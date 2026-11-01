@@ -1,0 +1,85 @@
+--- a/bsd/conf/Makefile.arm64
++++ b/bsd/conf/Makefile.arm64
+@@ -1,3 +1,7 @@
++# Camera probe runs on a kernel thread without a userspace SIMD context.
++hakios.thyme_camera.o_CFLAGS_ADD += -mgeneral-regs-only
++hakios.thyme_camera_dma.o_CFLAGS_ADD += -mgeneral-regs-only
++
+ ######################################################################
+ #BEGIN  Machine dependent Makefile fragment for arm
+ ######################################################################
+--- a/config/Makefile
++++ b/config/Makefile
+@@ -66,12 +66,15 @@
+ Kasan_EXPORTS := $(SRCROOT)/config/Kasan_enabled.$(KASAN_ARCH_SUFFIX).exports
+ endif
+ 
++# UMI links a device-specific subset of the XNU exports. Emit only symbols present
++# in this kernel so each generated kext symbol set matches the linked image.
+ define symbol_set_template
+ $(1)_EXPORTS := $$(addprefix $$(SOURCE)/,$$(filter $(1)%,$$(EXPORTS_FILES)))
+ $$(TARGET)/$(1).symbolset: MY_EXPORTS_ARGS := $$(foreach file,$$($(1)_EXPORTS),-export $$(file))
+ $$(TARGET)/$(1).symbolset: $$($(1)_EXPORTS) $$(TARGET)/allsymbols $$(KEXT_CREATE_SYMBOL_SET)
+ 	@$$(LOG_SYMBOLSET) "$(1)$$(Color0) ($$(ColorLF)$$(CURRENT_ARCH_CONFIG_LC)$$(Color0))"
+ 	$$(_v)$$(KEXT_CREATE_SYMBOL_SET)			\
++		-sect					\
+ 		$$(ARCH_FLAGS_$$(CURRENT_ARCH_CONFIG))	\
+ 		-import $$(TARGET)/allsymbols		\
+ 		$$(MY_EXPORTS_ARGS)			\
+@@ -119,19 +122,21 @@
+ 
+ check_all_exports: $(TARGET)/allsymbols $(KEXT_CREATE_SYMBOL_SET)
+ 	$(_v)$(KEXT_CREATE_SYMBOL_SET)					\
++		-sect				\
+ 		$(ARCH_FLAGS_$(CURRENT_ARCH_CONFIG))			\
+ 		-import $(TARGET)/allsymbols				\
+ 		$(foreach symbolset,$(filter-out Private,$(SYMBOL_COMPONENT_LIST)),	\
+ 			-export $(SOURCE)/$(symbolset).exports		\
+ 			-export $(SOURCE)/$(symbolset).$(EXPORT_SOURCE_ARCH_CONFIG_LC).exports)	\
+-		-output /dev/null $(_vstdout)
++		-output $(TARGET)/check_all_exports.symbolset $(_vstdout)
+ 	$(_v)$(KEXT_CREATE_SYMBOL_SET)					\
++		-sect				\
+ 		$(ARCH_FLAGS_$(CURRENT_ARCH_CONFIG))			\
+ 		-import $(TARGET)/allsymbols				\
+ 		$(foreach symbolset,$(filter-out Unsupported,$(SYMBOL_COMPONENT_LIST)),	\
+ 			-export $(SOURCE)/$(symbolset).exports		\
+ 			-export $(SOURCE)/$(symbolset).$(EXPORT_SOURCE_ARCH_CONFIG_LC).exports)	\
+-		-output /dev/null $(_vstdout)
++		-output $(TARGET)/check_all_exports.symbolset $(_vstdout)
+ 
+ $(OBJPATH)/$(MD_SUPPORTED_KPI_FILENAME): $(EXPORTS_FILES)
+ 	@$(LOG_SUPPORTED_KPI) "$(CURRENT_ARCH_CONFIG_LC)"
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -394,4 +394,4 @@
+ {
+-#pragma unused (state, esr, far)
+-	panic_plain("Unhandled implementation specific error\n");
++	panic("Unhandled implementation specific error ESR=%#x FAR=%p PC=%p",
++	    esr, (void *)far, (void *)get_saved_state_pc(state));
+ }
+--- a/osfmk/arm/io_map.c
++++ b/osfmk/arm/io_map.c
+@@ -62,7 +62,8 @@
+ 
+ extern vm_offset_t virtual_space_start;     /* Next available kernel VA */
+ 
+-#define IO_MAP_SIZE            (8ul << 20)
++/* Qualcomm peripherals use permanent mappings for PCIe, GPU and audio. */
++#define IO_MAP_SIZE            (32ul << 20)
+ 
+ __startup_data static struct mach_vm_range io_range;
+ static SECURITY_READ_ONLY_LATE(vm_map_t) io_submap;
+@@ -82,3 +83,11 @@
++/* UMI camera diagnostics must not overrun the permanent MMIO window. */
++uint64_t umi_camera_iomap_free(void);
++uint64_t
++umi_camera_iomap_free(void)
++{
++	return io_submap && io_submap->size < IO_MAP_SIZE ? IO_MAP_SIZE - io_submap->size : 0;
++}
++
+ /*
+  * Allocate and map memory for devices that may need to be mapped before
+  * Mach VM is running. Allows caller to specify mapping protection

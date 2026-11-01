@@ -50,6 +50,15 @@ hakios_battery_temperature(void)
 	return battery_temperature_c;
 }
 
+void
+hakios_battery_guard_state(int *soc, int *present, int *charger, int *charging)
+{
+	*soc = battery_soc_percent;
+	*present = battery_present;
+	*charger = battery_charger_present;
+	*charging = battery_charging;
+}
+
 SYSCTL_DECL(_kern_hakios);              /* the node is drivers/core/hakios.platform.c's: every driver hangs its sysctls there */
 SYSCTL_INT(_kern_hakios, OID_AUTO, battery_soc, CTLFLAG_RD | CTLFLAG_LOCKED,
     &battery_soc_percent, 0, "battery state of charge, 0..100 percent, or -1 if unknown");

@@ -1,0 +1,4 @@
+# THYME runtime arguments are supplied by the device run.sh.
+#include common_defconfig
+#include sm8250.config
+#include thyme.config

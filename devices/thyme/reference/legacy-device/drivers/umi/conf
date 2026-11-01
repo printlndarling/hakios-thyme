@@ -1,0 +1,16 @@
+driver THYME
+    default n
+    help THYME uses the UMI driver implementations through THYME-qualified wrappers
+    file bsd/dev/hakios.thyme_touch.c
+    file bsd/dev/hakios.thyme_keys.c
+    file bsd/dev/hakios.thyme_rpmh.c
+    file bsd/dev/hakios.thyme_touch_boost.c
+    file bsd/dev/hakios.thyme_wifi.c
+    file bsd/dev/hakios.thyme_bluetooth.c
+    file bsd/dev/hakios.thyme_mhi.c
+    file bsd/dev/hakios.thyme_pcie.c
+    file bsd/dev/hakios.thyme_camera.c
+    file bsd/dev/hakios.thyme_camera_dma.c
+    file bsd/dev/hakios.thyme_board.c
+    file bsd/dev/hakios.thyme_display.c
+    file iokit/Kernel/hakios.thyme_bluetooth.cpp iokitcpp

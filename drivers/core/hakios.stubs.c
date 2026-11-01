@@ -61,6 +61,11 @@ bool hakios_virtio_blk_dev(__unused dev_t dev) { return false; }
 #ifndef HAKIOS_BATTERY
 void hakios_battery_init(void) {}
 int hakios_battery_temperature(void) { return -273; }      /* "not known", as the driver says before its first reading */
+void hakios_battery_guard_state(int *soc, int *present, int *charger, int *charging)
+{
+	*soc = -1;
+	*present = *charger = *charging = 0;
+}
 void hakios_battery_report(__unused const struct hakios_battery_state *state) {}
 #endif
 

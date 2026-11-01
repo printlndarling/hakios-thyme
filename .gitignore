@@ -120,6 +120,8 @@ __pycache__/
 !/devices/manifest.conf
 !/devices/README.md
 !/devices/qemu/
+!/devices/thyme/
+!/devices/thyme/**
 
 # Android platform-tools for xl on a Mac (tools/macos-bin/README.md): not part of the repository
 /tools/macos-bin/platform-tools

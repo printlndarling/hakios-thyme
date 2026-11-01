@@ -1,0 +1,1 @@
+bootcpu=7 cpus=7 umi_touch=1 umi_keys=1 cpufreq=1 gpu=1 battery=1 battery_charge=1 battery_stop=25 battery_stop_poll=30

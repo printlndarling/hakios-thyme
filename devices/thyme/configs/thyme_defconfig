@@ -1,0 +1,4 @@
+# HakiOS defconfig for the Xiaomi Mi 10S (thyme): the common kernel, the sm8250 family's facts, and this device's own.
+#include common_defconfig
+#include sm8250.config
+#include thyme.config
