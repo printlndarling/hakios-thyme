@@ -50,9 +50,10 @@ fallback. The THYME audio stack now brings up LPASS/ADSP, APR, MI2S and both
 CS35L41 amplifiers with protection firmware. The official loader also boots on
 the phone, and the microphone probe now enumerates the WCD938x on SoundWire,
 reads its chip/SCP IDs and identifies the Bolero 1.2 profile. Microphone
-capture is now producing nonzero physical PCM through ADC1/DEC1; the complete
-dual-mic path and a userland recording are not yet PASS. See
-`docs/official-mic-path.md`. The AW8697 motor driver now follows Xiaomi's
+capture now produces nonzero dual-channel PCM through DEC1/ADC1 and
+DEC0/ADC4 (`rms 4854-7930` in the verified run); a userland recording is still
+needed for PASS. See `docs/official-mic-path.md`. The AW8697 motor driver now
+follows Xiaomi's
 stock activation
 sequence, loads and verifies Android's waveforms, and plays waveform 1 back to
 standby in 38 ms without a fatal fault; physical feel remains to be confirmed.

@@ -20,12 +20,12 @@
  * - WCD938x TX enumerates as device 1, ID 0xd01170223, status 1. Its SoundWire
  *   chip ID and SCP device ID respond, and the full path shuts down cleanly.
  *
- * Capture status: the ADC1 path now returns nonzero physical PCM. THYME's
- * qcom,swr-port-mapping puts codec TX port 0 / channel 1 on SoundWire master
- * port 2 / channel 1; using master port 1 produced exact silence. `mic_path=1`
- * (default) captures ADC1/DEC1 and reports RMS 5-8 for ordinary room noise.
- * The static overlay also enables DEC0/ADC4 and a second channel, which is not
- * implemented yet. `mic_path=0` is the diagnostic direct-DMIC path.
+ * Capture status: the full static-overlay path is implemented and works.
+ * Codec TX port 0/channel 1 (ADC1) goes to SoundWire master port 2; codec TX
+ * port 1/channel 2 (ADC4) goes to master port 3. DEC1/ADC1 and DEC0/ADC4 feed
+ * one two-channel ASM/ADM stream. Ordinary room audio produced RMS 4854-7930
+ * (`-16.8` to `-12.3 dBFS`) with peak near 28000 and no read errors.
+ * `mic_path=0` remains the diagnostic direct-DMIC path.
  *
  * Diagnostic boot arguments:
  *   mic_stage=1..6      stop after reset, SWR pins, TX clocks, master or codec
@@ -33,7 +33,7 @@
  *   mic_dmic=N          DMIC channel 0..5 for the direct-DMIC path (default 1)
  *   mic_chmask=M        AFE active-channel mask override
  *   mic_path=0          use the base DMIC1/DEC2 path
- *   mic_channels=N      ASM/ADM/AFE channel count (default 1)
+ *   mic_channels=N      ASM/ADM/AFE channel count (default 2)
  *   mic_dmic_probe=1    count transitions on the selected DMIC data pin
  *
  * Every register write is read back unless the register is known write-only;
@@ -70,7 +70,7 @@ static uint32_t dmic_channel = 1;
 static uint32_t mic_chmask;
 static uint32_t mic_path = 1;   /* mixer_paths_overlay_static.xml's ADC path */
 static uint32_t dmic_probe;
-static uint32_t mic_channels = 1;
+static uint32_t mic_channels = 2;   /* THYME's static handset overlay is stereo */
 
 static int say(const char *format, ...) __printflike(1, 2);
 
@@ -892,6 +892,7 @@ codec_look(void)
 #define WCD_ANA_BIAS                    0x3001
 #define WCD_ANA_TX_CH1                  0x300e
 #define WCD_ANA_TX_CH2                  0x300f
+#define WCD_ANA_TX_CH4                  0x3011
 #define WCD_ANA_MICB1                   0x3022
 #define WCD_ANA_MICB2                   0x3023
 #define WCD_ANA_MICB3                   0x3025
@@ -919,6 +920,7 @@ codec_look(void)
 #define WCD_CDC_ANA_CLK_CTL             0x3408
 #define WCD_CDC_DIG_CLK_CTL             0x3409
 #define WCD_CDC_TX_ANA_MODE_0_1         0x3410
+#define WCD_CDC_TX_ANA_MODE_2_3         0x3411
 #define WCD_CDC_ANA_TX_CLK_CTL          0x3417
 #define WCD_CDC_REQ_CTL                 0x3457
 #define WCD_CDC_DMIC_CTL                0x345b
@@ -1098,6 +1100,30 @@ port_config(uint8_t bank, bool first)
 }
 
 static bool
+port_config_second(uint8_t bank)
+{
+	/* ADC4: codec port 1, channel 2, interval 3; master port 3. */
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_CHANNEL_ENABLE_BANK(1, bank), 0x02, write_id);
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_SAMPLE_CONTROL_1_BANK(1, bank), 3, write_id);
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_SAMPLE_CONTROL_2_BANK(1, bank), 0, write_id);
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_OFFSET_CONTROL_1_BANK(1, bank), 0, write_id);
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_OFFSET_CONTROL_2_BANK(1, bank), 0, write_id);
+	write_id = write_id < 14 ? write_id + 1 : 0;
+	swr_write(codec_device, SWRS_DP_LANE_CONTROL_BANK(1, bank), 1, write_id);
+	note("mic: the codec's data port 2, bank %u: channel 2 on, interval 3, lane 1\n", bank);
+	return put(&tx_swr, "DP_PORT_CTRL (port 3): channel 2, interval 7", SWRM_DP_PORT_CTRL_BANK(3, bank),
+	           0x02u << 24 | 7u, 0xffffffff) &&
+	       put(&tx_swr, "DP_SAMPLECTRL2 (port 3)", SWRM_DP_SAMPLECTRL2_BANK(3, bank), 0, 0xff) &&
+	       put(&tx_swr, "DP_PORT_CTRL_2 (port 3): lane 1", SWRM_DP_PORT_CTRL_2_BANK(3, bank), 1, 0xff) &&
+	       put(&tx_swr, "DP_PORT_HCTRL (port 3): hstop 15, hstart 0", SWRM_DP_PORT_HCTRL_BANK(3, bank), 0xf0, 0);
+}
+
+static bool
 datapath_on(void)
 {
 	/* the codec's TX clock rate: "9.6 MHz" (0) in both banks; "4.8 MHz" (1) for mic_main=1 */
@@ -1114,7 +1140,8 @@ datapath_on(void)
 	}
 	/* swrm_slvdev_datapath_control() */
 	bank = (swr_rd(SWRM_MCP_STATUS) & 1) ? 0 : 1;
-	if (!put(&tx_swr, "CPU1_INTERRUPT_EN", SWRM_CPU1_INTERRUPT_EN, SWRM_INTERRUPT_STATUS_MASK, 0) || !port_config(bank, true)) {
+	if (!put(&tx_swr, "CPU1_INTERRUPT_EN", SWRM_CPU1_INTERRUPT_EN, SWRM_INTERRUPT_STATUS_MASK, 0) ||
+	    !port_config(bank, true) || (mic_channels > 1 && !port_config_second(bank))) {
 		return false;
 	}
 	/*
@@ -1130,7 +1157,8 @@ datapath_on(void)
 	broadcast(SWRS_SCP_FRAME_CTRL_BANK(bank), 1u << 3 | 7u);       /* (enable_bank_switch(): the switch itself) */
 	bank_now = (swr_rd(SWRM_MCP_STATUS) & 1);
 	say("mic: the banks switched: the master is in bank %u now (asked for %u)\n", bank_now, bank);
-	if (bank_now != bank || !port_config(bank ? 0 : 1, false)) {
+	if (bank_now != bank || !port_config(bank ? 0 : 1, false) ||
+	    (mic_channels > 1 && !port_config_second(bank ? 0 : 1))) {
 		return false;
 	}
 	/* and the codec's rate in the other bank */
@@ -1179,6 +1207,26 @@ adc1_on(void)
 	       codec_bits(WCD_CDC_DIG_CLK_CTL, 0x10, 0x10) && codec_bits(WCD_ANA_TX_CH2, 0x40, (test_bits & 2) ? 0x40 : 0x00);
 }
 
+/* ADC4 is the second half of THYME's static handset-mic overlay. */
+static bool
+adc4_on(void)
+{
+	return codec_bits(WCD_CDC_DIG_CLK_CTL, 0xf0, 0xf0) &&
+	       codec_bits(WCD_CDC_ANA_CLK_CTL, 0x10, 0x10) &&
+	       codec_bits(WCD_CDC_ANA_TX_CLK_CTL, 0x01, 0x01) &&
+	       codec_bits(WCD_MICB4_TEST_CTL_2, 0x01, 0x01) &&
+	       codec_bits(WCD_ANA_MICB4, 0xc0, (test_bits & 1) ? 0x00 : 0x40) &&
+	       codec_bits(WCD_ANA_TX_CH4, 0x1f, 6) &&
+	       codec_bits(WCD_CDC_ANA_CLK_CTL, 0x08, 0x08) &&
+	       codec_bits(WCD_CDC_ANA_CLK_CTL, 0x10, 0x10) &&
+	       codec_bits(WCD_CDC_REQ_CTL, 0x02, 0x02) &&
+	       codec_bits(WCD_CDC_REQ_CTL, 0x01, 0x00) &&
+	       codec_bits(WCD_ANA_TX_CH4, 0x20, 0x20) &&
+	       codec_bits(WCD_CDC_TX_ANA_MODE_2_3, 0xf0, 0x50) &&
+	       codec_bits(WCD_CDC_DIG_CLK_CTL, 0x80, 0x80) &&
+	       codec_bits(WCD_ANA_TX_CH4, 0x20, (test_bits & 2) ? 0x20 : 0x00);
+}
+
 /* ---- the TX macro's decimator 1 ------------------------------------------------------------------------- */
 
 #define TX_TOP_CSR_SWR_CTRL             0x088
@@ -1187,8 +1235,14 @@ adc1_on(void)
 #define TX_SWR_MIC2_CTL                 0x0c0
 #define TX_ADC_MUX1_CFG0                0x108
 #define TX_ADC_MUX1_CFG1                0x10c
+#define TX_ADC_MUX0_CFG0                0x100
+#define TX_ADC_MUX0_CFG1                0x104
 #define TX_ADC_MUX2_CFG0                0x110
 #define TX_ADC_MUX2_CFG1                0x114
+#define TX0_PATH_CTL                    0x400
+#define TX0_PATH_CFG0                   0x404
+#define TX0_VOL_CTL                     0x40c
+#define TX0_PATH_SEC2                   0x418
 #define TX1_PATH_CTL                    0x480
 #define TX1_PATH_CFG0                   0x484
 #define TX1_VOL_CTL                     0x48c
@@ -1206,9 +1260,10 @@ adc1_on(void)
 
 static uint32_t found_dec[10], found_va_mic[3];
 static uint32_t smic_input = 1;         /* boot-arg mic_input=N: TX SMIC MUX1's input (1 SWR_MIC0, Android's; 0 ZERO, a test) */
-static bool dec_taken, va_mic_taken, dmic_capture;
+static bool dec_taken, dec0_taken, va_mic_taken, dmic_capture;
 static unsigned bolero_version;         /* 12, 20 or 21: the digital codec's own core ID (bolero_soc_codec_probe()) */
 static uint8_t hpf_cut_off;             /* the decimator's high-pass filter as it was found */
+static uint8_t hpf_cut_off0;
 
 static const uint32_t dec_regs[] = {
 	TX_TOP_CSR_SWR_CTRL, TX_SWR_MIC0_CTL, TX_SWR_MIC1_CTL, TX_SWR_MIC2_CTL, TX_SWR_MIC2_CTL + 4, TX_SWR_MIC2_CTL + 8,
@@ -1418,6 +1473,81 @@ dmic2_off(void)
 	dmic_capture = false;
 }
 
+static uint32_t found_dec0[6];
+
+static bool
+dec0_on(void)
+{
+	static const uint32_t regs[6] = {
+		TX_ADC_MUX0_CFG0, TX_ADC_MUX0_CFG1, TX0_PATH_CTL, TX0_PATH_CFG0, TX0_VOL_CTL, TX0_PATH_SEC2,
+	};
+	uint32_t cfg0;
+
+	for (size_t i = 0; i < 6; i++) {
+		found_dec0[i] = get(&tx_macro, "(DEC0 as found)", regs[i]);
+	}
+	dec0_taken = true;
+	if (!put_bits(&tx_macro, "TX0_TX_PATH_CFG0: an analog mic", TX0_PATH_CFG0, 0x80, 0x00) ||
+	    !put_bits(&tx_macro, "ADC_MUX0_CFG0: ADC3 (hardware ADC4)", TX_ADC_MUX0_CFG0, 0x0f, 4) ||
+	    !put_bits(&tx_macro, "ADC_MUX0_CFG1: SWR_MIC", TX_ADC_MUX0_CFG1, 0x03, 0x01) ||
+	    !put_bits(&tx_macro, "TX0_TX_PATH_CTL: 48 kHz", TX0_PATH_CTL, 0x0f, 0x04) ||
+	    !put_bits(&tx_macro, "TX0_TX_PATH_CFG0: mode 0", TX0_PATH_CFG0, 0x06, 0x00) ||
+	    !put_bits(&tx_macro, "TX0_TX_PATH_CTL: muted", TX0_PATH_CTL, 0x10, 0x10) ||
+	    !put_bits(&tx_macro, "TX0_TX_PATH_CTL: on", TX0_PATH_CTL, 0x20, 0x20)) {
+		return false;
+	}
+	cfg0 = get(&tx_macro, "TX0_TX_PATH_CFG0", TX0_PATH_CFG0);
+	hpf_cut_off0 = (cfg0 & 0x60) >> 5;
+	if (hpf_cut_off0 != 2 && !put_bits(&tx_macro, "TX0_TX_PATH_CFG0: high-pass 150 Hz", TX0_PATH_CFG0, 0x60, 2u << 5)) {
+		return false;
+	}
+	if (hpf_cut_off0 != 2) {
+		if (!put_bits(&tx_macro, "TX0_TX_PATH_SEC2: filter gate", TX0_PATH_SEC2, 0x03, 0x02)) {
+			return false;
+		}
+		sleep_ms(6);
+		if (!put_bits(&tx_macro, "TX0_TX_PATH_SEC2", TX0_PATH_SEC2, 0x02, 0x00)) {
+			return false;
+		}
+	}
+	(void)put(&tx_macro, "TX0_TX_VOL_CTL: 0 dB", TX0_VOL_CTL, get(&tx_macro, "TX0_TX_VOL_CTL", TX0_VOL_CTL), 0xff);
+	return true;
+}
+
+static bool
+dec0_unmute(void)
+{
+	return put_bits(&tx_macro, "TX0_TX_PATH_CTL: unmuted", TX0_PATH_CTL, 0x10, 0x00);
+}
+
+static bool
+dec0_settled(void)
+{
+	return put_bits(&tx_macro, "TX0_TX_PATH_CFG0: high-pass as it was", TX0_PATH_CFG0, 0x60,
+	    (uint32_t)hpf_cut_off0 << 5) &&
+	       put_bits(&tx_macro, "TX0_TX_PATH_SEC2: filter gate", TX0_PATH_SEC2, 0x03, 0x02) &&
+	       (spin_us(21), put_bits(&tx_macro, "TX0_TX_PATH_SEC2", TX0_PATH_SEC2, 0x03, 0x01));
+}
+
+static void
+dec0_off(void)
+{
+	static const uint32_t regs[6] = {
+		TX_ADC_MUX0_CFG0, TX_ADC_MUX0_CFG1, TX0_PATH_CTL, TX0_PATH_CFG0, TX0_VOL_CTL, TX0_PATH_SEC2,
+	};
+
+	if (!dec0_taken) {
+		return;
+	}
+	broken = false;
+	(void)put_bits(&tx_macro, "TX0_TX_PATH_CTL: muted", TX0_PATH_CTL, 0x10, 0x10);
+	(void)put_bits(&tx_macro, "TX0_TX_PATH_CTL: off", TX0_PATH_CTL, 0x20, 0x00);
+	for (size_t i = 0; i < 6; i++) {
+		(void)put(&tx_macro, "(DEC0 put back as found)", regs[i], found_dec0[i], 0);
+	}
+	dec0_taken = false;
+}
+
 static void
 va_mic_off(void)
 {
@@ -1617,11 +1747,16 @@ dsp_path_on(void)
 static bool
 dsp_port_on(void)
 {
+	uint32_t active_mask = mic_chmask;
 	struct {
 		uint32_t version, rate;
 		uint16_t bits, format, channels, mask;
-	} __attribute__((packed)) config = { 1, MIC_RATE, 16, 0, 1,
-	                               mic_chmask ? mic_chmask : dmic_capture ? 1u << 2 : 1u << 1 };
+	} __attribute__((packed)) config = { 1, MIC_RATE, 16, 0, 1, 0 };
+
+	if (!active_mask) {
+		active_mask = dmic_capture ? 1u << 2 : mic_path && mic_channels > 1 ? 0x3 : 1u << 1;
+	}
+	config.mask = (uint16_t)active_mask;
 	uint16_t start[2] = { MIC_PORT, 0 };
 
 	config.channels = (uint16_t)(mic_channels > 8 ? 8 : mic_channels);
@@ -1773,7 +1908,7 @@ listen(bool for_darwin)
 	int64_t sum = 0;
 	uint64_t squares = 0;
 	unsigned next = 0;
-	bool unmuted = false, settled = false;
+	bool unmuted = false, settled = false, unmuted0 = false, settled0 = false;
 	uint64_t began = mach_absolute_time(), now, elapsed_ms;
 
 	struct hakios_apr_answer answer;
@@ -1803,8 +1938,14 @@ listen(bool for_darwin)
 		if (!unmuted && elapsed_ms >= (dmic_capture ? 40 : 200)) {
 			unmuted = dmic_capture ? dmic2_unmute() : dec1_unmute();
 		}
+		if (mic_path && mic_channels > 1 && !unmuted0 && elapsed_ms >= 200) {
+			unmuted0 = dec0_unmute();
+		}
 		if (!settled && elapsed_ms >= (dmic_capture ? 100 : 300)) {
 			settled = dmic_capture ? dmic2_settled() : dec1_settled();
+		}
+		if (mic_path && mic_channels > 1 && !settled0 && elapsed_ms >= 300) {
+			settled0 = dec0_settled();
 		}
 		if (tap && elapsed_ms >= 2000 && elapsed_ms < 3000) {
 			hakios_haptic_pretend(20000);
@@ -1901,6 +2042,7 @@ undo(void)
 {
 	dsp_off();
 	dec1_off();
+	dec0_off();
 	dmic2_off();
 	dmic_pins_restore();
 	va_mic_off();
@@ -1968,9 +2110,18 @@ path_up(void)
 		return true;
 	}
 	if (mic_path) {
-		/* Board-static mixer override: WCD938x ADC1, TX DEC1, SoundWire. */
-		return bolero_look() && codec_init() && dsp_path_on() && dsp_port_on() && dec1_on() &&
-		       (!adc_on || adc1_on()) && datapath_on();
+		bool ok = bolero_look() && codec_init() && dsp_path_on() && dsp_port_on() && dec1_on();
+
+		if (ok && mic_channels > 1) {
+			ok = dec0_on();
+		}
+		if (ok && adc_on) {
+			ok = adc1_on();
+		}
+		if (ok && mic_channels > 1) {
+			ok = adc4_on();
+		}
+		return ok && datapath_on();
 	}
 	/* Base mixer path: direct LPASS DMIC1 on decimator 2. */
 	return bolero_look() && dmic_pins_on() && dmic2_on() && dsp_path_on() && dsp_port_on();

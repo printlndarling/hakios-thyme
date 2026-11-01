@@ -12,7 +12,7 @@ mic=3 payload sha256=df0971c13ae0d72ae3333efc81a12225a17cecdd118d6dd3ea4a1b582d7
 log=logs/official-mic3-analog-port2-tail.log
 ```
 
-Default-path regression:
+Single-channel default run:
 
 ```text
 kernel sha256=7d0bcf1d343560a78399b595197d25337503505be7e260c65323c35f4ab80ee2
@@ -20,7 +20,15 @@ mic=3 payload sha256=b7b3d742ea1114408d3513599b23649dcd1a02cf55ca9b9ceaf783746b1
 log=logs/official-mic3-default-tail.log
 ```
 
-Loader RAM image used for both runs:
+Dual-channel run:
+
+```text
+kernel sha256=a66228d13b23dc69b1995d7b185415eb21cc405706501e593d6950a88a07eba7
+mic=3 payload sha256=37c482d18767c9ac88c35a65df6b3f42aa0005daf5248fd885b92f496f73ee23
+log=logs/official-mic3-dual-default-tail.log
+```
+
+Loader RAM image used for all runs:
 
 ```text
 sha256=f46783dc8df5973bc260f1853770a26466062a05c65253355b090584519afcf1
@@ -28,7 +36,7 @@ sha256=f46783dc8df5973bc260f1853770a26466062a05c65253355b090584519afcf1
 
 The code was built from `a420d234` plus the THYME audio and RPMh changes.
 
-## Verified hardware path
+## Verified transport
 
 - The official THYME loader boots and identifies as `product: xnuloader`,
   `version: 0.5`.
@@ -59,65 +67,41 @@ SCP DEVICE_ID_1  = 0x02
   and all modified registers are restored in reverse order.
 - The audio DSP and TrustZone shut down cleanly.
 
-## Capture now works
+## Capture works
 
-The DTS `qcom,swr-port-mapping` maps the codec's first TX data port (ADC1,
-slave port type `0x12`) to **SoundWire master port 2, channel 1**, not master
-port 1. The earlier code used master port 1 and therefore read exact silence.
+SoundWire routing follows the THYME DTS:
 
-With the corrected mapping, `mic=3` returns complete 20 ms periods and nonzero
-physical samples:
+- ADC1 (`0x12`): codec TX port 0/channel 1 -> master port 2/channel 1.
+- ADC4 (`0x15`): codec TX port 1/channel 2 -> master port 3/channel 2.
+- The TX macro uses DEC1/ADC0 for ADC1 and DEC0/ADC3 for hardware ADC4.
+- `TX_CDC_DMA_TX_3`, ADM and ASM carry two active channels (mask 3).
+
+The earlier code used master port 1 for ADC1 and therefore returned exact
+silence. The corrected single-channel path produced nonzero samples, and the
+completed dual path produced:
 
 ```text
 TX SoundWire master DP_PORT_CTRL (port 2): channel 1 ... reads back
-mic: second 1: 48000 frames (50 periods, 0 empty), level -72.0 dBFS (rms 8), peak 41, mean -5; reads 50, errors 0
+TX SoundWire master DP_PORT_CTRL (port 3): channel 2 ... reads back
+mic: second 1: 48000 frames (50 periods, 0 empty), level -16.8 dBFS (rms 4854), peak 28524, mean 479; reads 50, errors 0
+mic: second 2: 48000 frames (50 periods, 0 empty), level -12.5 dBFS (rms 7831), peak 27990, mean 0; reads 100, errors 0
+mic: second 3: 48000 frames (50 periods, 0 empty), level -12.3 dBFS (rms 7930), peak 28409, mean -23; reads 150, errors 0
 ```
 
-The default-path run reproduced it twice:
+This is a hardware PASS for dual-channel microphone capture and cleanup. It is
+not yet a complete user-facing PASS because `/dev/hakios-mic` has not recorded
+through Darwin with this path.
 
-```text
-mic: second 1: 48000 frames (50 periods, 0 empty), level -73.5 dBFS (rms 7), peak 23, mean -4; reads 50, errors 0
-mic: second 2: 48000 frames (50 periods, 0 empty), level -76.5 dBFS (rms 5), peak 16, mean 0; reads 100, errors 0
-```
+## Remaining checks
 
-This is a hardware PASS for low-level ADC1/DEC1 capture and cleanup. It is not
-yet a complete microphone PASS because the board uses a two-channel handset
-path and userland recording has not been tested.
-
-## Remaining dual-mic work
-
-Android's `mixer_paths_overlay_static.xml` replaces the base handset path with:
-
-```text
-TX_CDC_DMA_TX_3 Channels=Two
-TX DEC1 MUX=SWR_MIC, TX SMIC MUX1=ADC0, DEC1 enabled
-TX DEC0 MUX=SWR_MIC, TX SMIC MUX0=ADC3, DEC0 enabled
-ADC1_MIXER=1, ADC1 Volume=6
-ADC4_MIXER=1, ADC4 MUX=INP5, ADC4 Volume=6
-```
-
-The codec register mapping is:
-
-- ADC1 -> slave port type `0x12` -> codec port 0/channel 1 -> master port 2.
-- ADC4 -> slave port type `0x15` -> codec port 1/channel 2 -> master port 3.
-
-The current implementation captures the verified ADC1 half. It does not yet
-enable DEC0/ADC4, MIC BIAS4, or codec port 1/master port 3. A two-channel AFM
-request with only the ADC1 half active returned no read completion, which is
-consistent with the missing second SoundWire path.
-
-The diagnostic direct-DMIC path (`mic_path=0`, DMIC1/DEC2, LPI GPIO6/7) still
-returns silence and zero data-line transitions. It remains disabled by
-default.
-
-## Next checks
-
-- Add DEC0/ADC4, MIC BIAS4, codec data port 1/master port 3 and two-channel
-  ASM/ADM routing.
 - Correlate a known speaker tone or spoken sample with captured RMS.
 - Exercise `mic=4` and `/dev/hakios-mic` from Darwin with the corrected path.
+- Verify mono downmix and recording continuity when Darwin consumes the ring.
 - Only mark the complete microphone item PASS after a recovered recording
   contains intelligible audio.
+
+The diagnostic direct-DMIC path (`mic_path=0`, DMIC1/DEC2, LPI GPIO6/7) still
+returns silence and zero data-line transitions. It is not the default.
 
 No flash, erase, partition, slot or Android-data modification was used for
 these probes.
