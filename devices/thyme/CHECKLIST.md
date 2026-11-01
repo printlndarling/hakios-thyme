@@ -20,7 +20,7 @@ No item moves to `PASS` from source inspection alone.
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | FTS521 DOWN/MOVE/UP events reach backboardd and SpringBoard with `errors=0` |
-| Brightness adjustment | TODO | Legacy THYME has DCS 0x51 backlight control and `kern.hakios.brightness`; port it to official main and verify a physical level change |
+| Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
 
 ## Official-main migration gate
 
@@ -39,6 +39,7 @@ No item moves to `PASS` from source inspection alone.
 | XNU reaches userspace | PASS | PASS |
 | 7 CPUs and cpufreq | PASS; three EPSS domains at 1804/2419/3187 MHz | PASS |
 | 1080 x 2340 display | PARTIAL: generic framebuffer reaches SpringBoard | PASS |
+| Brightness adjustment | PARTIAL: iOS hooks and DCS `0x51` command completion verified | PASS in the legacy display probe |
 | Adreno 650 GPU rendering | PASS, more than 2,100 `hakios-gl` frames in four minutes | PASS |
 | 30-minute UI stability | TODO | PASS |
 | FTS521 touch polling | PASS, 415 events in the GPU run / `errors=0` | PASS |

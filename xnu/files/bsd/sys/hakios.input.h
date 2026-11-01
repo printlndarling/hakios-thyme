@@ -79,6 +79,7 @@ int hakios_cpufreq_top(uint32_t domain);
 uint32_t hakios_cpufreq_khz(uint32_t domain, int row);
 void hakios_cpufreq_cap(uint32_t domain, int row);
 void hakios_thermal_init(void);
+void hakios_brightness_init(void);
 void hakios_adreno_init(void);         /* boot-arg adreno=N: the first N steps of waking the phone's GPU */
 void hakios_adreno_quiesce(void);      /* on the way back to the loader: the GPU block stopped, out of our memory */
 void hakios_adreno_stop(void);         /* before that, where the ending is no panic's: the GPU given back in order */

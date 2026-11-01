@@ -1,0 +1,6 @@
+# drivers/display/conf: the THYME DSI backlight control used by iOS brightness.
+
+driver THYME_DISPLAY
+	file    bsd/dev/hakios.thyme_display.c
+	help    the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight
+	help    and the kern.hakios.brightness sysctl used by backboardd.

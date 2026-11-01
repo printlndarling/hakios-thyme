@@ -22,6 +22,12 @@ hakios.thyme_wlan.cpp
 Linux 7.0.14 `ath11k` and FreeBSD LinuxKPI are built separately by
 `tools/mk-ath11k.sh` and linked through `xnu-build.sh`.
 
+The aggregate `xnu-deps/build/ath11k/out/ath11k.o` embeds the build-machine
+paths of its component objects. After moving or renaming the WSL working tree,
+run `tools/mk-ath11k.sh` again before building the kernel. Reusing the old
+object produces `unable to open object file` warnings and leaves the Wi-Fi
+driver incomplete.
+
 ## Firmware and mission mode
 
 The QCA6390 passed PCIe enumeration, SMMU setup, SBL/AMSS download and MHI

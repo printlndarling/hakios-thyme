@@ -474,6 +474,10 @@ hakios_goodix_init(void)
 	extern void umi_bluetooth_init(void);
 
 	umi_touch_init();
+#ifdef HAKIOS_THYME_DISPLAY
+	extern void hakios_brightness_init(void);
+	hakios_brightness_init();
+#endif
 	umi_bluetooth_init();
 #ifdef HAKIOS_THYME_POWER
 	extern void hakios_thermal_init(void);

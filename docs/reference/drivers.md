@@ -117,6 +117,12 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 |---|---|---|---|---|---|---|
 | **`HAKIOS_THYME_BT`**<br>QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth IOService (bt=1). Needs htbtfw20.tlv and htnv20.bin under fw/qca6390-bt/. | `hakios.thyme_bluetooth.c`<br>`hakios.thyme_bluetooth.cpp` |  | `bt=`, `umi_bt=`, `umi_bt_probe=` | built | built | built | |
 
+## display (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_DISPLAY`**<br>the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight and the kern.hakios.brightness sysctl used by backboardd. | `hakios.thyme_display.c` |  |  | built | built | built | |
+
 ## gpu (devices/thyme)
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |

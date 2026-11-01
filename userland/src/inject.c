@@ -579,6 +579,209 @@ brightness_fixes(void)
 	method_setImplementation(method, (IMP)wait_for_als_arrival);
 }
 
+/* ---- backboardd: the CoreBrightness slider drives the THYME panel ------------------------------- */
+
+static float thyme_brightness = 0.6f;
+static bool thyme_brightness_user_set;
+static id thyme_bk_controller;
+static id thyme_tx_manager;
+static unsigned thyme_brightness_logs;
+
+static id (*orig_bk_init)(id, SEL, id, id, id);
+static float (*orig_bk_get_brightness)(id, SEL);
+static void (*orig_bk_set_brightness)(id, SEL, float, id, unsigned long long);
+static id (*orig_tx_init)(id, SEL, id);
+static float (*orig_tx_get_brightness)(id, SEL);
+static id (*orig_bsi_copy_prop)(id, SEL, id, id);
+static BOOL (*orig_bsi_set_prop)(id, SEL, id, id, id);
+
+static void
+thyme_apply_brightness(float level, const char *source)
+{
+	int permille;
+
+	if (level < 0.0f) level = 0.0f;
+	if (level > 1.0f) level = 1.0f;
+	thyme_brightness = level;
+	thyme_brightness_user_set = true;
+	if (thyme_bk_controller != NULL) {
+		*(float *)((char *)thyme_bk_controller + 0xc) = level;
+	}
+	if (thyme_tx_manager != NULL) {
+		*(float *)((char *)thyme_tx_manager + 0x10) = level;
+	}
+	permille = (int)(level * 1000.0f + 0.5f);
+	(void)sysctlbyname("kern.hakios.brightness", NULL, NULL, &permille, sizeof(permille));
+	if (thyme_brightness_logs < 8) {
+		thyme_brightness_logs++;
+		say("hakios: brightness (%s): %.3f -> %d permille\n", source, (double)level, permille);
+	}
+}
+
+static BOOL
+my_bk_is_brightness_available(__unused id self, __unused SEL cmd)
+{
+	return YES;
+}
+
+static id
+my_bk_init(id self, SEL cmd, id system, id sentinel, id orient)
+{
+	id result = orig_bk_init(self, cmd, system, sentinel, orient);
+
+	if (result != NULL) {
+		thyme_bk_controller = result;
+		*(float *)((char *)result + 0xc) = thyme_brightness;
+	}
+	return result;
+}
+
+static float
+my_bk_get_brightness(id self, SEL cmd)
+{
+	float level = orig_bk_get_brightness(self, cmd);
+
+	if (!thyme_brightness_user_set && level <= 0.001f) {
+		*(float *)((char *)self + 0xc) = thyme_brightness;
+		return thyme_brightness;
+	}
+	return thyme_brightness;
+}
+
+static void
+my_bk_set_brightness(id self, SEL cmd, float level, id reason, unsigned long long options)
+{
+	thyme_bk_controller = self;
+	if (!thyme_brightness_user_set && level <= 0.001f && reason != NULL &&
+	    CFGetTypeID((CFTypeRef)reason) == CFStringGetTypeID() &&
+	    CFStringCompare((CFStringRef)reason,
+	        CFSTR("synchronizeALSPreferencesAndDisplayBrightness"), 0) == kCFCompareEqualTo) {
+		level = thyme_brightness;
+		*(float *)((char *)self + 0xc) = level;
+		orig_bk_set_brightness(self, cmd, level, reason, options);
+		return;
+	}
+	thyme_apply_brightness(level, "BKDisplayBrightnessController");
+	orig_bk_set_brightness(self, cmd, thyme_brightness, reason, options);
+}
+
+static id
+my_tx_init(id self, SEL cmd, id controller)
+{
+	id result = orig_tx_init(self, cmd, controller);
+
+	if (result != NULL) {
+		thyme_tx_manager = result;
+		if (*(float *)((char *)result + 0x10) <= 0.001f) {
+			*(float *)((char *)result + 0x10) = thyme_brightness;
+		} else {
+			thyme_brightness = *(float *)((char *)result + 0x10);
+		}
+	}
+	return result;
+}
+
+static float
+my_tx_get_brightness(id self, SEL cmd)
+{
+	float level = orig_tx_get_brightness(self, cmd);
+
+	if (!thyme_brightness_user_set && level <= 0.001f) {
+		*(float *)((char *)self + 0x10) = thyme_brightness;
+		return thyme_brightness;
+	}
+	return thyme_brightness;
+}
+
+static id
+my_bsi_copy_prop(id self, SEL cmd, id key, id client)
+{
+	id result = orig_bsi_copy_prop(self, cmd, key, client);
+
+	if (key != NULL && CFGetTypeID((CFTypeRef)key) == CFStringGetTypeID()) {
+		if (CFStringCompare((CFStringRef)key, CFSTR("CBBrightnessControlAvailable"), 0) ==
+		    kCFCompareEqualTo) {
+			if (result != NULL) {
+				CFRelease((CFTypeRef)result);
+			}
+			return (id)CFRetain(kCFBooleanTrue);
+		}
+		if (CFStringCompare((CFStringRef)key, CFSTR("DisplayBrightness"), 0) ==
+		    kCFCompareEqualTo && result == NULL) {
+			CFStringRef key_name = CFSTR("Brightness");
+			CFNumberRef number = CFNumberCreate(NULL, kCFNumberFloatType, &thyme_brightness);
+
+			if (number != NULL) {
+				CFDictionaryRef dictionary = CFDictionaryCreate(NULL, (const void **)&key_name,
+				    (const void **)&number, 1, &kCFTypeDictionaryKeyCallBacks,
+				    &kCFTypeDictionaryValueCallBacks);
+				CFRelease(number);
+				return (id)dictionary;
+			}
+		}
+	}
+	return result;
+}
+
+static BOOL
+my_bsi_set_prop(id self, SEL cmd, id prop, id key, id client)
+{
+	BOOL ok = orig_bsi_set_prop(self, cmd, prop, key, client);
+
+	if (key != NULL && prop != NULL && CFGetTypeID((CFTypeRef)key) == CFStringGetTypeID() &&
+	    CFStringCompare((CFStringRef)key, CFSTR("DisplayBrightness"), 0) == kCFCompareEqualTo) {
+		float value = -1.0f;
+		CFTypeID type = CFGetTypeID((CFTypeRef)prop);
+
+		if (type == CFDictionaryGetTypeID()) {
+			const void *number = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("Brightness"));
+			if (number != NULL && CFGetTypeID((CFTypeRef)number) == CFNumberGetTypeID()) {
+				CFNumberGetValue((CFNumberRef)number, kCFNumberFloatType, &value);
+			}
+		} else if (type == CFNumberGetTypeID()) {
+			CFNumberGetValue((CFNumberRef)prop, kCFNumberFloatType, &value);
+		}
+		if (value >= 0.0f && value <= 1.0f) {
+			thyme_apply_brightness(value, "BrightnessSystemInternal");
+			return YES;
+		}
+	}
+	return ok;
+}
+
+static IMP
+hook_objc_method(Class cls, const char *name, IMP replacement)
+{
+	Method method = cls != NULL ? class_getInstanceMethod(cls, sel_registerName(name)) : NULL;
+
+	return method != NULL ? method_setImplementation(method, replacement) : NULL;
+}
+
+static void
+thyme_brightness_fixes(void)
+{
+	int permille = 600;
+	size_t length = sizeof(permille);
+	Class controller = objc_getClass("BKDisplayBrightnessController");
+	Class internal = objc_getClass("BrightnessSystemInternal");
+
+	if (sysctlbyname("kern.hakios.brightness", &permille, &length, NULL, 0) == 0 &&
+	    permille >= 0 && permille <= 1000) {
+		thyme_brightness = (float)permille / 1000.0f;
+	}
+	(void)hook_objc_method(controller, "isBrightnessLevelControlAvailable",
+	    (IMP)my_bk_is_brightness_available);
+	orig_bk_set_brightness = (void (*)(id, SEL, float, id, unsigned long long))hook_objc_method(
+	    controller, "setBrightnessLevel:reason:options:", (IMP)my_bk_set_brightness);
+	orig_bsi_copy_prop = (id (*)(id, SEL, id, id))hook_objc_method(internal,
+	    "copyPropertyForKey:client:", (IMP)my_bsi_copy_prop);
+	orig_bsi_set_prop = (BOOL (*)(id, SEL, id, id, id))hook_objc_method(internal,
+	    "setProperty:forKey:client:", (IMP)my_bsi_set_prop);
+	say("hakios: THYME brightness hooks %s (initial %.2f)\n",
+	    orig_bk_set_brightness && orig_bsi_copy_prop && orig_bsi_set_prop ?
+	    "installed" : "INCOMPLETE", (double)thyme_brightness);
+}
+
 /* ---- backboardd: the touch screen and the buttons ---------------------------------------------- */
 
 /* IOKit's HID event system, the part that has no public header on Darwin (prototypes checked against 20F66) */
@@ -1133,6 +1336,7 @@ hakios_init(void)
 		}
 		opengl_es();
 		window_server_fixes();
+		thyme_brightness_fixes();
 		/*
 		 * brightness_fixes() is not used for now: with it backboardd no longer took our touch
 		 * screen service for its own ("still waiting for a main screen digitizer"), whether the

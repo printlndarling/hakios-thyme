@@ -59,6 +59,10 @@ The SM8250 EPSS CPU frequency domains and both TSENS blocks are also live on
 official main. All three clusters reached 1804/2419/3187 MHz, the governor
 physically throttled the big-core domain at 75.9 C, and an artificially low
 `thermal_stop=30` run returned to the loader without a panic.
+The command-mode 42 02 0a panel now has a DSI `0x51` backlight path and
+CoreBrightness hooks: an iOS request for 500 permille reached the panel as level
+2056 and completed the command DMA. A human-visible 20/50/100% comparison is
+still pending.
 
 The first official-main run reported:
 
@@ -72,6 +76,7 @@ battguard: charge 92% (battery present, charger attached, charging no)
 See `docs/official-core-probe.md`.
 See also `docs/official-touch-probe.md`.
 See also `docs/official-gpu-probe.md`.
+See also `docs/official-brightness-probe.md`.
 See also `docs/official-cpu-thermal-probe.md`.
 See also `docs/official-audio-probe.md`.
 See also `docs/official-haptic-probe.md`.

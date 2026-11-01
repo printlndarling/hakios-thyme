@@ -15,7 +15,7 @@
 
 | Part | State | |
 |---|---|---|
-| display | works | framebuffer and Adreno path reach SpringBoard on official main |
+| display | works | framebuffer, Adreno and DSI DCS 0x51 backlight paths work; physical brightness comparison pending |
 | touch | works | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38 |
 | buttons | works | PM8150 PON + GPIO6; power and both volume keys verified |
 | cpu | works | 7 CPUs; three EPSS domains raised to 1804/2419/3187 MHz on official main |
