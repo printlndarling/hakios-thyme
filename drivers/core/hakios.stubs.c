@@ -41,6 +41,10 @@ void hakios_virtio_input_init(void) {}
 void hakios_goodix_init(void) {}
 #endif
 
+#ifndef HAKIOS_THYME_BT
+void umi_bluetooth_init(void) {}
+#endif
+
 #if !defined(HAKIOS_BUTTONS) && !defined(HAKIOS_THYME_INPUT)
 void hakios_buttons_init(void) {}
 #endif

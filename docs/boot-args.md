@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **335 arguments**: 283 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **337 arguments**: 285 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -395,13 +395,13 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (23)
+## User space (25)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `adsp_umi` | K | `hakios.thyme_adsp.c`, `hakios.thyme_sound.c` | `CONFIG_ADSP_UMI` |  |
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
-| `bt` | K | `hakios.bt.c` | `CONFIG_BT` |  |
+| `bt` | K | `hakios.bt.c`, `hakios.thyme_bluetooth.c` | `CONFIG_BT` |  |
 | `bt_again` | K | `hakios.bt.c` | `CONFIG_BT_AGAIN` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
@@ -416,6 +416,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `umi_amp_probe` | K | `hakios.thyme_speaker.c` | `CONFIG_UMI_AMP_PROBE` |  |
+| `umi_bt` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT` |  |
+| `umi_bt_probe` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT_PROBE` |  |
 | `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 | `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
 | `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |

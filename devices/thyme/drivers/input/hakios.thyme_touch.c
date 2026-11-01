@@ -471,5 +471,8 @@ void umi_touch_init(void)
 void
 hakios_goodix_init(void)
 {
+	extern void umi_bluetooth_init(void);
+
 	umi_touch_init();
+	umi_bluetooth_init();
 }

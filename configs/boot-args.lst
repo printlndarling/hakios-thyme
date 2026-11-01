@@ -283,6 +283,8 @@ ufs_probe	l
 ufs_shared_pa	k
 ufs_write	kl
 umi_amp_probe	k
+umi_bt	k
+umi_bt_probe	k
 umi_haptic	k
 umi_keys	k
 umi_touch	k

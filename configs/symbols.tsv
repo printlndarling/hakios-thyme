@@ -54,7 +54,7 @@ APPLOG_NAME	arg	applog_name	CPU, memory and boot	k	(patch)
 AUTOUNLOCK	arg	autounlock	User space	u	inject_sb.c	
 BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.thyme_adsp.c,loader.c	
 BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	every property once, for the log (which number is which on this phone's firmware)
-BT	arg	bt	User space	k	hakios.bt.c	
+BT	arg	bt	User space	k	hakios.bt.c,hakios.thyme_bluetooth.c	
 BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds later (0: no second look; 30)
 BUTTONS	arg	buttons	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
 BUTTONS_STEPS	arg	buttons_steps	Touch and buttons	k	hakios.buttons.c	
@@ -252,6 +252,8 @@ UFS_NATIVE_SLOTS	arg	ufs_native_slots	Storage and APFS	k	hakios.ufshc.c
 UFS_NATIVE_SPIN	arg	ufs_native_spin	Storage and APFS	k	hakios.ufshc.c	
 UFS_PROBE	arg	ufs_probe	Loader	l	loader.c	
 UMI_AMP_PROBE	arg	umi_amp_probe	User space	k	hakios.thyme_speaker.c	
+UMI_BT	arg	umi_bt	User space	k	hakios.thyme_bluetooth.c	
+UMI_BT_PROBE	arg	umi_bt_probe	User space	k	hakios.thyme_bluetooth.c	
 UMI_HAPTIC	arg	umi_haptic	User space	k	hakios.thyme_haptic.c	
 UMI_KEYS	arg	umi_keys	User space	k	hakios.thyme_keys.c	
 UMI_TOUCH	arg	umi_touch	User space	k	hakios.thyme_touch.c	

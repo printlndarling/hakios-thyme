@@ -1,0 +1,8 @@
+# drivers/bluetooth/conf: the THYME QCA6390 UART controller.
+
+driver THYME_BT
+	file    bsd/dev/hakios.thyme_bluetooth.c
+	file    iokit/Kernel/hakios.thyme_bluetooth.cpp iokitcpp
+	help    QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap,
+	help    the H4 kernel-control transport and its Bluetooth IOService (bt=1).
+	help    Needs htbtfw20.tlv and htnv20.bin under fw/qca6390-bt/.

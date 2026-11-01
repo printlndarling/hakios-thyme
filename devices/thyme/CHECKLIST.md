@@ -53,8 +53,9 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 | QCA6390 PCIe/MHI | PARTIAL | port and retest |
 | WLFW QMI | FAIL | diagnose previous timeout `-60` |
 | Wi-Fi station / join / DHCP | TODO | depends on WLFW |
-| Bluetooth UART firmware | TODO | load `htbtfw20.tlv` and `htnv20.bin` |
-| Bluetooth HCI reset | FAIL | no usable HCI controller yet |
+| Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
+| Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
+| Scan / pair / connect | TODO | controller is initialized; physical peer test pending |
 | ALS / proximity / accelerometer | FAIL | no usable sensor path |
 
 ## Later product work

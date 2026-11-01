@@ -50,7 +50,9 @@ fallback. The THYME audio stack now brings up LPASS/ADSP, APR, MI2S and both
 CS35L41 amplifiers with protection firmware; audible speaker and microphone
 checks remain. The AW8697 motor driver identifies the chip and loads and
 verifies Android's waveforms, but its SYSST register still reports UVLO when
-entering active mode. Wi-Fi and Bluetooth remain to be migrated.
+entering active mode. Bluetooth is now live on official main: QCA6390 firmware
+and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
+iOS Bluetooth initialization all work. Wi-Fi remains to be migrated.
 
 The first official-main run reported:
 
@@ -66,6 +68,7 @@ See also `docs/official-touch-probe.md`.
 See also `docs/official-gpu-probe.md`.
 See also `docs/official-audio-probe.md`.
 See also `docs/official-haptic-probe.md`.
+See also `docs/official-bt-probe.md`.
 
 The legacy tree previously proved the following on the physical phone:
 
