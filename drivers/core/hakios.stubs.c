@@ -74,7 +74,7 @@ void hakios_cpufreq_init(void) {}
 void hakios_ddr_quiesce(void) {}
 #endif
 
-#ifndef HAKIOS_ADRENO
+#if !defined(HAKIOS_ADRENO) && !defined(HAKIOS_THYME_ADRENO)
 void hakios_adreno_init(void) {}
 void hakios_adreno_quiesce(void) {}
 void hakios_adreno_stop(void) {}

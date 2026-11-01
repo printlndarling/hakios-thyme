@@ -1,0 +1,8 @@
+# drivers/gpu/conf: the THYME Adreno 650 and the DRM-compatible HakiosGPU service.
+
+driver THYME_ADRENO
+	file    bsd/dev/hakios.thyme_adreno.c
+	file    iokit/Kernel/hakios.thyme_gpu.cpp iokitcpp
+	help    the XIAOMI Mi 10S Adreno 650, zap shader and GMU path, and the
+	help    HakiosGPU service Mesa and the window server draw through (gpu=1).
+	help    Needs a650 firmware from fw-gpu/.

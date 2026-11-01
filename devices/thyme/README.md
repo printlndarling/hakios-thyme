@@ -43,8 +43,10 @@ loader, reaches `/redwood/sbin/init`, starts launchd and SpringBoard, and return
 to Android after the watchdog. The THYME-specific ST FTS521 touch path is also
 running on official main: a physical interaction raised the event count from 7
 to 472 with `errors=0`, and backboardd reported contact presence touching/none.
-The PM8150 key driver initialized and found both PMIC APIDs; physical keys still
-need a dedicated run. GPU, audio, Wi-Fi and Bluetooth remain to be migrated.
+The PM8150 key driver now reports power and volume press/release events. The
+THYME Adreno 650 driver is also running on official main: a four-minute run
+produced more than 2,100 hardware-rendered `hakios-gl` frames without softpipe
+fallback. Audio, Wi-Fi and Bluetooth remain to be migrated.
 
 The first official-main run reported:
 
@@ -57,6 +59,7 @@ battguard: charge 92% (battery present, charger attached, charging no)
 
 See `docs/official-core-probe.md`.
 See also `docs/official-touch-probe.md`.
+See also `docs/official-gpu-probe.md`.
 
 The legacy tree previously proved the following on the physical phone:
 

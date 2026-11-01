@@ -21,12 +21,12 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 | XNU reaches userspace | PASS | PASS |
 | 7 CPUs and cpufreq | PARTIAL: 7 CPUs start; cpufreq driver still off | PASS |
 | 1080 x 2340 display | PARTIAL: generic framebuffer reaches SpringBoard | PASS |
-| Adreno 650 GPU rendering | TODO: generic framebuffer still runs in software | PASS |
+| Adreno 650 GPU rendering | PASS, more than 2,100 `hakios-gl` frames in four minutes | PASS |
 | 30-minute UI stability | TODO | PASS |
-| FTS521 touch polling | PASS, 472 events / `errors=0` | PASS |
+| FTS521 touch polling | PASS, 415 events in the GPU run / `errors=0` | PASS |
 | Tap, drag, gestures | PASS, backboardd touching/none and gesture handling | PASS |
-| Power key | PARTIAL: PM8150 driver initialized; physical event not captured | PASS |
-| Volume keys | PARTIAL: PM8150 driver initialized; physical event not captured | PASS |
+| Power key | PASS, pressed/released captured | PASS |
+| Volume keys | PASS, pressed/released captured | PASS |
 | Display off and wake | TODO | PASS |
 
 ## Power and charging
