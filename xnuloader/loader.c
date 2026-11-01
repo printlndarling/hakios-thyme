@@ -563,6 +563,7 @@ struct platform {
 	uint32_t small_cores;            /* a bit for each of the slower cores, by number: "small-core" in the device tree */
 };
 
+#ifndef LOADER_THYME
 static const struct platform platform_qemu_virt = {
 	.name = "qemu-virt", .io_base = 0x08000000, .io_size = 0x08000000,
 	.gic_dist = 0x08000000, .gic_redist = 0x080A0000, .uart = 0x09000000, .psci_hvc = 1,
@@ -574,6 +575,7 @@ static const struct platform platform_qemu_virt = {
 	 */
 	.timeout_scale = 20,
 };
+#endif
 
 static const struct platform platform_redwood = {
 	/* io_base must be non-zero: XNU treats a zero SoC base as "no SoC" and skips clock setup. */
@@ -586,6 +588,14 @@ static const struct platform platform_redwood = {
 	 * (XNU's machine_routines.c, ml_choose_slow_core_partners()).
 	 */
 	.small_cores = 0x0f,
+};
+
+/* SM8250 THYME has the same interrupt layout as redwood, but its UEFI
+ * reports a different GOP buffer and must not fall through to ramfb. */
+static const struct platform platform_thyme = {
+	.name = "thyme", .io_base = 0x00400000, .io_size = 0x3FC00000,
+	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
+	.cores = 8, .core_shift = 8, .small_cores = 0x0f,
 };
 
 /* ------------------------------------------------------------------------ */
@@ -2235,7 +2245,7 @@ charger_start(void)
 	static const efi_guid qcom_charger_guid = QCOM_CHARGER_GUID;
 	efi_status ex_status, qcom_status, init_status = 0;
 
-	if (charger_enabled || PLAT != &platform_redwood) {
+	if (charger_enabled || (PLAT != &platform_redwood && PLAT != &platform_thyme)) {
 		return;
 	}
 	ex_status = BS->locate_protocol(&charger_ex_guid, NULL, (void **)&CHARGER_EX);
@@ -2503,7 +2513,7 @@ wdt_arm(void)
 {
 	uint64_t ctl = 0, since = 0;
 
-	if (PLAT != &platform_redwood) {
+	if (PLAT != &platform_redwood && PLAT != &platform_thyme) {
 		return; /* SMC is not routed anywhere useful on QEMU virt */
 	}
 	uint64_t st = smc_call(VIRT_WDT_STATUS, 0, 0, &ctl, &since);
@@ -3226,8 +3236,13 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	dt_identity(&w, identity_root, sizeof(identity_root) / sizeof(identity_root[0]), identity_root_data);
 	dt_prop_str(&w, "platform-name", "t8015");
 	/* what iBoot takes from the factory configuration of a real phone; fixed size fields */
+#ifdef LOADER_THYME
+	dt_prop_padded(&w, "serial-number", "THYME0XIAOMI10S", 32);
+	dt_prop_padded(&w, "mlb-serial-number", "THYME0XIAOMI10SMLB00", 32);
+#else
 	dt_prop_padded(&w, "serial-number", "RDW00POCOX5P", 32);
 	dt_prop_padded(&w, "mlb-serial-number", "RDW00POCOX5PMLB00", 32);
+#endif
 	dt_prop_padded(&w, "model-number", "MQAC2", 32);
 	dt_prop_padded(&w, "region-info", "LL/A", 32);
 	dt_prop_padded(&w, "regulatory-model-number", "A1865", 32);
@@ -4084,6 +4099,7 @@ usb_command_loop(void)
 #define FW_CFG_DMA_SELECT 0x08
 #define FW_CFG_DMA_WRITE  0x10
 
+#ifndef LOADER_THYME
 static uint32_t
 be32(uint32_t v)
 {
@@ -4160,6 +4176,7 @@ ramfb_phone_screen(void)
 	SCREEN.height = PHONE_HEIGHT;
 	SCREEN.stride = PHONE_WIDTH * 4;
 }
+#endif
 
 /*
  * UEFI-native boot: a payload from the volume the loader was started from.
@@ -4334,7 +4351,11 @@ efi_main(efi_handle image, efi_system_table *st)
 	print("CurrentEL=%x MIDR=%x MMFR0=%x CNTFRQ=%d image=%x\n", READ_SYSREG(CurrentEL) >> 2, READ_SYSREG(MIDR_EL1),
 	    READ_SYSREG(ID_AA64MMFR0_EL1), READ_SYSREG(CNTFRQ_EL0), (uint64_t)(uintptr_t)&__ImageBase);
 
+#ifdef LOADER_THYME
+	PLAT = &platform_thyme;
+#else
 	PLAT = &platform_qemu_virt;
+#endif
 	if (EFI_ERROR(BS->locate_protocol(&gop_guid, NULL, (void **)&GOP)) || GOP->mode == NULL ||
 	    GOP->mode->info == NULL || GOP->mode->fb_base == 0) {
 		GOP = NULL;                     /* no display (QEMU without -device ramfb) */
@@ -4343,13 +4364,23 @@ efi_main(efi_handle image, efi_system_table *st)
 		SCREEN.width = GOP->mode->info->width;
 		SCREEN.height = GOP->mode->info->height;
 		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
+#ifdef LOADER_THYME
+		PLAT = &platform_thyme;
+#else
 		if (SCREEN.base == 0xE1000000ULL) {
 			PLAT = &platform_redwood;
 		} else {
 			ramfb_phone_screen();
 		}
+#endif
 		print("display %d x %d at %x\n", (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, SCREEN.base);
 	}
+#ifdef LOADER_THYME
+	if (GOP == NULL || SCREEN.width != 1080 || SCREEN.height != 2340) {
+		print("THYME: expected GOP 1080 x 2340; refusing kernel handoff\n");
+		return 0x8000000000000003ULL; /* EFI_UNSUPPORTED */
+	}
+#endif
 	print("platform %s\n", PLAT->name);
 
 	install_exception_hook();

@@ -117,8 +117,20 @@ tools/hakios-device.py check thyme
 make config
 ```
 
-The UEFI/loader path is not yet rebuilt against the official repository. Until
-that passes, use the legacy tree only as a hardware reference and fallback.
+Build the THYME-specific loader and RAM-boot image:
+
+```sh
+DEVICE=thyme make loader       # xnuloader/loader-thyme.efi
+devices/thyme/build-loader.sh  # devices/thyme/prebuilt/xnu-usb.img
+```
+
+The THYME loader uses Project Silicium addresses `FD_BASE=0x9fc00000`,
+`FD_SIZE=0x300000` and `PAYLOAD_BASE=0xf0000000`. See
+`docs/official-loader-thyme.md`.
+
+The official loader now builds for THYME, but its RAM-boot image still needs a
+successful physical boot. Keep the known-good legacy image available until
+that hardware check passes.
 
 ## Repository layout
 
