@@ -1612,10 +1612,13 @@ sound_thread(__unused void *parameter, __unused wait_result_t result)
 		goto out;
 	}
 	if (umi_profile && level == 3) {
-		announce("UMI protected speaker test: OTP trims, board limits, firmware and a capped one-second tone");
-		if (!umi_speaker_prepare() || !umi_speaker_start()) goto out;
-		say("sound: UMI QUIET TONE NOW: one second, protected output at -40 dB digital\n");
-		ok = play(1000, true);
+		uint32_t test_seconds = seconds ? seconds : 1;
+
+		announce("UMI protected speaker test: OTP trims, board limits, firmware and a capped test tone");
+		if (!umi_speaker_prepare() || !umi_speaker_start() || !umi_speaker_volume(below, 50)) goto out;
+		say("sound: UMI SPEAKER TONE NOW: %u s, 1 kHz at -20 dBFS, %u.%03u dB under unity\n",
+		    test_seconds, below / 8, below % 8 * 125);
+		ok = play(test_seconds * 1000, true);
 		goto out;
 	}
 	if (level == 4) {

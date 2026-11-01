@@ -55,6 +55,24 @@ sound: WHAT IOS PLAYS GOES TO THE SPEAKERS from here on
 The iOS HAL opened `/dev/hakios-audio` and the stream was routed to the CS35L41
 speaker path.
 
+## Self-test correction
+
+The THYME `sound=3` path originally left the amplifiers at a fixed `-40 dB`
+while playing a `-20 dBFS` tone, and ignored `sound_secs`. That made an
+acoustic loopback test nearly impossible. The self-test now applies the
+requested `sound_below` attenuation and plays for the requested duration, up
+to the three-second test limit.
+
+Example:
+
+```text
+adsp=1 sound=3 sound_secs=3 sound_below=96 mic=3 mic_secs=8
+rec_sound=8 rec_sound_mic=1 mic_tap=1 umi_haptic=5
+```
+
+This is intended to record the speaker tone and the motor through the
+microphone. Hardware verification is pending.
+
 ## Remaining physical checks
 
 - Play a known system sound or music and confirm audible stereo output.
