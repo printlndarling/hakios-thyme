@@ -78,8 +78,9 @@ microphone. Hardware verification is pending.
 The official loader and the microphone probe were brought up further on the
 physical phone. WCD938x enumeration and ID reads pass, and the full
 DEC1/ADC1 + DEC0/ADC4 dual-mic path now returns nonzero physical PCM after
-correcting THYME's SoundWire master port mapping. The remaining userland
-recording check is recorded in `official-mic-path.md`.
+correcting THYME's SoundWire master port mapping. Darwin AVAudioRecorder also
+completed a 4.9-second `/dev/hakios-mic` recording with no skipped frames; see
+`official-mic-path.md`.
 
 ## Remaining physical checks
 

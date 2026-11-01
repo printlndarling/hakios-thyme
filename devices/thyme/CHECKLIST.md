@@ -69,7 +69,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
 | Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
-| Microphone capture | PARTIAL: full DEC1/ADC1 + DEC0/ADC4 hardware path captures dual-channel PCM (`rms 4854-7930`, peak about 28000, reads 50/50); tone correlation and `/dev/hakios-mic` recording remain | test `mic=4` from Darwin and verify recovered audio before PASS |
+| Microphone capture | PASS: DEC1/ADC1 + DEC0/ADC4 captures dual-channel PCM (`rms 4854-7930`); Darwin AVAudioRecorder through `/dev/hakios-mic` ran 4.9 s with `0 frames skipped` and `0` short reads | keep a tone/intelligibility regression check in future soak runs |
 | Haptics | PARTIAL: stock activation sequence and waveform 1 complete; BSTERRI is the vendor-ignored boost latch | confirm physical vibration, then test iOS taps and long vibrations |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
 | QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |

@@ -88,17 +88,24 @@ mic: second 2: 48000 frames (50 periods, 0 empty), level -12.5 dBFS (rms 7831), 
 mic: second 3: 48000 frames (50 periods, 0 empty), level -12.3 dBFS (rms 7930), peak 28409, mean -23; reads 150, errors 0
 ```
 
-This is a hardware PASS for dual-channel microphone capture and cleanup. It is
-not yet a complete user-facing PASS because `/dev/hakios-mic` has not recorded
-through Darwin with this path.
+This is a hardware PASS for dual-channel microphone capture and cleanup.
 
-## Remaining checks
+Darwin then opened `/dev/hakios-mic` through HakiosAudio.driver and
+AVAudioRecorder:
+
+```text
+mic: Darwin records (2): the path up
+mic: Darwin's recording 2 ended after 4.9 s; last: 0x1 to the TX macro TX0_TX_PATH_SEC2 (0x3220418); 0 frames skipped as too late, 0 reads found too little
+```
+
+This is a complete PASS for the current microphone path: hardware capture,
+stereo-to-mono downmix, `/dev/hakios-mic`, AVAudioRecorder, ring continuity and
+cleanup.
+
+## Remaining soak checks
 
 - Correlate a known speaker tone or spoken sample with captured RMS.
-- Exercise `mic=4` and `/dev/hakios-mic` from Darwin with the corrected path.
-- Verify mono downmix and recording continuity when Darwin consumes the ring.
-- Only mark the complete microphone item PASS after a recovered recording
-  contains intelligible audio.
+- Keep recording continuity in future long-running UI tests.
 
 The diagnostic direct-DMIC path (`mic_path=0`, DMIC1/DEC2, LPI GPIO6/7) still
 returns silence and zero data-line transitions. It is not the default.

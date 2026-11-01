@@ -25,7 +25,9 @@
  * port 1/channel 2 (ADC4) goes to master port 3. DEC1/ADC1 and DEC0/ADC4 feed
  * one two-channel ASM/ADM stream. Ordinary room audio produced RMS 4854-7930
  * (`-16.8` to `-12.3 dBFS`) with peak near 28000 and no read errors.
- * `mic_path=0` remains the diagnostic direct-DMIC path.
+ * Darwin's AVAudioRecorder then recorded 4.9 s through /dev/hakios-mic with
+ * zero frames skipped and zero short reads. `mic_path=0` remains the direct
+ * DMIC diagnostic path.
  *
  * Diagnostic boot arguments:
  *   mic_stage=1..6      stop after reset, SWR pins, TX clocks, master or codec
@@ -1968,9 +1970,15 @@ listen(bool for_darwin)
 		OSBitAndAtomic(~(1u << next), &read_ready);
 		{
 			int16_t *samples = (int16_t *)(mic_memory + 4096 * next);
-			uint32_t got = read_sizes[next] / 2;
+			int16_t mono[MIC_PERIOD_FRAMES];
 			int16_t stereo[2 * 240];
+			uint32_t channels = mic_channels > 0 ? mic_channels : 1;
+			uint32_t samples_got = read_sizes[next] / 2;
+			uint32_t got = samples_got / channels;
 
+			frames = periods = empty = peak = 0;
+			sum = 0;
+			squares = 0;
 			for (vm_offset_t line = (vm_offset_t)samples; line < (vm_offset_t)samples + MIC_PERIOD_BYTES; line += 64) {
 				__asm__ volatile ("dc ivac, %0" : : "r" (line));
 			}
@@ -1978,7 +1986,15 @@ listen(bool for_darwin)
 			got = got > MIC_PERIOD_FRAMES ? MIC_PERIOD_FRAMES : got;
 			empty += got == 0;
 			for (uint32_t i = 0; i < got; i++) {
-				int32_t v = samples[i];
+				int32_t mixed = 0;
+
+				for (uint32_t c = 0; c < channels; c++) {
+					mixed += samples[i * channels + c];
+				}
+				mono[i] = (int16_t)(mixed / (int32_t)channels);
+			}
+			for (uint32_t i = 0; i < got; i++) {
+				int32_t v = mono[i];
 				uint32_t a = (uint32_t)(v < 0 ? -v : v);
 
 				sum += v;
@@ -1987,14 +2003,14 @@ listen(bool for_darwin)
 			}
 			frames += got;
 			if (for_darwin) {
-				ring_put(samples, got);
+				ring_put(mono, got);
 			}
 			if (hakios_audio_recording_mic()) {
 				for (uint32_t i = 0; i < got; i += 240) {
 					uint32_t n = got - i < 240 ? got - i : 240;
 
 					for (uint32_t j = 0; j < n; j++) {
-						stereo[2 * j] = stereo[2 * j + 1] = samples[i + j];
+						stereo[2 * j] = stereo[2 * j + 1] = mono[i + j];
 					}
 					hakios_audio_record_fed(stereo, n);
 				}
