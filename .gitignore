@@ -123,5 +123,10 @@ __pycache__/
 !/devices/thyme/
 !/devices/thyme/**
 
+# THYME device-tree, vendor firmware, UEFI binaries, and RAM-session images are
+# local inputs/results and must never be committed.
+/devices/thyme/prebuilt/
+/devices/thyme/uefi/files/Binaries/
+
 # Android platform-tools for xl on a Mac (tools/macos-bin/README.md): not part of the repository
 /tools/macos-bin/platform-tools
