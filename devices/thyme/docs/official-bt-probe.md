@@ -53,9 +53,17 @@ UMI BT: HCI command rejected opcode=0xfd48 status=0x1
 
 The controller remained running and the standard iOS initialization continued.
 
+## Scan diagnostics
+
+`umi_bt_probe=5` performs LE passive scan and classic inquiry after firmware
+boot. It now logs each report's address, RSSI and advertised name (when
+present), then shuts the controller down and returns to the loader. The
+diagnostic compiles but still needs a physical run with a known discoverable
+peer.
+
 ## Remaining checks
 
-- Scan for a nearby Bluetooth device.
-- Pair and reconnect.
+- Run `umi_bt_probe=5` with a known LE and classic peer.
+- Pair from iOS and reconnect after disabling/re-enabling Bluetooth.
 - Transfer a small file or use a Bluetooth audio device.
 - Verify sleep/wake of the QCA6390 controller over a long session.

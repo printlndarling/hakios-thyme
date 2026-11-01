@@ -53,10 +53,11 @@ reads its chip/SCP IDs and identifies the Bolero 1.2 profile. Microphone
 capture now produces nonzero dual-channel PCM through DEC1/ADC1 and
 DEC0/ADC4, and Darwin's AVAudioRecorder completed a 4.9-second recording
 through `/dev/hakios-mic` with no skipped frames. See
-`docs/official-mic-path.md`. The AW8697 motor driver now follows Xiaomi's
-stock activation
-sequence, loads and verifies Android's waveforms, and plays waveform 1 back to
-standby in 38 ms without a fatal fault; physical feel remains to be confirmed.
+`docs/official-mic-path.md`. The AW8697 motor driver follows Xiaomi's stock activation sequence, loads
+and verifies Android's 1700 Hz LRA waveforms, and completed repeated
+waveform-11 playback without a fatal fault. A microphone cross-check was
+inconclusive because the actuator was below the capture noise floor; a stock
+continuous-mode BEMF/f0 diagnostic is compiled for physical validation.
 Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. The device-owned QCA6390 Wi-Fi stack now

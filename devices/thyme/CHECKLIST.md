@@ -15,8 +15,8 @@ No item moves to `PASS` from source inspection alone.
 | Battery percentage display | PASS | Loader and iOS report percentage, voltage, current and temperature |
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
-| Vibration | PARTIAL | AW8697 active mode, waveform RAM and waveform 1 playback complete; standby in 38 ms with no fatal fault. Physical feel is still unconfirmed |
-| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and the iOS H4 endpoint work; scan, pair and reconnect are pending |
+| Vibration | PARTIAL | AW8697 stock RAM path and 1700 Hz LRA identified; waveform 1 and seven waveform-11 bursts completed without fatal faults. The microphone cross-check was inconclusive. The stock continuous-mode BEMF/f0 diagnostic is compiled but not yet run on-device |
+| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and iOS H4 work; detailed LE/classic scan diagnostics compile. Physical scan, pair and reconnect are pending |
 | Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
@@ -71,13 +71,13 @@ No item moves to `PASS` from source inspection alone.
 | ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
 | Speaker playback | PASS for acoustic output: MI2S, both CS35L41 amps and protection DSP run, and a 1 kHz tone raises the microphone's 1 kHz component by 25.78 dB at the matching time | confirm independent left/right output and stereo balance |
 | Microphone capture | PASS: DEC1/ADC1 + DEC0/ADC4 captures dual-channel PCM (`rms 4854-7930`); Darwin AVAudioRecorder through `/dev/hakios-mic` ran 4.9 s with `0 frames skipped` and `0` short reads | keep a tone/intelligibility regression check in future soak runs |
-| Haptics | PARTIAL: stock activation sequence and waveform 1 complete; BSTERRI is the vendor-ignored boost latch | confirm physical vibration, then test iOS taps and long vibrations |
+| Haptics | PARTIAL: stock activation, waveforms and repeated waveform-11 playback are clean; BSTERRI is the vendor-ignored boost latch; microphone detection was inconclusive | run the BEMF/f0 probe, confirm physical feel, then test iOS taps and long vibrations |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
 | QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |
 | Wi-Fi station / join / DHCP | PASS; WPA2 association, DHCP and en0 TCP traffic | test 2.4/5 GHz and reconnect |
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
-| Scan / pair / connect | TODO | controller is initialized; physical peer test pending |
+| Scan / pair / connect | TODO | `umi_bt_probe=5` now logs LE/classic addresses, RSSI and advertised names; run it with a known discoverable peer, then test iOS pairing and reconnect |
 | ALS / proximity / accelerometer | FAIL | no usable sensor path |
 
 ## Later product work
