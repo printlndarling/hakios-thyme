@@ -120,7 +120,7 @@ def scan(root, keep=None):
             text = "\n".join(l[1:] for l in text.splitlines() if l.startswith("+") and not l.startswith("+++"))
             base = "(patch)"
         # the kernel's side: where the drivers are kept (xnu/files/ until they moved to drivers/<subsystem>/) and the Linux layer
-        if f.startswith(("xnu/", "drivers/", "wifi/lx/src/")):
+        if f.startswith(("xnu/", "drivers/", "wifi/lx/src/")) or re.match(r"devices/[^/]+/drivers/", f):
             for m in KERNEL.finditer(text):
                 found[m.group(1)]["kernel"].add(base)
             for m in STRING.finditer(text):

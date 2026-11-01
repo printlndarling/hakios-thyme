@@ -1,0 +1,9 @@
+# drivers/input/conf: THYME's ST FTS521 touch controller and PM8150 keys.
+
+driver THYME_INPUT
+	file    bsd/dev/hakios.thyme_touch.c
+	file    bsd/dev/hakios.thyme_touch_boost.c
+	file    bsd/dev/hakios.thyme_rpmh.c
+	file    bsd/dev/hakios.thyme_keys.c
+	help    ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys
+	help    (touchscreen=1, buttons=1). This replaces GOODIX and BUTTONS on THYME.

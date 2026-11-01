@@ -37,11 +37,11 @@ void HakiosWLANStart(const char *interface, const uint8_t *address);
 void hakios_virtio_input_init(void) {}
 #endif
 
-#ifndef HAKIOS_GOODIX
+#if !defined(HAKIOS_GOODIX) && !defined(HAKIOS_THYME_INPUT)
 void hakios_goodix_init(void) {}
 #endif
 
-#ifndef HAKIOS_BUTTONS
+#if !defined(HAKIOS_BUTTONS) && !defined(HAKIOS_THYME_INPUT)
 void hakios_buttons_init(void) {}
 #endif
 
