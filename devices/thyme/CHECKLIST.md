@@ -6,21 +6,21 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 
 ## Official-main migration gate
 
-- [ ] Register THYME in `devices/manifest.conf`.
-- [ ] `tools/hakios-device.py check thyme` passes.
-- [ ] `make thyme_defconfig` and `make config` pass.
-- [ ] Official-main kernel builds.
-- [ ] Official-main kernel reaches launchd on the phone.
-- [ ] Official-main kernel returns to Android safely.
+- [x] Register THYME in `devices/manifest.conf`.
+- [x] `tools/hakios-device.py check thyme` passes.
+- [x] `make thyme_defconfig` and `make config` pass.
+- [x] Official-main kernel builds.
+- [x] Official-main kernel reaches launchd and SpringBoard on the phone.
+- [x] Official-main kernel returns to Android safely.
 - [ ] UEFI and loader are rebuilt from official infrastructure.
 
 ## Boot and interaction
 
 | Check | Official main | Legacy evidence |
 |---|---|---|
-| XNU reaches userspace | TODO | PASS |
-| 7 CPUs and cpufreq | TODO | PASS |
-| 1080 x 2340 display | TODO | PASS |
+| XNU reaches userspace | PASS | PASS |
+| 7 CPUs and cpufreq | PARTIAL: 7 CPUs start; cpufreq driver still off | PASS |
+| 1080 x 2340 display | PARTIAL: generic framebuffer reaches SpringBoard | PASS |
 | Adreno 650 GPU rendering | TODO | PASS |
 | 30-minute UI stability | TODO | PASS |
 | FTS521 touch polling | TODO | PASS |
@@ -33,8 +33,8 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 
 | Check | Official main | Legacy evidence |
 |---|---|---|
-| Battery percentage/voltage/temperature | TODO | PASS |
-| Signed current | TODO | PASS |
+| Battery percentage/voltage/temperature | PASS | PASS |
+| Signed current | PASS, `-97 mA` during the probe | PASS |
 | Positive current in HakiOS | TODO | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
 | 30-minute charging endurance | TODO | PASS with endpoint online |

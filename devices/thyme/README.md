@@ -38,9 +38,22 @@ kept outside Git at `/home/darling/thyme-assets/thyme.dtb`.
 
 ## Current state
 
-The official-main device package is at the skeleton/porting stage. The common
-official kernel builds with this configuration, but no device driver has yet
-been claimed as working on official main.
+The official-main common kernel now boots this phone through the legacy RAM
+loader, reaches `/redwood/sbin/init`, starts launchd and SpringBoard, and returns
+to Android after the watchdog. The first official-main probe used the generic
+framebuffer display path and the battery/battguard drivers; device-specific GPU,
+touch, keys, audio, Wi-Fi and Bluetooth still have to be migrated.
+
+The first official-main run reported:
+
+```text
+Darwin 22.5.0 iPhone10,3
+memory 6144 MB, page size 16384, 7 cpu
+battery: SOC=92%, V=4282 mV, I=-97 mA, T=24 C, battery=1 charger=1 charging=0
+battguard: charge 92% (battery present, charger attached, charging no)
+```
+
+See `docs/official-core-probe.md`.
 
 The legacy tree previously proved the following on the physical phone:
 
@@ -55,8 +68,9 @@ The legacy tree previously proved the following on the physical phone:
   action 3 after it.
 - The external charge guard returned the phone to Android after a bounded run.
 
-Those are evidence for the port, not claims about the official-main build. See
-`docs/legacy-validation.md` and `docs/legacy-checklist.md`.
+Those are evidence for the port, not claims that every part already works on the
+official-main build. See `docs/legacy-validation.md` and
+`docs/legacy-checklist.md`.
 
 ## Build
 
