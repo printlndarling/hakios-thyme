@@ -20,11 +20,12 @@
  * - WCD938x TX enumerates as device 1, ID 0xd01170223, status 1. Its SoundWire
  *   chip ID and SCP device ID respond, and the full path shuts down cleanly.
  *
- * Capture status: both plausible handset paths reach ASM and return full frame
- * counts, but samples are still exact silence. `mic_path=0` (default) follows
- * mixer_paths.xml: handset-mic -> dmic2 -> DMIC1, DEC2, LPI GPIO6/7.
- * `mic_path=1` follows mixer_paths_overlay_static.xml: WCD938x ADC1, DEC1,
- * SoundWire. Neither is a hardware PASS until a nonzero sample is observed.
+ * Capture status: the one-channel candidate paths reach ASM and return full
+ * frame counts, but samples are still exact silence. `mic_path=0` (probe
+ * default) follows mixer_paths.xml: handset-mic -> dmic2 -> DMIC1, DEC2,
+ * LPI GPIO6/7. `mic_path=1` starts the overlay path, but still needs the full
+ * DEC1/ADC1 + DEC0/ADC4 pair. Neither is a hardware PASS until a nonzero
+ * sample is observed.
  *
  * Diagnostic boot arguments:
  *   mic_stage=1..6      stop after reset, SWR pins, TX clocks, master or codec
@@ -68,6 +69,7 @@ static uint32_t dmic_channel = 1;
 static uint32_t mic_chmask;
 static uint32_t mic_path;
 static uint32_t dmic_probe;
+static uint32_t mic_channels = 1;
 
 static int say(const char *format, ...) __printflike(1, 2);
 
@@ -1555,6 +1557,15 @@ dsp_path_on(void)
 	struct hakios_apr_answer answer;
 	uint32_t bytes = 0;
 
+	if (mic_channels > 8) {
+		mic_channels = 8;
+	}
+	open.channels = (uint16_t)mic_channels;
+	encoder.channels = (uint16_t)mic_channels;
+	if (mic_channels > 1) {
+		open.map[1] = 1;        /* PCM_CHANNEL_L */
+		encoder.map[1] = 1;
+	}
 	if (!hakios_audio_dsp_memory(&mic_memory, &mic_address, &bytes) || bytes < MIC_PERIODS * 4096) {
 		say("mic: no memory the DSP can see\n");
 		return false;
@@ -1609,6 +1620,7 @@ dsp_port_on(void)
 	                               mic_chmask ? mic_chmask : dmic_capture ? 1u << 2 : 1u << 1 };
 	uint16_t start[2] = { MIC_PORT, 0 };
 
+	config.channels = (uint16_t)(mic_channels > 8 ? 8 : mic_channels);
 	if (!afe_port_param(AFE_MODULE_AUDIO_DEV_INTERFACE, AFE_PARAM_ID_CODEC_DMA_CONFIG, &config, sizeof(config),
 	    "the port TX_CDC_DMA_TX_3 (0xb037): 1 channel of 16 bits at 48 kHz, decimator 1")) {
 		return false;
@@ -2077,6 +2089,7 @@ hakios_mic_dsp_up(void)
 	PE_parse_boot_argn("mic_chmask", &mic_chmask, sizeof(mic_chmask));
 	PE_parse_boot_argn("mic_path", &mic_path, sizeof(mic_path));
 	PE_parse_boot_argn("mic_dmic_probe", &dmic_probe, sizeof(dmic_probe));
+	PE_parse_boot_argn("mic_channels", &mic_channels, sizeof(mic_channels));
 	mic_secs = mic_secs < 1 ? 1 : mic_secs > 600 ? 600 : mic_secs;
 	running = true;
 	if (kernel_thread_start(mic_thread, NULL, &thread) != KERN_SUCCESS) {

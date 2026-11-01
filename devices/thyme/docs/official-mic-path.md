@@ -57,11 +57,17 @@ Both candidate THYME handset paths were exercised through `mic=3`:
 
 1. Base `mixer_paths.xml`: `handset-mic -> dmic2 -> TX DMIC MUX2=DMIC1`,
    `TX DEC2 MUX=MSM_DMIC`, LPI GPIO6 clock / GPIO7 data, AFE channel mask 4.
-2. `mixer_paths_overlay_static.xml`: WCD938x ADC1/AMIC path, `TX DEC1 MUX`,
-   `TX SMIC MUX1=ADC0`, AFE channel mask 2.
+2. `mixer_paths_overlay_static.xml`: a two-channel analog path with
+   `TX DEC1 MUX=SWR_MIC`, `TX SMIC MUX1=ADC0`, `DEC0 MUX=SWR_MIC`,
+   `TX SMIC MUX0=ADC3`, both DEC0/DEC1 enabled, and
+   `TX_CDC_DMA_TX_3 Channels=Two` (mask 3).
 
-In both cases the DSP accepts the stream and returns complete 20 ms periods
-(48000 frames per second, no read errors), but every sample is zero:
+The HAL binary contains `/vendor/etc/mixer_paths_overlay_static.xml`, so the
+overlay is the likely runtime path. The current `mic_path=1` probe only
+configured the DEC1/ADC1 half with a two-channel ASM/DAI request; it did not
+yet implement DEC0/ADC4. That partial stereo attempt returned no read
+completion. The one-channel DEC1 attempt did return complete periods, but all
+samples were zero:
 
 ```text
 mic: second 1: 48000 frames (50 periods, 0 empty), level -99.9 dBFS (rms 0), peak 0, mean 0
@@ -88,11 +94,15 @@ TX_CDC_DMA_TX_3 SampleRate KHZ_48
 ```
 
 `mixer_paths.xml` maps `handset-mic` to `dmic2`, while
-`mixer_paths_overlay_static.xml` overrides it with the ADC1/DEC1 analog path.
-The runtime selection of that overlay has not yet been proven.
+`mixer_paths_overlay_static.xml` replaces it with the dual analog
+DEC1/ADC1 + DEC0/ADC4 path. The static-overlay filename is present in
+`audio.primary.kona.so`; an actual recording has not yet been captured to
+prove the runtime selection.
 
 ## Next checks
 
+- Implement the complete static-overlay path: DEC0/ADC4 and DEC1/ADC1,
+  matching SoundWire port/channel maps, two-channel ADM/ASM and mic biases.
 - Determine which mixer overlay Android actually applies during a real
   recording, not only at boot.
 - Check DMIC microphone power and clock arrival at the LPI pads, then verify
