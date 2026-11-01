@@ -89,7 +89,7 @@ errno_t hakios_apple80211_ioctl(__unused u_long command, __unused void *data) { 
 void HakiosWLANStart(__unused const char *interface, __unused const uint8_t *address) {}
 #endif
 
-#ifndef HAKIOS_ADSP
+#if !defined(HAKIOS_ADSP) && !defined(HAKIOS_THYME_AUDIO)
 void hakios_adsp_init(void) {}
 void hakios_adsp_stop(void) {}
 void hakios_adsp_quiesce(void) {}
@@ -109,23 +109,23 @@ void hakios_virtio_net_init(void) {}
 void hakios_virtio_sound_init(void) {}
 #endif
 
-#ifndef HAKIOS_SPEAKER
+#if !defined(HAKIOS_SPEAKER) && !defined(HAKIOS_THYME_AUDIO)
 void hakios_speaker_init(void) {}
 #endif
 
-#ifndef HAKIOS_SOUND
+#if !defined(HAKIOS_SOUND) && !defined(HAKIOS_THYME_AUDIO)
 void hakios_sound_dsp_up(void) {}
 void hakios_sound_dsp_down(void) {}
 void hakios_sound_quiesce(void) {}
 #endif
 
-#ifndef HAKIOS_MIC
+#if !defined(HAKIOS_MIC) && !defined(HAKIOS_THYME_AUDIO)
 void hakios_mic_dsp_up(void) {}
 void hakios_mic_dsp_down(void) {}
 void hakios_mic_quiesce(void) {}
 #endif
 
-#ifndef HAKIOS_HAPTIC
+#if !defined(HAKIOS_HAPTIC) && !defined(HAKIOS_THYME_HAPTIC)
 void hakios_haptic_init(void) {}
 void hakios_haptic_quiesce(void) {}
 void hakios_haptic_pretend(__unused uint32_t peak) {}

@@ -1,0 +1,6 @@
+# drivers/haptic/conf: the THYME AW8697 linear resonant actuator.
+
+driver THYME_HAPTIC
+	file    bsd/dev/hakios.thyme_haptic.c
+	help    the Xiaomi Mi 10S AW8697 motor, Android waveforms and
+	help    /dev/hakios-haptic actuator service (haptic=1..5, umi_haptic=1..5).

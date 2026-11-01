@@ -1,0 +1,11 @@
+# drivers/audio/conf: THYME LPASS, CS35L41 speakers and microphone path.
+
+driver THYME_AUDIO
+	file    bsd/dev/hakios.thyme_adsp.c
+	file    bsd/dev/hakios.thyme_speaker.c
+	file    bsd/dev/hakios.thyme_sound.c
+	file    bsd/dev/hakios.thyme_mic.c
+	file    bsd/dev/hakios.thyme_guard.c
+	help    the Xiaomi Mi 10S audio DSP, CS35L41 speaker amplifiers,
+	help    TDM/MI2S stream, guard and microphone path (adsp=1 sound=4 mic=4).
+	help    Needs fw-audio/ from the phone.

@@ -19,6 +19,7 @@ adsp_new	k
 adsp_pause	k
 adsp_return	k
 adsp_step	k
+adsp_umi	k
 adsp_wait	k
 apfs_cheap	k
 apfs_check	k
@@ -145,6 +146,7 @@ gpu_log	k
 hakios_kver	k
 haptic	k
 haptic_effect	k
+haptic_gain	k
 hv_wdt_pet	k
 loader_return_after	kl
 machine_name	k
@@ -280,6 +282,11 @@ ufs_native_spin	k
 ufs_probe	l
 ufs_shared_pa	k
 ufs_write	kl
+umi_amp_probe	k
+umi_haptic	k
+umi_keys	k
+umi_touch	k
+umifts_scan	k
 ustacks	k
 ustacks_at	k
 ustacks_count	k

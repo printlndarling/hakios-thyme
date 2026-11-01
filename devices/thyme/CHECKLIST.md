@@ -46,10 +46,10 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 
 | Check | Status | Next action |
 |---|---|---|
-| ADSP firmware | TODO | port and validate official ADSP path |
-| Speaker playback | TODO | AW882xx path and physical output |
-| Microphone capture | TODO | capture and playback test |
-| Haptics | FAIL | resolve AW8697 UVLO / enable path |
+| ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
+| Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
+| Microphone capture | PARTIAL: path linked to `/dev/hakios-mic`; physical capture pending | capture and playback test |
+| Haptics | FAIL: AW8697 identified and waveforms loaded, SYSST still reports UVLO | resolve AW8697 UVLO / enable path |
 | QCA6390 PCIe/MHI | PARTIAL | port and retest |
 | WLFW QMI | FAIL | diagnose previous timeout `-60` |
 | Wi-Fi station / join / DHCP | TODO | depends on WLFW |

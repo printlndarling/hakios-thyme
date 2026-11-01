@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **328 arguments**: 276 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **335 arguments**: 283 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -12,19 +12,19 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `adreno` | K | `hakios.adreno.c` | `CONFIG_ADRENO` |  |
-| `adreno_blind` | K | `hakios.adreno.c` | `CONFIG_ADRENO_BLIND` |  |
-| `adreno_dirty` | K | `hakios.adreno.c` | `CONFIG_ADRENO_DIRTY` |  |
-| `adreno_fine` | K | `hakios.adreno.c` | `CONFIG_ADRENO_FINE` |  |
-| `adreno_keep` | K | `hakios.adreno.c` | `CONFIG_ADRENO_KEEP` |  |
-| `adreno_only` | K | `hakios.adreno.c` | `CONFIG_ADRENO_ONLY` |  |
-| `adreno_pause` | K | `hakios.adreno.c` | `CONFIG_ADRENO_PAUSE` |  |
-| `adreno_return` | K | `hakios.adreno.c` | `CONFIG_ADRENO_RETURN` |  |
-| `adreno_skip` | K | `hakios.adreno.c` | `CONFIG_ADRENO_SKIP` |  |
-| `adreno_speed` | K | `hakios.adreno.c` | `CONFIG_ADRENO_SPEED` |  |
-| `adreno_stream1` | K | `hakios.adreno.c` | `CONFIG_ADRENO_STREAM1` |  |
-| `adreno_watch` | K | `hakios.adreno.c` | `CONFIG_ADRENO_WATCH` |  |
-| `display_probe` | K | `hakios.adreno.c` | `CONFIG_DISPLAY_PROBE` |  |
+| `adreno` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO` |  |
+| `adreno_blind` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_BLIND` |  |
+| `adreno_dirty` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_DIRTY` |  |
+| `adreno_fine` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_FINE` |  |
+| `adreno_keep` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_KEEP` |  |
+| `adreno_only` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_ONLY` |  |
+| `adreno_pause` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_PAUSE` |  |
+| `adreno_return` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_RETURN` |  |
+| `adreno_skip` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_SKIP` |  |
+| `adreno_speed` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_SPEED` |  |
+| `adreno_stream1` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_STREAM1` |  |
+| `adreno_watch` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_ADRENO_WATCH` |  |
+| `display_probe` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_DISPLAY_PROBE` |  |
 | `fb_beat` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_BEAT` |  |
 | `fb_ca_hz` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_CA_HZ` |  |
 | `fb_diff` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DIFF` |  |
@@ -69,11 +69,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `gltrace_shaders` | U | `eagl.c` | `CONFIG_GLTRACE_SHADERS` |  |
 | `gltrace_uniforms` | U | `eagl.c` | `CONFIG_GLTRACE_UNIFORMS` |  |
 | `glwait` | U | `eagl.c` | `CONFIG_GLWAIT` |  |
-| `gpu` | K | `hakios.adreno.c` | `CONFIG_GPU` |  |
-| `gpu_cached` | K | `hakios.gpu.cpp` | `CONFIG_GPU_CACHED` |  |
-| `gpu_exact` | K | `hakios.adreno.c` | `CONFIG_GPU_EXACT` |  |
-| `gpu_keep` | K | `hakios.gpu.cpp` | `CONFIG_GPU_KEEP` |  |
-| `gpu_log` | K | `hakios.adreno.c` | `CONFIG_GPU_LOG` |  |
+| `gpu` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU` |  |
+| `gpu_cached` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_CACHED` |  |
+| `gpu_exact` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_EXACT` |  |
+| `gpu_keep` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_KEEP` |  |
+| `gpu_log` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_LOG` |  |
 | `metal` | KU | `HakiosMetal.m`, `MiniIOMobileFramebuffer.cpp` | `CONFIG_METAL` |  |
 | `rec_mb` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_MB` |  |
 | `rec_ring` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_RING` |  |
@@ -84,7 +84,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `surf_wrap` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_WRAP` |  |
 | `surftrace` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE` |  |
 | `surftrace_of` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE_OF` |  |
-| `touch_lat` | KU | `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
+| `touch_lat` | KU | `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `hakios.thyme_gpu.cpp`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
 | `vblur` | U | `eagl.c` | `CONFIG_VBLUR` |  |
 
 ## Security stand-ins (1)
@@ -191,38 +191,38 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `adsp` | K | `hakios.adsp.c` | `CONFIG_ADSP` |  |
-| `adsp_again` | K | `hakios.adsp.c` | `CONFIG_ADSP_AGAIN` |  |
-| `adsp_apr_wait` | K | `hakios.adsp.c` | `CONFIG_ADSP_APR_WAIT` |  |
-| `adsp_keep` | K | `hakios.adsp.c` | `CONFIG_ADSP_KEEP` |  |
-| `adsp_listen` | K | `hakios.adsp.c` | `CONFIG_ADSP_LISTEN` |  |
-| `adsp_new` | K | `hakios.adsp.c` | `CONFIG_ADSP_NEW` |  |
-| `adsp_pause` | K | `hakios.adsp.c` | `CONFIG_ADSP_PAUSE` |  |
-| `adsp_return` | K | `hakios.adsp.c` | `CONFIG_ADSP_RETURN` |  |
-| `adsp_step` | K | `hakios.adsp.c` | `CONFIG_ADSP_STEP` |  |
-| `adsp_wait` | K | `hakios.adsp.c` | `CONFIG_ADSP_WAIT` |  |
-| `battery` | KL | `hakios.adsp.c`, `hakios.battery.c`, `loader.c` | `CONFIG_BATTERY` |  |
+| `adsp` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP` |  |
+| `adsp_again` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_AGAIN` |  |
+| `adsp_apr_wait` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_APR_WAIT` |  |
+| `adsp_keep` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_KEEP` |  |
+| `adsp_listen` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_LISTEN` |  |
+| `adsp_new` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_NEW` |  |
+| `adsp_pause` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_PAUSE` |  |
+| `adsp_return` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_RETURN` |  |
+| `adsp_step` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_STEP` |  |
+| `adsp_wait` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_WAIT` |  |
+| `battery` | KL | `hakios.adsp.c`, `hakios.battery.c`, `hakios.thyme_adsp.c`, `loader.c` | `CONFIG_BATTERY` |  |
 | `battery_shared_pa` | K | `hakios.battery.c` |  | the loader (the address of its charger page) |
 | `battery_stop` | K | `hakios.battguard.c` | `CONFIG_BATTERY_STOP` |  |
 | `battery_stop_poll` | K | `hakios.battguard.c` | `CONFIG_BATTERY_STOP_POLL` |  |
-| `battmgr` | K | `hakios.adsp.c` | `CONFIG_BATTMGR` |  |
-| `mic` | K | `hakios.mic.c` | `CONFIG_MIC` |  |
-| `mic_adc` | K | `hakios.mic.c` | `CONFIG_MIC_ADC` |  |
-| `mic_input` | K | `hakios.mic.c` | `CONFIG_MIC_INPUT` |  |
-| `mic_main` | K | `hakios.mic.c` | `CONFIG_MIC_MAIN` |  |
-| `mic_secs` | K | `hakios.mic.c` | `CONFIG_MIC_SECS` |  |
-| `mic_tap` | K | `hakios.mic.c` | `CONFIG_MIC_TAP` |  |
-| `mic_test` | K | `hakios.mic.c` | `CONFIG_MIC_TEST` |  |
+| `battmgr` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_BATTMGR` |  |
+| `mic` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC` |  |
+| `mic_adc` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_ADC` |  |
+| `mic_input` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_INPUT` |  |
+| `mic_main` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_MAIN` |  |
+| `mic_secs` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_SECS` |  |
+| `mic_tap` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_TAP` |  |
+| `mic_test` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_TEST` |  |
 | `rec_sound` | K | `hakios.audio.c` | `CONFIG_REC_SOUND` |  |
 | `rec_sound_fed` | K | `hakios.audio.c` | `CONFIG_REC_SOUND_FED` |  |
 | `rec_sound_mic` | K | `hakios.audio.c` | `CONFIG_REC_SOUND_MIC` |  |
-| `sound` | K | `hakios.sound.c` | `CONFIG_SOUND` |  |
-| `sound_below` | K | `hakios.sound.c` | `CONFIG_SOUND_BELOW` |  |
-| `sound_gain` | K | `hakios.sound.c` | `CONFIG_SOUND_GAIN` |  |
-| `sound_guard_as` | K | `hakios.sound.c` | `CONFIG_SOUND_GUARD_AS` |  |
-| `sound_pause` | K | `hakios.sound.c` | `CONFIG_SOUND_PAUSE` |  |
-| `sound_secs` | K | `hakios.sound.c` | `CONFIG_SOUND_SECS` |  |
-| `speaker_probe` | K | `hakios.speaker.c` | `CONFIG_SPEAKER_PROBE` |  |
+| `sound` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND` |  |
+| `sound_below` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_BELOW` |  |
+| `sound_gain` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_GAIN` |  |
+| `sound_guard_as` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_GUARD_AS` |  |
+| `sound_pause` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_PAUSE` |  |
+| `sound_secs` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_SECS` |  |
+| `speaker_probe` | K | `hakios.speaker.c`, `hakios.thyme_speaker.c` | `CONFIG_SPEAKER_PROBE` |  |
 | `virtio_sound` | K | `hakios.virtio_sound.c` | `CONFIG_VIRTIO_SOUND` |  |
 
 ## Cameras (13)
@@ -247,7 +247,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `buttons` | K | `hakios.buttons.c` | `CONFIG_BUTTONS` |  |
+| `buttons` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_BUTTONS` |  |
 | `buttons_steps` | K | `hakios.buttons.c` | `CONFIG_BUTTONS_STEPS` |  |
 | `press_power` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER` |  |
 | `press_power_ms` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER_MS` |  |
@@ -255,7 +255,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `touch_poll_us` | K | `hakios.goodix.c` | `CONFIG_TOUCH_POLL_US` |  |
 | `touch_rate` | K | `hakios.goodix.c` | `CONFIG_TOUCH_RATE` |  |
 | `touch_spi_hz` | K | `hakios.goodix.c` | `CONFIG_TOUCH_SPI_HZ` |  |
-| `touchscreen` | K | `hakios.buttons.c`, `hakios.goodix.c` | `CONFIG_TOUCHSCREEN` |  |
+| `touchscreen` | K | `hakios.buttons.c`, `hakios.goodix.c`, `hakios.thyme_touch.c` | `CONFIG_TOUCHSCREEN` |  |
 | `virtio_input` | K | `hakios.virtio_input.c` | `CONFIG_VIRTIO_INPUT` |  |
 
 ## Storage and APFS (43)
@@ -318,8 +318,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `haptic` | K | `hakios.haptic.c` | `CONFIG_HAPTIC` |  |
-| `haptic_effect` | K | `hakios.haptic.c` | `CONFIG_HAPTIC_EFFECT` |  |
+| `haptic` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC` |  |
+| `haptic_effect` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_EFFECT` |  |
 | `torch` | KL | `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
 | `torch_max_s` | K | `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |
 | `torch_secs` | K | `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
@@ -395,10 +395,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (16)
+## User space (23)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `adsp_umi` | K | `hakios.thyme_adsp.c`, `hakios.thyme_sound.c` | `CONFIG_ADSP_UMI` |  |
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
 | `bt` | K | `hakios.bt.c` | `CONFIG_BT` |  |
 | `bt_again` | K | `hakios.bt.c` | `CONFIG_BT_AGAIN` |  |
@@ -410,8 +411,14 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `glno` | U | `inject.c` | `CONFIG_GLNO` |  |
 | `glsb3` | U | `inject.c` | `CONFIG_GLSB3` |  |
 | `glyes` | U | `inject.c` | `CONFIG_GLYES` |  |
+| `haptic_gain` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_GAIN` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
+| `umi_amp_probe` | K | `hakios.thyme_speaker.c` | `CONFIG_UMI_AMP_PROBE` |  |
+| `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
+| `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
+| `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |
+| `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |

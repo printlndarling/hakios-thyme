@@ -46,7 +46,11 @@ to 472 with `errors=0`, and backboardd reported contact presence touching/none.
 The PM8150 key driver now reports power and volume press/release events. The
 THYME Adreno 650 driver is also running on official main: a four-minute run
 produced more than 2,100 hardware-rendered `hakios-gl` frames without softpipe
-fallback. Audio, Wi-Fi and Bluetooth remain to be migrated.
+fallback. The THYME audio stack now brings up LPASS/ADSP, APR, MI2S and both
+CS35L41 amplifiers with protection firmware; audible speaker and microphone
+checks remain. The AW8697 motor driver identifies the chip and loads and
+verifies Android's waveforms, but its SYSST register still reports UVLO when
+entering active mode. Wi-Fi and Bluetooth remain to be migrated.
 
 The first official-main run reported:
 
@@ -60,6 +64,8 @@ battguard: charge 92% (battery present, charger attached, charging no)
 See `docs/official-core-probe.md`.
 See also `docs/official-touch-probe.md`.
 See also `docs/official-gpu-probe.md`.
+See also `docs/official-audio-probe.md`.
+See also `docs/official-haptic-probe.md`.
 
 The legacy tree previously proved the following on the physical phone:
 
