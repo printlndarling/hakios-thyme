@@ -50,9 +50,9 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 | Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
 | Microphone capture | PARTIAL: path linked to `/dev/hakios-mic`; physical capture pending | capture and playback test |
 | Haptics | FAIL: AW8697 identified and waveforms loaded, SYSST still reports UVLO | resolve AW8697 UVLO / enable path |
-| QCA6390 PCIe/MHI | PARTIAL | port and retest |
-| WLFW QMI | FAIL | diagnose previous timeout `-60` |
-| Wi-Fi station / join / DHCP | TODO | depends on WLFW |
+| QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
+| QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |
+| Wi-Fi station / join / DHCP | PASS; WPA2 association, DHCP and en0 TCP traffic | test 2.4/5 GHz and reconnect |
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
 | Scan / pair / connect | TODO | controller is initialized; physical peer test pending |

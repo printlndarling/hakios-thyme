@@ -85,7 +85,7 @@ void hakios_adreno_stop(void) {}
 void hakios_adreno_minute(void) {}
 #endif
 
-#ifndef HAKIOS_WIFI
+#if !defined(HAKIOS_WIFI) && !defined(HAKIOS_THYME_WIFI)
 void hakios_wifi_init(void) {}
 void hakios_wifi_stop(void) {}
 void hakios_wifi_quiesce(void) {}

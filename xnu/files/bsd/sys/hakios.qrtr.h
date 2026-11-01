@@ -39,6 +39,8 @@ struct hakios_qrtr_ops {
 	int (*send)(struct hakios_qrtr_port *port, uint32_t node, uint32_t to_port, const void *data, size_t length);
 	/* Tell this port's `server` callback about the servers of that service, now and from now on; 0, or an errno. */
 	int (*lookup)(struct hakios_qrtr_port *port, uint32_t service, uint32_t version, uint32_t instance);
+	/* Let a polled transport service its receive path for up to `timeout_ms`; optional. */
+	int (*poll)(struct hakios_qrtr_port *port, uint32_t timeout_ms);
 	/* No callback comes after this has returned. */
 	void (*close)(struct hakios_qrtr_port *port);
 };

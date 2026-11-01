@@ -53,6 +53,8 @@ verifies Android's waveforms, but its SYSST register still reports UVLO when
 entering active mode. Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. Wi-Fi remains to be migrated.
+QCA6390 Wi-Fi now scans, associates to a WPA2 access point, completes DHCP and
+carries TCP traffic through en0.
 
 The first official-main run reported:
 
@@ -69,6 +71,7 @@ See also `docs/official-gpu-probe.md`.
 See also `docs/official-audio-probe.md`.
 See also `docs/official-haptic-probe.md`.
 See also `docs/official-bt-probe.md`.
+See also `docs/official-wifi-probe.md`.
 
 The legacy tree previously proved the following on the physical phone:
 

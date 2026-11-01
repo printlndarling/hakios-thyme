@@ -1,0 +1,15 @@
+# drivers/wifi/conf: the THYME QCA6390 PCIe/MHI and Wi-Fi stack.
+
+driver THYME_WIFI
+	file    bsd/dev/hakios.thyme_wifi.c
+	file    bsd/dev/hakios.thyme_wlfw.c
+	file    bsd/dev/hakios.thyme_lx.c
+	file    bsd/dev/hakios.thyme_apple80211.c
+	file    bsd/dev/hakios.thyme_qmi.c
+	file    bsd/dev/hakios.thyme_qca6390.c
+	file    bsd/dev/hakios.thyme_mhi.c
+	file    bsd/dev/hakios.thyme_pcie.c
+	file    bsd/dev/hakios.thyme_sta.c
+	file    iokit/Kernel/hakios.thyme_wlan.cpp iokitcpp
+	help    QCA6390 PCIe/MHI, QMI/WLFW, station and Apple80211 surface (wifi=1).
+	help    Needs QCA6390 firmware from fw-wifi/.

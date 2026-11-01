@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **337 arguments**: 285 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **340 arguments**: 288 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -93,40 +93,41 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `privs` | K | `kern_minimac.c` | `CONFIG_PRIVS` |  |
 
-## Wi-Fi (31)
+## Wi-Fi (32)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `wifi` | K | `hakios.wifi.c` | `CONFIG_WIFI` |  |
-| `wifi_again` | K | `hakios.wifi.c` | `CONFIG_WIFI_AGAIN` |  |
-| `wifi_ask` | K | `hakios.wifi.c` | `CONFIG_WIFI_ASK` |  |
+| `wifi` | K | `hakios.thyme_qca6390.c`, `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI` |  |
+| `wifi_again` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_AGAIN` |  |
+| `wifi_ask` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_ASK` |  |
 | `wifi_ba` | K | `lx_80211.c` | `CONFIG_WIFI_BA` | implied by wifi=1 |
 | `wifi_cal` | K | `hakios.wlfw.c` | `CONFIG_WIFI_CAL` |  |
-| `wifi_dirty` | K | `hakios.wifi.c` | `CONFIG_WIFI_DIRTY` |  |
-| `wifi_file` | K | `hakios.wifi.c` | `CONFIG_WIFI_FILE` |  |
-| `wifi_fine` | K | `hakios.wifi.c` | `CONFIG_WIFI_FINE` |  |
+| `wifi_dirty` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_DIRTY` |  |
+| `wifi_file` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_FILE` |  |
+| `wifi_fine` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_FINE` |  |
 | `wifi_hold` | K | `lx_bus.c` | `CONFIG_WIFI_HOLD` |  |
 | `wifi_irq` | K | `lx_bus.c` | `CONFIG_WIFI_IRQ` | implied by wifi=1 |
 | `wifi_join` | K | `lx_bus.c` | `CONFIG_WIFI_JOIN` |  |
-| `wifi_keep` | K | `hakios.wifi.c` | `CONFIG_WIFI_KEEP` | implied by wifi=1 |
-| `wifi_listen` | K | `hakios.wifi.c` | `CONFIG_WIFI_LISTEN` |  |
-| `wifi_loud` | K | `hakios.wifi.c` | `CONFIG_WIFI_LOUD` |  |
-| `wifi_lx` | K | `hakios.wifi.c`, `lx_bus.c` | `CONFIG_WIFI_LX` | implied by wifi=1 (as 2) |
+| `wifi_keep` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_KEEP` | implied by wifi=1 |
+| `wifi_listen` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_LISTEN` |  |
+| `wifi_loud` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_LOUD` |  |
+| `wifi_lx` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c`, `lx_bus.c` | `CONFIG_WIFI_LX` | implied by wifi=1 (as 2) |
 | `wifi_lx_step` | K | `lx_base.c` | `CONFIG_WIFI_LX_STEP` |  |
-| `wifi_mac` | K | `hakios.wifi.c` | `CONFIG_WIFI_MAC` |  |
+| `wifi_mac` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_MAC` |  |
 | `wifi_mission` | K | `hakios.wlfw.c` | `CONFIG_WIFI_MISSION` |  |
-| `wifi_new` | K | `hakios.wifi.c` | `CONFIG_WIFI_NEW` |  |
-| `wifi_pause` | K | `hakios.wifi.c` | `CONFIG_WIFI_PAUSE` |  |
+| `wifi_new` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_NEW` |  |
+| `wifi_pause` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_PAUSE` |  |
 | `wifi_quiet` | K | `lx_bus.c` | `CONFIG_WIFI_QUIET` |  |
-| `wifi_radio_read` | K | `hakios.wifi.c` | `CONFIG_WIFI_RADIO_READ` |  |
+| `wifi_radio_read` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_RADIO_READ` |  |
 | `wifi_ready` | K | `hakios.wlfw.c` | `CONFIG_WIFI_READY` |  |
-| `wifi_return` | K | `hakios.wifi.c` | `CONFIG_WIFI_RETURN` |  |
+| `wifi_return` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_RETURN` |  |
 | `wifi_scan` | K | `lx_bus.c` | `CONFIG_WIFI_SCAN` |  |
-| `wifi_smmu` | K | `hakios.wifi.c` | `CONFIG_WIFI_SMMU` | implied by wifi=1 (as 2) |
+| `wifi_smmu` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_SMMU` | implied by wifi=1 (as 2) |
 | `wifi_station` | K | `lx_bus.c` | `CONFIG_WIFI_STATION` | implied by wifi=1 |
-| `wifi_step` | K | `hakios.wifi.c` | `CONFIG_WIFI_STEP` |  |
-| `wifi_wait` | K | `hakios.wifi.c` | `CONFIG_WIFI_WAIT` |  |
-| `wifi_watch` | K | `hakios.wifi.c` | `CONFIG_WIFI_WATCH` |  |
+| `wifi_step` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_STEP` |  |
+| `wifi_umi` | K | `lx_base.c`, `lx_bus.c` | `CONFIG_WIFI_UMI` |  |
+| `wifi_wait` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_WAIT` |  |
+| `wifi_watch` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_WATCH` |  |
 | `wifi_wide` | K | `lx_80211.c` | `CONFIG_WIFI_WIDE` | implied by wifi=1 |
 
 ## Cellular (53)
@@ -395,7 +396,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (25)
+## User space (27)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -421,6 +422,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 | `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
 | `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |
+| `umi_wifi_return` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_RETURN` |  |
+| `umi_wifi_step` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_STEP` |  |
 | `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |

@@ -288,6 +288,8 @@ umi_bt_probe	k
 umi_haptic	k
 umi_keys	k
 umi_touch	k
+umi_wifi_return	k
+umi_wifi_step	k
 umifts_scan	k
 ustacks	k
 ustacks_at	k
@@ -331,6 +333,7 @@ wifi_scan	k
 wifi_smmu	k
 wifi_station	k
 wifi_step	k
+wifi_umi	k
 wifi_wait	k
 wifi_watch	k
 wifi_wide	k

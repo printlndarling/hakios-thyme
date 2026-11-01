@@ -15,21 +15,21 @@
 
 | Part | State | |
 |---|---|---|
-| display | partly | legacy RAM tree reaches SpringBoard; official-main port pending |
-| touch | partly | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38; legacy tree verified |
-| buttons | partly | PM8150 PON + GPIO6; power and both volume keys verified in legacy tree |
+| display | works | framebuffer and Adreno path reach SpringBoard on official main |
+| touch | works | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38 |
+| buttons | works | PM8150 PON + GPIO6; power and both volume keys verified |
 | cpu | partly | 7 CPUs and cpufreq verified in legacy tree; official-main port pending |
-| gpu | partly | Adreno 650 / zap 0x8c41a000 verified in legacy tree; official-main port pending |
-| battery | partly | percentage, current and temperature verified in legacy tree |
+| gpu | works | Adreno 650 / zap 0x8c41a000, hardware-rendered SpringBoard |
+| battery | works | percentage, signed current and temperature from the loader cache |
 | storage | no | read-only UFS survey not run in the official-main port |
-| audio | no | ADSP/speaker/microphone not yet ported to official main |
+| audio | partly | DSP, MI2S and both CS35L41 amps work; audible output pending |
 | haptic | no | AW8697 UVLO path still fails |
 | camera | no | sensor tables collected; no working capture yet |
 | torch | no | not yet tested on THYME |
-| wifi | partly | QCA6390 PCIe/MHI starts; WLFW QMI times out |
-| bluetooth | no | UART/pins identified; no HCI controller yet |
+| wifi | works | QCA6390 scan, WPA2 association, DHCP and TCP through en0 |
+| bluetooth | partly | firmware, HCI reset and iOS H4 work; pairing test pending |
 | cellular | no | modem and telephony path not implemented |
-| network | no | no usable station/interface yet |
+| network | works | en0 DHCP and TCP traffic verified |
 | thermal | partly | thermal driver exists in legacy tree; soak test pending |
 | usb | partly | xnuloader fastboot endpoint works; one endpoint loss observed |
 | sensors | no | ALS, accelerometer and proximity are not usable |

@@ -105,4 +105,40 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 |---|---|---|---|---|---|---|
 | **`HAKIOS_WIFI`**<br>Wi-Fi of the WCN6750 (wifi=1, wifi_step=N): the DSP that runs the radio's firmware, Linux's ath11k (its object, made by tools/mk-ath11k.sh, is linked in only with this), a station, and the Apple80211 surface Darwin's wifid talks to. Needs fw-wifi/ from the phone | `hakios.wifi.c`<br>`hakios.wlfw.c`<br>`hakios.lx.c`<br>`hakios.sta.c`<br>`hakios.apple80211.c`<br>`hakios.wlan.cpp` | `HAKIOS_QMI` | `wifi=`, `wifi_again=`, `wifi_ask=`, `wifi_cal=`, `wifi_dirty=`, `wifi_file=`, `wifi_fine=`, `wifi_keep=` and 14 more |  | built |  | |
 
+## audio (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_AUDIO`**<br>the Xiaomi Mi 10S audio DSP, CS35L41 speaker amplifiers, TDM/MI2S stream, guard and microphone path (adsp=1 sound=4 mic=4). Needs fw-audio/ from the phone. | `hakios.thyme_adsp.c`<br>`hakios.thyme_speaker.c`<br>`hakios.thyme_sound.c`<br>`hakios.thyme_mic.c`<br>`hakios.thyme_guard.c` |  | `adsp=`, `adsp_again=`, `adsp_apr_wait=`, `adsp_keep=`, `adsp_listen=`, `adsp_new=`, `adsp_pause=`, `adsp_return=` and 19 more | built | built | built | |
+
+## bluetooth (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_BT`**<br>QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth IOService (bt=1). Needs htbtfw20.tlv and htnv20.bin under fw/qca6390-bt/. | `hakios.thyme_bluetooth.c`<br>`hakios.thyme_bluetooth.cpp` |  | `bt=`, `umi_bt=`, `umi_bt_probe=` | built | built | built | |
+
+## gpu (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_ADRENO`**<br>the XIAOMI Mi 10S Adreno 650, zap shader and GMU path, and the HakiosGPU service Mesa and the window server draw through (gpu=1). Needs a650 firmware from fw-gpu/. | `hakios.thyme_adreno.c`<br>`hakios.thyme_gpu.cpp` |  | `adreno=`, `adreno_blind=`, `adreno_dirty=`, `adreno_fine=`, `adreno_keep=`, `adreno_only=`, `adreno_pause=`, `adreno_return=` and 10 more | built | built | built | |
+
+## haptic (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_HAPTIC`**<br>the Xiaomi Mi 10S AW8697 motor, Android waveforms and /dev/hakios-haptic actuator service (haptic=1..5, umi_haptic=1..5). | `hakios.thyme_haptic.c` |  | `haptic=`, `haptic_effect=`, `haptic_gain=`, `umi_haptic=` | built | built | built | |
+
+## input (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_INPUT`**<br>ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and BUTTONS on THYME. | `hakios.thyme_touch.c`<br>`hakios.thyme_touch_boost.c`<br>`hakios.thyme_rpmh.c`<br>`hakios.thyme_keys.c` |  | `buttons=`, `touchscreen=`, `umi_keys=`, `umi_touch=`, `umifts_scan=` | built | built | built | |
+
+## wifi (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_WIFI`**<br>QCA6390 PCIe/MHI, QMI/WLFW, station and Apple80211 surface (wifi=1). Needs QCA6390 firmware from fw-wifi/. | `hakios.thyme_wifi.c`<br>`hakios.thyme_wlfw.c`<br>`hakios.thyme_lx.c`<br>`hakios.thyme_apple80211.c`<br>`hakios.thyme_qmi.c`<br>`hakios.thyme_qca6390.c`<br>`hakios.thyme_mhi.c`<br>`hakios.thyme_pcie.c`<br>`hakios.thyme_sta.c`<br>`hakios.thyme_wlan.cpp` |  | `umi_wifi_return=`, `umi_wifi_step=`, `wifi=`, `wifi_again=`, `wifi_ask=`, `wifi_cal=`, `wifi_dirty=`, `wifi_file=` and 16 more | built | built | built | |
+
 The columns on the right are the devices' defconfigs: "built" means that defconfig builds the driver in.
