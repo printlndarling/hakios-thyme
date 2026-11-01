@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 350 symbols in 18 groups; 34 are set, 25 of them drivers built in.
+# 370 symbols in 18 groups; 42 are set, 33 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (25)
+# Drivers built in (33)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -97,6 +97,30 @@ CONFIG_HAKIOS_VIRTIO_BLK=y
 # Wi-Fi of the WCN6750 (wifi=1, wifi_step=N): the DSP that runs the radio's firmware, Linux's ath11k (its object, made ... [hakios.wifi.c, hakios.wlfw.c, hakios.lx.c, hakios.sta.c, hakios.apple80211.c, hakios.wlan.cpp; requires CONFIG_HAKIOS_QMI]
 CONFIG_HAKIOS_WIFI=y
 
+# the Xiaomi Mi 10S audio DSP, CS35L41 speaker amplifiers, TDM/MI2S stream, guard and microphone path (adsp=1 sound=4 ... [hakios.thyme_adsp.c, hakios.thyme_speaker.c, hakios.thyme_sound.c, hakios.thyme_mic.c, hakios.thyme_guard.c]
+CONFIG_HAKIOS_THYME_AUDIO=y
+
+# QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth ... [hakios.thyme_bluetooth.c, hakios.thyme_bluetooth.cpp]
+CONFIG_HAKIOS_THYME_BT=y
+
+# the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight and the kern.hakios.brightness sysctl used by ... [hakios.thyme_display.c]
+CONFIG_HAKIOS_THYME_DISPLAY=y
+
+# the XIAOMI Mi 10S Adreno 650, zap shader and GMU path, and the HakiosGPU service Mesa and the window server draw ... [hakios.thyme_adreno.c, hakios.thyme_gpu.cpp]
+CONFIG_HAKIOS_THYME_ADRENO=y
+
+# the Xiaomi Mi 10S AW8697 motor, Android waveforms and /dev/hakios-haptic actuator service (haptic=1..5, ... [hakios.thyme_haptic.c]
+CONFIG_HAKIOS_THYME_HAPTIC=y
+
+# ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and ... [hakios.thyme_touch.c, hakios.thyme_touch_boost.c, hakios.thyme_rpmh.c, hakios.thyme_keys.c]
+CONFIG_HAKIOS_THYME_INPUT=y
+
+# THYME board address overrides, EPSS/RPMh CPU frequency control and TSENS thermal governors (cpufreq=1, thermal=1). [hakios.thyme_board.c, hakios.thyme_cpufreq.c, hakios.thyme_thermal.c]
+CONFIG_HAKIOS_THYME_POWER=y
+
+# QCA6390 PCIe/MHI, QMI/WLFW, station and Apple80211 surface (wifi=1). Needs QCA6390 firmware from fw-wifi/. [hakios.thyme_wifi.c, hakios.thyme_wlfw.c, hakios.thyme_lx.c, hakios.thyme_apple80211.c, hakios.thyme_qmi.c, hakios.thyme_qca6390.c, hakios.thyme_mhi.c, hakios.thyme_pcie.c, hakios.thyme_sta.c, hakios.thyme_wlan.cpp]
+CONFIG_HAKIOS_THYME_WIFI=y
+
 #
 # CPU, memory and boot (21)
 #
@@ -122,16 +146,16 @@ CONFIG_HAKIOS_WIFI=y
 # the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote ...
 # CONFIG_DDR is not set
 
-# read by hakios.cpufreq.c (kernel)
+# read by hakios.cpufreq.c, hakios.thyme_cpufreq.c (kernel)
 # CONFIG_DDR_REST is not set
 
-# read by hakios.cpufreq.c (kernel)
+# read by hakios.cpufreq.c, hakios.thyme_cpufreq.c (kernel)
 # CONFIG_DDR_VOTE is not set
 
 # read by GenericARMPE.cpp (kernel)
 # CONFIG_MACHINE_NAME is not set
 
-# read by hakios.cpufreq.c (kernel)
+# read by hakios.cpufreq.c, hakios.thyme_cpufreq.c (kernel)
 # CONFIG_MEMBENCH is not set
 
 # read by the patch to Apple's files, loader.c (kernel and loader)
@@ -307,7 +331,7 @@ CONFIG_UFS=2
 # the touch screen, and the power and volume buttons
 CONFIG_TOUCHSCREEN=y
 
-# read by hakios.buttons.c (kernel)
+# read by hakios.buttons.c, hakios.thyme_keys.c (kernel)
 # CONFIG_BUTTONS is not set
 
 # read by hakios.buttons.c (kernel)
@@ -341,19 +365,19 @@ CONFIG_TOUCHSCREEN=y
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
 CONFIG_GPU=y
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_ADRENO is not set
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_ADRENO_BLIND is not set
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_ADRENO_DIRTY is not set
 
 # the newest step waits like that before every single access
 # CONFIG_ADRENO_FINE is not set
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_ADRENO_KEEP is not set
 
 # step K alone (what steps 6 to 10 need, they check for themselves: within one session of the loader, power and clocks ...
@@ -512,16 +536,16 @@ CONFIG_GPU=y
 # read by eagl.c (user space)
 # CONFIG_GLWAIT is not set
 
-# read by hakios.gpu.cpp (kernel)
+# read by hakios.gpu.cpp, hakios.thyme_gpu.cpp (kernel)
 # CONFIG_GPU_CACHED is not set
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_GPU_EXACT is not set
 
-# read by hakios.gpu.cpp (kernel)
+# read by hakios.gpu.cpp, hakios.thyme_gpu.cpp (kernel)
 # CONFIG_GPU_KEEP is not set
 
-# read by hakios.adreno.c (kernel)
+# read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_GPU_LOG is not set
 
 # only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
@@ -579,55 +603,55 @@ CONFIG_SOUND=4
 # how often the battery guard looks, in seconds (5 to 600; 20) [requires CONFIG_BATTERY_STOP]
 # CONFIG_BATTERY_STOP_POLL is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_AGAIN is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_APR_WAIT is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_KEEP is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_LISTEN is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_NEW is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_PAUSE is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_RETURN is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_STEP is not set
 
-# read by hakios.adsp.c (kernel)
+# read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_WAIT is not set
 
-# read by hakios.adsp.c, hakios.battery.c, loader.c (kernel and loader)
+# read by hakios.adsp.c, hakios.battery.c, hakios.thyme_adsp.c, loader.c (kernel and loader)
 # CONFIG_BATTERY is not set
 
 # every property once, for the log (which number is which on this phone's firmware)
 # CONFIG_BATTMGR is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_ADC is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_INPUT is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_MAIN is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_SECS is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_TAP is not set
 
-# read by hakios.mic.c (kernel)
+# read by hakios.mic.c, hakios.thyme_mic.c (kernel)
 # CONFIG_MIC_TEST is not set
 
 # read by hakios.audio.c (kernel)
@@ -639,19 +663,19 @@ CONFIG_SOUND=4
 # read by hakios.audio.c (kernel)
 # CONFIG_REC_SOUND_MIC is not set
 
-# read by hakios.sound.c (kernel)
+# read by hakios.sound.c, hakios.thyme_sound.c (kernel)
 # CONFIG_SOUND_BELOW is not set
 
-# read by hakios.sound.c (kernel)
+# read by hakios.sound.c, hakios.thyme_sound.c (kernel)
 # CONFIG_SOUND_GAIN is not set
 
-# read by hakios.sound.c (kernel)
+# read by hakios.sound.c, hakios.thyme_sound.c (kernel)
 # CONFIG_SOUND_GUARD_AS is not set
 
-# read by hakios.sound.c (kernel)
+# read by hakios.sound.c, hakios.thyme_sound.c (kernel)
 # CONFIG_SOUND_PAUSE is not set
 
-# read by hakios.sound.c (kernel)
+# read by hakios.sound.c, hakios.thyme_sound.c (kernel)
 # CONFIG_SOUND_SECS is not set
 
 # reads registers and nothing else: the pins, the power names (below)
@@ -661,7 +685,7 @@ CONFIG_SOUND=4
 # CONFIG_VIRTIO_SOUND is not set
 
 #
-# Wi-Fi (31)
+# Wi-Fi (32)
 #
 
 # Wi-Fi: the radio, its driver, a connection (also fw-wifi/mac and fw-wifi/network) [needs fw-wifi/ from the phone]
@@ -676,10 +700,10 @@ CONFIG_WIFI=y
 # read by lx_80211.c (kernel)
 # CONFIG_WIFI_BA is not set
 
-# read by hakios.wlfw.c (kernel)
+# read by hakios.thyme_wlfw.c, hakios.wlfw.c (kernel)
 # CONFIG_WIFI_CAL is not set
 
-# read by hakios.wifi.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c (kernel)
 # CONFIG_WIFI_DIRTY is not set
 
 # with wifi=1: the network of fw/network is not joined at the start
@@ -703,10 +727,10 @@ CONFIG_WIFI=y
 # how long step 14 waits for the Wi-Fi firmware's service (default 3)
 # CONFIG_WIFI_LISTEN is not set
 
-# read by hakios.wifi.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c (kernel)
 # CONFIG_WIFI_LOUD is not set
 
-# read by hakios.wifi.c, lx_bus.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c, lx_bus.c (kernel)
 # CONFIG_WIFI_LX is not set
 
 # read by lx_base.c (kernel)
@@ -715,13 +739,13 @@ CONFIG_WIFI=y
 # the radio's own address for the driver (hakios_wifi_radio_address() below; xl takes it from a file that is not in ...
 # CONFIG_WIFI_MAC is not set
 
-# read by hakios.wlfw.c (kernel)
+# read by hakios.thyme_wlfw.c, hakios.wlfw.c (kernel)
 # CONFIG_WIFI_MISSION is not set
 
 # steps K and later have not been seen to work (default: the last one)
 # CONFIG_WIFI_NEW is not set
 
-# read by hakios.wifi.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c (kernel)
 # CONFIG_WIFI_PAUSE is not set
 
 # read by lx_bus.c (kernel)
@@ -730,7 +754,7 @@ CONFIG_WIFI=y
 # step 16 does read (2: whatever mode the firmware is in)
 # CONFIG_WIFI_RADIO_READ is not set
 
-# read by hakios.wlfw.c (kernel)
+# read by hakios.thyme_wlfw.c, hakios.wlfw.c (kernel)
 # CONFIG_WIFI_READY is not set
 
 # when all is over, go back to the loader instead of starting the system
@@ -745,13 +769,16 @@ CONFIG_WIFI=y
 # read by lx_bus.c (kernel)
 # CONFIG_WIFI_STATION is not set
 
-# read by hakios.wifi.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c (kernel)
 # CONFIG_WIFI_STEP is not set
+
+# read by lx_base.c, lx_bus.c (kernel)
+# CONFIG_WIFI_UMI is not set
 
 # how long step 11 watches for the DSP to say that it is up (default 10)
 # CONFIG_WIFI_WAIT is not set
 
-# read by hakios.wifi.c (kernel)
+# read by hakios.thyme_wifi.c, hakios.wifi.c (kernel)
 # CONFIG_WIFI_WATCH is not set
 
 # read by lx_80211.c (kernel)
@@ -970,7 +997,7 @@ CONFIG_MODEM_AGAIN=y
 # the vibration motor (5 is what the README's phone line uses) [needs fw-haptic/ from the phone]
 # CONFIG_HAPTIC is not set
 
-# read by hakios.haptic.c (kernel)
+# read by hakios.haptic.c, hakios.thyme_haptic.c (kernel)
 # CONFIG_HAPTIC_EFFECT is not set
 
 # a look, reading only: the arbiter's channel for the module and who may write through it, the module's type, its ...
@@ -1075,13 +1102,16 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (14)
+# User space (25)
 #
+
+# read by hakios.thyme_adsp.c, hakios.thyme_sound.c (kernel)
+# CONFIG_ADSP_UMI is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_AUTOUNLOCK is not set
 
-# read by hakios.bt.c (kernel)
+# read by hakios.bt.c, hakios.thyme_bluetooth.c (kernel)
 # CONFIG_BT is not set
 
 # the second look this many seconds later (0: no second look; 30)
@@ -1111,11 +1141,41 @@ CONFIG_MODEM_AGAIN=y
 # the renderer is made to answer that it has those functions after all
 # CONFIG_GLYES is not set
 
+# read by hakios.thyme_haptic.c (kernel)
+# CONFIG_HAPTIC_GAIN is not set
+
 # the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
 # CONFIG_ROOT_APFS is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set
+
+# read by hakios.thyme_speaker.c (kernel)
+# CONFIG_UMI_AMP_PROBE is not set
+
+# read by hakios.thyme_bluetooth.c (kernel)
+# CONFIG_UMI_BT is not set
+
+# read by hakios.thyme_bluetooth.c (kernel)
+# CONFIG_UMI_BT_PROBE is not set
+
+# read by hakios.thyme_haptic.c (kernel)
+# CONFIG_UMI_HAPTIC is not set
+
+# read by hakios.thyme_keys.c (kernel)
+# CONFIG_UMI_KEYS is not set
+
+# read by hakios.thyme_touch.c (kernel)
+# CONFIG_UMI_TOUCH is not set
+
+# read by hakios.thyme_qca6390.c (kernel)
+# CONFIG_UMI_WIFI_RETURN is not set
+
+# read by hakios.thyme_qca6390.c (kernel)
+# CONFIG_UMI_WIFI_STEP is not set
+
+# read by hakios.thyme_touch.c (kernel)
+# CONFIG_UMIFTS_SCAN is not set
 
 # read by init.c (user space)
 # CONFIG_VAR_HFS is not set

@@ -244,10 +244,12 @@ try:
     check("a driver without one it requires is refused (SOUND without ADSP)", any("CONFIG_HAKIOS_SOUND requires CONFIG_HAKIOS_ADSP" in p for p in problems), problems)
     problems, _ = hc.check(dict(off, HAKIOS_GOODIX="n"))
     check("an argument another built driver still reads is fine (touchscreen= is the buttons' too)", not problems, problems)
-    problems, _ = hc.check(dict(off, HAKIOS_GOODIX="n", HAKIOS_BUTTONS="n"))
-    check("an argument only left-out drivers read is refused (touchscreen= without GOODIX and BUTTONS)",
-          any("CONFIG_TOUCHSCREEN gives touchscreen=" in p and "CONFIG_HAKIOS_GOODIX" in p and "CONFIG_HAKIOS_BUTTONS" in p for p in problems), problems)
-    problems, _ = hc.check(dict(off, HAKIOS_GOODIX="n", HAKIOS_BUTTONS="n", TOUCHSCREEN="n"))
+    input_off = dict(off, HAKIOS_GOODIX="n", HAKIOS_BUTTONS="n", HAKIOS_THYME_INPUT="n")
+    problems, _ = hc.check(input_off)
+    check("an argument only left-out drivers read is refused (touchscreen= without GOODIX, BUTTONS and THYME_INPUT)",
+          any("CONFIG_TOUCHSCREEN gives touchscreen=" in p and "CONFIG_HAKIOS_GOODIX" in p and
+              "CONFIG_HAKIOS_BUTTONS" in p and "CONFIG_HAKIOS_THYME_INPUT" in p for p in problems), problems)
+    problems, _ = hc.check(dict(input_off, TOUCHSCREEN="n"))
     check("... and with that argument gone too, the choice passes", not [p for p in problems if "GOODIX" in p or "touchscreen" in p], problems)
     problems, _ = hc.check(dict(off, HAKIOS_GOODIX="maybe"))
     check("a driver is y or not set", any("CONFIG_HAKIOS_GOODIX is a driver" in p for p in problems), problems)
