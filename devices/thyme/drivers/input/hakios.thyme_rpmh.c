@@ -410,10 +410,20 @@ out:
 int
 umi_rpmh_vreg_enable(const char *res, unsigned mv)
 {
+	bool set_ldo_mode;
+
 	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
-	/* umi: st,fts vdd-supply -> PM8150A L1, resource ldoc1, exactly 1.8V. */
-	if (!res || strcmp(res, "ldoc1") || mv != 1800) {
-		printf("UMI RPMH: expected ldoc1 at 1800 mV\n");
+	if (!res) {
+		return EINVAL;
+	}
+	if (!strcmp(res, "ldoc1") && mv == 1800) {
+		set_ldo_mode = true;    /* ST FTS521 touch VDD */
+	} else if (!strcmp(res, "smpa4") && mv == 1800) {
+		set_ldo_mode = false;   /* WCD938x VDD_RXTX/VDDIO/VDD_BUCK */
+	} else if (!strcmp(res, "bobc1") && mv == 3296) {
+		set_ldo_mode = false;   /* WCD938x VDD_MIC_BIAS */
+	} else {
+		printf("UMI RPMH: unsupported resource %s at %u mV\n", res, mv);
 		return EINVAL;
 	}
 	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
@@ -430,7 +440,7 @@ umi_rpmh_vreg_enable(const char *res, unsigned mv)
 		error = rh_lookup(res, &address);
 	}
 	if (!error) {
-		error = rh_send(address, mv, true);
+		error = rh_send(address, mv, set_ldo_mode);
 	}
 out:
 	if (error) {

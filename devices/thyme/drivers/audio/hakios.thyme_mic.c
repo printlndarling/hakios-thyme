@@ -1,60 +1,41 @@
 /*
- * The phone's microphones, through the audio DSP. Every address and number below belongs to the
- * POCO X5 Pro (redwood), from Android's own live device tree, its mixer paths (fw-audio/android/)
- * and Xiaomi's kernel (hakios-s-oss, techpack/audio: asoc/codecs/bolero/, asoc/codecs/wcd938x/,
- * soc/swr-mstr-ctrl.c, soc/pinctrl-lpi.c, dsp/q6afe.c, asoc/codecs/audio-ext-clk-up.c). Nothing
- * here happens unless boot-arg mic=N asks for it, with adsp=1 (hakios.adsp.c), which calls
- * hakios_mic_dsp_up() once the DSP's audio services are up.
+ * THYME microphone probes through LPASS and the audio DSP.
  *
- * The main microphone under Android (mixer paths "handset-mic" = "amic1", "audio-record"): the
- * analog microphone at ADC1 of the WCD938x codec, whose samples go over SoundWire (the TX master
- * of the LPASS's digital codec, "bolero") into decimator 1 of the TX macro, out of it through the
- * codec DMA interface TX_CDC_DMA_TX_3, the AFE's port, into a stream that is read (ASM). Before any
- * of it: the LPASS's own clocks, which the DSP gives out (Android's audio-ref-clk nodes):
- *   lpass_core_hw_vote   AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST, block 3 ("LPASS_HW_MACRO")
- *   lpass_audio_hw_vote  the same, block 4 ("LPASS_HW_DCODEC")
- *   tx_core_clk          AFE clock 0x30c at 19.2 MHz (qcom,codec-lpass-clk-id, -ext-clk-freq)
- *   tx_npl_clk           AFE clock 0x30d at 19.2 MHz
- * Without them the macros' registers are not to be touched at all: an access to a block without
- * its clock may hang the bus.
+ * Addresses come from THYME's live DTB, pinctrl-kona, WCD938x/Bolero sources,
+ * swr-mstr-ctrl.c, pinctrl-lpi.c and q6afe.c. Nothing runs unless boot-arg
+ * mic=N is present together with adsp=1 (hakios.thyme_adsp.c).
  *
- *   mic=1    a look: the votes and the two clocks asked for, then -- only if all four were given --
- *            the registers of the TX and VA macros, of the TX SoundWire master, of the LPASS pins
- *            the master uses and of the codec's reset pin read (nothing written to any of them);
- *            then the clocks and the votes given back
- *   mic=2    ... and the codec brought up far enough to answer on SoundWire, nothing of it set:
- *            its supplies as the boot chain leaves them (L18B and BoB are on: the codec answers; nothing
- *            of the PMICs is touched), its reset released (GPIO83 low 20 us, then high, 16 mA:
- *            msm-cdc-pinctrl's two states), the master's pins to their active state (LPASS GPIOs
- *            0, 1, 2, 14: function 1, 2 mA, slew rate 1; the clock without a pull, the data with a
- *            keeper), the TX macro's clocks as tx_macro_tx_va_mclk_enable() starts them (bolero's
- *            "fs-gen-sequence" in the VA macro, FREQ_MCLK, MCLK_CONTROL, FS_CNT_CONTROL, the
- *            SoundWire clock with a reset), the master started as swrm_runtime_resume() and
- *            swrm_master_init() start it (the frame 50 rows x 2 columns, auto-enumeration, its
- *            interrupts' masks), the codec's TX device waited for (ID 0x000d01170223, the tree's
- *            wcd938x-tx-slave) and its chip ID read over SoundWire. Then all of it undone, in reverse:
- *            the codec back in reset, the pins and registers as they were found
- *   mic=3    ... and the main microphone listened to for mic_secs seconds (default 10, at most 600)
- *            the way Android records from it: the codec set up as wcd938x_bind() and
- *            wcd938x_init_reg() set it up (its interrupts as edges, the mic biases' 2750 mV, its
- *            bias and sleep registers); the DSP's side (a stream read through our memory, ASM
- *            session 2; a device path for recording, ADM; the codec DMA port TX_CDC_DMA_TX_3, AFE
- *            port 0xB037, 48 kHz, 16 bits, one channel: decimator 1); the TX macro's decimator 1 fed
- *            from SWR_MIC0 (the mixer controls "TX DEC1 MUX" SWR_MIC, "TX SMIC MUX1" SWR_MIC0, and
- *            tx_macro_enable_dec()); "MIC BIAS1" and ADC1 in "low power" mode, "ADC1 Volume" 6 (Xiaomi's
- *            mixer paths); the SoundWire port with the bus as Android has it for its handset
- *            microphones (see datapath_on()); then the decimator unmuted after 200 ms and its
- *            filter settled after 300 ms, as tx-macro's delayed work does. Each second's level goes
- *            to the log; with rec_sound=N rec_sound_mic=1 the samples go into the recording that
- *            ./xl sound fetches. Every register write is read back (a few registers that read 0
- *            whatever is written, as on Android, are said so); any mismatch or a DSP command
- *            refused stops it all. Tests: mic_input=0 (decimator 1 fed from ZERO: exact silence),
- *            mic_adc=0 (ADC1 left off), mic_test=1 (no mic bias), mic_test=2 (ADC1's input held),
- *            mic_main=1 (the bus and ports of Android's one-microphone tables: a tone, not the room),
- *            mic_tap=1 with haptic=5 (the vibration motor from 2 s to 3 s of listening: the motor's
- *            175.5 Hz in the samples)
+ * mic=1  read-only look at the clocks, votes, macros, LPASS pins and reset pin.
+ * mic=2  power/reset GPIO32, bring up SoundWire, enumerate WCD938x and read IDs.
+ * mic=3  run the capture path for mic_secs seconds and report one level per second.
+ * mic=4  expose /dev/hakios-mic to Darwin while it records.
  *
- * What is asked for is given back at the end, and before the DSP is shut down (hakios_mic_dsp_down()).
+ * Verified on the physical Mi 10S through mic_stage=6 / mic=2:
+ * - GPIO32 is on Kona's SOUTH tile at 0x0f520000. It must use GPIO mux 0;
+ *   the DTB string "func2" does not drive the codec reset line on this device.
+ * - The THYME TX SoundWire pins are LPASS GPIO0/1/2 only. There is no fourth
+ *   SWR data pin and no qcom,swrm-hctl-reg property, so the HCTL workaround is
+ *   skipped exactly as the Android driver does.
+ * - THYME reports Bolero core IDs 00/0f, the three-macro 1.2 profile.
+ * - WCD938x TX enumerates as device 1, ID 0xd01170223, status 1. Its SoundWire
+ *   chip ID and SCP device ID respond, and the full path shuts down cleanly.
+ *
+ * Capture status: both plausible handset paths reach ASM and return full frame
+ * counts, but samples are still exact silence. `mic_path=0` (default) follows
+ * mixer_paths.xml: handset-mic -> dmic2 -> DMIC1, DEC2, LPI GPIO6/7.
+ * `mic_path=1` follows mixer_paths_overlay_static.xml: WCD938x ADC1, DEC1,
+ * SoundWire. Neither is a hardware PASS until a nonzero sample is observed.
+ *
+ * Diagnostic boot arguments:
+ *   mic_stage=1..6      stop after reset, SWR pins, TX clocks, master or codec
+ *   mic_reset_mux=N     GPIO32 mux override (default 0, the hardware-validated value)
+ *   mic_dmic=N          DMIC channel 0..5 for the direct-DMIC path (default 1)
+ *   mic_chmask=M        AFE active-channel mask override
+ *   mic_path=1          use the analog ADC1/DEC1 overlay path
+ *   mic_dmic_probe=1    count transitions on the selected DMIC data pin
+ *
+ * Every register write is read back unless the register is known write-only;
+ * a mismatch stops the path and undo restores what was found.
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
@@ -72,6 +53,7 @@
 #include <sys/uio.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern int umi_rpmh_vreg_enable(const char *resource, unsigned mv);
 extern kern_return_t thread_terminate(thread_t thread);
 extern void loader_log_putc(char c);
 
@@ -80,6 +62,12 @@ static LCK_MTX_DECLARE(mic_lock, &mic_lock_group);      /* what is asked for, an
 
 static uint32_t level;
 static bool running;
+static uint32_t path_stage = 99;
+static uint32_t reset_mux;      /* GPIO mode 0: verified with the WCD938x on THYME */
+static uint32_t dmic_channel = 1;
+static uint32_t mic_chmask;
+static uint32_t mic_path;
+static uint32_t dmic_probe;
 
 static int say(const char *format, ...) __printflike(1, 2);
 
@@ -243,6 +231,8 @@ put_bits(struct block *b, const char *name, uint32_t offset, uint32_t mask, uint
 #define LPASS_HW_DCODEC_BLOCK                   4
 #define CLOCK_TX_CORE                           0x30c
 #define CLOCK_TX_NPL                            0x30d
+#define CLOCK_VA_CORE                           0x30b
+#define CLOCK_VA_NPL                            0x310
 #define CLOCK_HZ                                19200000
 #define CLOCK_COUPLE_NO                         1
 
@@ -322,7 +312,7 @@ afe_clock(const char *what, uint32_t id, bool on)
 }
 
 static uint32_t vote_handle[5];
-static bool voted[5], core_clock, npl_clock;
+static bool voted[5], core_clock, npl_clock, va_core_clock, va_npl_clock;
 
 static bool
 vote(uint32_t block, const char *client)
@@ -371,12 +361,28 @@ clocks_on(void)
 		return false;
 	}
 	npl_clock = afe_clock("the TX macro's NPL clock (0x30d) at 19.2 MHz, on", CLOCK_TX_NPL, true);
-	return npl_clock;
+	if (!npl_clock) {
+		return false;
+	}
+	va_core_clock = afe_clock("the VA macro's core clock (0x30b) at 19.2 MHz, on", CLOCK_VA_CORE, true);
+	if (!va_core_clock) {
+		return false;
+	}
+	va_npl_clock = afe_clock("the VA macro's NPL clock (0x310) at 19.2 MHz, on", CLOCK_VA_NPL, true);
+	return va_npl_clock;
 }
 
 static void
 clocks_off(void)
 {
+	if (va_npl_clock) {
+		(void)afe_clock("the VA macro's NPL clock, off", CLOCK_VA_NPL, false);
+		va_npl_clock = false;
+	}
+	if (va_core_clock) {
+		(void)afe_clock("the VA macro's core clock, off", CLOCK_VA_CORE, false);
+		va_core_clock = false;
+	}
 	if (npl_clock) {
 		(void)afe_clock("the TX macro's NPL clock, off", CLOCK_TX_NPL, false);
 		npl_clock = false;
@@ -394,10 +400,12 @@ clocks_off(void)
 static struct block tx_macro = { "the TX macro", 0x03220000, 0x1000 };
 static struct block va_macro = { "the VA macro", 0x03370000, 0x1000 };
 static struct block tx_swr = { "the TX SoundWire master", 0x03230000, 0x2000 };
-static struct block tx_hctl = { "the TX SoundWire master's HCTL", 0x032a9000, 0x1000 };
 static struct block lpi = { "the LPASS pins", 0x033c0000, 0x10000 };
-static struct block lpi_high = { "the LPASS pins", 0x033ce000, 0x1000 };
-static struct block tlmm = { "the pin controller", 0x0f100000, 0x100000 };
+/*
+ * THYME's pinctrl-kona.c puts GPIO32 in the SOUTH tile:
+ * f000000 + 0x500000 + 0x1000 * 32 = f520000.
+ */
+static struct block tlmm = { "the pin controller", 0x0f500000, 0x80000 };
 
 static void
 look(void)
@@ -429,43 +437,54 @@ look(void)
 		snprintf(name, sizeof(name), "gpio%u in/out", pins[i]);
 		(void)get(&lpi, name, 0x1000 * pins[i] + 4);
 	}
-	(void)get(&lpi_high, "gpio14 config (SoundWire TX data 2)", 0);
-	(void)get(&lpi_high, "gpio14 in/out", 4);
-	(void)get(&tlmm, "gpio83 config (the codec's reset)", 0x1000 * 83);
-	(void)get(&tlmm, "gpio83 in/out", 0x1000 * 83 + 4);
+	(void)get(&tlmm, "gpio32 config (the codec's reset)", 0x1000 * 32);
+	(void)get(&tlmm, "gpio32 in/out", 0x1000 * 32 + 4);
 	/* (last: the master is a block of its own, and not yet known; with its version above 1.5.1 the votes are all it needs) */
 	for (size_t i = 0; i < sizeof(swr) / sizeof(swr[0]); i++) {
 		(void)get(&tx_swr, swr[i].name, swr[i].offset);
 	}
-	(void)get(&tx_hctl, "HCTL (0x32a90a8)", 0x0a8);
 }
 
 /* ---- the codec's reset, the master's pins ------------------------------------------------------------ */
 
-#define TLMM_CFG_83             (0x1000 * 83)
-#define TLMM_IO_83              (0x1000 * 83 + 4)
+/* THYME's wcd938x_reset_active is GPIO32, function 2, 16 mA, output-high;
+ * wcd938x_reset_sleep is the same with output-low. */
+#define CODEC_RESET_GPIO        32
+#define TLMM_CFG_32             (0x1000 * CODEC_RESET_GPIO)
+#define TLMM_IO_32              (0x1000 * CODEC_RESET_GPIO + 4)
 static uint32_t found_reset_cfg, found_reset_io;
 static bool reset_taken;
 
 static bool
 reset_release(void)
 {
+	uint32_t cfg;
+
 	if (tlmm.base == 0) {
 		tlmm.base = ml_io_map(tlmm.phys, tlmm.size);
 	}
-	found_reset_cfg = rd(tlmm.base + TLMM_CFG_83);
-	found_reset_io = rd(tlmm.base + TLMM_IO_83);
+	found_reset_cfg = rd(tlmm.base + TLMM_CFG_32);
+	found_reset_io = rd(tlmm.base + TLMM_IO_32);
 	reset_taken = true;
-	/* the sleep state: gpio, 16 mA, no pull, output low; 20 us; the active state: output high */
-	if (!put(&tlmm, "gpio83 out (the codec's reset)", TLMM_IO_83, 0, 2) ||
-	    !put(&tlmm, "gpio83 config: gpio, 16 mA, no pull, output", TLMM_CFG_83, 0x3c0, 0x3ff)) {
+	/*
+	 * THYME's DTB labels the reset state "func2", but that does not drive the
+	 * pad on hardware. GPIO mux 0 does: the codec then enumerates on SoundWire.
+	 * Keep mic_reset_mux only as a diagnostic override.
+	 */
+	cfg = found_reset_cfg & ~0x3ffu;
+	cfg |= ((reset_mux & 7u) << 2) | (7u << 6) | (1u << 9);
+	if (cfg & (1u << 11)) {
+		cfg |= 1u << 12;
+	}
+	if (!put(&tlmm, "gpio32 out: low (the codec in reset)", TLMM_IO_32, 0, 2) ||
+	    !put(&tlmm, "gpio32 config: GPIO mode, 16 mA, output low", TLMM_CFG_32, cfg, 0x3ff)) {
 		return false;
 	}
-	spin_us(30);
-	if (!put(&tlmm, "gpio83 out: high (the codec out of reset)", TLMM_IO_83, 2, 2)) {
+	sleep_ms(2);    /* the codec needs the low pulse after a cold rail */
+	if (!put(&tlmm, "gpio32 out: high (the codec out of reset)", TLMM_IO_32, 2, 2)) {
 		return false;
 	}
-	spin_us(30);
+	sleep_ms(2);    /* and time to start before its bus master is enabled */
 	return true;
 }
 
@@ -476,16 +495,16 @@ reset_restore(void)
 		return;
 	}
 	broken = false;         /* (putting back is done whatever went before) */
-	(void)put(&tlmm, "gpio83 out: low (the codec in reset)", TLMM_IO_83, 0, 2);
-	(void)put(&tlmm, "gpio83 config, as it was found", TLMM_CFG_83, found_reset_cfg, 0x3ff);
-	(void)put(&tlmm, "gpio83 out, as it was found", TLMM_IO_83, found_reset_io & 2, 2);
+	(void)put(&tlmm, "gpio32 out: low (the codec in reset)", TLMM_IO_32, 0, 2);
+	(void)put(&tlmm, "gpio32 config, as it was found", TLMM_CFG_32, found_reset_cfg, 0x3ff);
+	(void)put(&tlmm, "gpio32 out, as it was found", TLMM_IO_32, found_reset_io & 2, 2);
 	reset_taken = false;
 }
 
 static struct block lpi_slew = { "the LPASS pins' slew rates", 0x0355a000, 0x1000 };
+/* THYME's tx_swr_clk_data_pinctrl uses LPASS GPIO0, GPIO1 and GPIO2 only. */
 static const struct { unsigned pin, slew_bit; uint32_t pull; const char *name; } swr_pins[] = {
 	{ 0, 0, 0, "gpio0 (SoundWire TX clock)" }, { 1, 2, 2, "gpio1 (data 0)" }, { 2, 4, 2, "gpio2 (data 1)" },
-	{ 14, 6, 2, "gpio14 (data 2)" },
 };
 #define SWR_PINS                (sizeof(swr_pins) / sizeof(swr_pins[0]))
 static uint32_t found_pin_cfg[SWR_PINS], found_pin_dir[SWR_PINS], found_slew;
@@ -512,7 +531,7 @@ pins_on(void)
 	for (unsigned i = 0; i < SWR_PINS; i++) {
 		slew = (slew & ~(3u << swr_pins[i].slew_bit)) | (1u << swr_pins[i].slew_bit);
 	}
-	if (!put(&lpi_slew, "slew rates: 1 for the four", 0, slew, 0xff)) {
+	if (!put(&lpi_slew, "slew rates: 1 for the three", 0, slew, 0xff)) {
 		return false;
 	}
 	for (unsigned i = 0; i < SWR_PINS; i++) {
@@ -525,6 +544,86 @@ pins_on(void)
 		}
 	}
 	return true;
+}
+
+#define VA_DMIC01_CTL           0x084
+#define VA_DMIC_CFG             0x094
+static uint32_t found_dmic_cfg[2], found_dmic_dir[2], found_dmic_clk, found_dmic_va_cfg;
+static bool dmic_pins_taken;
+static unsigned dmic_pair;
+
+static bool
+dmic_pins_on(void)
+{
+	static const unsigned clk_pins[3] = { 6, 8, 12 }, data_pins[3] = { 7, 9, 13 };
+	char clk_name[64], data_name[64], clk_dir_name[64], data_dir_name[64];
+	uint32_t clk_cfg, data_cfg, clk_off, data_off, clock;
+
+	if (lpi.base == 0) {
+		lpi.base = ml_io_map(lpi.phys, lpi.size);
+	}
+	dmic_channel = dmic_channel > 5 ? 5 : dmic_channel;
+	dmic_pair = dmic_channel / 2;
+	clk_off = 0x1000u * clk_pins[dmic_pair];
+	data_off = 0x1000u * data_pins[dmic_pair];
+	clock = VA_DMIC01_CTL + 4u * dmic_pair;
+	snprintf(clk_name, sizeof(clk_name), "gpio%u config: DMIC clock", clk_pins[dmic_pair]);
+	snprintf(clk_dir_name, sizeof(clk_dir_name), "gpio%u direction: output", clk_pins[dmic_pair]);
+	snprintf(data_name, sizeof(data_name), "gpio%u config: DMIC data", data_pins[dmic_pair]);
+	snprintf(data_dir_name, sizeof(data_dir_name), "gpio%u direction: input", data_pins[dmic_pair]);
+	found_dmic_cfg[0] = rd(lpi.base + clk_off);
+	found_dmic_dir[0] = rd(lpi.base + clk_off + 4);
+	found_dmic_cfg[1] = rd(lpi.base + data_off);
+	found_dmic_dir[1] = rd(lpi.base + data_off + 4);
+	found_dmic_clk = rd(va_macro.base + clock);
+	found_dmic_va_cfg = rd(va_macro.base + VA_DMIC_CFG);
+	dmic_pins_taken = true;
+	clk_cfg = (found_dmic_cfg[0] & ~0x3ffu) | (1u << 2) | (3u << 6) | (1u << 9);
+	data_cfg = (found_dmic_cfg[1] & ~0x3ffu) | (1u << 2) | (3u << 6);
+	if (!put(&lpi, clk_name, clk_off, clk_cfg, 0x3ff) ||
+	    !put(&lpi, clk_dir_name, clk_off + 4, 2, 2) ||
+	    !put(&lpi, data_name, data_off, data_cfg, 0x3ff) ||
+	    !put(&lpi, data_dir_name, data_off + 4, 0, 2) ||
+	    !put_bits(&va_macro, "DMIC_CFG: no rate change", VA_DMIC_CFG, 0x80, 0x00) ||
+	    /* tx-dmic-sample-rate 2.4 MHz from a 9.6 MHz MCLK: divide by 4. */
+	    !put(&va_macro, "DMIC clock: divide by 4, on", clock, 0x05, 0x0f)) {
+		return false;
+	}
+	spin_us(100);
+	if (dmic_probe) {
+		uint32_t last = rd(lpi.base + data_off + 4) & 1, edges = 0;
+
+		for (unsigned i = 0; i < 20000; i++) {
+			uint32_t now = rd(lpi.base + data_off + 4) & 1;
+
+			edges += now != last;
+			last = now;
+		}
+		say("mic: DMIC%u data line gpio%u: %u edges in 20000 samples (last %u)\n",
+		    dmic_channel, data_pins[dmic_pair], edges, last);
+	}
+	return true;
+}
+
+static void
+dmic_pins_restore(void)
+{
+	static const unsigned clk_pins[3] = { 6, 8, 12 }, data_pins[3] = { 7, 9, 13 };
+	uint32_t clk_off = 0x1000u * clk_pins[dmic_pair];
+	uint32_t data_off = 0x1000u * data_pins[dmic_pair];
+	uint32_t clock = VA_DMIC01_CTL + 4u * dmic_pair;
+
+	if (!dmic_pins_taken) {
+		return;
+	}
+	broken = false;
+	(void)put(&lpi, "DMIC clock config, as found", clk_off, found_dmic_cfg[0], 0x3ff);
+	(void)put(&lpi, "DMIC clock direction, as found", clk_off + 4, found_dmic_dir[0], 2);
+	(void)put(&lpi, "DMIC data config, as found", data_off, found_dmic_cfg[1], 0x3ff);
+	(void)put(&lpi, "DMIC data direction, as found", data_off + 4, found_dmic_dir[1], 2);
+	(void)put(&va_macro, "DMIC clock, as found", clock, found_dmic_clk, 0x0f);
+	(void)put(&va_macro, "DMIC_CFG, as found", VA_DMIC_CFG, found_dmic_va_cfg, 0x80);
+	dmic_pins_taken = false;
 }
 
 static void
@@ -547,7 +646,9 @@ pins_restore(void)
 #define TX_MCLK_CONTROL         0x000
 #define TX_FS_CNT_CONTROL       0x004
 #define TX_SWR_CONTROL          0x008
+#define TX_SWR_CTRL             0x088
 #define TX_FREQ_MCLK            0x090
+#define TX_PATH_SEC7            0x42c
 #define VA_MCLK_CONTROL         0x000
 #define VA_FS_CNT_CONTROL       0x004
 #define VA_TOP_CFG0             0x080
@@ -580,15 +681,16 @@ pins_restore(void)
 #define SWRS_SCP_INT_STATUS_MASK_1      0x41
 
 static bool tx_clocks_taken, master_taken;
-static uint32_t found_hctl;
 static uint8_t read_id = 0;
 
 static bool
 tx_clocks_on(void)
 {
 	tx_clocks_taken = true;
-	/* bolero_clk_rsc_fs_gen_request(): the tree's qcom,fs-gen-sequence, register, mask, value */
-	return put_bits(&va_macro, "MCLK_CONTROL (fs-gen)", VA_MCLK_CONTROL, 0x01, 0x01) &&
+	/* tx_macro_init(): TX_PATH_SEC7. */
+	return put_bits(&tx_macro, "TX_PATH_SEC7 (SWR init)", TX_PATH_SEC7, 0x3f, 0x0a) &&
+	       /* bolero_clk_rsc_fs_gen_request(): the tree's qcom,fs-gen-sequence, register, mask, value */
+	       put_bits(&va_macro, "MCLK_CONTROL (fs-gen)", VA_MCLK_CONTROL, 0x01, 0x01) &&
 	       put_bits(&va_macro, "FS_CNT_CONTROL (fs-gen)", VA_FS_CNT_CONTROL, 0x03, 0x03) &&
 	       put_bits(&va_macro, "FS_CNT_CONTROL (fs-gen)", VA_FS_CNT_CONTROL, 0x03, 0x01) &&
 	       put_bits(&va_macro, "TOP_CFG0 (fs-gen)", VA_TOP_CFG0, 0x02, 0x02) &&
@@ -602,7 +704,13 @@ tx_clocks_on(void)
 	       /* tx_macro_tx_va_mclk_enable(): the SoundWire clock, with the first reset */
 	       put_bits(&tx_macro, "SWR_CONTROL: reset", TX_SWR_CONTROL, 0x02, 0x02) &&
 	       put_bits(&tx_macro, "SWR_CONTROL: clock on", TX_SWR_CONTROL, 0x01, 0x01) &&
-	       put_bits(&tx_macro, "SWR_CONTROL: reset over", TX_SWR_CONTROL, 0x02, 0x00);
+	       put_bits(&tx_macro, "SWR_CONTROL: reset over", TX_SWR_CONTROL, 0x02, 0x00) &&
+	       /*
+	        * tx_macro_init() also sets TX_TOP_CSR_SWR_CTRL to 0xa. The
+	        * register reads 0 back on THYME, so do not treat that as failure.
+	        */
+	       put(&tx_macro, "SWR_CTRL (SWR mode, write-only)", TX_SWR_CTRL,
+	           (rd(tx_macro.base + TX_SWR_CTRL) & ~0x0fu) | 0x0a, 0);
 }
 
 static void
@@ -616,6 +724,8 @@ tx_clocks_off(void)
 	(void)put_bits(&tx_macro, "FS_CNT_CONTROL: off", TX_FS_CNT_CONTROL, 0x01, 0x00);
 	(void)put_bits(&tx_macro, "MCLK_CONTROL: off", TX_MCLK_CONTROL, 0x01, 0x00);
 	(void)put(&tx_macro, "FREQ_MCLK: as at reset", TX_FREQ_MCLK, 0, 0);
+	(void)put_bits(&tx_macro, "SWR_CTRL, as at reset", TX_SWR_CTRL, 0x0f, 0x00);
+	(void)put_bits(&tx_macro, "TX_PATH_SEC7, as at reset", TX_PATH_SEC7, 0x3f, 0x00);
 	(void)put_bits(&va_macro, "TOP_CFG0 (fs-gen off)", VA_TOP_CFG0, 0x02, 0x00);
 	(void)put_bits(&va_macro, "FS_CNT_CONTROL (fs-gen off)", VA_FS_CNT_CONTROL, 0x03, 0x00);
 	(void)put_bits(&va_macro, "MCLK_CONTROL (fs-gen off)", VA_MCLK_CONTROL, 0x01, 0x00);
@@ -637,16 +747,8 @@ master_on(void)
 	uint32_t ssp = SWR_BUS_HZ * 2 / (SWR_ROWS * SWR_COLUMNS * SWR_FRAME_SYNC_HZ), cfg;
 	bool linked = false;
 
-	if (tx_hctl.base == 0) {
-		tx_hctl.base = ml_io_map(tx_hctl.phys, tx_hctl.size);
-	}
-	found_hctl = rd(tx_hctl.base + 0x0a8);
+	/* THYME has no qcom,swrm-hctl-reg, so Linux skips the >= 1.6 workaround. */
 	master_taken = true;
-	/* "SW workaround to gate hw_ctl for SWR version >= 1.6" */
-	if (!put(&tx_hctl, "HCTL: bit 1 cleared", 0x0a8, found_hctl & ~2u, 0x3)) {
-		return false;
-	}
-	spin_us(505);
 	/* swrm_runtime_resume() */
 	if (!put(&tx_swr, "COMP_SW_RESET", SWRM_COMP_SW_RESET, 1, 0) || !put(&tx_swr, "COMP_SW_RESET", SWRM_COMP_SW_RESET, 1, 0) ||
 	    !put(&tx_swr, "MCP_BUS_CTRL", SWRM_MCP_BUS_CTRL, 1, 0)) {
@@ -691,7 +793,6 @@ master_off(void)
 	(void)put(&tx_swr, "INTERRUPT_EN: none", SWRM_INTERRUPT_EN, 0, 0);
 	(void)put(&tx_swr, "CPU1_INTERRUPT_EN: none", SWRM_CPU1_INTERRUPT_EN, 0, 0);
 	(void)put(&tx_swr, "COMP_SW_RESET", SWRM_COMP_SW_RESET, 1, 0);
-	(void)put(&tx_hctl, "HCTL, as it was found", 0x0a8, found_hctl, 0x3);
 	master_taken = false;
 }
 
@@ -1080,10 +1181,16 @@ adc1_on(void)
 #define TX_SWR_MIC2_CTL                 0x0c0
 #define TX_ADC_MUX1_CFG0                0x108
 #define TX_ADC_MUX1_CFG1                0x10c
+#define TX_ADC_MUX2_CFG0                0x110
+#define TX_ADC_MUX2_CFG1                0x114
 #define TX1_PATH_CTL                    0x480
 #define TX1_PATH_CFG0                   0x484
 #define TX1_VOL_CTL                     0x48c
 #define TX1_PATH_SEC2                   0x498
+#define TX2_PATH_CTL                    0x500
+#define TX2_PATH_CFG0                   0x504
+#define TX2_VOL_CTL                     0x50c
+#define TX2_PATH_SEC2                   0x518
 
 #define VA_CORE_ID_0                    0x0c0
 #define VA_CORE_ID_1                    0x0c4
@@ -1093,8 +1200,8 @@ adc1_on(void)
 
 static uint32_t found_dec[10], found_va_mic[3];
 static uint32_t smic_input = 1;         /* boot-arg mic_input=N: TX SMIC MUX1's input (1 SWR_MIC0, Android's; 0 ZERO, a test) */
-static bool dec_taken, va_mic_taken;
-static unsigned bolero_version;         /* 20 or 21: the digital codec's own core ID (bolero_soc_codec_probe()) */
+static bool dec_taken, va_mic_taken, dmic_capture;
+static unsigned bolero_version;         /* 12, 20 or 21: the digital codec's own core ID (bolero_soc_codec_probe()) */
 static uint8_t hpf_cut_off;             /* the decimator's high-pass filter as it was found */
 
 static const uint32_t dec_regs[] = {
@@ -1113,10 +1220,20 @@ bolero_look(void)
 {
 	uint32_t id0 = get(&va_macro, "CORE_ID_0", VA_CORE_ID_0) & 0xff, id1 = get(&va_macro, "CORE_ID_1", VA_CORE_ID_1) & 0xff;
 
-	bolero_version = id0 == 0x01 && id1 == 0x0f ? 20 : id0 == 0x02 && id1 == 0x0e ? 21 : 0;
-	say("mic: the digital codec is bolero %s\n", bolero_version == 20 ? "2.0" : bolero_version == 21 ? "2.1" : "OF AN UNKNOWN VERSION");
+	/*
+	 * THYME reports 00/0f. With three macros and no qcom,bolero-version,
+	 * bolero_soc_codec_probe() treats that as the Bolero 1.2 profile.
+	 */
+	bolero_version = id0 == 0x00 && id1 == 0x0f ? 12 :
+	                 id0 == 0x01 && id1 == 0x0f ? 20 :
+	                 id0 == 0x02 && id1 == 0x0e ? 21 : 0;
+	say("mic: the digital codec is bolero %s\n", bolero_version == 12 ? "1.2" :
+	    bolero_version == 20 ? "2.0" : bolero_version == 21 ? "2.1" : "OF AN UNKNOWN VERSION");
+	if (bolero_version == 0) {
+		return false;
+	}
 	if (bolero_version != 21) {
-		return bolero_version == 20;
+		return true;
 	}
 	for (unsigned i = 0; i < 3; i++) {
 		found_va_mic[i] = get(&va_macro, "SWR_MIC_CTL (as found)", VA_SWR_MIC_CTL0 + 4 * i);
@@ -1210,6 +1327,89 @@ dec1_off(void)
 		(void)put(&tx_macro, "(put back as found)", dec_regs[i], found_dec[i], 0);
 	}
 	dec_taken = false;
+}
+
+static uint32_t found_dmic_dec[6];
+static bool dmic_dec_taken;
+
+static bool
+dmic2_on(void)
+{
+	static const uint32_t regs[6] = {
+		TX_ADC_MUX2_CFG0, TX_ADC_MUX2_CFG1, TX2_PATH_CTL, TX2_PATH_CFG0, TX2_VOL_CTL, TX2_PATH_SEC2,
+	};
+	uint32_t cfg0;
+
+	for (size_t i = 0; i < 6; i++) {
+		found_dmic_dec[i] = get(&tx_macro, "(DMIC2 as found)", regs[i]);
+	}
+	dmic_dec_taken = true;
+	dmic_capture = true;
+	/*
+	 * THYME handset-mic: TX DMIC MUX2=DMIC1 (index 2), TX DEC2 MUX=MSM_DMIC.
+	 * Decimator 2 is the DMA path selected by the mixer paths.
+	 */
+	if (!put_bits(&tx_macro, "ADC_MUX2_CFG0: selected DMIC", TX_ADC_MUX2_CFG0, 0xf0,
+	    ((dmic_channel + 1u) & 0x0f) << 4) ||
+	    !put_bits(&tx_macro, "ADC_MUX2_CFG1: MSM_DMIC", TX_ADC_MUX2_CFG1, 0x03, 0x00) ||
+	    !put_bits(&tx_macro, "TX2_TX_PATH_CTL: 48 kHz", TX2_PATH_CTL, 0x0f, 0x04) ||
+	    !put_bits(&tx_macro, "TX2_TX_PATH_CFG0: a DMIC", TX2_PATH_CFG0, 0x80, 0x80) ||
+	    !put_bits(&tx_macro, "TX2_TX_PATH_CFG0: mode 0", TX2_PATH_CFG0, 0x06, 0x00) ||
+	    !put_bits(&tx_macro, "TX2_TX_PATH_CTL: muted", TX2_PATH_CTL, 0x10, 0x10) ||
+	    !put_bits(&tx_macro, "TX2_TX_PATH_CTL: on", TX2_PATH_CTL, 0x20, 0x20)) {
+		return false;
+	}
+	cfg0 = get(&tx_macro, "TX2_TX_PATH_CFG0", TX2_PATH_CFG0);
+	hpf_cut_off = (cfg0 & 0x60) >> 5;
+	if (hpf_cut_off != 2 && !put_bits(&tx_macro, "TX2_TX_PATH_CFG0: high-pass 150 Hz", TX2_PATH_CFG0, 0x60, 2u << 5)) {
+		return false;
+	}
+	if (hpf_cut_off != 2) {
+		if (!put_bits(&tx_macro, "TX2_TX_PATH_SEC2: filter gate", TX2_PATH_SEC2, 0x03, 0x02)) {
+			return false;
+		}
+		sleep_ms(6);
+		if (!put_bits(&tx_macro, "TX2_TX_PATH_SEC2", TX2_PATH_SEC2, 0x02, 0x00)) {
+			return false;
+		}
+	}
+	(void)put(&tx_macro, "TX2_TX_VOL_CTL: 0 dB", TX2_VOL_CTL, get(&tx_macro, "TX2_TX_VOL_CTL", TX2_VOL_CTL), 0xff);
+	return true;
+}
+
+static bool
+dmic2_unmute(void)
+{
+	return put_bits(&tx_macro, "TX2_TX_PATH_CTL: unmuted", TX2_PATH_CTL, 0x10, 0x00);
+}
+
+static bool
+dmic2_settled(void)
+{
+	return put_bits(&tx_macro, "TX2_TX_PATH_CFG0: high-pass as it was", TX2_PATH_CFG0, 0x60,
+	    (uint32_t)hpf_cut_off << 5) &&
+	       put_bits(&tx_macro, "TX2_TX_PATH_SEC2: filter gate", TX2_PATH_SEC2, 0x03, 0x02) &&
+	       (spin_us(21), put_bits(&tx_macro, "TX2_TX_PATH_SEC2", TX2_PATH_SEC2, 0x03, 0x01));
+}
+
+static void
+dmic2_off(void)
+{
+	static const uint32_t regs[6] = {
+		TX_ADC_MUX2_CFG0, TX_ADC_MUX2_CFG1, TX2_PATH_CTL, TX2_PATH_CFG0, TX2_VOL_CTL, TX2_PATH_SEC2,
+	};
+
+	if (!dmic_dec_taken) {
+		return;
+	}
+	broken = false;
+	(void)put_bits(&tx_macro, "TX2_TX_PATH_CTL: muted", TX2_PATH_CTL, 0x10, 0x10);
+	(void)put_bits(&tx_macro, "TX2_TX_PATH_CTL: off", TX2_PATH_CTL, 0x20, 0x00);
+	for (size_t i = 0; i < 6; i++) {
+		(void)put(&tx_macro, "(DMIC2 put back as found)", regs[i], found_dmic_dec[i], 0);
+	}
+	dmic_dec_taken = false;
+	dmic_capture = false;
 }
 
 static void
@@ -1405,7 +1605,8 @@ dsp_port_on(void)
 	struct {
 		uint32_t version, rate;
 		uint16_t bits, format, channels, mask;
-	} __attribute__((packed)) config = { 1, MIC_RATE, 16, 0, 1, 1u << 1 };
+	} __attribute__((packed)) config = { 1, MIC_RATE, 16, 0, 1,
+	                               mic_chmask ? mic_chmask : dmic_capture ? 1u << 2 : 1u << 1 };
 	uint16_t start[2] = { MIC_PORT, 0 };
 
 	if (!afe_port_param(AFE_MODULE_AUDIO_DEV_INTERFACE, AFE_PARAM_ID_CODEC_DMA_CONFIG, &config, sizeof(config),
@@ -1583,11 +1784,11 @@ listen(bool for_darwin)
 	for (;;) {
 		absolutetime_to_nanoseconds(mach_absolute_time() - began, &now);
 		elapsed_ms = now / NSEC_PER_MSEC;
-		if (!unmuted && elapsed_ms >= 200) {            /* TX_MACRO_AMIC_UNMUTE_DELAY_MS */
-			unmuted = dec1_unmute();
+		if (!unmuted && elapsed_ms >= (dmic_capture ? 40 : 200)) {
+			unmuted = dmic_capture ? dmic2_unmute() : dec1_unmute();
 		}
-		if (!settled && elapsed_ms >= 300) {            /* TX_MACRO_AMIC_HPF_DELAY_MS */
-			settled = dec1_settled();
+		if (!settled && elapsed_ms >= (dmic_capture ? 100 : 300)) {
+			settled = dmic_capture ? dmic2_settled() : dec1_settled();
 		}
 		if (tap && elapsed_ms >= 2000 && elapsed_ms < 3000) {
 			hakios_haptic_pretend(20000);
@@ -1684,6 +1885,8 @@ undo(void)
 {
 	dsp_off();
 	dec1_off();
+	dmic2_off();
+	dmic_pins_restore();
 	va_mic_off();
 	master_off();
 	tx_clocks_off();
@@ -1700,12 +1903,45 @@ path_up(void)
 		say("mic: the clocks were not all given: the blocks are not touched\n");
 		return false;
 	}
-	if (!reset_release() || !pins_on() || !tx_clocks_on() || !master_on()) {
+	if (path_stage <= 1) {
+		return true;
+	}
+	/* The boot chain may leave the codec rails unvoted. An inherited RPMh
+	 * request returns EBUSY and is already sufficient. */
+	int codec_s4 = umi_rpmh_vreg_enable("smpa4", 1800);
+	int codec_bob = umi_rpmh_vreg_enable("bobc1", 3296);
+	say("mic: codec power: S4=%d BOB=%d (0 enabled, EBUSY already voted)\n", codec_s4, codec_bob);
+	sleep_ms(5);    /* let the PMIC rails finish ramping before reset */
+	if (!reset_release()) {
 		return false;
+	}
+	if (path_stage <= 2) {
+		return true;
+	}
+	if (!pins_on()) {
+		return false;
+	}
+	if (path_stage <= 3) {
+		return true;
+	}
+	if (!tx_clocks_on()) {
+		return false;
+	}
+	if (path_stage <= 4) {
+		return true;
+	}
+	if (!master_on()) {
+		return false;
+	}
+	if (path_stage <= 5) {
+		return true;
 	}
 	sleep_ms(5);    /* ("5 ms for SoundWire's auto-enumeration", wcd938x_bind()) */
 	if ((codec_device = codec_wait()) == 0) {
 		return false;
+	}
+	if (path_stage <= 6) {
+		return true;
 	}
 	swr_write(0xf, SWRS_SCP_INT_STATUS_MASK_1, 0x04, 0xf);  /* (swrm_runtime_resume(): broadcast) */
 	sleep_ms(10);
@@ -1715,9 +1951,13 @@ path_up(void)
 	if (level < 3) {
 		return true;
 	}
-	/* the stream and path, the port's format and start, the codec's widgets */
-	return bolero_look() && codec_init() && dsp_path_on() && dsp_port_on() && dec1_on() && (!adc_on || adc1_on()) &&
-	       datapath_on();
+	if (mic_path) {
+		/* Board-static mixer override: WCD938x ADC1, TX DEC1, SoundWire. */
+		return bolero_look() && codec_init() && dsp_path_on() && dsp_port_on() && dec1_on() &&
+		       (!adc_on || adc1_on()) && datapath_on();
+	}
+	/* Base mixer path: direct LPASS DMIC1 on decimator 2. */
+	return bolero_look() && dmic_pins_on() && dmic2_on() && dsp_path_on() && dsp_port_on();
 }
 
 /*
@@ -1831,6 +2071,12 @@ hakios_mic_dsp_up(void)
 	PE_parse_boot_argn("mic_main", &main_timing, sizeof(main_timing));
 	PE_parse_boot_argn("mic_test", &test_bits, sizeof(test_bits));
 	PE_parse_boot_argn("mic_tap", &tap, sizeof(tap));
+	PE_parse_boot_argn("mic_stage", &path_stage, sizeof(path_stage));
+	PE_parse_boot_argn("mic_reset_mux", &reset_mux, sizeof(reset_mux));
+	PE_parse_boot_argn("mic_dmic", &dmic_channel, sizeof(dmic_channel));
+	PE_parse_boot_argn("mic_chmask", &mic_chmask, sizeof(mic_chmask));
+	PE_parse_boot_argn("mic_path", &mic_path, sizeof(mic_path));
+	PE_parse_boot_argn("mic_dmic_probe", &dmic_probe, sizeof(dmic_probe));
 	mic_secs = mic_secs < 1 ? 1 : mic_secs > 600 ? 600 : mic_secs;
 	running = true;
 	if (kernel_thread_start(mic_thread, NULL, &thread) != KERN_SUCCESS) {
