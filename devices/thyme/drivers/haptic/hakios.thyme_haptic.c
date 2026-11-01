@@ -42,6 +42,8 @@
  * UMI selects the separate AW8697 path with umi_haptic=1..5. QUP11 is on GPIO 60/61,
  * reset GPIO 130, and the south TLMM tile is at 0x0f500000. Firmware is UMI's /vendor/firmware/aw8697_haptic.bin. Levels 1..4
  * probe, configure/load, and play a short test effect; level 5 runs the same iOS actuator service.
+ * This source is compiled only for THYME, so haptic=1..5 is accepted as an alias and always
+ * selects this AW8697 path.
  *
  * Limits, whatever asks: Android's own boost and drive levels and waveforms; its gain 0x80 on
  * HK and UMI's safer ceiling of 0x40. No effect is longer than HAPTIC_MAX_MS, and the
@@ -383,8 +385,11 @@ regs_write(uint8_t reg, const uint8_t *values, unsigned count)
 #define AW_CHIPIDL              0x58
 #define AW_CHIPID               0x9270
 
-#define SYSINT_FAULTS           0xe6            /* boost short circuit and over-voltage, under-voltage, over-current, over-temperature */
+#define SYSINT_DONE             0x01
+#define SYSINT_BSTERR           0x80
+#define SYSINT_FAULTS           0x66            /* boost over-voltage, under-voltage, over-current, over-temperature */
 #define HAPTIC_MAX_MS           1000
+#define UMI_HAPTIC_STOCK_GAIN   0x1e            /* DT qcom,wf-vmax-mv=0xe10 maps to stock driver level 0x1e */
 #define UMI_HAPTIC_MAX_GAIN     0x40            /* the 0x60 gain tripped AW8697 boost short-circuit protection */
 
 static void
@@ -433,7 +438,12 @@ put(uint8_t reg, uint8_t value)
 	return true;
 }
 
-/* The chip's interrupt flags (reading clears them): false, and the chip given up on, if one is a fault. */
+/*
+ * The chip's interrupt flags (reading clears them): false, and the chip given up on, if one is a
+ * fault. Xiaomi's stock driver ignores BSTERRI and logs DONEI; this chip latches BSTERRI as soon
+ * as the boost is brought up, before GO, and latches it with DONEI after a short RAM waveform.
+ * Report that vendor-specific latch but do not mistake it for an actuated short circuit.
+ */
 static bool
 healthy(const char *when)
 {
@@ -443,10 +453,14 @@ healthy(const char *when)
 		give_up("the flags could not be read");
 		return false;
 	}
+	if (flags & SYSINT_BSTERR) {
+		say("haptic: %s: AW8697 flags %#04x carry BSTERRI%s; stock Android ignores this boost latch\n", when, flags,
+		    flags & SYSINT_DONE ? " with DONEI" : " before GO");
+	}
 	if (flags & SYSINT_FAULTS) {
-		say("haptic: %s: the chip reports %#04x:%s%s%s%s%s\n", when, flags, flags & 0x80 ? " BOOST SHORT CIRCUIT" : "",
-		    flags & 0x40 ? " BOOST OVER-VOLTAGE" : "", flags & 0x20 ? " UNDER-VOLTAGE" : "", flags & 0x04 ? " OVER-CURRENT" : "",
-		    flags & 0x02 ? " OVER-TEMPERATURE" : "");
+		say("haptic: %s: the chip reports %#04x:%s%s%s%s\n", when, flags,
+		    flags & 0x40 ? " BOOST OVER-VOLTAGE" : "", flags & 0x20 ? " UNDER-VOLTAGE" : "",
+		    flags & 0x04 ? " OVER-CURRENT" : "", flags & 0x02 ? " OVER-TEMPERATURE" : "");
 		give_up("a fault");
 		return false;
 	}
@@ -596,35 +610,38 @@ umi_report_status(const char *when)
 
 	if (get(0x01, &status)) {
 		say("haptic: %s: AW8697 SYSST=%#04x%s\n", when, status,
-		    status & 0x20 ? " (VDD below UVLO threshold)" : "");
+		    status & 0x20 ? " (UVLS set; stock Android also reports 0x30 at rest)" : "");
 	}
 }
 
-/* The stock driver clears standby-time interrupt latches after entering active mode. UVLO is
- * checked against live SYSST only after that transition, before the GO register can start motion. */
+/*
+ * Stock Android's RAM sequence is: select RAM with the boost bypassed, enter active mode, clear
+ * the latched interrupts, unmask UVLO, then turn the boost on. SYSST.UVLS is not a fatal status:
+ * the working Android driver leaves SYSST at 0x30 while idle. SYSINT is the edge-latched fault
+ * source and is still checked after the transition.
+ */
 static bool
 umi_activate(void)
 {
-	uint8_t flags = 0, status = 0;
+	uint8_t flags = 0;
 
-	if (!umi_update_bits(0x04, 0xf2, 0x00)) {                   /* active RAM mode with boost */
+	if (!umi_update_bits(0x04, 0xf0, 0x00)) {                   /* RAM mode, boost bypass, active */
 		return false;
 	}
+	wait_ms(2);
 	if (!get(0x02, &flags)) {
 		give_up("standby interrupt flags could not be cleared");
 		return false;
 	}
 	say("haptic: AW8697 cleared standby interrupt flags %#04x on activation\n", flags);
-	wait_ms(3);
-	if (!get(0x01, &status)) {
-		give_up("active AW8697 status could not be read");
+	if (!umi_update_bits(0x03, 0xdf, 0x00)) {                   /* unmask UVLO, as the stock driver */
 		return false;
 	}
-	if (status & 0x20) {
-		say("haptic: active AW8697 SYSST=%#04x still reports UVLO; no waveform will start\n", status);
-		give_up("active-mode under-voltage");
+	if (!umi_update_bits(0x04, 0xfd, 0x02)) {                   /* boost on while remaining active */
 		return false;
 	}
+	wait_ms(2);
+	umi_report_status("after UMI AW8697 activation");
 	return healthy("after UMI AW8697 activation");
 }
 
@@ -724,7 +741,7 @@ umi_configure(void)
 {
 	say("haptic: configure UMI AW8697 from its stock device tree and driver, keep it in standby\n");
 	if (!wait_standby(250) || !umi_measure_vbat() || !put(0x03, 0xff) || /* SYSINTM: polled, no IRQ path */
-	    !umi_update_bits(0x04, 0xf0, 0x03) ||                     /* SYSCTRL: explicitly select RAM, boost, standby */
+	    !umi_update_bits(0x04, 0xf0, 0x01) ||                     /* SYSCTRL: RAM, boost bypass, standby */
 	    !umi_update_bits(0x2e, 0x9f, 0x40) ||                     /* PWMDBG: 24 kHz */
 	    !umi_update_bits(0x5f, 0xdf, 0x20) ||                     /* DETCTRL: stock protection mode */
 	    !umi_update_bits(0x2d, 0x7f, 0x00) ||                     /* PWMPRC: stock protection setting */
@@ -737,7 +754,7 @@ umi_configure(void)
 	    !umi_update_bits(0x47, 0xfb, 0x00) ||                     /* BST_AUTO: stock manual boost */
 	    !umi_offset_calibrate() ||
 	    !umi_update_bits(0x3a, 0xc1, 0x18) ||                     /* BSTDBG4.BST_VO = 0x0c */
-	    !put(0x5b, 0x05) ||                                       /* UMI stock resonance trim from its AW8697 calibration */
+	    !put(0x5b, 0x0c) ||                                       /* stock f0 calibration: final trim_lra=0x0c */
 	    !put(0x74, 0x00) || !put(0x75, 0x08) || !put(0x76, 0x03) || !put(0x77, 0xf8)) { /* BEMF thresholds */
 		return false;
 	}
@@ -949,7 +966,7 @@ play_effect(unsigned effect)
 	uint64_t began = mach_absolute_time(), ended;
 	bool done;
 	if (umi_chip) {
-		uint32_t gain = 0x40;
+		uint32_t gain = UMI_HAPTIC_STOCK_GAIN;
 
 		(void)PE_parse_boot_argn("haptic_gain", &gain, sizeof(gain));
 		if (umi_chip && gain > UMI_HAPTIC_MAX_GAIN) {
@@ -1114,7 +1131,7 @@ umi_start_waveform(unsigned waveform, bool forever, uint8_t gain)
 	if (!wait_standby(250) || !put(0x07, (uint8_t)waveform) || !put(0x08, 0) ||
 	    !put(0x0f, forever ? 0xf0 : 0x00) ||                        /* WAVSEQ1/2 and WAVLOOP1 */
 	    !umi_activate() ||
-	    !umi_update_bits(0x3a, 0xc1, 0x18) || !put(0x39, gain)) {  /* BSTDBG4 and DATDBG, after RAM mode is active */
+	    !umi_update_bits(0x3a, 0xc1, 0x20) || !put(0x39, gain)) {  /* BSTDBG4 = bst_vol_ram 0x10, then DATDBG */
 		return false;
 	}
 	if (!regs_write(0x05, &go, 1)) {                               /* GO */
@@ -1380,6 +1397,9 @@ hakios_haptic_init(void)
 	} else if (!PE_parse_boot_argn("haptic", &level, sizeof(level))) {
 		return;
 	}
+	/* This source is selected only by THYME. Keep haptic= as a compatibility alias rather
+	 * than letting it select the unrelated Redwood GPIO/I2C path. */
+	umi_chip = true;
 	if (level == 0) {
 		return;
 	}

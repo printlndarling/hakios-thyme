@@ -48,9 +48,10 @@ THYME Adreno 650 driver is also running on official main: a four-minute run
 produced more than 2,100 hardware-rendered `hakios-gl` frames without softpipe
 fallback. The THYME audio stack now brings up LPASS/ADSP, APR, MI2S and both
 CS35L41 amplifiers with protection firmware; audible speaker and microphone
-checks remain. The AW8697 motor driver identifies the chip and loads and
-verifies Android's waveforms, but its SYSST register still reports UVLO when
-entering active mode. Bluetooth is now live on official main: QCA6390 firmware
+checks remain. The AW8697 motor driver now follows Xiaomi's stock activation
+sequence, loads and verifies Android's waveforms, and plays waveform 1 back to
+standby in 38 ms without a fatal fault; physical feel remains to be confirmed.
+Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. The device-owned QCA6390 Wi-Fi stack now
 scans, associates to a WPA2 access point, completes DHCP and carries TCP traffic

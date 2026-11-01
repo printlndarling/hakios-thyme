@@ -14,7 +14,7 @@ No item moves to `PASS` from source inspection alone.
 | Charging while iOS runs | PARTIAL | Positive current observed at 1239 mA and 106-140 mA with `charging=1`; 30-minute charging and reconnect endurance still required |
 | Battery percentage display | PASS | Loader and iOS report percentage, voltage, current and temperature |
 | Dual speakers | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; audible left/right playback is still unverified |
-| Vibration | FAIL | AW8697 is identified and firmware loads, but active mode still reports UVLO |
+| Vibration | PARTIAL | AW8697 active mode, waveform RAM and waveform 1 playback complete; standby in 38 ms with no fatal fault. Physical feel is still unconfirmed |
 | Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and the iOS H4 endpoint work; scan, pair and reconnect are pending |
 | Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
@@ -70,7 +70,7 @@ No item moves to `PASS` from source inspection alone.
 | ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
 | Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
 | Microphone capture | PARTIAL: path linked to `/dev/hakios-mic`; physical capture pending | capture and playback test |
-| Haptics | FAIL: AW8697 identified and waveforms loaded, SYSST still reports UVLO | resolve AW8697 UVLO / enable path |
+| Haptics | PARTIAL: stock activation sequence and waveform 1 complete; BSTERRI is the vendor-ignored boost latch | confirm physical vibration, then test iOS taps and long vibrations |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
 | QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |
 | Wi-Fi station / join / DHCP | PASS; WPA2 association, DHCP and en0 TCP traffic | test 2.4/5 GHz and reconnect |
