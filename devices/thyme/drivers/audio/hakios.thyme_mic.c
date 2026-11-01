@@ -1898,6 +1898,28 @@ static const struct cdevsw mic_cdevsw = {
 static uint32_t mic_secs = 10;
 
 /*
+ * An asynchronous read shares the APR transmit path with playback. glink_send()
+ * can be briefly busy, especially while a speaker stream is running; a dropped
+ * read is never retried by the DSP, so retry the command itself for a bounded
+ * amount of time rather than silently losing this period.
+ */
+static bool
+mic_read_retry(unsigned period)
+{
+	for (unsigned tries = 0; tries < 100; tries++) {
+		if (mic_read(period)) {
+			return true;
+		}
+		if (stopping || broken) {
+			return false;
+		}
+		sleep_ms(1);
+	}
+	say("mic: period %u could not be queued for 100 ms (the APR transmit path stayed busy)\n", period);
+	return false;
+}
+
+/*
  * The stream run, read for mic_secs (for_darwin: while Darwin has the device open): how loud it is, every
  * second (for Darwin: the first three, then every 30th); into the recording with rec_sound_mic=1; for
  * Darwin into the ring. False if it could not get going (the run refused, a read not sent, no read ever came
@@ -1924,7 +1946,7 @@ listen(bool for_darwin)
 	}
 	say("mic: the session 2, run: done\n");
 	for (unsigned p = 0; p < MIC_PERIODS; p++) {
-		if (!mic_read(p)) {
+		if (!mic_read_retry(p)) {
 			say("mic: a read could not be sent\n");
 			return false;
 		}
@@ -1976,9 +1998,6 @@ listen(bool for_darwin)
 			uint32_t samples_got = read_sizes[next] / 2;
 			uint32_t got = samples_got / channels;
 
-			frames = periods = empty = peak = 0;
-			sum = 0;
-			squares = 0;
 			for (vm_offset_t line = (vm_offset_t)samples; line < (vm_offset_t)samples + MIC_PERIOD_BYTES; line += 64) {
 				__asm__ volatile ("dc ivac, %0" : : "r" (line));
 			}
@@ -2017,7 +2036,10 @@ listen(bool for_darwin)
 			}
 		}
 		periods++;
-		(void)mic_read(next);
+		if (!mic_read_retry(next)) {
+			say("mic: the next read could not be queued\n");
+			return false;
+		}
 		next = (next + 1) % MIC_PERIODS;
 		if (frames >= MIC_RATE) {
 			uint64_t mean_square = squares / frames;
@@ -2049,6 +2071,11 @@ listen(bool for_darwin)
 			sum = 0;
 			squares = 0;
 		}
+	}
+	if (!for_darwin) {
+		say("mic: readback summary: %u done, %u errors, ready %#x, sizes %u %u %u %u %u %u %u %u\n", reads_done,
+		    read_errors, read_ready, read_sizes[0], read_sizes[1], read_sizes[2], read_sizes[3], read_sizes[4],
+		    read_sizes[5], read_sizes[6], read_sizes[7]);
 	}
 	return true;
 }

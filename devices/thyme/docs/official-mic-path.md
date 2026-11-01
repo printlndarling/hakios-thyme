@@ -102,9 +102,23 @@ This is a complete PASS for the current microphone path: hardware capture,
 stereo-to-mono downmix, `/dev/hakios-mic`, AVAudioRecorder, ring continuity and
 cleanup.
 
+## Concurrent playback regression (2026-11-02)
+
+A later dual-path run found that the one-second statistics were reset at every
+20 ms DSP read. Microphone PCM was still arriving, but the per-second summary
+could never run. The same run showed that an asynchronous read dropped while
+the APR transmit path was busy was never queued again.
+
+The statistics now accumulate until the one-second boundary, read commands are
+retried for at most 100 ms, and each non-Darwin run ends with a readback
+summary. A 45-second concurrent speaker/microphone run completed 4500 reads,
+0 errors and 0 empty periods. The speaker test tone overlapped seconds 30-32
+and produced a 25.78 dB rise at 1 kHz in the captured PCM; see
+`official-speaker-mic-loopback.md`.
+
 ## Remaining soak checks
 
-- Correlate a known speaker tone or spoken sample with captured RMS.
+- Correlate a spoken sample with captured RMS.
 - Keep recording continuity in future long-running UI tests.
 
 The diagnostic direct-DMIC path (`mic_path=0`, DMIC1/DEC2, LPI GPIO6/7) still

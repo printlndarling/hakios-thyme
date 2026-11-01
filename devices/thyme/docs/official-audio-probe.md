@@ -70,8 +70,11 @@ adsp=1 sound=3 sound_secs=3 sound_below=96 mic=3 mic_secs=8
 rec_sound=8 rec_sound_mic=1 mic_tap=1 umi_haptic=5
 ```
 
-This is intended to record the speaker tone and the motor through the
-microphone. Hardware verification is pending.
+The intended speaker/microphone overlap exposed two microphone statistics
+bugs: each DSP read reset the in-progress one-second accumulation, and a busy
+APR transmit path silently dropped reads. Both are fixed. A 1 kHz
+speaker-to-microphone acoustic loopback now passes; see
+`official-speaker-mic-loopback.md`.
 
 ## Microphone follow-up (2026-11-02)
 
@@ -84,7 +87,7 @@ completed a 4.9-second `/dev/hakios-mic` recording with no skipped frames; see
 
 ## Remaining physical checks
 
-- Play a known system sound or music and confirm audible stereo output.
+- Confirm independent left/right output and stereo balance.
 - Record a spoken sample and verify microphone level and playback.
 - Observe amplifier temperature and battery voltage under sustained audio.
 

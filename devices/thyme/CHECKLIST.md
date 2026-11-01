@@ -13,7 +13,8 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Charging while iOS runs | PARTIAL | Positive current observed at 1239 mA and 106-140 mA with `charging=1`; 30-minute charging and reconnect endurance still required |
 | Battery percentage display | PASS | Loader and iOS report percentage, voltage, current and temperature |
-| Dual speakers | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; audible left/right playback is still unverified |
+| Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
+| Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 active mode, waveform RAM and waveform 1 playback complete; standby in 38 ms with no fatal fault. Physical feel is still unconfirmed |
 | Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and the iOS H4 endpoint work; scan, pair and reconnect are pending |
 | Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
@@ -68,7 +69,7 @@ No item moves to `PASS` from source inspection alone.
 | Check | Status | Next action |
 |---|---|---|
 | ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
-| Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
+| Speaker playback | PASS for acoustic output: MI2S, both CS35L41 amps and protection DSP run, and a 1 kHz tone raises the microphone's 1 kHz component by 25.78 dB at the matching time | confirm independent left/right output and stereo balance |
 | Microphone capture | PASS: DEC1/ADC1 + DEC0/ADC4 captures dual-channel PCM (`rms 4854-7930`); Darwin AVAudioRecorder through `/dev/hakios-mic` ran 4.9 s with `0 frames skipped` and `0` short reads | keep a tone/intelligibility regression check in future soak runs |
 | Haptics | PARTIAL: stock activation sequence and waveform 1 complete; BSTERRI is the vendor-ignored boost latch | confirm physical vibration, then test iOS taps and long vibrations |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
