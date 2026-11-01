@@ -1064,7 +1064,11 @@ codec_init(void)
 static uint8_t bank_now;
 static uint32_t adc_on = 1;             /* boot-arg mic_adc=0 (a test): ADC1 and its mic bias left off, the port alone */
 static uint32_t main_timing;            /* boot-arg mic_main=1 (a test): the bus and ports of Android's one-microphone tables */
-static uint32_t tap;                    /* boot-arg mic_tap=1 (a test): the vibration motor (haptic=5) runs from 2 s to 3 s of listening */
+static uint32_t tap;                    /* boot-arg mic_tap=1 (a test): run the vibration motor (haptic=5) while listening */
+static uint32_t tap_count = 1;          /* mic_tap_count: pulses, default one from 2 s to 3 s */
+static uint32_t tap_start_ms = 2000;
+static uint32_t tap_period_ms = 1000;
+static uint32_t tap_on_ms = 1000;
 static uint32_t test_bits;              /* boot-arg mic_test=N (tests): 1 no mic bias, 2 the ADC's input held (HPF init) */
 
 static bool
@@ -1933,6 +1937,7 @@ listen(bool for_darwin)
 	uint64_t squares = 0;
 	unsigned next = 0;
 	bool unmuted = false, settled = false, unmuted0 = false, settled0 = false;
+	bool tap_quiet = true;
 	uint64_t began = mach_absolute_time(), now, elapsed_ms;
 
 	struct hakios_apr_answer answer;
@@ -1971,11 +1976,18 @@ listen(bool for_darwin)
 		if (mic_path && mic_channels > 1 && !settled0 && elapsed_ms >= 300) {
 			settled0 = dec0_settled();
 		}
-		if (tap && elapsed_ms >= 2000 && elapsed_ms < 3000) {
-			hakios_haptic_pretend(20000);
-		} else if (tap == 1 && elapsed_ms >= 3000) {
-			hakios_haptic_pretend(0);
-			tap = 2;
+		if (tap) {
+			uint64_t after_start = elapsed_ms >= tap_start_ms ? elapsed_ms - tap_start_ms : 0;
+			bool tap_on = elapsed_ms >= tap_start_ms && after_start / tap_period_ms < tap_count &&
+			    after_start % tap_period_ms < tap_on_ms;
+
+			if (tap_on) {
+				hakios_haptic_pretend(20000);
+				tap_quiet = false;
+			} else if (!tap_quiet) {
+				hakios_haptic_pretend(0);
+				tap_quiet = true;
+			}
 		}
 		/* (`stopping' ends every kind of run: hakios_mic_dsp_down() waits for mic_lock, which is held until this returns) */
 		if ((for_darwin ? !darwin_wants : elapsed_ms >= mic_secs * 1000ull) || stopping || broken) {
@@ -2281,6 +2293,10 @@ hakios_mic_dsp_up(void)
 	PE_parse_boot_argn("mic_main", &main_timing, sizeof(main_timing));
 	PE_parse_boot_argn("mic_test", &test_bits, sizeof(test_bits));
 	PE_parse_boot_argn("mic_tap", &tap, sizeof(tap));
+	PE_parse_boot_argn("mic_tap_count", &tap_count, sizeof(tap_count));
+	PE_parse_boot_argn("mic_tap_start_ms", &tap_start_ms, sizeof(tap_start_ms));
+	PE_parse_boot_argn("mic_tap_period_ms", &tap_period_ms, sizeof(tap_period_ms));
+	PE_parse_boot_argn("mic_tap_on_ms", &tap_on_ms, sizeof(tap_on_ms));
 	PE_parse_boot_argn("mic_stage", &path_stage, sizeof(path_stage));
 	PE_parse_boot_argn("mic_reset_mux", &reset_mux, sizeof(reset_mux));
 	PE_parse_boot_argn("mic_dmic", &dmic_channel, sizeof(dmic_channel));
@@ -2289,6 +2305,13 @@ hakios_mic_dsp_up(void)
 	PE_parse_boot_argn("mic_dmic_probe", &dmic_probe, sizeof(dmic_probe));
 	PE_parse_boot_argn("mic_channels", &mic_channels, sizeof(mic_channels));
 	mic_secs = mic_secs < 1 ? 1 : mic_secs > 600 ? 600 : mic_secs;
+	if (tap) {
+		tap_count = tap_count < 1 ? 1 : tap_count > 100 ? 100 : tap_count;
+		tap_period_ms = tap_period_ms < 1 ? 1 : tap_period_ms;
+		tap_on_ms = tap_on_ms < 1 ? 1 : tap_on_ms > tap_period_ms ? tap_period_ms : tap_on_ms;
+		say("mic: haptic test: %u pulses, %u ms on every %u ms, from %u ms\n", tap_count, tap_on_ms, tap_period_ms,
+		    tap_start_ms);
+	}
 	running = true;
 	if (kernel_thread_start(mic_thread, NULL, &thread) != KERN_SUCCESS) {
 		running = false;

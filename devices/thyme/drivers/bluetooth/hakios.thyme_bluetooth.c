@@ -291,6 +291,68 @@ static int bt_qca_firmware(vm_offset_t uart)
     if (!nonzero || (bt_public_address[0]&1)) return EINVAL;
     return 0;
 }
+static void bt_log_address(const char *kind, unsigned report, const uint8_t *address)
+{
+    hakios_tl("UMI BT: %s %u address=%02x:%02x:%02x:%02x:%02x:%02x\n", kind, report,
+        address[5], address[4], address[3], address[2], address[1], address[0]);
+}
+
+static void bt_log_le_report(const uint8_t event[BT_EVENT_MAX], unsigned length)
+{
+    if (length < 5 || event[2] < 2 || (unsigned)event[2] + 3 > length) return;
+    unsigned reports = event[4], at = 5;
+    for (unsigned report = 0; report < reports && at + 9 <= length; report++) {
+        unsigned type = event[at++], address_type = event[at++];
+        const uint8_t *address = event + at;
+        at += 6;
+        unsigned data_length = event[at++];
+        if (at + data_length + 1 > length) return;
+        const uint8_t *data = event + at;
+        at += data_length;
+        int rssi = (int8_t)event[at++];
+        char name[32];
+        unsigned name_length = 0;
+        for (unsigned i = 0; i + 1 < data_length; ) {
+            unsigned field_length = data[i], field_type = data[i + 1];
+            if (field_length < 1 || i + field_length + 1 > data_length) break;
+            if ((field_type == 0x08 || field_type == 0x09) && field_length > 1) {
+                for (unsigned j = 1; j < field_length && name_length + 1 < sizeof(name); j++) {
+                    uint8_t c = data[i + 1 + j];
+                    name[name_length++] = c >= 0x20 && c < 0x7f ? c : '?';
+                }
+            }
+            i += field_length + 1;
+        }
+        name[name_length] = 0;
+        bt_log_address("LE report", report, address);
+        hakios_tl("UMI BT: LE report %u type=%#x address-type=%u rssi=%d name=\"%s\"\n",
+            report, type, address_type, rssi, name);
+    }
+}
+
+static void bt_log_classic_report(const uint8_t event[BT_EVENT_MAX], unsigned length)
+{
+    if (length < 4) return;
+    unsigned reports = event[3], at = 4;
+    for (unsigned report = 0; report < reports && at + 13 <= length; report++) {
+        if (event[1] == 0x2f) {
+            if (at + 15 > length) return;
+            bt_log_address("classic extended report", report, event + at);
+            hakios_tl("UMI BT: classic extended report %u rssi=%d\n", report, (int8_t)event[at + 13]);
+            at += 15 + event[at + 14];
+        } else {
+            bt_log_address(event[1] == 0x22 ? "classic RSSI report" : "classic report", report, event + at);
+            if (event[1] == 0x22) {
+                if (at + 14 > length) return;
+                hakios_tl("UMI BT: classic RSSI report %u rssi=%d\n", report, (int8_t)event[at + 13]);
+                at += 14;
+            } else {
+                at += 13;
+            }
+        }
+    }
+}
+
 static int bt_radio_scan(vm_offset_t uart)
 {
     uint8_t event[BT_EVENT_MAX]; unsigned length = 0;
@@ -311,7 +373,10 @@ static int bt_radio_scan(vm_offset_t uart)
         if (result < 0) { error = -result; break; }
         error = bt_service_ibs(uart);
         if (error) break;
-        if (result == 1 && event[1] == 0x3e && length >= 5 && event[3] == 2) reports += event[4];
+        if (result == 1 && event[1] == 0x3e && length >= 5 && event[3] == 2) {
+            reports += event[4];
+            bt_log_le_report(event, length);
+        }
         delay(100);
     }
     int stop = bt_hci_command(uart,0x200c,disable,sizeof(disable),true,event,&length);
@@ -328,7 +393,10 @@ static int bt_radio_scan(vm_offset_t uart)
         error = bt_service_ibs(uart);
         if (error) return error;
         if (result == 1) {
-            if ((event[1] == 2 || event[1] == 0x22 || event[1] == 0x2f) && length >= 4) classic += event[3];
+            if ((event[1] == 2 || event[1] == 0x22 || event[1] == 0x2f) && length >= 4) {
+                classic += event[3];
+                bt_log_classic_report(event, length);
+            }
             if (event[1] == 1) { complete = true; break; }
         }
         delay(100);

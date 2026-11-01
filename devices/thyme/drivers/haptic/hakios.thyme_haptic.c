@@ -10,7 +10,7 @@
  *              and given back as they were found
  *   reset      GPIO 35, high = running (Android: low for 5 ms, then high, at its driver's start)
  *   interrupt  GPIO 18, pulled up, low when the chip has something to say (not used: polled)
- *   the motor  f0 175.5 Hz as Android calibrated it (f0_pre 170.0 Hz, calibration data 0x0d)
+ *   the motor  f0 1700 Hz from Xiaomi's device tree (vib_f0_pre 0x6a4, coefficient 0x104)
  *   effects    Android's RAM waveforms, /vendor/firmware/aw8697_haptic.bin of the phone (fw-haptic/
  *              here, not in the repository; userland/build.sh puts it into /fw of the system image):
  *              eleven of them, 1..10 short (Android's effects 0..9), 11 the one looped for a
@@ -763,6 +763,120 @@ umi_configure(void)
 }
 
 static bool
+umi_read16(uint8_t reg, uint16_t *value)
+{
+	uint8_t bytes[2];
+
+	if (!regs_read(reg, bytes, sizeof(bytes))) {
+		say("haptic: AW8697 registers %#04x/%#04x NOT READ\n", reg, reg + 1);
+		return false;
+	}
+	*value = (uint16_t)(bytes[0] << 8 | bytes[1]);
+	return true;
+}
+
+/*
+ * Run the same non-persistent continuous-mode f0/BEMF measurement as Xiaomi's driver.
+ * This drives the LRA long enough for its back-EMF to be measured. A result near the
+ * device-tree value is evidence that the coil moved, not merely that GO was accepted.
+ */
+static bool
+umi_f0_probe(void)
+{
+	static const uint8_t touched[] = {
+		0x03, 0x04, 0x2b, 0x36, 0x48, 0x49,
+		0x4a, 0x5b, 0x7b, 0x7d, 0x7e, 0x7f,
+	};
+	const uint32_t expected = 1700, coeff = 0x104;
+	uint8_t saved[sizeof(touched)], state = 0, status = 0, flags = 0, stop = 0;
+	uint16_t raw = 0, cont_raw = 0, bemf = 0, bemf_pos = 0, bemf_neg = 0;
+	bool done = false, ok = true;
+	uint32_t measured = 0;
+
+	say("haptic: AW8697 f0/BEMF probe: stock %u Hz, coefficient %u\n", expected, coeff);
+	if (!wait_standby(250)) {
+		return false;
+	}
+	for (unsigned i = 0; i < sizeof(touched); i++) {
+		if (!get(touched[i], &saved[i])) {
+			return false;
+		}
+	}
+	say("haptic: AW8697 f0/BEMF probe: saved trim_lra=%#04x\n", saved[7]);
+
+	/* Vendor calibration starts from zero trim, then enters continuous mode with f0 detection. */
+	if (!put(0x5b, 0x00) ||
+	    !umi_update_bits(0x04, 0xf3, 0x08) ||                    /* CONT mode, boost bypass */
+	    !umi_update_bits(0x04, 0xfe, 0x00) ||                    /* active */
+	    !get(0x02, &flags) ||                                   /* clear latched interrupts */
+	    !umi_update_bits(0x03, 0xdf, 0x00) ||                    /* unmask UVLO */
+	    !umi_update_bits(0x48, 0xf7, 0x00) ||                    /* open continuous playback */
+	    !umi_update_bits(0x48, 0xfb, 0x04) ||                    /* enable f0 detection */
+	    !umi_update_bits(0x2b, 0x3f, 0xc0) ||                    /* 1 kHz feedback low-pass */
+	    !umi_update_bits(0x2b, 0xdf, 0x20) ||                    /* enable low-pass */
+	    !umi_update_bits(0x36, 0xdf, 0x20) ||                    /* LRA oscillator from registers */
+	    !put(0x49, 0x08) || !put(0x4a, 0xd6) ||                 /* preset f0: 1e9/(1700*260) */
+	    !put(0x7b, 0x26) ||                                     /* stock continuous drive level */
+	    !put(0x7d, 0x93) || !put(0x7e, 0x01) || !put(0x7f, 0x1f)) { /* stock f0 trace counts */
+		ok = false;
+		goto out;
+	}
+	{
+		uint8_t go = 1;
+
+		if (!regs_write(0x05, &go, 1)) {
+			say("haptic: AW8697 f0/BEMF probe GO was not acknowledged\n");
+			ok = false;
+			goto out;
+		}
+	}
+	for (unsigned i = 0; i < 60; i++) {
+		wait_ms(10);
+		if (!get(0x46, &state)) {
+			ok = false;
+			goto out;
+		}
+		if ((state & 0x0f) == 0) {
+			done = true;
+			break;
+		}
+	}
+	if (done && get(0x01, &status) && get(0x02, &flags) && umi_read16(0x68, &raw) &&
+	    umi_read16(0x6a, &cont_raw) && umi_read16(0x70, &bemf) && get(0x6d, &state)) {
+		bemf_pos = state;
+		if (get(0x6f, &state)) {
+			bemf_neg = state;
+		} else {
+			ok = false;
+		}
+		if (raw != 0) {
+			measured = 1000000000u / ((uint32_t)raw * coeff);
+		}
+		say("haptic: AW8697 f0/BEMF probe %s: F0=%#04x -> %u Hz, CONT=%#04x, BEMF=%#04x, "
+		    "positive=%u, negative=%u, SYSST=%#04x, SYSINT=%#04x\n",
+		    done ? "complete" : "timed out", raw, measured, cont_raw, bemf, bemf_pos,
+		    bemf_neg, status, flags);
+		if (!done || raw == 0 || measured + 100 < expected || measured > expected + 100) {
+			ok = false;
+		}
+	} else {
+		say("haptic: AW8697 f0/BEMF probe did not produce a complete result\n");
+		ok = false;
+	}
+out:
+	if (!regs_write(0x05, &stop, 1) || !wait_standby(250)) {
+		ok = false;
+	}
+	for (unsigned i = 0; i < sizeof(touched); i++) {
+		if (!put(touched[i], saved[i])) {
+			ok = false;
+		}
+	}
+	say("haptic: AW8697 f0/BEMF probe %s\n", ok ? "PASS" : "FAIL");
+	return ok;
+}
+
+static bool
 umi_load_waveforms(void)
 {
 	uint64_t size = 0;
@@ -1364,6 +1478,13 @@ haptic_thread(__unused void *parameter, __unused wait_result_t result)
 			bool reset_ok = !umi_chip || umi_soft_reset();
 			bool ready = reset_ok && configure() && load_waveforms();
 
+			if (ready) {
+				uint32_t f0_probe = 0;
+
+				if (PE_parse_boot_argn("haptic_f0_probe", &f0_probe, sizeof(f0_probe)) && f0_probe != 0) {
+					ready = umi_f0_probe();
+				}
+			}
 			if (ready && level == 4) {
 				uint32_t effect = 1;
 
