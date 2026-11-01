@@ -76,9 +76,9 @@ microphone. Hardware verification is pending.
 ## Microphone follow-up (2026-11-02)
 
 The official loader and the microphone probe were brought up further on the
-physical phone. WCD938x enumeration and ID reads now pass, but no nonzero
-microphone sample has been observed yet. The exact hardware evidence, the two
-candidate THYME mixer paths and the remaining checks are recorded in
+physical phone. WCD938x enumeration and ID reads pass, and the ADC1/DEC1 path
+now returns nonzero physical PCM after correcting THYME's SoundWire master
+port mapping. The remaining dual-mic and userland checks are recorded in
 `official-mic-path.md`.
 
 ## Remaining physical checks

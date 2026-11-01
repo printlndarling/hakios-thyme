@@ -4,35 +4,46 @@ Date: 2026-11-02
 
 ## Build and evidence
 
-Final kernel probe build:
+Port-mapping correction run:
 
 ```text
-kernel sha256=a27d2dea225dfd54eb54292f3018908189310ec920d6d6ae58622423f332d3a0
-loader sha256=f46783dc8df5973bc260f1853770a26466062a05c65253355b090584519afcf1
-mic=2 stage=6 payload sha256=1942befc236f430bd3c71b904e6bffa45962c12d69bf6213022115084333c6e1
+kernel sha256=8ce8492840d073d8eaf9808e5683738aca3133ec9926fe03092f6d4960f7f135
+mic=3 payload sha256=df0971c13ae0d72ae3333efc81a12225a17cecdd118d6dd3ea4a1b582d79cf7c
+log=logs/official-mic3-analog-port2-tail.log
 ```
 
-The tested kernel was built from `a420d234` with the THYME audio and RPMh
-changes described below. The final physical evidence is in
-`logs/official-mic2-final-tail.log`; the follow-up capture probes are in
-`logs/official-mic3-*`.
+Default-path regression:
 
-## What now works
+```text
+kernel sha256=7d0bcf1d343560a78399b595197d25337503505be7e260c65323c35f4ab80ee2
+mic=3 payload sha256=b7b3d742ea1114408d3513599b23649dcd1a02cf55ca9b9ceaf783746b163b75
+log=logs/official-mic3-default-tail.log
+```
 
-- The official THYME loader boots and its USB endpoint identifies as
-  `product: xnuloader`, `version: 0.5`.
-- GPIO32 is on the Kona SOUTH tile:
+Loader RAM image used for both runs:
+
+```text
+sha256=f46783dc8df5973bc260f1853770a26466062a05c65253355b090584519afcf1
+```
+
+The code was built from `a420d234` plus the THYME audio and RPMh changes.
+
+## Verified hardware path
+
+- The official THYME loader boots and identifies as `product: xnuloader`,
+  `version: 0.5`.
+- GPIO32 is on Kona's SOUTH tile:
   `0x0f000000 + 0x500000 + 0x1000 * 32 = 0x0f520000`.
-- GPIO32 must use GPIO mux 0. `func2` does not drive the reset line on this
-  board, while mux 0 produces a real low/high reset pulse and full readback.
-- The codec rails are voted through the existing RPMh client: PM8150 S4 at
-  1800 mV and PM8150A BOB at 3296 mV. Both returned success.
-- THYME's TX SoundWire pins are LPASS GPIO0, GPIO1 and GPIO2. The three slew
+- GPIO32 must use GPIO mux 0. The DTB label `func2` does not drive the reset
+  line on this board; mux 0 produces a real low/high pulse and full readback.
+- PM8150 S4 at 1800 mV and PM8150A BOB at 3296 mV are voted through the
+  existing RPMh client.
+- THYME's TX SoundWire pins are LPASS GPIO0, GPIO1 and GPIO2. Their slew
   controls write as `0x15` and read back.
-- THYME has no `qcom,swrm-hctl-reg`; the HCTL workaround is skipped.
-- The SoundWire master reports `COMP_STATUS=0x1` (link up).
+- THYME has no `qcom,swrm-hctl-reg`, so the Android HCTL workaround is skipped.
+- The SoundWire master reports `COMP_STATUS=0x1`.
 - WCD938x TX enumerates as device 1, ID `0xd01170223`, status 1.
-- SoundWire reads identify the codec:
+- Codec ID reads return:
 
 ```text
 DIGITAL_CHIP_ID0 = 0x00
@@ -43,73 +54,70 @@ SCP DEVICE_ID_0  = 0x23
 SCP DEVICE_ID_1  = 0x02
 ```
 
-- The VA macro CORE_ID reads `00/0f`, the three-macro Bolero 1.2 profile.
-- VA core/NPL clocks `0x30b/0x310`, TX core/NPL clocks `0x30c/0x30d`, the
-  SoundWire master, and all modified registers are restored in reverse order.
-- The audio DSP and TrustZone shut down cleanly after the probe.
+- The VA macro reports Bolero 1.2 (`00/0f`).
+- VA core/NPL (`0x30b/0x310`) and TX core/NPL (`0x30c/0x30d`) clocks come up,
+  and all modified registers are restored in reverse order.
+- The audio DSP and TrustZone shut down cleanly.
 
-This is a PASS for loader, clock, pin, SoundWire, codec-enumeration and cleanup
-behavior. It is not a PASS for microphone capture.
+## Capture now works
 
-## Capture attempts
+The DTS `qcom,swr-port-mapping` maps the codec's first TX data port (ADC1,
+slave port type `0x12`) to **SoundWire master port 2, channel 1**, not master
+port 1. The earlier code used master port 1 and therefore read exact silence.
 
-Both candidate THYME handset paths were exercised through `mic=3`:
-
-1. Base `mixer_paths.xml`: `handset-mic -> dmic2 -> TX DMIC MUX2=DMIC1`,
-   `TX DEC2 MUX=MSM_DMIC`, LPI GPIO6 clock / GPIO7 data, AFE channel mask 4.
-2. `mixer_paths_overlay_static.xml`: a two-channel analog path with
-   `TX DEC1 MUX=SWR_MIC`, `TX SMIC MUX1=ADC0`, `DEC0 MUX=SWR_MIC`,
-   `TX SMIC MUX0=ADC3`, both DEC0/DEC1 enabled, and
-   `TX_CDC_DMA_TX_3 Channels=Two` (mask 3).
-
-The HAL binary contains `/vendor/etc/mixer_paths_overlay_static.xml`, so the
-overlay is the likely runtime path. The current `mic_path=1` probe only
-configured the DEC1/ADC1 half with a two-channel ASM/DAI request; it did not
-yet implement DEC0/ADC4. That partial stereo attempt returned no read
-completion. The one-channel DEC1 attempt did return complete periods, but all
-samples were zero:
+With the corrected mapping, `mic=3` returns complete 20 ms periods and nonzero
+physical samples:
 
 ```text
-mic: second 1: 48000 frames (50 periods, 0 empty), level -99.9 dBFS (rms 0), peak 0, mean 0
+TX SoundWire master DP_PORT_CTRL (port 2): channel 1 ... reads back
+mic: second 1: 48000 frames (50 periods, 0 empty), level -72.0 dBFS (rms 8), peak 41, mean -5; reads 50, errors 0
 ```
 
-The direct-DMIC follow-up also sampled the selected data line:
+The default-path run reproduced it twice:
 
 ```text
-mic: DMIC1 data line gpio7: 0 edges in 20000 samples (last 0)
-mic: DMIC3 data line gpio9: 0 edges in 20000 samples (last 1)
+mic: second 1: 48000 frames (50 periods, 0 empty), level -73.5 dBFS (rms 7), peak 23, mean -4; reads 50, errors 0
+mic: second 2: 48000 frames (50 periods, 0 empty), level -76.5 dBFS (rms 5), peak 16, mean 0; reads 100, errors 0
 ```
 
-Attempts with DMIC channels 0, 2 and 3 and with AFE masks 1 and 2 either gave
-no read completion or the same zero data. LPI GPIO6 was confirmed as clock
-output (DIR=2, OE=1), GPIO7 as input, and the VA DMIC clock divider as 4.
+This is a hardware PASS for low-level ADC1/DEC1 capture and cleanup. It is not
+yet a complete microphone PASS because the board uses a two-channel handset
+path and userland recording has not been tested.
 
-Android's runtime mixer state confirms the expected control names exist:
+## Remaining dual-mic work
+
+Android's `mixer_paths_overlay_static.xml` replaces the base handset path with:
 
 ```text
-TX DMIC MUX2        ZERO
-TX DEC2 MUX         MSM_DMIC
-TX_CDC_DMA_TX_3     One
-TX_CDC_DMA_TX_3 SampleRate KHZ_48
+TX_CDC_DMA_TX_3 Channels=Two
+TX DEC1 MUX=SWR_MIC, TX SMIC MUX1=ADC0, DEC1 enabled
+TX DEC0 MUX=SWR_MIC, TX SMIC MUX0=ADC3, DEC0 enabled
+ADC1_MIXER=1, ADC1 Volume=6
+ADC4_MIXER=1, ADC4 MUX=INP5, ADC4 Volume=6
 ```
 
-`mixer_paths.xml` maps `handset-mic` to `dmic2`, while
-`mixer_paths_overlay_static.xml` replaces it with the dual analog
-DEC1/ADC1 + DEC0/ADC4 path. The static-overlay filename is present in
-`audio.primary.kona.so`; an actual recording has not yet been captured to
-prove the runtime selection.
+The codec register mapping is:
+
+- ADC1 -> slave port type `0x12` -> codec port 0/channel 1 -> master port 2.
+- ADC4 -> slave port type `0x15` -> codec port 1/channel 2 -> master port 3.
+
+The current implementation captures the verified ADC1 half. It does not yet
+enable DEC0/ADC4, MIC BIAS4, or codec port 1/master port 3. A two-channel AFM
+request with only the ADC1 half active returned no read completion, which is
+consistent with the missing second SoundWire path.
+
+The diagnostic direct-DMIC path (`mic_path=0`, DMIC1/DEC2, LPI GPIO6/7) still
+returns silence and zero data-line transitions. It remains disabled by
+default.
 
 ## Next checks
 
-- Implement the complete static-overlay path: DEC0/ADC4 and DEC1/ADC1,
-  matching SoundWire port/channel maps, two-channel ADM/ASM and mic biases.
-- Determine which mixer overlay Android actually applies during a real
-  recording, not only at boot.
-- Check DMIC microphone power and clock arrival at the LPI pads, then verify
-  whether the selected pair is the physical handset microphone.
-- Re-audit the AFE channel mask and ADM/ASM route with a known nonzero source.
-- Only move microphone capture to PASS after a spoken or injected sample shows
-  nonzero RMS in both the HakiOS log and a recovered recording.
+- Add DEC0/ADC4, MIC BIAS4, codec data port 1/master port 3 and two-channel
+  ASM/ADM routing.
+- Correlate a known speaker tone or spoken sample with captured RMS.
+- Exercise `mic=4` and `/dev/hakios-mic` from Darwin with the corrected path.
+- Only mark the complete microphone item PASS after a recovered recording
+  contains intelligible audio.
 
 No flash, erase, partition, slot or Android-data modification was used for
 these probes.

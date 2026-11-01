@@ -20,19 +20,20 @@
  * - WCD938x TX enumerates as device 1, ID 0xd01170223, status 1. Its SoundWire
  *   chip ID and SCP device ID respond, and the full path shuts down cleanly.
  *
- * Capture status: the one-channel candidate paths reach ASM and return full
- * frame counts, but samples are still exact silence. `mic_path=0` (probe
- * default) follows mixer_paths.xml: handset-mic -> dmic2 -> DMIC1, DEC2,
- * LPI GPIO6/7. `mic_path=1` starts the overlay path, but still needs the full
- * DEC1/ADC1 + DEC0/ADC4 pair. Neither is a hardware PASS until a nonzero
- * sample is observed.
+ * Capture status: the ADC1 path now returns nonzero physical PCM. THYME's
+ * qcom,swr-port-mapping puts codec TX port 0 / channel 1 on SoundWire master
+ * port 2 / channel 1; using master port 1 produced exact silence. `mic_path=1`
+ * (default) captures ADC1/DEC1 and reports RMS 5-8 for ordinary room noise.
+ * The static overlay also enables DEC0/ADC4 and a second channel, which is not
+ * implemented yet. `mic_path=0` is the diagnostic direct-DMIC path.
  *
  * Diagnostic boot arguments:
  *   mic_stage=1..6      stop after reset, SWR pins, TX clocks, master or codec
  *   mic_reset_mux=N     GPIO32 mux override (default 0, the hardware-validated value)
  *   mic_dmic=N          DMIC channel 0..5 for the direct-DMIC path (default 1)
  *   mic_chmask=M        AFE active-channel mask override
- *   mic_path=1          use the analog ADC1/DEC1 overlay path
+ *   mic_path=0          use the base DMIC1/DEC2 path
+ *   mic_channels=N      ASM/ADM/AFE channel count (default 1)
  *   mic_dmic_probe=1    count transitions on the selected DMIC data pin
  *
  * Every register write is read back unless the register is known write-only;
@@ -67,7 +68,7 @@ static uint32_t path_stage = 99;
 static uint32_t reset_mux;      /* GPIO mode 0: verified with the WCD938x on THYME */
 static uint32_t dmic_channel = 1;
 static uint32_t mic_chmask;
-static uint32_t mic_path;
+static uint32_t mic_path = 1;   /* mixer_paths_overlay_static.xml's ADC path */
 static uint32_t dmic_probe;
 static uint32_t mic_channels = 1;
 
@@ -1084,13 +1085,16 @@ port_config(uint8_t bank, bool first)
 	write_id = write_id < 14 ? write_id + 1 : 0;
 	swr_write(codec_device, SWRS_DP_LANE_CONTROL_BANK(0, bank), 1, write_id);
 	note("mic: the codec's data port 1, bank %u: channel 1 on, sample interval %u, offsets 0 0, lane 1\n", bank, codec_interval);
-	/* the master's port 1 */
-	return put(&tx_swr, "DP_PORT_CTRL (port 1): channel 1, offsets 0 0, interval 7", SWRM_DP_PORT_CTRL_BANK(1, bank),
+	/*
+	 * THYME's qcom,swr-port-mapping puts the codec's first TX data port
+	 * (ADC1, slave port type 0x12) on SoundWire master port 2, channel 1.
+	 */
+	return put(&tx_swr, "DP_PORT_CTRL (port 2): channel 1, offsets 0 0, interval 7", SWRM_DP_PORT_CTRL_BANK(2, bank),
 	           0x01u << 24 | 0u << 16 | 0u << 8 | master_interval, 0xffffffff) &&
-	       put(&tx_swr, "DP_SAMPLECTRL2 (port 1)", SWRM_DP_SAMPLECTRL2_BANK(1, bank), 0, 0xff) &&
-	       put(&tx_swr, "DP_PORT_CTRL_2 (port 1): lane 1", SWRM_DP_PORT_CTRL_2_BANK(1, bank), 1, 0xff) &&
+	       put(&tx_swr, "DP_SAMPLECTRL2 (port 2)", SWRM_DP_SAMPLECTRL2_BANK(2, bank), 0, 0xff) &&
+	       put(&tx_swr, "DP_PORT_CTRL_2 (port 2): lane 1", SWRM_DP_PORT_CTRL_2_BANK(2, bank), 1, 0xff) &&
 	       /* (it reads 0 back on the phone whatever is written; Android writes it and never reads it) */
-	       put(&tx_swr, "DP_PORT_HCTRL (port 1): hstop 15, hstart 0", SWRM_DP_PORT_HCTRL_BANK(1, bank), 0xf0, 0);
+	       put(&tx_swr, "DP_PORT_HCTRL (port 2): hstop 15, hstart 0", SWRM_DP_PORT_HCTRL_BANK(2, bank), 0xf0, 0);
 }
 
 static bool
