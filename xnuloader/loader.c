@@ -144,6 +144,22 @@ memcpy(void *dst, const void *src, size_t n)
 	return dst;
 }
 
+void *
+memmove(void *dst, const void *src, size_t n)
+{
+	uint8_t *d = dst;
+	const uint8_t *s = src;
+
+	if (d <= s || d >= s + n) {
+		return memcpy(dst, src, n);
+	}
+	while (n != 0) {
+		n--;
+		d[n] = s[n];
+	}
+	return dst;
+}
+
 static size_t
 str_len(const char *s)
 {
@@ -2513,8 +2529,8 @@ wdt_arm(void)
 {
 	uint64_t ctl = 0, since = 0;
 
-	if (PLAT != &platform_redwood && PLAT != &platform_thyme) {
-		return; /* SMC is not routed anywhere useful on QEMU virt */
+	if (PLAT != &platform_redwood) {
+		return; /* THYME's firmware does not route Haven's watchdog SMC; QEMU has none either */
 	}
 	uint64_t st = smc_call(VIRT_WDT_STATUS, 0, 0, &ctl, &since);
 	uint64_t r_time = smc_call(VIRT_WDT_SET_TIME, WDT_BITE_MS, WDT_BITE_MS, NULL, NULL);
@@ -3940,10 +3956,12 @@ fb_command(char *cmd)
 			fb_reply_data(staged_len);
 			while (sent < staged_len) {
 				uint64_t chunk = staged_len - sent > USB_CHUNK ? USB_CHUNK : staged_len - sent;
-				if (usb_tx((const uint8_t *)staged_data + sent, chunk) < 0) {
+				int64_t wrote = usb_tx((const uint8_t *)staged_data + sent, chunk);
+				if (wrote <= 0) {
 					break;
 				}
-				sent += chunk;
+				/* A controller may complete a bulk transfer in smaller pieces. */
+				sent += (uint64_t)wrote > chunk ? chunk : (uint64_t)wrote;
 			}
 			fb_reply("OKAY", "");
 		} else if (starts_with(cmd, "oem screenshot")) {
@@ -4002,6 +4020,33 @@ fb_command(char *cmd)
 		} else if (starts_with(cmd, "oem memmap")) {
 			/* the firmware's memory map into the log (then "oem log" and fetch it) */
 			print_memory_map();
+			fb_reply("OKAY", "");
+		} else if (starts_with(cmd, "oem logtail")) {
+			/*
+			 * Some hosts stop a get_staged upload at 32767 bytes. Stage the end of the
+			 * combined log so the result of a run is still reachable with such a host.
+			 */
+			const uint64_t keep = 0x7fff;
+			static const char marker[] = "== LOG TAIL ==\n";
+			uint64_t marker_len = sizeof(marker) - 1;
+
+			if (busy && running_live != NULL) {
+				compose_live_log(running_live, running_slide);
+			} else if (staged_len == 0) {
+				compose_logs(NULL, 0);
+			}
+			if (staged_len > keep) {
+				const char *tail = staged_data + staged_len - (keep - marker_len);
+
+				memmove(out_buf, tail, keep - marker_len);
+				staged_len = keep - marker_len;
+			} else if (staged_len > keep - marker_len) {
+				staged_len = keep - marker_len;
+			}
+			memmove(out_buf + marker_len, out_buf, staged_len);
+			memcpy(out_buf, marker, marker_len);
+			staged_data = out_buf;
+			staged_len += marker_len;
 			fb_reply("OKAY", "");
 		} else if (starts_with(cmd, "oem log")) {
 			if (busy && running_live != NULL) {
