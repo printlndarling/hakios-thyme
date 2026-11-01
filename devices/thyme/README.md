@@ -52,9 +52,13 @@ checks remain. The AW8697 motor driver identifies the chip and loads and
 verifies Android's waveforms, but its SYSST register still reports UVLO when
 entering active mode. Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
-iOS Bluetooth initialization all work. Wi-Fi remains to be migrated.
-QCA6390 Wi-Fi now scans, associates to a WPA2 access point, completes DHCP and
-carries TCP traffic through en0.
+iOS Bluetooth initialization all work. The device-owned QCA6390 Wi-Fi stack now
+scans, associates to a WPA2 access point, completes DHCP and carries TCP traffic
+through en0.
+The SM8250 EPSS CPU frequency domains and both TSENS blocks are also live on
+official main. All three clusters reached 1804/2419/3187 MHz, the governor
+physically throttled the big-core domain at 75.9 C, and an artificially low
+`thermal_stop=30` run returned to the loader without a panic.
 
 The first official-main run reported:
 
@@ -68,6 +72,7 @@ battguard: charge 92% (battery present, charger attached, charging no)
 See `docs/official-core-probe.md`.
 See also `docs/official-touch-probe.md`.
 See also `docs/official-gpu-probe.md`.
+See also `docs/official-cpu-thermal-probe.md`.
 See also `docs/official-audio-probe.md`.
 See also `docs/official-haptic-probe.md`.
 See also `docs/official-bt-probe.md`.

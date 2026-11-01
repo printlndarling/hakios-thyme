@@ -4,6 +4,24 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## User-priority hardware gate
+
+These are the minimum user-facing hardware checks for the current THYME port.
+No item moves to `PASS` from source inspection alone.
+
+| Item | Status | Evidence / next action |
+|---|---|---|
+| Charging while iOS runs | PARTIAL | Positive current observed at 1239 mA and 106-140 mA with `charging=1`; 30-minute charging and reconnect endurance still required |
+| Battery percentage display | PASS | Loader and iOS report percentage, voltage, current and temperature |
+| Dual speakers | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; audible left/right playback is still unverified |
+| Vibration | FAIL | AW8697 is identified and firmware loads, but active mode still reports UVLO |
+| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and the iOS H4 endpoint work; scan, pair and reconnect are pending |
+| Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
+| CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
+| GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
+| Touch | PASS | FTS521 DOWN/MOVE/UP events reach backboardd and SpringBoard with `errors=0` |
+| Brightness adjustment | TODO | Legacy THYME has DCS 0x51 backlight control and `kern.hakios.brightness`; port it to official main and verify a physical level change |
+
 ## Official-main migration gate
 
 - [x] Register THYME in `devices/manifest.conf`.
@@ -19,7 +37,7 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 | Check | Official main | Legacy evidence |
 |---|---|---|
 | XNU reaches userspace | PASS | PASS |
-| 7 CPUs and cpufreq | PARTIAL: 7 CPUs start; cpufreq driver still off | PASS |
+| 7 CPUs and cpufreq | PASS; three EPSS domains at 1804/2419/3187 MHz | PASS |
 | 1080 x 2340 display | PARTIAL: generic framebuffer reaches SpringBoard | PASS |
 | Adreno 650 GPU rendering | PASS, more than 2,100 `hakios-gl` frames in four minutes | PASS |
 | 30-minute UI stability | TODO | PASS |
@@ -35,12 +53,14 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 |---|---|---|
 | Battery percentage/voltage/temperature | PASS | PASS |
 | Signed current | PASS, `-97 mA` during the probe | PASS |
-| Positive current in HakiOS | TODO | PASS |
+| Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1` | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
 | 30-minute charging endurance | TODO | PASS with endpoint online |
 | Net charge under USB load | TODO | PARTIAL: load can exceed a 500 mA host port |
 | `battery_stop` safety guard | TODO | PASS |
-| Thermal stop | TODO | TODO |
+| Thermal frequency caps | PASS; big-core domain 17 -> 16 at 75.9 C, then recovered | PASS |
+| `thermal_stop` hand-back | PASS with forced `thermal_stop=30`; GPU stopped in order and loader returned without panic | TODO |
+| Automatic Android return after `thermal_stop` | TODO: host must issue `fastboot -s xnuloader reboot` | TODO |
 
 ## Audio, wireless, and sensors
 

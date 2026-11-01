@@ -73,11 +73,11 @@ CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
-CPULOAD	arg	cpuload	CPU, memory and boot	k	hakios.cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
+CPULOAD	arg	cpuload	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
 CPUMASK	arg	cpumask	Loader	l	loader.c	
-DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
-DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c	
-DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
+DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
+DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
+DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
@@ -136,7 +136,7 @@ GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c
 HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c,hakios.thyme_haptic.c	
 HAPTIC_GAIN	arg	haptic_gain	User space	k	hakios.thyme_haptic.c	
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
-MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c	
+MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
 METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp	only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 MIC_ADC	arg	mic_adc	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
 MIC_INPUT	arg	mic_input	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
@@ -275,7 +275,7 @@ VIRTIO_SOUND	arg	virtio_sound	Audio and battery	k	hakios.virtio_sound.c
 WIFI_AGAIN	arg	wifi_again	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	start the DSP although the one before it was shut down without having acknowledged a stop: THAT HAS RESET THE PHONE, twice of two
 WIFI_ASK	arg	wifi_ask	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	step 14 also asks that service a question (its capabilities) and writes down the beginning of an answer
 WIFI_BA	arg	wifi_ba	Wi-Fi	k	lx_80211.c	
-WIFI_CAL	arg	wifi_cal	Wi-Fi	k	hakios.wlfw.c	
+WIFI_CAL	arg	wifi_cal	Wi-Fi	k	hakios.thyme_wlfw.c,hakios.wlfw.c	
 WIFI_DIRTY	arg	wifi_dirty	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	
 WIFI_FILE	arg	wifi_file	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	with wifi=1: the network of fw/network is not joined at the start
 WIFI_FINE	arg	wifi_fine	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	such a step waits like that before every single write and call
@@ -288,12 +288,12 @@ WIFI_LOUD	arg	wifi_loud	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c
 WIFI_LX	arg	wifi_lx	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c,lx_bus.c	
 WIFI_LX_STEP	arg	wifi_lx_step	Wi-Fi	k	lx_base.c	
 WIFI_MAC	arg	wifi_mac	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	the radio's own address for the driver (hakios_wifi_radio_address() below; xl takes it from a file that is not in the repository)
-WIFI_MISSION	arg	wifi_mission	Wi-Fi	k	hakios.wlfw.c	
+WIFI_MISSION	arg	wifi_mission	Wi-Fi	k	hakios.thyme_wlfw.c,hakios.wlfw.c	
 WIFI_NEW	arg	wifi_new	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	steps K and later have not been seen to work (default: the last one)
 WIFI_PAUSE	arg	wifi_pause	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	
 WIFI_QUIET	arg	wifi_quiet	Wi-Fi	k	lx_bus.c	
 WIFI_RADIO_READ	arg	wifi_radio_read	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	step 16 does read (2: whatever mode the firmware is in)
-WIFI_READY	arg	wifi_ready	Wi-Fi	k	hakios.wlfw.c	
+WIFI_READY	arg	wifi_ready	Wi-Fi	k	hakios.thyme_wlfw.c,hakios.wlfw.c	
 WIFI_RETURN	arg	wifi_return	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	when all is over, go back to the loader instead of starting the system
 WIFI_SCAN	arg	wifi_scan	Wi-Fi	k	lx_bus.c	
 WIFI_SMMU	arg	wifi_smmu	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	before any step: read what the boot chain has set up in the SMMU for the radio's stream (smmu_look() below; nothing is written)

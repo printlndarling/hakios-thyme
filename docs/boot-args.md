@@ -101,7 +101,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `wifi_again` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_AGAIN` |  |
 | `wifi_ask` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_ASK` |  |
 | `wifi_ba` | K | `lx_80211.c` | `CONFIG_WIFI_BA` | implied by wifi=1 |
-| `wifi_cal` | K | `hakios.wlfw.c` | `CONFIG_WIFI_CAL` |  |
+| `wifi_cal` | K | `hakios.thyme_wlfw.c`, `hakios.wlfw.c` | `CONFIG_WIFI_CAL` |  |
 | `wifi_dirty` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_DIRTY` |  |
 | `wifi_file` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_FILE` |  |
 | `wifi_fine` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_FINE` |  |
@@ -114,12 +114,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `wifi_lx` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c`, `lx_bus.c` | `CONFIG_WIFI_LX` | implied by wifi=1 (as 2) |
 | `wifi_lx_step` | K | `lx_base.c` | `CONFIG_WIFI_LX_STEP` |  |
 | `wifi_mac` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_MAC` |  |
-| `wifi_mission` | K | `hakios.wlfw.c` | `CONFIG_WIFI_MISSION` |  |
+| `wifi_mission` | K | `hakios.thyme_wlfw.c`, `hakios.wlfw.c` | `CONFIG_WIFI_MISSION` |  |
 | `wifi_new` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_NEW` |  |
 | `wifi_pause` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_PAUSE` |  |
 | `wifi_quiet` | K | `lx_bus.c` | `CONFIG_WIFI_QUIET` |  |
 | `wifi_radio_read` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_RADIO_READ` |  |
-| `wifi_ready` | K | `hakios.wlfw.c` | `CONFIG_WIFI_READY` |  |
+| `wifi_ready` | K | `hakios.thyme_wlfw.c`, `hakios.wlfw.c` | `CONFIG_WIFI_READY` |  |
 | `wifi_return` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_RETURN` |  |
 | `wifi_scan` | K | `lx_bus.c` | `CONFIG_WIFI_SCAN` |  |
 | `wifi_smmu` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_SMMU` | implied by wifi=1 (as 2) |
@@ -333,10 +333,10 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `pmic_list` | K | `hakios.pmic.c` | `CONFIG_PMIC_LIST` |  |
 | `soc_smem_size` | K | `hakios.socinfo.c` | `CONFIG_SOC_SMEM_SIZE` |  |
 | `socinfo` | K | `hakios.socinfo.c` | `CONFIG_SOCINFO` |  |
-| `thermal` | K | `hakios.thermal.c` | `CONFIG_THERMAL` |  |
+| `thermal` | K | `hakios.thermal.c`, `hakios.thyme_thermal.c` | `CONFIG_THERMAL` |  |
 | `thermal_log` | K | `hakios.thermal.c` | `CONFIG_THERMAL_LOG` |  |
 | `thermal_poll` | K | `hakios.thermal.c` | `CONFIG_THERMAL_POLL` |  |
-| `thermal_stop` | K | `hakios.thermal.c` | `CONFIG_THERMAL_STOP` |  |
+| `thermal_stop` | K | `hakios.thermal.c`, `hakios.thyme_thermal.c` | `CONFIG_THERMAL_STOP` |  |
 | `thermal_tm0` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM0` |  |
 | `thermal_tm1` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM1` |  |
 
@@ -353,16 +353,16 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `applog` | K | `(patch)` | `CONFIG_APPLOG` |  |
 | `applog_name` | K | `(patch)` | `CONFIG_APPLOG_NAME` |  |
 | `bootcpu` | KL | `loader.c`, `loader_return.c` | `CONFIG_BOOTCPU` |  |
-| `cpufreq` | K | `hakios.cpufreq.c` | `CONFIG_CPUFREQ` |  |
-| `cpuload` | K | `hakios.cpufreq.c` | `CONFIG_CPULOAD` |  |
-| `ddr` | K | `hakios.cpufreq.c` | `CONFIG_DDR` |  |
-| `ddr_rest` | K | `hakios.cpufreq.c` | `CONFIG_DDR_REST` |  |
-| `ddr_vote` | K | `hakios.cpufreq.c` | `CONFIG_DDR_VOTE` |  |
+| `cpufreq` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPUFREQ` |  |
+| `cpuload` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPULOAD` |  |
+| `ddr` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR` |  |
+| `ddr_rest` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_REST` |  |
+| `ddr_vote` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_VOTE` |  |
 | `epoch` | K | `GenericARMPE.cpp` |  | xl (the host's clock) |
 | `hv_wdt_pet` | K | `loader_return.c` |  | the loader, when it has armed the watchdog (the runner also passes it) |
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
 | `machine_name` | K | `GenericARMPE.cpp` | `CONFIG_MACHINE_NAME` |  |
-| `membench` | K | `hakios.cpufreq.c` | `CONFIG_MEMBENCH` |  |
+| `membench` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_MEMBENCH` |  |
 | `rd` | KL | `(patch)`, `loader.c` | `CONFIG_RD` |  |
 | `regtrace` | K | `(patch)` | `CONFIG_REGTRACE` |  |
 | `return_cpu` | K | `loader_return.c` | `CONFIG_RETURN_CPU` |  |

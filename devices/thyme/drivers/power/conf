@@ -1,0 +1,8 @@
+# drivers/power/conf: THYME board addresses, CPU clocks and thermal policy.
+
+driver THYME_POWER
+	file    bsd/dev/hakios.thyme_board.c
+	file    bsd/dev/hakios.thyme_cpufreq.c
+	file    bsd/dev/hakios.thyme_thermal.c
+	help    THYME board address overrides, EPSS/RPMh CPU frequency control and
+	help    TSENS thermal governors (cpufreq=1, thermal=1).

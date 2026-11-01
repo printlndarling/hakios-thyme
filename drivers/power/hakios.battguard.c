@@ -13,9 +13,8 @@
  * An unknown charge (-1), no battery, or a battery that is actually taking current is never a reason to stop. It does not read
  * hardware itself.
  *
- * Status (what has and has not been seen): COMPILED ONLY. It was written while the phone was off USB, so it has not run on one;
- * whether the numbers it reads are filled in when a kernel runs without adsp=1 is not known (the battery driver's header says
- * where they come from; the first run that sets battery_stop will print its "battguard:" line and say). Not run in QEMU.
+ * Status: built and exercised on THYME. It reads the loader's battery state directly and has reported effective charging from
+ * positive current; a controlled low-battery stop still needs a dedicated hardware run. Not run in QEMU.
  *
  * Boot-args:
  *   battery_stop=<percent>   stop at this charge or below (0: never, the default; 1 to 99)

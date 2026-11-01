@@ -135,6 +135,12 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 |---|---|---|---|---|---|---|
 | **`HAKIOS_THYME_INPUT`**<br>ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and BUTTONS on THYME. | `hakios.thyme_touch.c`<br>`hakios.thyme_touch_boost.c`<br>`hakios.thyme_rpmh.c`<br>`hakios.thyme_keys.c` |  | `buttons=`, `touchscreen=`, `umi_keys=`, `umi_touch=`, `umifts_scan=` | built | built | built | |
 
+## power (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_POWER`**<br>THYME board address overrides, EPSS/RPMh CPU frequency control and TSENS thermal governors (cpufreq=1, thermal=1). | `hakios.thyme_board.c`<br>`hakios.thyme_cpufreq.c`<br>`hakios.thyme_thermal.c` |  | `cpufreq=`, `cpuload=`, `ddr=`, `ddr_rest=`, `ddr_vote=`, `membench=`, `thermal=`, `thermal_stop=` | built | built | built | |
+
 ## wifi (devices/thyme)
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |

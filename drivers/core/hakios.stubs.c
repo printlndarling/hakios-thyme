@@ -73,7 +73,7 @@ void hakios_battery_guard_state(int *soc, int *present, int *charger, int *charg
 void hakios_battery_report(__unused const struct hakios_battery_state *state) {}
 #endif
 
-#ifndef HAKIOS_CPUFREQ
+#if !defined(HAKIOS_CPUFREQ) && !defined(HAKIOS_THYME_POWER)
 void hakios_cpufreq_init(void) {}
 void hakios_ddr_quiesce(void) {}
 #endif

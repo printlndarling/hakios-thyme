@@ -18,7 +18,7 @@
 | display | works | framebuffer and Adreno path reach SpringBoard on official main |
 | touch | works | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38 |
 | buttons | works | PM8150 PON + GPIO6; power and both volume keys verified |
-| cpu | partly | 7 CPUs and cpufreq verified in legacy tree; official-main port pending |
+| cpu | works | 7 CPUs; three EPSS domains raised to 1804/2419/3187 MHz on official main |
 | gpu | works | Adreno 650 / zap 0x8c41a000, hardware-rendered SpringBoard |
 | battery | works | percentage, signed current and temperature from the loader cache |
 | storage | no | read-only UFS survey not run in the official-main port |
@@ -30,7 +30,7 @@
 | bluetooth | partly | firmware, HCI reset and iOS H4 work; pairing test pending |
 | cellular | no | modem and telephony path not implemented |
 | network | works | en0 DHCP and TCP traffic verified |
-| thermal | partly | thermal driver exists in legacy tree; soak test pending |
+| thermal | works | 27 TSENS inputs, live throttling, and orderly thermal_stop hand-back verified; soak pending |
 | usb | partly | xnuloader fastboot endpoint works; one endpoint loss observed |
 | sensors | no | ALS, accelerometer and proximity are not usable |
 

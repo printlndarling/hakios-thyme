@@ -75,10 +75,15 @@ struct hakios_battery_state {
 void hakios_battery_report(const struct hakios_battery_state *state);
 void hakios_net_init(void);            /* en0, if there is something to carry its frames: sys/hakios.net.h */
 void hakios_cpufreq_init(void);        /* boot-arg cpufreq=1: the phone's processor at full speed */
+int hakios_cpufreq_top(uint32_t domain);
+uint32_t hakios_cpufreq_khz(uint32_t domain, int row);
+void hakios_cpufreq_cap(uint32_t domain, int row);
+void hakios_thermal_init(void);
 void hakios_adreno_init(void);         /* boot-arg adreno=N: the first N steps of waking the phone's GPU */
 void hakios_adreno_quiesce(void);      /* on the way back to the loader: the GPU block stopped, out of our memory */
 void hakios_adreno_stop(void);         /* before that, where the ending is no panic's: the GPU given back in order */
 void hakios_adreno_minute(void);       /* once a minute: a line about how warm the GPU is, if it is in use */
+void hakios_adsp_stop(void);           /* where a run ends in order: the audio DSP, if it was started, shut down */
 void hakios_wifi_init(void);           /* boot-arg wifi=1: the phone's Wi-Fi; wifi_step=N: the first N steps of it */
 void hakios_adsp_init(void);           /* boot-arg adsp=1: the phone's audio DSP started and linked; adsp_step=N: the first N steps */
 void hakios_mpss_init(void);           /* boot-arg modem=1: the phone's modem started and linked; modem_step=N: the first N steps */
