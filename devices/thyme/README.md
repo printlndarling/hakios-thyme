@@ -47,8 +47,13 @@ The PM8150 key driver now reports power and volume press/release events. The
 THYME Adreno 650 driver is also running on official main: a four-minute run
 produced more than 2,100 hardware-rendered `hakios-gl` frames without softpipe
 fallback. The THYME audio stack now brings up LPASS/ADSP, APR, MI2S and both
-CS35L41 amplifiers with protection firmware; audible speaker and microphone
-checks remain. The AW8697 motor driver now follows Xiaomi's stock activation
+CS35L41 amplifiers with protection firmware. The official loader also boots on
+the phone, and the microphone probe now enumerates the WCD938x on SoundWire,
+reads its chip/SCP IDs and identifies the Bolero 1.2 profile. Microphone
+capture is not yet a PASS: both candidate input paths reach ASM and return full
+frames, but the samples are still exact silence. See
+`docs/official-mic-path.md`. The AW8697 motor driver now follows Xiaomi's
+stock activation
 sequence, loads and verifies Android's waveforms, and plays waveform 1 back to
 standby in 38 ms without a fatal fault; physical feel remains to be confirmed.
 Bluetooth is now live on official main: QCA6390 firmware
@@ -128,9 +133,11 @@ The THYME loader uses Project Silicium addresses `FD_BASE=0x9fc00000`,
 `FD_SIZE=0x300000` and `PAYLOAD_BASE=0xf0000000`. See
 `docs/official-loader-thyme.md`.
 
-The official loader now builds for THYME, but its RAM-boot image still needs a
-successful physical boot. Keep the known-good legacy image available until
-that hardware check passes.
+The official loader now builds and boots on THYME. The RAM-boot image used by
+the verified microphone runs has SHA-256
+`f46783dc8df5973bc260f1853770a26466062a05c65253355b090584519afcf1`.
+Keep the legacy image as a recovery reference, but it is no longer the only
+hardware-proven loader.
 
 ## Repository layout
 

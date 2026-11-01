@@ -30,7 +30,7 @@ No item moves to `PASS` from source inspection alone.
 - [x] Official-main kernel builds.
 - [x] Official-main kernel reaches launchd and SpringBoard on the phone.
 - [x] Official-main kernel returns to Android safely.
-- [ ] UEFI and loader are rebuilt from official infrastructure.
+- [x] Official loader and `xnu-usb.img` boot on the phone.
 
 ## Boot and interaction
 
@@ -69,7 +69,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | ADSP firmware | PASS on official main; APR services up | port and validate official ADSP path |
 | Speaker playback | PARTIAL: MI2S runs, both CS35L41 amps and protection DSP verified; audible output pending | CS35L41 path existed from the legacy tree |
-| Microphone capture | PARTIAL: path linked to `/dev/hakios-mic`; physical capture pending | capture and playback test |
+| Microphone capture | PARTIAL: WCD938x SoundWire enumeration, chip/SCP IDs and Bolero 1.2 detection PASS; ADC1/DEC1 and DMIC1/DEC2 candidate paths both reach ASM but return exact silence | determine the real THYME mixer path and DMIC/mic-bias power, then require a nonzero physical sample before PASS |
 | Haptics | PARTIAL: stock activation sequence and waveform 1 complete; BSTERRI is the vendor-ignored boost latch | confirm physical vibration, then test iOS taps and long vibrations |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
 | QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |

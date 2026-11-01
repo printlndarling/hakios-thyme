@@ -73,6 +73,14 @@ rec_sound=8 rec_sound_mic=1 mic_tap=1 umi_haptic=5
 This is intended to record the speaker tone and the motor through the
 microphone. Hardware verification is pending.
 
+## Microphone follow-up (2026-11-02)
+
+The official loader and the microphone probe were brought up further on the
+physical phone. WCD938x enumeration and ID reads now pass, but no nonzero
+microphone sample has been observed yet. The exact hardware evidence, the two
+candidate THYME mixer paths and the remaining checks are recorded in
+`official-mic-path.md`.
+
 ## Remaining physical checks
 
 - Play a known system sound or music and confirm audible stereo output.
