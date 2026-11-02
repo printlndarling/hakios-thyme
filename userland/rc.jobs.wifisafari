@@ -1,0 +1,7 @@
+# User-visible network gate: join, DHCP, then let Safari load an HTTPS page.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 30
+/redwood/bin/battery_test open https://example.com
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open https://www.apple.com/library/test/success.html
+/redwood/bin/rwtouch wait 30
