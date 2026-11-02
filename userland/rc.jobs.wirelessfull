@@ -1,0 +1,18 @@
+# Complete wireless gate: Wi-Fi join/DHCP, Safari, power cycle, rejoin and DHCP,
+# Safari again, then Bluetooth discovery. All in one cold RAM boot.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/battery_test open https://www.apple.com/library/test/success.html
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=WIFI
+/redwood/bin/rwtouch wait 20
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 20
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store
+/redwood/bin/battery_test open https://example.com
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 35
