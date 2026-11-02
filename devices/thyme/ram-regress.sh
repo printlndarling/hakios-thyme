@@ -21,6 +21,7 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 SCENARIO=${1:-out/thyme-boot/root-wirelessregress.apfs}
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+[ -z "${RAM_EXTRA_ARGS:-}" ] || ARGS="$ARGS $RAM_EXTRA_ARGS"
 
 [ -f "$SCENARIO" ] || { echo "ram-regress: no scenario image: $SCENARIO" >&2; exit 1; }
 [ -f "$SYSTEM_IMAGE" ] || { echo "ram-regress: no system image: $SYSTEM_IMAGE" >&2; exit 1; }

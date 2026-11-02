@@ -1,0 +1,11 @@
+# Network regression after the kernel joins fw/network with wifi_join=1.
+# Wi-Fi association, DHCP, DNS, TCP, HTTPS, scan, then Bluetooth discovery.
+/redwood/bin/net_test wait 20
+/redwood/bin/net_test show dhcp en0 waitaddr en0 40 store
+/redwood/bin/net_test resolve example.com tcp example.com 80 reach example.com
+/redwood/bin/net_test fetch https://example.com/
+/redwood/bin/battery_test open prefs:root=WIFI
+/redwood/bin/rwtouch wait 20
+/redwood/bin/net_test scan
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 35
