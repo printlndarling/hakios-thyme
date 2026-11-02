@@ -68,3 +68,28 @@ Wi-Fi power-cycle gate:
 This clean-main run proves that the committed Wi-Fi path still works after a
 fresh boot. If a later run fails, compare the source commit, worktree state,
 artifact hashes, boot arguments, and loader log before changing driver code.
+
+## Why an earlier pass can disappear
+
+A passing subsystem is only comparable when the complete input set is the same.
+Two later 2026-11-02 runs showed why:
+
+- `logs/204958-run.log` used the full wireless command line and passed Wi-Fi
+  discovery, Wi-Fi off/on recovery, and Bluetooth LE report delivery in one
+  boot.
+- `logs/212033-run.log` used the Bluetooth-only command line
+  `... bt=1 touch_lat=1`: it did not contain `wifi=1`. The Wi-Fi firmware files
+  were present in the scene image, but the kernel never enumerated or started
+  the QCA6390. This was an incomplete test invocation, not a source
+  regression.
+
+Use `devices/thyme/ram-regress.sh` for RAM regressions. It refuses a dirty tree
+unless `ALLOW_DIRTY=1` is explicit, always uses the full
+`devices/thyme/ram.args`, selects the THYME ADB serial, and requires the system
+and scenario images by path. `xl` now records twelve-digit SHA-256 identities
+for the kernel, scene image, and loader as `kernel_sha=`, `image_sha=`, and
+`loader_sha=` in the boot command line, so a later log identifies the bytes the
+phone actually received rather than only the current Git checkout.
+
+When several ADB devices are attached, set `XL_ADB_SERIAL` or use
+`ram-regress.sh`; otherwise `xl` correctly fails closed instead of choosing one.

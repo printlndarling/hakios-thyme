@@ -1,0 +1,6 @@
+# Bluetooth-only pairing reproduction against a discovered BLE Accessory.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 35
+/redwood/bin/rwtouch tap 0.5 0.35
+/redwood/bin/rwtouch wait 60

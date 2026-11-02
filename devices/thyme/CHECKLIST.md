@@ -53,11 +53,13 @@ display can all work together; it does not prove stable discovery on every boot.
 
 Bluetooth firmware, HCI, the iOS H4 endpoint and LE reception are verified
 independently. The controller reported seven to eight LE advertisers both with
-Wi-Fi off and with Wi-Fi in mission mode. The remaining failure is above that
-path: the stock Bluetooth Settings page stays in its DEVICES spinner and does
-not list or pair those advertisers, including on a Wi-Fi-off boot. This is an
-iOS `bluetoothd` integration issue, not evidence that QCA6390 coexistence
-suppresses every HCI report.
+Wi-Fi off and with Wi-Fi in mission mode. The full regression run
+`logs/204958-run.log` then displayed an `Accessory` in stock Bluetooth Settings
+while Wi-Fi remained usable. The pair attempt in `logs/212033-run.log` was
+accepted by the controller as LE Create Connection (`0x200d`, command status
+0), but no LE Connection Complete event followed before iOS timed out. The
+failure is therefore in LE connection establishment or the peer, not H4 event
+delivery, Wi-Fi coexistence, or missing discovered devices.
 
 A clean-main rerun on 2026-11-02 (`0f28e9c`, clean worktree) again brought Wi-Fi
 up, returned three APs through `net_test`, and displayed real networks in stock
@@ -87,7 +89,7 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PARTIAL; Settings/pairing broken | Firmware, HCI reset, H4 and LE reception PASS, but stock Settings does not list or pair reported advertisers even with Wi-Fi off (`logs/194622-run.log`). Pairing/reconnect remain unverified |
+| Bluetooth | PARTIAL; pairing broken | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`); pairing FAIL because accepted LE Create Connection `0x200d` produced no Connection Complete before timeout (`logs/212033-run.log`). Reconnect remains unverified |
 | Wi-Fi | PARTIAL; clean-main scan PASS | Clean main scanned three APs and displayed networks in stock Settings (`logs/201710-run.log`). Power off/on recovery, association, DHCP and boot-to-boot stability still require the pinned baseline |
 | Wi-Fi power off/on recovery | PASS | On the pinned clean main, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio started in 0.1 s); the post-toggle scan returned networks and Settings displayed them (`logs/203537-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
@@ -161,7 +163,7 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
 | Wi-Fi Settings UI | PARTIAL | Clean main displays real nearby networks. Wi-Fi power off/on recovery and joining still need validation on the pinned baseline |
-| Bluetooth Settings/pairing UI | FAIL | The controller reports LE advertisers, but the Settings page remains empty and no peer has been paired/reconnected from iOS |
+| Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed an `Accessory`; selecting it timed out in LE connection establishment, so no peer has paired or reconnected |
 | Notifications, audio routing and background apps | TODO | requires a sustained interactive session with representative applications |
 | Lock/unlock and passcode | PARTIAL | lock-screen navigation works through injected input; passcode, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |

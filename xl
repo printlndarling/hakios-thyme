@@ -36,6 +36,8 @@
 #               and its screen stays on: a phone left in the loader overnight is a flat one by morning)
 #   XL_FIRMWARE=u-boot|silicium   what the phone's bootloader starts the loader with (default: Silicium's UEFI when its
 #               image is built, else HakiOS's U-Boot: docs/u-boot.md); either way from RAM, nothing is flashed
+#   XL_ADB_SERIAL=serial   the Android device to reboot when more than one is attached. Fastboot is
+#               left alone because its loader has its own serial.
 #   XL_SB_DELAY seconds SpringBoard waits before it starts (default 8; see userland/src/inject_sb.c)
 #               Among XL_CMDLINE, for the phone: bootcpu=7 runs the kernel on the biggest core instead of
 #               the small one the firmware starts on (the loader then watches from the first core, and a
@@ -70,7 +72,13 @@ PHONE=${XDG_RUNTIME_DIR:-/tmp}/darwin-hakios-phone
 # adb starts a server of its own the first time, and the server inherits every open descriptor: started during a run it
 # kept the run's lock (descriptor 8, below) for as long as it lived, and every later command said a run was in progress
 # (27 October). So adb never gets that descriptor.
-adb() { command adb "$@" 8>&-; }
+adb() {
+	if [ -n "${XL_ADB_SERIAL:-}" ]; then
+		command adb -s "$XL_ADB_SERIAL" "$@" 8>&-
+	else
+		command adb "$@" 8>&-
+	fi
+}
 
 # one fastboot at a time (a run in one terminal, "xl screenshot" in another): each takes the lock for itself
 fb() { flock -w 90 $PHONE.lock timeout "${FB_TIMEOUT:-10}" fastboot "$@" 2>&1; }
@@ -81,13 +89,17 @@ is_loader() { in_fastboot && fb getvar product | grep -q 'product: xnuloader'; }
 state() {
 	if is_loader; then echo loader
 	elif in_fastboot; then echo fastboot
-	elif [ "$(adb get-state 2>/dev/null)" = device ]; then echo android
+	elif [ "$(adb get-state 2>/dev/null | tr -d '\r\n')" = device ]; then echo android
 	else echo absent; fi
 }
 wait_for() { # wait_for <state> <seconds>
 	local i
 	for ((i = 0; i < $2; i += 2)); do [ "$(state)" = "$1" ] && return 0; sleep 2; done
 	return 1
+}
+
+short_hash() { # short_hash <file>: twelve hex digits identify an uploaded input in the boot log
+	sha256sum "$1" | cut -c1-12
 }
 
 # After a hang the watchdog resets the phone, and what comes up is not always Android: it can stop in its bootloader (it
@@ -163,7 +175,7 @@ enter() {
 
 fetch_log() { # fetch_log <file>
 	rm -f "$1"
-	FB_TIMEOUT=20 fb get_staged "$1" >/dev/null
+	FB_TIMEOUT=60 fb get_staged "$1" >/dev/null
 	[ -s "$1" ] && tr -d '\0' < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 
@@ -212,6 +224,14 @@ run() { # run <oem command> <label>
 		case " $args " in
 		*" wifi="*|*" wifi_step="*) [ -s fw-wifi/mac ] && args="$args wifi_mac=$(tr -d ' \n\r' < fw-wifi/mac)" ;;
 		esac
+		local kernel_sha image_sha loader_sha
+		kernel_sha=$(short_hash "$K")
+		loader_sha=$(short_hash "$L")
+		if [ -n "$rd" ]; then image_sha=$(short_hash "$rd"); else image_sha=none; fi
+		echo "xl: inputs: kernel=$kernel_sha image=$image_sha loader=$loader_sha"
+		# Put the binary identities in the boot log too. The git revision alone says which worktree
+		# asked for the run, not which kernel or ramdisk the loader actually received.
+		args="$args kernel_sha=$kernel_sha image_sha=$image_sha loader_sha=$loader_sha"
 		xnuloader/mkpayload.py -o run-payload.bin kernel=$K ${rd:+ramdisk=$rd} --cmdline "loader_return_after=${XL_SECS:-8} epoch=$(date +%s) sb_delay=${XL_SB_DELAY:-8} $args" >/dev/null || return 1
 		FB_TIMEOUT=30 fb stage run-payload.bin | grep -q OKAY || { echo "xl: upload failed"; return 1; }
 	fi
@@ -297,7 +317,8 @@ ramdisk() { # ramdisk [<file>|none]
 	fi
 	set -- "${1:-userland/system.apfs}"
 	[ -f "$1" ] || { echo "xl: $1 not found"; return 1; }
-	local t0=$(date +%s) size=$(stat -c %s "$1")
+	local t0=$(date +%s) size=$(stat -c %s "$1") sha
+	sha=$(sha256sum "$1" | cut -d' ' -f1)
 	fb oem ramdisk | grep -q OKAY || { echo "xl: the loader refused (no memory window?)"; return 1; }
 	FB_TIMEOUT=1800 fb stage "$1" | grep -q OKAY || { echo "xl: upload failed"; return 1; }
 	local dt=$(( $(date +%s) - t0 )); [ $dt -lt 1 ] && dt=1
@@ -310,7 +331,7 @@ ramdisk() { # ramdisk [<file>|none]
 	# ... size 400000" against "size 97308000". The size is recorded for exactly that reason: a
 	# foreign image of the same kind is harmless, a foreign one of another kind kills the run and
 	# says nothing.
-	printf '%s\t%s\t%s\n' "$(pwd)" "$1" "$size" > $PHONE.ramdisk 2>/dev/null
+	printf '%s\t%s\t%s\t%s\n' "$(pwd)" "$1" "$size" "$sha" > $PHONE.ramdisk 2>/dev/null
 }
 
 screenshot() { # screenshot [file.png]
