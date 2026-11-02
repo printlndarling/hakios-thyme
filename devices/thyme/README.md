@@ -92,6 +92,7 @@ See also `docs/official-brightness-probe.md`.
 See also `docs/official-cpu-thermal-probe.md`.
 See also `docs/official-audio-probe.md`.
 See also `docs/official-haptic-probe.md`.
+See also `docs/official-ui-soak.md`.
 See also `docs/official-bt-probe.md`.
 See also `docs/official-wifi-probe.md`.
 

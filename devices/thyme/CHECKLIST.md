@@ -11,8 +11,8 @@ No item moves to `PASS` from source inspection alone.
 
 | Item | Status | Evidence / next action |
 |---|---|---|
-| Charging while iOS runs | PARTIAL | Positive current observed at 1239 mA and 106-140 mA with `charging=1`; 30-minute charging and reconnect endurance still required |
-| Battery percentage display | PASS | Loader and iOS report percentage, voltage, current and temperature |
+| Charging while iOS runs | PASS | Full 30-minute SpringBoard run stayed connected: `charger=1 charging=1`, +129..151 mA, 349 battery reads with 0 failures |
+| Battery percentage display | PARTIAL | Kernel telemetry is valid, but the 30-minute screenshot showed 99% while kernel telemetry ended at 97%; refresh/path audit required |
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
@@ -42,7 +42,7 @@ No item moves to `PASS` from source inspection alone.
 | 1080 x 2340 display | PARTIAL: generic framebuffer reaches SpringBoard | PASS |
 | Brightness adjustment | PARTIAL: iOS hooks and DCS `0x51` command completion verified | PASS in the legacy display probe |
 | Adreno 650 GPU rendering | PASS, more than 2,100 `hakios-gl` frames in four minutes | PASS |
-| 30-minute UI stability | TODO | PASS |
+| 30-minute UI stability | PASS; continuous SpringBoard rendering, stable memory and orderly return (`docs/official-ui-soak.md`) | PASS |
 | FTS521 touch polling | PASS, 415 events in the GPU run / `errors=0` | PASS |
 | Tap, drag, gestures | PASS, backboardd touching/none and gesture handling | PASS |
 | Power key | PASS, pressed/released captured | PASS |
@@ -53,12 +53,12 @@ No item moves to `PASS` from source inspection alone.
 
 | Check | Official main | Legacy evidence |
 |---|---|---|
-| Battery percentage/voltage/temperature | PASS | PASS |
+| Battery percentage/voltage/temperature | PASS for telemetry; iOS status bar refresh mismatch remains | PASS |
 | Signed current | PASS, `-97 mA` during the probe | PASS |
 | Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1` | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
-| 30-minute charging endurance | TODO | PASS with endpoint online |
-| Net charge under USB load | TODO | PARTIAL: load can exceed a 500 mA host port |
+| 30-minute charging endurance | PASS; endpoint online throughout the UI run, 0 failed reads | PASS with endpoint online |
+| Net charge under USB load | PARTIAL: SOC stayed 97% over the 30-minute UI run at +129..151 mA; longer net-charge test still required | PARTIAL: load can exceed a 500 mA host port |
 | `battery_stop` safety guard | TODO | PASS |
 | Thermal frequency caps | PASS; big-core domain 17 -> 16 at 75.9 C, then recovered | PASS |
 | `thermal_stop` hand-back | PASS with forced `thermal_stop=30`; GPU stopped in order and loader returned without panic | TODO |
