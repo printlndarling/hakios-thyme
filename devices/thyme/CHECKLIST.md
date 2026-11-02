@@ -43,9 +43,9 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `3b096da1` on `main` was cold-booted from RAM with the pinned
+The tested source revision `8a55dec6` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`a443cbbdb18a`), boot image (`2d662c991a5a`), loader
+and the kernel (`c594cafc9ac1`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -59,12 +59,12 @@ One boot completed:
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
   or enqueue errors.
 
-Evidence: `logs/052011-run.log` (SHA-256
-`82d12f8aab1242ee8474daac55ebf0f72e68a8eda483cf1e2d1c61d146a0d36d`),
-`logs/wirelessregress-wifi.png` (SHA-256
-`2710015bdf8c9d2b20b4c3055cac32bff068f4366fd8315f352d04ba1da8ae44`) and
-`logs/wirelessregress-bt.png` (SHA-256
-`a624afc80cf694bb82d0e5ff5674ebeda94041e232e170173e089a18baca7331`).
+Evidence: `logs/062313-run.log` (SHA-256
+`d0086465cdc259e8a7d30d0aa5c0d7aa63f8c7086724b3ae8bfe51e6933a3acf`),
+`logs/061901-wifi.png` (SHA-256
+`674c7efc33dd6479ab15bf53487abfdaa3127cfe5162db2ee5c60836d40feb19`) and
+`logs/061901-bt.png` (SHA-256
+`492914edf897d92b5242e9978244ac9cef6bfdfc00386b033445826bc3e7b079`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -73,6 +73,31 @@ default and refuses any kernel, boot image, UEFI, loader, system image,
 scenario or boot-argument hash that differs from
 `devices/thyme/ram-baseline.conf`. This prevents a supposedly fixed feature
 from being tested with stale local artifacts or a Bluetooth-only scenario.
+
+### Bluetooth pairing target diagnosis
+
+The HCI trace now records the address in the LE white-list add/remove commands.
+This closes the ambiguity in the earlier pairing failures:
+
+```text
+LE whitelist add address-type=0
+LE whitelist add 0 address=<anonymous advertiser>
+LE enhanced connection complete status=0 handle=1
+LE enhanced connection peer 0 address=<same anonymous advertiser>
+disconnection complete status=0 handle=1 reason=0x3e
+```
+
+A Windows Intel Bluetooth controller was then used as a known connectable BLE
+peripheral at approximately `-40 dBm`. HakiOS still selected the anonymous
+advertiser at approximately `-98 dBm`; the Windows peripheral was not placed in
+the white list. The failure is therefore in iOS's choice of the single
+unnamed `Accessory` row, not in HCI event delivery, queueing or Wi-Fi/Bluetooth
+coexistence.
+
+The Windows GATT provider does not publish a local name through this path, so
+iOS collapses nearby unnamed connectable advertisers into one `Accessory`
+entry. A named, known BLE peripheral remains required for a valid end-to-end
+pairing result.
 
 ## Wireless startup and coexistence (2026-11-02)
 
