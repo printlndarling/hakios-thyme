@@ -142,6 +142,26 @@ disconnection complete reason=0x3e
 The link-layer connection is established, then the peer or its connection
 setup times out before remote feature exchange. Reason `0x3e` is
 `Connection Failed to be Established`. This is not an H4 queue, event-mask or
-Connection Complete delivery failure. Pairing must next be repeated with a
-known-good connectable BLE peripheral; the anonymous `Accessory` used here is
-not suitable evidence that the HakiOS host stack cannot pair.
+Connection Complete delivery failure.
+
+The follow-up run `logs/002232-run.log`, SHA-256
+`fcc8887b272125a70ad24879933ed1af9397c240841dae97461c1fb4656e2606`,
+identifies the peer's advertising report before the attempt:
+
+```text
+LE advertising report type=0 (connectable undirected)
+RSSI=-99..-105 dBm
+LE Enhanced Connection Complete status=0
+disconnection complete reason=0x3e
+```
+
+The advertiser is connectable, but it is at the edge of usable range. The
+controller establishes the link and then loses it before remote feature
+exchange. Pairing must next be repeated with a known-good BLE peripheral close
+to the phone; this anonymous, approximately -100 dBm peer is not suitable
+evidence that the HakiOS host stack cannot pair.
+
+| Pairing evidence | SHA-256 |
+|---|---|
+| `logs/btpair-le-progress.png` | `40ee458fb5207a954c447489ffa5cfb28f1907840df75d8e338bdb602f432fd2` |
+| `logs/btpair-le-result.png` | `0e263981b3ae2db81e0dfd381ac47d894c3bb9c289f1e0a59388d6052d7dd990` |
