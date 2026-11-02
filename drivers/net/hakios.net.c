@@ -125,7 +125,7 @@ trace_frame(const char *way, const uint8_t *frame, size_t length, size_t whole)
 	uint16_t type;
 	bool ports;
 
-	if (length < ETHER_HDR_LEN + 28 || (said >= net_trace && (!net_names || names >= NAMES_MAX))) {
+	if (length < ETHER_HDR_LEN + 28 || (said >= net_trace && (!net_names || names >= NAMES_MAX) && !net_dhcp)) {
 		return;
 	}
 	type = (uint16_t)(frame[12] << 8 | frame[13]);
@@ -151,11 +151,17 @@ trace_frame(const char *way, const uint8_t *frame, size_t length, size_t whole)
 			}
 			name[n ? n - 1 : 0] = 0;
 			names++;
-			printf("net: asks for the name %s (type %u)\n", name, label + 2 < end ? label[1] << 8 | label[2] : 0);
+			printf("net: asks %u.%u.%u.%u for the name %s (type %u)\n", ip[16], ip[17], ip[18], ip[19], name,
+			    label + 2 < end ? label[1] << 8 | label[2] : 0);
 		} else if (ip[9] == IPPROTO_TCP && l4 + 14 <= end && (l4[13] & 0x12) == 0x02) {
 			names++;
 			printf("net: connects to %u.%u.%u.%u port %u\n", ip[16], ip[17], ip[18], ip[19], l4[2] << 8 | l4[3]);
 		}
+	}
+	if (net_names && names < NAMES_MAX && ports && way[0] == 'i' && ip[9] == IPPROTO_UDP &&
+	    (l4[0] << 8 | l4[1]) == 53) {
+		names++;
+		printf("net: DNS answer from %u.%u.%u.%u (%zu bytes)\n", ip[12], ip[13], ip[14], ip[15], length);
 	}
 	if (said >= net_trace) {
 		return;
