@@ -4,6 +4,43 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## Current-build regression (2026-11-02)
+
+The official-loader RAM run `logs/143146-run-cpoem.log` reached SpringBoard
+but reproduced a device-wide regression:
+
+```text
+UMI FTS: board mismatch
+display: brightness board mismatch
+UMI keys: board mismatch; driver not started
+```
+
+The loader omitted `/chosen/hakios-board`, so every THYME driver that rejects
+another board (touch, keys, brightness/thermal and the QCA6390 Wi-Fi path)
+remained disabled. The run also had no charging bolt and no usable Wi-Fi or
+Bluetooth pairing. Bluetooth firmware and HCI reset were still visible in the
+kernel log, so that observation does not invalidate the earlier low-level
+Bluetooth evidence.
+
+The fix in commit `66500d7` publishes the selected platform as
+`/chosen/hakios-board`. A SpringBoard battery-state-refresh change is in the
+same commit. Neither fix is a hardware `PASS` until a new RAM run proves the
+drivers start and the user-visible charging state updates.
+
+Tested artifacts:
+
+| Artifact | SHA-256 |
+|---|---|
+| `devices/thyme/prebuilt/xnu-usb.img` | `a559fa38ab4e684459dd9f4d49066486da5ce734038ae723b17c9f632d2d93be` |
+| `hakios-kernel` | `10f6b1c18a5fe2e45b5239326b1b681ca41ac9406f17e45193bcc736ad689331` |
+| `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
+
+Post-fix RAM test image:
+
+| Artifact | SHA-256 |
+|---|---|
+| `out/thyme-boot/root-battery-ui-2.apfs` | `11a23b1b9db35d58a3d732e941b7b5f3a69162624511a23ccb30623cf061df58` |
+
 ## User-priority hardware gate
 
 These are the minimum user-facing hardware checks for the current THYME port.
@@ -12,15 +49,15 @@ No item moves to `PASS` from source inspection alone.
 | Item | Status | Evidence / next action |
 |---|---|---|
 | Charging while iOS runs | PASS | Full 30-minute SpringBoard run stayed connected: `charger=1 charging=1`, +129..151 mA, 349 battery reads with 0 failures |
-| Battery percentage display | PARTIAL | Kernel telemetry is valid, but the 30-minute screenshot showed 99% while kernel telemetry ended at 97%; refresh/path audit required |
+| Battery percentage display | FAIL, fixed source awaits RAM retest | Kernel telemetry is valid, but the current run had no `IOPMPowerSource`; commit `66500d7` feeds the status-bar aggregator from the kernel's battery sysctls and requests a refresh every five seconds |
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and iOS H4 work. A physical LE scan found 9 unique advertisers (`-72..-96 dBm`, one named `DL02V1`) and classic inquiry completed cleanly; pairing and reconnect are pending |
-| Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
+| Bluetooth | PARTIAL; current UI flow failed | Earlier runs prove QCA6390 firmware, HCI reset, MAC publication, iOS H4, a 9-advertiser LE scan and classic inquiry. The current RAM run had no usable pairing UI; board gating fix needs a retest before pairing/reconnect work continues |
+| Wi-Fi | PARTIAL; current RAM boot failed | Earlier runs prove QCA6390 scan, WPA2 association, DHCP and en0 TCP traffic. The current run disabled the THYME QCA6390 path through the missing board property, and `wifi=1` fell through to the legacy WPSS request |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
-| Touch | PASS | FTS521 DOWN/MOVE/UP events reach backboardd and SpringBoard with `errors=0` |
+| Touch | FAIL, fixed source awaits RAM retest | The current run logged `UMI FTS: board mismatch`; earlier builds produced FTS521 DOWN/MOVE/UP events with `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
 
 ## Official-main migration gate

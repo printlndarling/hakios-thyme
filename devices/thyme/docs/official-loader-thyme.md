@@ -18,7 +18,13 @@ THYME support.
 - SM8250 peripheral window, GIC addresses, eight cores and the A55 core mask;
 - GOP validation for the THYME 1080 x 2340 panel;
 - THYME included in the charger/status and virtual-watchdog conditions;
-- THYME serial fields in the generated device tree.
+- THYME serial fields in the generated device tree;
+- THYME published as `/chosen/hakios-board`.
+
+The last item is a hardware gate, not an identity detail. Without it the
+FTS521 touch driver, PM8150 key driver, display/thermal path and QCA6390 Wi-Fi
+path all report a board mismatch and stay disabled. Commit `66500d7` fixes the
+official loader after the regression reproduced on hardware.
 
 `xnuloader/build.sh` accepts `DEVICE=thyme` and emits
 `xnuloader/loader-thyme.efi`. Redwood remains the default.
@@ -51,5 +57,7 @@ sha256 a7061100f88135e5887057bebca24e242c0c7eebd57047888ba81ef743b029cb
 - Redwood loader build passes.
 - THYME loader build passes with `LOADER_THYME`.
 - THYME boot image packing passes.
-- Hardware boot is pending because the previous failed image left the phone
-  without a USB endpoint and requires a physical power-cycle.
+- The loader reaches USB and boots the kernel on hardware.
+- The post-`hakios-board` image is built and ready for a RAM test. Its hardware
+  result is pending; do not mark touch, keys, brightness or Wi-Fi as validated
+  until the new run logs those drivers starting.
