@@ -41,8 +41,9 @@ import sys
 BOOT = ["boot_a", "boot_b", "init_boot_a", "init_boot_b", "vendor_boot_a", "vendor_boot_b", "dtbo_a", "dtbo_b", "vbmeta_a", "vbmeta_b",
         "vbmeta_system_a", "vbmeta_system_b", "misc", "devinfo"]
 IDENTITY = ["persist", "modemst1", "modemst2", "fsg"]
-BOOTCHAIN = ["xbl", "xbl_config", "abl", "aop", "aop_config", "tz", "hyp", "devcfg", "qupfw", "uefisecapp", "shrm", "cpucp", "keymaster",
-             "featenabler", "imagefv"]
+BOOTCHAIN_BASE = ["xbl", "xbl_config", "abl", "aop", "aop_config", "tz", "hyp", "devcfg", "qupfw", "uefisecapp", "shrm", "cpucp",
+                  "keymaster", "featenabler", "imagefv"]
+BOOTCHAIN = BOOTCHAIN_BASE + [f"{name}_{slot}" for name in BOOTCHAIN_BASE for slot in ("a", "b")]
 BLOCK = 4096
 TRIES = 3
 ENOUGH_FREE = 1.5           # the room that has to be free on the host, as a multiple of what is copied
