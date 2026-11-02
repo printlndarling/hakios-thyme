@@ -94,6 +94,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi power off/on recovery | PASS | On both pinned regression boots, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted); the following scan returned networks (`logs/225307-run.log`, `logs/230506-run.log`) |
 | Wi-Fi association/DHCP | PASS | The current 5 GHz AP completed authentication, association, the four-way handshake and key installation. DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS servers `192.168.1.1`/`192.168.0.1` (`logs/022344-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari loaded `https://www.apple.com/library/test/success.html` through en0 and displayed `Success`; MobileSafari/WebKit/trustd established multiple TLS connections and transferred about 40 MB (`logs/wifisafari-success.png`) |
+| Combined wireless regression | PASS | One cold boot completed Wi-Fi join/DHCP, Safari HTTPS, Wi-Fi power off/on, second association, and Bluetooth discovery. Settings displayed both `Accessory` and `HONOR X10 Max` while the Wi-Fi status icon remained active (`logs/023242-run.log`, `logs/wirelessfull-safari.png`, `logs/wirelessfull-bt.png`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |

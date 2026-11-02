@@ -205,3 +205,26 @@ Observed on hardware:
 `net_test`'s direct `getaddrinfo` call still reports a 30-second failure while
 mDNSResponder and Safari resolve the same names later in the same boot. This is
 tracked as a test-harness problem, not a network PASS failure.
+
+### Combined wireless regression
+
+The complete cold-boot gate used `userland/rc.jobs.wirelessfull` with the same
+full Wi-Fi/Bluetooth argument set. It first joined the private network, obtained
+DHCP settings, and opened Apple's HTTPS success page. It then switched Wi-Fi
+power off and on, associated again, and finally opened Bluetooth Settings.
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/023242-run.log` | `35d6f1e395ebc0767d9795c8037139abed520f88bdb6e88634b027eec150eb6b` |
+| `logs/wirelessfull-safari.png` | `299c9cef2bdd3fd3c772fcb33ef35599ce242bba64eef3e89248378ac5bd2c51` |
+| `logs/wirelessfull-bt.png` | `9e1afc0577ca80ee114241b8eb31555715959dff67b5a974b6af1d3195881c6d` |
+
+Observed:
+
+- initial 5 GHz association, four-way handshake and DHCP succeeded;
+- Safari rendered the Apple HTTPS success page;
+- Wi-Fi power off removed the interface and power on restarted the radio;
+- the second join reached `THE NETWORK IS JOINED` with the pairwise/group keys
+  installed;
+- Bluetooth Settings listed both `Accessory` and `HONOR X10 Max`;
+- the Wi-Fi status icon remained active in the final Bluetooth screenshot.
