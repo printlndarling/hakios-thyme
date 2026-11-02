@@ -228,3 +228,8 @@ Observed:
   installed;
 - Bluetooth Settings listed both `Accessory` and `HONOR X10 Max`;
 - the Wi-Fi status icon remained active in the final Bluetooth screenshot.
+
+A later named-peer attempt, `logs/024316-run.log`, kept Wi-Fi connected but the
+list contained only `Accessory` when the second row was tapped. No pairing was
+attempted. `HONOR X10 Max` is an intermittent nearby advertisement, not yet a
+controlled peer; the known-peer Bluetooth gate remains open.
