@@ -70,9 +70,52 @@ net_if_unit(unsigned unit)
  * Boot-arg net_names=1: a line for every name asked of a DNS server and for every TCP connection
  * begun from here -- which is how to see what a system that has just been given a network does
  * with it (up to NAMES_MAX lines).
+ * Boot-arg net_dhcp=1: every DHCP message's type, address, router and DNS options.
  */
 #define NAMES_MAX       3000
-static uint32_t net_trace, net_names;
+static uint32_t net_trace, net_names, net_dhcp;
+
+static void
+trace_dhcp(const char *way, const uint8_t *bootp, size_t length)
+{
+	const uint8_t *options, *end = bootp + length;
+	unsigned kind = 0;
+	uint32_t router = 0, dns[2] = { 0, 0 };
+	unsigned dns_count = 0;
+
+	if (length < 240 || bootp[236] != 0x63 || bootp[237] != 0x82 || bootp[238] != 0x53 || bootp[239] != 0x63) {
+		return;
+	}
+	for (options = bootp + 240; options < end && *options != 255; ) {
+		unsigned option = *options++, option_length;
+
+		if (option == 0) {
+			continue;
+		}
+		if (options >= end) {
+			break;
+		}
+		option_length = *options++;
+		if (options + option_length > end) {
+			break;
+		}
+		if (option == 53 && option_length >= 1) {
+			kind = options[0];
+		} else if (option == 3 && option_length >= 4) {
+			router = (uint32_t)options[0] << 24 | (uint32_t)options[1] << 16 | (uint32_t)options[2] << 8 | options[3];
+		} else if (option == 6) {
+			for (unsigned i = 0; i + 4 <= option_length && dns_count < 2; i += 4) {
+				dns[dns_count++] = (uint32_t)options[i] << 24 | (uint32_t)options[i + 1] << 16 |
+				    (uint32_t)options[i + 2] << 8 | options[i + 3];
+			}
+		}
+		options += option_length;
+	}
+	printf("net: DHCP %s type=%u address=%u.%u.%u.%u router=%u.%u.%u.%u DNS=%u.%u.%u.%u,%u.%u.%u.%u\n", way, kind,
+	    bootp[16], bootp[17], bootp[18], bootp[19], router >> 24, router >> 16 & 0xff, router >> 8 & 0xff, router & 0xff,
+	    dns[0] >> 24, dns[0] >> 16 & 0xff, dns[0] >> 8 & 0xff, dns[0] & 0xff,
+	    dns[1] >> 24, dns[1] >> 16 & 0xff, dns[1] >> 8 & 0xff, dns[1] & 0xff);
+}
 
 static void
 trace_frame(const char *way, const uint8_t *frame, size_t length, size_t whole)
@@ -88,6 +131,11 @@ trace_frame(const char *way, const uint8_t *frame, size_t length, size_t whole)
 	type = (uint16_t)(frame[12] << 8 | frame[13]);
 	l4 = ip + 4 * (ip[0] & 0xf);
 	ports = type == ETHERTYPE_IP && (ip[9] == IPPROTO_TCP || ip[9] == IPPROTO_UDP) && l4 + 4 <= end;
+	if (net_dhcp && type == ETHERTYPE_IP && ip[9] == IPPROTO_UDP && l4 + 8 <= end &&
+	    ((l4[0] << 8 | l4[1]) == 67 || (l4[0] << 8 | l4[1]) == 68 ||
+	    (l4[2] << 8 | l4[3]) == 67 || (l4[2] << 8 | l4[3]) == 68)) {
+		trace_dhcp(way, l4 + 8, end - (l4 + 8));
+	}
 	if (net_names && names < NAMES_MAX && ports && way[0] == 'o') {
 		if (ip[9] == IPPROTO_UDP && (l4[2] << 8 | l4[3]) == 53 && l4 + 8 + 12 < end) {
 			char name[128];
@@ -424,5 +472,6 @@ hakios_net_init(void)
 {
 	PE_parse_boot_argn("net_trace", &net_trace, sizeof(net_trace));
 	PE_parse_boot_argn("net_names", &net_names, sizeof(net_names));
+	PE_parse_boot_argn("net_dhcp", &net_dhcp, sizeof(net_dhcp));
 	hakios_virtio_net_init();
 }
