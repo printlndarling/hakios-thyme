@@ -30,9 +30,10 @@
  *                         ASSOCIATE), and say what the kernel answers: Apple80211's result number
  *                         (21: a wrong passphrase) and how long it took. The network's name is
  *                         the kernel's (its SSID request) and is not printed.
- *   joinfile [FILE]       join the SSID and passphrase on the two lines of FILE (default
+ *   joinfile [FILE]       join the SSID and passphrase on the first two lines of FILE (default
  *                         /redwood/fw/network) through the same Apple80211 ASSOCIATE request.
- *                         Only their lengths are printed.
+ *                         An optional third line pins the BSSID. Only lengths and whether an
+ *                         access point was selected are printed.
  *
  * The interface QEMU's network gives (en0, drivers/net/hakios.net.c) has no IOKit object behind it,
  * and configd makes its network services out of those. (The phone's radio has one now:
@@ -670,8 +671,9 @@ wrongjoin(void)
 static void
 joinfile(const char *path)
 {
-	char ssid[33] = { 0 }, passphrase[64] = { 0 }, line[96];
+	char ssid[33] = { 0 }, passphrase[64] = { 0 }, bssid_text[32] = { 0 };
 	uint8_t assoc[592];
+	unsigned bssid[6];
 	struct apple80211req request = { .name = "en0" };
 	FILE *file;
 	int s;
@@ -688,6 +690,9 @@ joinfile(const char *path)
 		printf("net_test: joinfile: the file does not have two lines\n");
 		fclose(file);
 		return;
+	}
+	if (fgets(bssid_text, sizeof(bssid_text), file) != NULL) {
+		bssid_text[strcspn(bssid_text, "\r\n")] = 0;
 	}
 	fclose(file);
 	ssid[strcspn(ssid, "\r\n")] = 0;
@@ -708,6 +713,12 @@ joinfile(const char *path)
 	*(uint16_t *)(assoc + 0x08) = 8;
 	*(uint32_t *)(assoc + 0x0c) = (uint32_t)ssid_length;
 	memcpy(assoc + 0x10, ssid, ssid_length);
+	if (bssid_text[0] != 0 &&
+	    sscanf(bssid_text, "%x:%x:%x:%x:%x:%x", &bssid[0], &bssid[1], &bssid[2], &bssid[3], &bssid[4], &bssid[5]) == 6) {
+		for (unsigned i = 0; i < 6; i++) {
+			assoc[0x30 + i] = (uint8_t)bssid[i];
+		}
+	}
 	*(uint32_t *)(assoc + 0x38) = 1;
 	*(uint32_t *)(assoc + 0x3c) = (uint32_t)passphrase_length;
 	*(uint32_t *)(assoc + 0x40) = 10;
@@ -728,8 +739,8 @@ joinfile(const char *path)
 		close(s);
 		return;
 	}
-	printf("net_test: joinfile: ASSOCIATE asked for a name of %zu bytes and a passphrase of %zu bytes\n",
-	    ssid_length, passphrase_length);
+	printf("net_test: joinfile: ASSOCIATE asked for a name of %zu bytes, a passphrase of %zu bytes, %s access point\n",
+	    ssid_length, passphrase_length, bssid_text[0] != 0 ? "a selected" : "any");
 	for (;;) {
 		memset(&request, 0, sizeof(request));
 		strlcpy(request.name, "en0", sizeof(request.name));
