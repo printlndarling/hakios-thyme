@@ -357,6 +357,28 @@ static void bt_log_classic_report(const uint8_t event[BT_EVENT_MAX], unsigned le
     }
 }
 
+static void bt_log_le_connection(const uint8_t event[BT_EVENT_MAX], unsigned length, uint8_t subevent)
+{
+    if (subevent == 0x01 && length >= 22) {
+        hakios_tl("UMI BT: LE connection complete status=%#x handle=%#x role=%u peer-type=%u "
+            "interval=%u latency=%u timeout=%u accuracy=%#x\n",
+            event[4], bt_le16(event + 5), event[7], event[8], bt_le16(event + 15),
+            bt_le16(event + 17), bt_le16(event + 19), event[21]);
+        bt_log_address("LE connection peer", 0, event + 9);
+    } else if (subevent == 0x0a && length >= 34) {
+        hakios_tl("UMI BT: LE enhanced connection complete status=%#x handle=%#x role=%u peer-type=%u "
+            "interval=%u latency=%u timeout=%u accuracy=%#x\n",
+            event[4], bt_le16(event + 5), event[7], event[8], bt_le16(event + 27),
+            bt_le16(event + 29), bt_le16(event + 31), event[33]);
+        bt_log_address("LE enhanced connection peer", 0, event + 9);
+        bt_log_address("LE enhanced local RPA", 0, event + 15);
+        bt_log_address("LE enhanced peer RPA", 0, event + 21);
+    } else {
+        hakios_tl("UMI BT: LE connection event subevent=%#x length=%u is short or unknown\n",
+            subevent, length);
+    }
+}
+
 static int bt_radio_scan(vm_offset_t uart)
 {
     uint8_t event[BT_EVENT_MAX]; unsigned length = 0;
@@ -430,6 +452,7 @@ static unsigned bt_enqueue_errors;
 static unsigned bt_command_status_logged;
 static unsigned bt_scan_complete_seen;
 static unsigned bt_scan_status_seen;
+static unsigned bt_conn_status_seen;
 
 static errno_t bt_control_connect(kern_ctl_ref ref,struct sockaddr_ctl *address,void **info)
 {
@@ -548,12 +571,23 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 } else if(mach_absolute_time()>=wake_deadline) error=ETIMEDOUT;
             } else {
                 waking=false;
+                uint16_t opcode=tx.bytes[0]==1?bt_le16(tx.bytes+1):0;
                 if(tx.bytes[0]==1 && commands++<128)
-                    hakios_tl("UMI BT: iOS HCI opcode=%#x length=%u\n",bt_le16(tx.bytes+1),tx.used);
+                    hakios_tl("UMI BT: iOS HCI opcode=%#x length=%u\n",opcode,tx.used);
                 if(tx.bytes[0]==1 && tx.used>=6 && bt_le16(tx.bytes+1)==0x200c)
                     hakios_tl("UMI BT: scan enable=%#x duplicates=%#x\n",tx.bytes[4],tx.bytes[5]);
                 if(tx.bytes[0]==1 && tx.used==11 && bt_le16(tx.bytes+1)==0x200b)
                     hakios_tl("UMI BT: scan params type=%#x interval=%u window=%u own-address=%#x policy=%#x\n",tx.bytes[4],bt_le16(tx.bytes+5),bt_le16(tx.bytes+7),tx.bytes[9],tx.bytes[10]);
+                if(opcode==0x200d && tx.used>=29) {
+                    hakios_tl("UMI BT: LE create connection policy=%#x peer-type=%u own-type=%#x "
+                        "interval=%u-%u latency=%u timeout=%u ce=%u-%u\n",
+                        tx.bytes[8],tx.bytes[9],tx.bytes[16],bt_le16(tx.bytes+17),
+                        bt_le16(tx.bytes+19),bt_le16(tx.bytes+21),bt_le16(tx.bytes+23),
+                        bt_le16(tx.bytes+25),bt_le16(tx.bytes+27));
+                    bt_log_address("LE create connection peer", 0, tx.bytes + 10);
+                } else if(opcode==0x200e) {
+                    hakios_tl("UMI BT: LE create connection cancel\n");
+                }
                 error=bt_uart_tx(bt_control_uart,tx.bytes,tx.used);
                 memset(&tx,0,sizeof(tx));
             }
@@ -585,11 +619,15 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 uint16_t opcode=bt_le16(receive+5);
                 if((opcode==0x200b || opcode==0x200c) && bt_scan_status_seen++<16)
                     hakios_tl("UMI BT: HCI command status opcode=%#x status=%#x\n",opcode,receive[3]);
+                else if((opcode==0x200d || opcode==0x200e) && bt_conn_status_seen++<16)
+                    hakios_tl("UMI BT: LE create/cancel status opcode=%#x status=%#x\n",opcode,receive[3]);
             }
             if(event==0x3e && receive_length>=5) {
                 uint8_t subevent=receive[3];
                 if(!bt_le_meta_seen[subevent]++)
-                    hakios_tl("UMI BT: LE meta subevent=%#x length=%u\n",subevent,receive_length-5);
+                    hakios_tl("UMI BT: LE meta subevent=%#x length=%u\n",subevent,receive_length-4);
+                if(subevent==0x01 || subevent==0x0a)
+                    bt_log_le_connection(receive,receive_length,subevent);
                 if(subevent==0x02 && receive_length>=15) {
                     unsigned reports=receive[4], data_length=receive[13];
                     bt_le_report_events++;
@@ -604,6 +642,9 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     }
                 }
             }
+            if(event==0x05 && receive_length>=7)
+                hakios_tl("UMI BT: disconnection complete status=%#x handle=%#x reason=%#x\n",
+                    receive[3],bt_le16(receive+4),receive[6]);
         }
         if(!error) error=bt_service_ibs(bt_control_uart);
         if(error && !fault) {
