@@ -62,7 +62,9 @@ stock driver; its F0 reading is advisory because the vendor path itself is
 unstable on this UMI. User-perceptible feel remains unconfirmed.
 Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
-iOS Bluetooth initialization all work. The device-owned QCA6390 Wi-Fi stack now
+iOS Bluetooth initialization all work. A physical LE scan found nine unique
+advertisers with valid RSSI and name decoding, and classic inquiry completed
+cleanly; pairing and reconnect remain pending. The device-owned QCA6390 Wi-Fi stack now
 scans, associates to a WPA2 access point, completes DHCP and carries TCP traffic
 through en0.
 The SM8250 EPSS CPU frequency domains and both TSENS blocks are also live on

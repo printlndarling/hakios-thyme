@@ -16,7 +16,7 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and iOS H4 work; detailed LE/classic scan diagnostics compile. Physical scan, pair and reconnect are pending |
+| Bluetooth | PARTIAL | QCA6390 firmware, HCI reset, MAC publication and iOS H4 work. A physical LE scan found 9 unique advertisers (`-72..-96 dBm`, one named `DL02V1`) and classic inquiry completed cleanly; pairing and reconnect are pending |
 | Wi-Fi | PASS | QCA6390 scans, joins WPA2, completes DHCP and carries TCP traffic through en0; long-run reconnect is pending |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
@@ -77,7 +77,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi station / join / DHCP | PASS; WPA2 association, DHCP and en0 TCP traffic | test 2.4/5 GHz and reconnect |
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
-| Scan / pair / connect | TODO | `umi_bt_probe=5` now logs LE/classic addresses, RSSI and advertised names; run it with a known discoverable peer, then test iOS pairing and reconnect |
+| Scan / pair / connect | PARTIAL: LE scan and classic inquiry PASS, including address/RSSI/name decoding | pair a known LE peer from iOS, reconnect after disabling/enabling Bluetooth, then test data or audio transfer |
 | ALS / proximity / accelerometer | FAIL | no usable sensor path |
 
 ## Later product work

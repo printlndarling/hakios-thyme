@@ -56,14 +56,16 @@ The controller remained running and the standard iOS initialization continued.
 ## Scan diagnostics
 
 `umi_bt_probe=5` performs LE passive scan and classic inquiry after firmware
-boot. It now logs each report's address, RSSI and advertised name (when
-present), then shuts the controller down and returns to the loader. The
-diagnostic compiles but still needs a physical run with a known discoverable
-peer.
+boot. It logs each report's address, RSSI and advertised name (when present),
+then shuts the controller down and returns to the loader.
+
+The first physical run found nine unique LE advertisers at RSSI `-72` to
+`-96 dBm`, including one named `DL02V1`; classic inquiry completed with no
+classic peers present. See `official-bt-scan.md`.
 
 ## Remaining checks
 
-- Run `umi_bt_probe=5` with a known LE and classic peer.
-- Pair from iOS and reconnect after disabling/re-enabling Bluetooth.
+- Run classic discovery with a known discoverable peer.
+- Pair an LE peer from iOS and reconnect after disabling/re-enabling Bluetooth.
 - Transfer a small file or use a Bluetooth audio device.
 - Verify sleep/wake of the QCA6390 controller over a long session.
