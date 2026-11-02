@@ -56,6 +56,17 @@ The rebuilt UEFI was RAM-tested without replacing the verified image:
 Log: `logs/041710-run.log`, SHA-256
 `e62b25dc98d0e860087bfba74441422a8042a544670d0c928f87ebdc08d523d5`.
 
+The final packaged boot image was also tested:
+
+```text
+devices/thyme/prebuilt/xnu-usb.img
+2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10
+```
+
+Its RAM log `logs/043951-run.log`, SHA-256
+`c1b0b98a05e08ac2c460d08d0c57e4de682b6e8fb4d6477ab7f7ab5372ea8cb9`,
+again enumerated all six LUNs and the GPT partition set.
+
 The same UEFI also passed the complete UFS + Wi-Fi + Safari + Bluetooth
 workload in `logs/042810-run.log`, SHA-256
 `f024a0b15f061feb49649097f708293bf591f117c81d9bde4a68f8514b137328`.

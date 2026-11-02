@@ -300,3 +300,20 @@ The run enumerated all six UFS LUNs and partitions, then completed:
 | `logs/042810-run.log` | `f024a0b15f061feb49649097f708293bf591f117c81d9bde4a68f8514b137328` |
 | `logs/ufs-full-safari.png` | `dfb5ca5eab694969a4bfc8db48b72ae2d4afaceef39e88b48ffbfdab8a0cbad4` |
 | `logs/ufs-full-bt.png` | `4667ea92b8a0bac68af0a64c12c661c0887734a6e8cb2569a17631bbdbb4a0a6` |
+
+The final packaged `devices/thyme/prebuilt/xnu-usb.img` was then cold-booted
+again with `ufs=1`:
+
+```text
+source bf973a76
+kernel a443cbbdb18a
+UEFI   3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d
+loader 7bc139e4b1e4
+image 9e219ee5b77b
+boot   2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10
+```
+
+The log `logs/043951-run.log`, SHA-256
+`c1b0b98a05e08ac2c460d08d0c57e4de682b6e8fb4d6477ab7f7ab5372ea8cb9`,
+repeated the six-LUN/GPT enumeration and completed the bounded RAM return to
+Android.
