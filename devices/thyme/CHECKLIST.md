@@ -117,6 +117,48 @@ No item moves to `PASS` from source inspection alone.
 | Scan / pair / connect | PARTIAL: LE scan and classic inquiry PASS, including address/RSSI/name decoding | pair a known LE peer from iOS, reconnect after disabling/enabling Bluetooth, then test data or audio transfer |
 | ALS / proximity / accelerometer | FAIL | no usable sensor path |
 
+## User space and daily use
+
+| Check | Status | Evidence / next action |
+|---|---|---|
+| Darwin launchd and core daemons | PASS in historical RAM runs | launchd starts process 1 and brings up cfprefsd, logd, runningboardd, backboardd, powerd, wifid and other selected system daemons |
+| SpringBoard home screen | PASS in historical RAM runs; current fixed build awaits retest | SpringBoard reaches the home screen and renders through the Adreno OpenGL ES path |
+| SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
+| Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
+| Wi-Fi Settings UI | PARTIAL | wifid and the Apple80211 surface start, but joining/managing networks from the iOS UI has not been validated end to end |
+| Bluetooth Settings/pairing UI | FAIL | firmware/HCI/inquiry work, but no LE peer has been paired and reconnected from the iOS UI |
+| Notifications, audio routing and background apps | TODO | requires a sustained interactive session with representative applications |
+| Lock/unlock and passcode | PARTIAL | lock-screen navigation works through injected input; passcode, secure storage and reboot persistence are not validated |
+| User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
+
+## Display, storage, and installation
+
+| Check | Status | Evidence / next action |
+|---|---|---|
+| Native 1080 x 2340 display | PASS in historical runs | loader validates THYME GOP size and SpringBoard renders at the panel resolution |
+| Brightness control | PARTIAL | iOS hook and DSI DCS `0x51` completion are verified; human comparison and automatic brightness remain missing |
+| Display sleep and wake | TODO | exercise the power path under the current board-gating fix |
+| APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
+| UFS read-only survey | TODO | run the official-main read-only survey before considering any write path |
+| Persistent system/user storage | TODO | no accepted design; preserve Android and do not write partitions yet |
+| Safe return to Android | PASS | RAM runs return through the loader; Android remains installed and bootable |
+| Standalone installer/recovery | TODO | requires carve, guarded-write, RAM-boot-from-flash, slot-switch and recovery gates from `docs/install-safe.md` |
+
+## Camera, cellular, sensors, and security hardware
+
+| Check | Status | Evidence / next action |
+|---|---|---|
+| Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
+| Front camera capture | TODO | not exercised |
+| Torch/flash | TODO | not yet exercised on the official-main port |
+| Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
+| Mobile data / calls / SMS | FAIL | depends on the cellular stack |
+| ALS / auto-brightness | FAIL | no usable ambient-light sensor path; brightness is manual |
+| Accelerometer / orientation | FAIL | backboardd reports no usable accelerometer HID service |
+| Proximity | TODO | no usable sensor path; lock-screen pocket behavior is unverified |
+| NFC | TODO | not ported |
+| Fingerprint | TODO | not ported and no secure unlock design exists |
+
 ## Later product work
 
 - [ ] UFS read-only survey, then a separate accepted design for persistent

@@ -15,21 +15,21 @@
 
 | Part | State | |
 |---|---|---|
-| display | works | framebuffer, Adreno and DSI DCS 0x51 backlight paths work; physical brightness comparison pending |
-| touch | works | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38 |
-| buttons | works | PM8150 PON + GPIO6; power and both volume keys verified |
+| display | partly | framebuffer, Adreno and DSI DCS 0x51 paths work; current board-gating fix awaits a RAM retest and physical brightness comparison is pending |
+| touch | partly | ST FTS521 at I2C 0x49, IRQ GPIO39, reset GPIO38; historically verified, current board-gating fix awaits a RAM retest |
+| buttons | partly | PM8150 PON + GPIO6; historically verified, current board-gating fix awaits a RAM retest |
 | cpu | works | 7 CPUs; three EPSS domains raised to 1804/2419/3187 MHz on official main |
 | gpu | works | Adreno 650 / zap 0x8c41a000, hardware-rendered SpringBoard |
-| battery | works | percentage, signed current and temperature from the loader cache |
+| battery | partly | kernel telemetry and charging work; SpringBoard battery/charging refresh is implemented but awaits hardware validation |
 | storage | no | read-only UFS survey not run in the official-main port |
-| audio | partly | DSP, MI2S and both CS35L41 amps work; audible output pending |
-| haptic | no | AW8697 UVLO path still fails |
+| audio | partly | DSP/MI2S/CS35L41 and WCD938x dual-mic capture work; speaker-to-mic acoustic loopback verified, stereo balance pending |
+| haptic | partly | 1700 Hz AW8697 playback and repeatable BEMF response verified; F0 advisory unstable, physical feel pending |
 | camera | no | sensor tables collected; no working capture yet |
 | torch | no | not yet tested on THYME |
-| wifi | works | QCA6390 scan, WPA2 association, DHCP and TCP through en0 |
-| bluetooth | partly | firmware, HCI reset and iOS H4 work; pairing test pending |
+| wifi | partly | QCA6390 scan, WPA2 association, DHCP and TCP through en0 verified historically; current RAM regression fix awaits retest |
+| bluetooth | partly | firmware, iOS H4 and physical LE scan work; pairing and reconnect pending |
 | cellular | no | modem and telephony path not implemented |
-| network | works | en0 DHCP and TCP traffic verified |
+| network | partly | en0 DHCP and TCP traffic verified historically; current RAM regression fix awaits retest |
 | thermal | works | 27 TSENS inputs, live throttling, and orderly thermal_stop hand-back verified; soak pending |
 | usb | partly | xnuloader fastboot endpoint works; one endpoint loss observed |
 | sensors | no | ALS, accelerometer and proximity are not usable |

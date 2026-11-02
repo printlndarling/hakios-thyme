@@ -109,7 +109,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_THYME_AUDIO`**<br>the Xiaomi Mi 10S audio DSP, CS35L41 speaker amplifiers, TDM/MI2S stream, guard and microphone path (adsp=1 sound=4 mic=4). Needs fw-audio/ from the phone. | `hakios.thyme_adsp.c`<br>`hakios.thyme_speaker.c`<br>`hakios.thyme_sound.c`<br>`hakios.thyme_mic.c`<br>`hakios.thyme_guard.c` |  | `adsp=`, `adsp_again=`, `adsp_apr_wait=`, `adsp_keep=`, `adsp_listen=`, `adsp_new=`, `adsp_pause=`, `adsp_return=` and 19 more | built | built | built | |
+| **`HAKIOS_THYME_AUDIO`**<br>the Xiaomi Mi 10S audio DSP, CS35L41 speaker amplifiers, TDM/MI2S stream, guard and microphone path (adsp=1 sound=4 mic=4). Needs fw-audio/ from the phone. | `hakios.thyme_adsp.c`<br>`hakios.thyme_speaker.c`<br>`hakios.thyme_sound.c`<br>`hakios.thyme_mic.c`<br>`hakios.thyme_guard.c` |  | `adsp=`, `adsp_again=`, `adsp_apr_wait=`, `adsp_keep=`, `adsp_listen=`, `adsp_new=`, `adsp_pause=`, `adsp_return=` and 31 more | built | built | built | |
 
 ## bluetooth (devices/thyme)
 
@@ -133,7 +133,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_THYME_HAPTIC`**<br>the Xiaomi Mi 10S AW8697 motor, Android waveforms and /dev/hakios-haptic actuator service (haptic=1..5, umi_haptic=1..5). | `hakios.thyme_haptic.c` |  | `haptic=`, `haptic_effect=`, `haptic_gain=`, `umi_haptic=` | built | built | built | |
+| **`HAKIOS_THYME_HAPTIC`**<br>the Xiaomi Mi 10S AW8697 motor, Android waveforms and /dev/hakios-haptic actuator service (haptic=1..5, umi_haptic=1..5). | `hakios.thyme_haptic.c` |  | `haptic=`, `haptic_effect=`, `haptic_f0_probe=`, `haptic_f0_trace=`, `haptic_gain=`, `umi_haptic=` | built | built | built | |
 
 ## input (devices/thyme)
 
