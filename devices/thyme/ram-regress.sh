@@ -92,10 +92,19 @@ fi
 	./xl screenshot "${BT_SCREENSHOT:-logs/wirelessregress-bt.png}" || true
 ) &
 CAPTURE_PID=$!
+stop_capture() {
+	if [ -n "${CAPTURE_PID:-}" ]; then
+		kill "$CAPTURE_PID" 2>/dev/null || true
+	fi
+}
+trap stop_capture EXIT HUP INT TERM
 
 XL_SECS=${XL_SECS:-230} \
 XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} \
 XL_RAMDISK="$SCENARIO" \
 XL_CMDLINE="$ARGS" \
 	./xl run
+stop_capture
 wait "$CAPTURE_PID" || true
+CAPTURE_PID=
+trap - EXIT HUP INT TERM
