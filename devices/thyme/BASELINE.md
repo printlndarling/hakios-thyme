@@ -109,8 +109,9 @@ The second run is the current UI reference:
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/wirelessregress-wifi.png` | `192f46543fb87b0e20a3141cec9cc868bcf7a1a25ca030ab749fc4d8e65fc7ab` |
-| `logs/wirelessregress-bt.png` | `db222e129cd1ae0a8c4a361850f8614073a9cddd82f57f64cf7e2e8adfbdf3c6` |
+| `logs/235513-run.log` | `cd437436d2168acb916ba08f7f343ec24b2601ea70634c27095af13ab0a9e88f` |
+| `logs/wirelessregress-wifi.png` | `3be43e133b623d312f15c31f1c249f1c75fd6a6c76d503ec2c7c964ce432f8f7` |
+| `logs/wirelessregress-bt.png` | `927a712e9e7f76697d87a752d08909c8ed3ad59e38dec7a7377469cf04e3d12e` |
 
 The Wi-Fi page shows the switch on and real 2.4 GHz and 5 GHz networks. The
 Bluetooth page shows the switch on and the discovered `Accessory`. In the
@@ -118,3 +119,29 @@ second run, `net_test` returned three APs in 0.6 s, Wi-Fi off removed the
 interface, Wi-Fi on restarted the radio, and the following scan again returned
 networks. The H4 transport ended with 528 LE reports, `queue=0`,
 `queue-err=0`, and `enqueue-errors=0`.
+
+### Bluetooth connection result
+
+The Bluetooth-only pairing scene was then run with the same full boot arguments.
+Its log is `logs/234132-run.log`, SHA-256
+`7de27ab44c9c97c974da427bee19c6ab094b445151267a09be3d8a47298de3ff`,
+and the failure screenshot is `logs/wirelessregress-bt.png`.
+
+The HCI trace corrects an earlier interpretation that no connection-complete
+event arrived:
+
+```text
+iOS opcode=0x2011                 Add Device To White List
+iOS opcode=0x200d                 LE Create Connection, filter policy 1
+command status 0x200d status=0
+LE Enhanced Connection Complete status=0 handle=1 role=0
+iOS opcode=0x41d                  LE Read Remote Features
+disconnection complete reason=0x3e
+```
+
+The link-layer connection is established, then the peer or its connection
+setup times out before remote feature exchange. Reason `0x3e` is
+`Connection Failed to be Established`. This is not an H4 queue, event-mask or
+Connection Complete delivery failure. Pairing must next be repeated with a
+known-good connectable BLE peripheral; the anonymous `Accessory` used here is
+not suitable evidence that the HakiOS host stack cannot pair.
