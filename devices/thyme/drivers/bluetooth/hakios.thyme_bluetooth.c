@@ -634,7 +634,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     bt_le_report_entries+=reports;
                     if(14+data_length<receive_length) {
                         uint8_t rssi=receive[14+data_length];
-                        if(bt_le_reports_logged++<8)
+                    if(bt_le_reports_logged++<64)
                             hakios_tl("UMI BT: LE advertising report type=%#x address=%02x:%02x:%02x:%02x:%02x:%02x "
                                 "data=%u RSSI=%d report=%u\n",receive[5],
                                 receive[12],receive[11],receive[10],receive[9],receive[8],receive[7],
