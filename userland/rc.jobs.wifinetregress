@@ -1,6 +1,6 @@
-# Network regression after the kernel joins fw/network with wifi_join=1.
-# Wi-Fi association, DHCP, DNS, TCP, HTTPS, scan, then Bluetooth discovery.
-/redwood/bin/net_test wait 20
+# Network regression: join the private fw/network through Apple80211, then DHCP,
+# DNS, TCP, HTTPS, scan, and Bluetooth discovery.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
 /redwood/bin/net_test show dhcp en0 waitaddr en0 40 store
 /redwood/bin/net_test resolve example.com tcp example.com 80 reach example.com
 /redwood/bin/net_test fetch https://example.com/

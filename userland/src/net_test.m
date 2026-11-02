@@ -30,6 +30,9 @@
  *                         ASSOCIATE), and say what the kernel answers: Apple80211's result number
  *                         (21: a wrong passphrase) and how long it took. The network's name is
  *                         the kernel's (its SSID request) and is not printed.
+ *   joinfile [FILE]       join the SSID and passphrase on the two lines of FILE (default
+ *                         /redwood/fw/network) through the same Apple80211 ASSOCIATE request.
+ *                         Only their lengths are printed.
  *
  * The interface QEMU's network gives (en0, drivers/net/hakios.net.c) has no IOKit object behind it,
  * and configd makes its network services out of those. (The phone's radio has one now:
@@ -659,6 +662,97 @@ wrongjoin(void)
 	close(s);
 }
 
+/*
+ * Join the network in a private two-line file: SSID, then passphrase. This is the same
+ * Apple80211 ASSOCIATE request Settings makes, without needing the on-screen keyboard.
+ * Only positions and lengths go to the log; the secrets stay in the image.
+ */
+static void
+joinfile(const char *path)
+{
+	char ssid[33] = { 0 }, passphrase[64] = { 0 }, line[96];
+	uint8_t assoc[592];
+	struct apple80211req request = { .name = "en0" };
+	FILE *file;
+	int s;
+	double start;
+	size_t ssid_length, passphrase_length;
+	unsigned result = 0;
+
+	file = fopen(path, "r");
+	if (file == NULL) {
+		printf("net_test: joinfile: cannot open %s: %s\n", path, strerror(errno));
+		return;
+	}
+	if (fgets(ssid, sizeof(ssid), file) == NULL || fgets(passphrase, sizeof(passphrase), file) == NULL) {
+		printf("net_test: joinfile: the file does not have two lines\n");
+		fclose(file);
+		return;
+	}
+	fclose(file);
+	ssid[strcspn(ssid, "\r\n")] = 0;
+	passphrase[strcspn(passphrase, "\r\n")] = 0;
+	ssid_length = strlen(ssid);
+	passphrase_length = strlen(passphrase);
+	if (ssid_length == 0 || ssid_length > 32 || passphrase_length < 8 || passphrase_length > 63) {
+		printf("net_test: joinfile: SSID length %zu or passphrase length %zu is invalid\n", ssid_length, passphrase_length);
+		memset(passphrase, 0, sizeof(passphrase));
+		return;
+	}
+
+	/* The ASSOCIATE layout used by wrongjoin() above and struct apple80211_assoc in the kernel. */
+	memset(assoc, 0, sizeof(assoc));
+	*(uint32_t *)(assoc + 0x00) = 1;
+	*(uint16_t *)(assoc + 0x04) = 1;
+	*(uint16_t *)(assoc + 0x06) = 1;
+	*(uint16_t *)(assoc + 0x08) = 8;
+	*(uint32_t *)(assoc + 0x0c) = (uint32_t)ssid_length;
+	memcpy(assoc + 0x10, ssid, ssid_length);
+	*(uint32_t *)(assoc + 0x38) = 1;
+	*(uint32_t *)(assoc + 0x3c) = (uint32_t)passphrase_length;
+	*(uint32_t *)(assoc + 0x40) = 10;
+	memcpy(assoc + 0x48, passphrase, passphrase_length);
+	memset(passphrase, 0, sizeof(passphrase));
+
+	s = socket(AF_INET, SOCK_DGRAM, 0);
+	if (s < 0) {
+		printf("net_test: joinfile: socket: %s\n", strerror(errno));
+		return;
+	}
+	request.type = 20;
+	request.length = sizeof(assoc);
+	request.data = assoc;
+	start = seconds();
+	if (ioctl(s, SIOCSA80211, &request) != 0) {
+		printf("net_test: joinfile: the kernel refuses ASSOCIATE: %s\n", strerror(errno));
+		close(s);
+		return;
+	}
+	printf("net_test: joinfile: ASSOCIATE asked for a name of %zu bytes and a passphrase of %zu bytes\n",
+	    ssid_length, passphrase_length);
+	for (;;) {
+		memset(&request, 0, sizeof(request));
+		strlcpy(request.name, "en0", sizeof(request.name));
+		request.type = 21;
+		if (ioctl(s, SIOCGA80211, &request) != 0) {
+			printf("net_test: joinfile: ASSOCIATE_RESULT failed: %s\n", strerror(errno));
+			break;
+		}
+		result = (unsigned)request.value;
+		if (result != 0) {
+			break;
+		}
+		if (seconds() - start > 60) {
+			printf("net_test: joinfile: no final result after %.1f s\n", seconds() - start);
+			break;
+		}
+		usleep(200000);
+	}
+	printf("net_test: joinfile: result %u after %.1f s%s\n", result, seconds() - start,
+	    result == 1 ? " (joined)" : result == 21 ? " (invalid passphrase)" : result == 9 ? " (timeout)" : "");
+	close(s);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -702,6 +796,8 @@ main(int argc, char **argv)
 				watch(atof(argv[++i]));
 			} else if (strcmp(step, "wrongjoin") == 0) {
 				wrongjoin();
+			} else if (strcmp(step, "joinfile") == 0) {
+				joinfile(i + 1 < argc ? argv[++i] : "/redwood/fw/network");
 			} else {
 				fprintf(stderr, "net_test: bad step \"%s\"\n", step);
 				return 1;
