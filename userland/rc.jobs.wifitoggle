@@ -1,0 +1,12 @@
+# Wi-Fi power-cycle gate: scan, switch Wi-Fi off, switch it back on, scan again.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=WIFI
+/redwood/bin/rwtouch wait 25
+/redwood/bin/net_test scan
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 20
+/redwood/bin/net_test scan
+/redwood/bin/rwtouch wait 40

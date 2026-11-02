@@ -72,6 +72,8 @@ source, worktree, image hashes and boot arguments are compared.
 | `logs/183439-run.log` (Bluetooth only) | `5d9eebe1c34fe8c948764634c19d4b6ce537e4b830ff910b1aee27a4f0206dc9` |
 | `logs/194622-run.log` (Settings spinner) | `c8a572b4e6d8a198212c0b94fb83115c71dd19ce35788237d8459508ba5b238d` |
 | clean-main `hakios-kernel` | `86a4f3423e1858ef27e51790ef6da54611cb6714db3ad7ffd2e19f7e74c99cff` |
+| `logs/203537-run.log` (Wi-Fi power cycle) | `075d5f2d3622e27a10d335a61aae3282076cbe9ddbe0c6516c853822ef6a413a` |
+| `logs/wifi-after-toggle.png` | `16b0cfee4034ce277d65c8412d69f240dccd8ad660f9fd06599f525ef82f6091` |
 
 ## User-priority hardware gate
 
@@ -87,6 +89,7 @@ No item moves to `PASS` from source inspection alone.
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
 | Bluetooth | PARTIAL; Settings/pairing broken | Firmware, HCI reset, H4 and LE reception PASS, but stock Settings does not list or pair reported advertisers even with Wi-Fi off (`logs/194622-run.log`). Pairing/reconnect remain unverified |
 | Wi-Fi | PARTIAL; clean-main scan PASS | Clean main scanned three APs and displayed networks in stock Settings (`logs/201710-run.log`). Power off/on recovery, association, DHCP and boot-to-boot stability still require the pinned baseline |
+| Wi-Fi power off/on recovery | PASS | On the pinned clean main, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio started in 0.1 s); the post-toggle scan returned networks and Settings displayed them (`logs/203537-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |

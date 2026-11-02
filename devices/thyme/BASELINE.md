@@ -56,6 +56,15 @@ XL_SECS=190 XL_HOME=fastboot XL_CMDLINE='...' ./xl run
   access points in 0.6 s; the stock Wi-Fi Settings page displayed real networks.
 - Apple80211 handled 53 power queries and 21 scan requests without a refusal.
 
+Wi-Fi power-cycle gate:
+
+- Loader log: `logs/203537-run.log`, SHA-256
+  `075d5f2d3622e27a10d335a61aae3282076cbe9ddbe0c6516c853822ef6a413a`
+- Screenshot after power off/on: `logs/wifi-after-toggle.png`, SHA-256
+  `16b0cfee4034ce277d65c8412d69f240dccd8ad660f9fd06599f525ef82f6091`
+- Both `set 19 (POWER)` requests were accepted. The radio was removed when
+  switched off, restarted in 0.1 s when switched on, and scanned networks again.
+
 This clean-main run proves that the committed Wi-Fi path still works after a
 fresh boot. If a later run fails, compare the source commit, worktree state,
 artifact hashes, boot arguments, and loader log before changing driver code.
