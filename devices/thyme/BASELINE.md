@@ -165,3 +165,12 @@ evidence that the HakiOS host stack cannot pair.
 |---|---|
 | `logs/btpair-le-progress.png` | `40ee458fb5207a954c447489ffa5cfb28f1907840df75d8e338bdb602f432fd2` |
 | `logs/btpair-le-result.png` | `0e263981b3ae2db81e0dfd381ac47d894c3bb9c289f1e0a59388d6052d7dd990` |
+
+The delayed retry in `logs/004734-run.log` (SHA-256
+`8c5e4b11bd81c2c2c7554d34bd9742b1160168b0ec581cf669f7e09b9ebcc280`)
+made two real connection attempts to the same peer and reproduced
+`status=0` followed by reason `0x3e` both times. Parsing the advertisements
+found stronger connectable advertisers, but the strongest unnamed one was
+-84 dBm and the named candidates were still -97/-98 dBm. Stock Settings
+continued to select the approximately -100 dBm anonymous peer. A known,
+close-range BLE peer is therefore still required before this gate can pass.
