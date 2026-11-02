@@ -3273,6 +3273,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	/* what MobileGestalt answers "main screen scale" from: 3 device pixels per point */
 	dt_prop_u32(&w, "display-scale", 3);
 	dt_prop_u32(&w, "display-rotation", 0);
+	/* What the device drivers use to reject a platform they were not written for. */
+	dt_prop_str(&w, "hakios-board", plat->name);
 	/* how the kernel is to ask the firmware for more cores (PSCI) */
 	dt_prop_str(&w, "psci-method", plat->psci_hvc ? "hvc" : "smc");
 	/* the time now, by the firmware's clock (the kernel has no real-time clock driver) */

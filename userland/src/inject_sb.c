@@ -236,6 +236,10 @@ static BOOL   (*original_battery_view_should_show_bolt)(id self, SEL sel);
 static double (*original_battery_view_charge_percent)(id self, SEL sel);
 static void   (*original_battery_view_set_charge_percent)(id self, SEL sel, double p);
 static double (*original_ring_charging_level)(id self, SEL sel);
+static void   (*original_update_battery_items)(id self, SEL sel);
+static void   (*original_set_battery_charging_state)(id self, SEL sel, long charging);
+static id      battery_aggregator;
+static unsigned battery_charging_logs;
 
 static int
 sysctl_int(const char *name)
@@ -259,6 +263,71 @@ battery_power_source(void)
 		found = true;
 	}
 	return found;
+}
+
+/*
+ * SpringBoard's status bar does not take the battery state only from UIDevice: on newer
+ * Darwin versions SBStatusBarStateAggregator builds the battery entry from SystemStatus.
+ * Without an IOPMPowerSource there is no SystemStatus battery, so the percentage can be
+ * correct in our UIDevice hooks while the bolt and later refreshes stay stale. Feed the
+ * aggregator the kernel's state and ask it to rebuild its battery items whenever the
+ * kernel's five-second sample may have changed.
+ */
+static void
+battery_aggregator_state(int *soc, int *present, int *plugged, int *charging)
+{
+	*soc = sysctl_int("kern.hakios.battery_soc");
+	*present = sysctl_int("kern.hakios.battery_present");
+	*plugged = sysctl_int("kern.hakios.battery_charger_present");
+	*charging = sysctl_int("kern.hakios.battery_charging");
+}
+
+static void
+battery_set_charging_state(id self, SEL sel, long charging)
+{
+	int soc, present, plugged, charging_now;
+
+	battery_aggregator = self;
+	battery_aggregator_state(&soc, &present, &plugged, &charging_now);
+	if (!battery_power_source() && soc >= 0 && soc <= 100 && present >= 0 && plugged >= 0 && charging_now >= 0) {
+		long wanted = present && plugged && charging_now ? 1 : 0;
+
+		if (charging != wanted && battery_charging_logs++ < 12) {
+			say("hakios: battery: aggregator charging state %ld -> %ld (SOC %d%%, charger %d, charging %d)\n",
+			    charging, wanted, soc, plugged, charging_now);
+		}
+		charging = wanted;
+	}
+	if (original_set_battery_charging_state) {
+		original_set_battery_charging_state(self, sel, charging);
+	}
+}
+
+static void
+battery_update_items(id self, SEL sel)
+{
+	int soc, present, plugged, charging, before;
+	SEL charging_selector = sel_registerName("batteryChargingState");
+	SEL setter = sel_registerName("setBatteryChargingState:");
+
+	battery_aggregator = self;
+	before = class_getInstanceMethod(object_getClass(self), charging_selector) ?
+	    (int)((long (*)(id, SEL))objc_msgSend)(self, charging_selector) : -1;
+	if (original_update_battery_items) {
+		original_update_battery_items(self, sel);
+	}
+	battery_aggregator_state(&soc, &present, &plugged, &charging);
+	if (!battery_power_source() && soc >= 0 && soc <= 100 && present >= 0 && plugged >= 0 && charging >= 0) {
+		long wanted = present && plugged && charging ? 1 : 0;
+
+		if (class_getInstanceMethod(object_getClass(self), setter)) {
+			((void (*)(id, SEL, long))objc_msgSend)(self, setter, wanted);
+		}
+		if (before >= 0 && before != wanted && battery_charging_logs++ < 12) {
+			say("hakios: battery: battery items rebuilt, charging state %d -> %ld (SOC %d%%, charger %d, charging %d)\n",
+			    before, wanted, soc, plugged, charging);
+		}
+	}
 }
 
 /* ---- the cellular items of the status bar, from the kernel's modem ------------------------------ */
@@ -626,6 +695,22 @@ battery_post_notifications(void)
 		    (id)CFSTR("UIDeviceBatteryLevelDidChangeNotification"), device);
 		((void (*)(id, SEL, id, id))objc_msgSend)(center, post,
 		    (id)CFSTR("UIDeviceBatteryStateDidChangeNotification"), device);
+	}
+	/* UIDevice notifications do not rebuild the status bar's cached battery entry. */
+	if (battery_aggregator == nil) {
+		Class aggregator_class = objc_getClass("SBStatusBarStateAggregator");
+		SEL shared = sel_registerName("sharedInstance");
+
+		if (aggregator_class != Nil && class_getClassMethod(aggregator_class, shared)) {
+			battery_aggregator = ((id (*)(Class, SEL))objc_msgSend)(aggregator_class, shared);
+		}
+	}
+	if (battery_aggregator != nil && !battery_power_source()) {
+		SEL update = sel_registerName("_updateBatteryItems");
+
+		if (class_getInstanceMethod(object_getClass(battery_aggregator), update)) {
+			((void (*)(id, SEL))objc_msgSend)(battery_aggregator, update);
+		}
 	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
 		battery_post_notifications();
@@ -1519,6 +1604,21 @@ hakios_springboard_init(void)
 	    0x18928d310UL, (IMP)battery_view_set_charge_percent);
 	original_ring_charging_level = (double (*)(id, SEL))replace_method("CSBatteryChargingRingView", "batteryChargingLevel",
 	    0x1c48c2cf4UL, (IMP)ring_charging_level);
+	{
+		Class aggregator_class = objc_getClass("SBStatusBarStateAggregator");
+		Method update = aggregator_class ? class_getInstanceMethod(aggregator_class, sel_registerName("_updateBatteryItems")) : NULL;
+		Method charging = aggregator_class ? class_getInstanceMethod(aggregator_class,
+		    sel_registerName("setBatteryChargingState:")) : NULL;
+
+		if (update != NULL) {
+			original_update_battery_items = (void (*)(id, SEL))method_getImplementation(update);
+			method_setImplementation(update, (IMP)battery_update_items);
+		}
+		if (charging != NULL) {
+			original_set_battery_charging_state = (void (*)(id, SEL, long))method_getImplementation(charging);
+			method_setImplementation(charging, (IMP)battery_set_charging_state);
+		}
+	}
 	battery_lvl = (IMP)original_battery_level;
 	battery_st  = (IMP)original_battery_state;
 	say("hakios: SpringBoard: activation %s, setup assistant %s, application snapshots %s, the side button's long press %s, "
@@ -1567,6 +1667,8 @@ hakios_springboard_init(void)
 	    original_battery_view_charge_percent ? "ok" : "NO",
 	    original_battery_view_set_charge_percent ? "ok" : "NO",
 	    original_ring_charging_level ? "ok" : "NO");
+	say("hakios: battery aggregator: _updateBatteryItems %s, setBatteryChargingState: %s\n",
+	    original_update_battery_items ? "ok" : "NO", original_set_battery_charging_state ? "ok" : "NO");
 	{
 		char args[1024] = "";
 		size_t size = sizeof(args) - 1;
