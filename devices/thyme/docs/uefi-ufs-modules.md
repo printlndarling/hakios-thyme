@@ -55,3 +55,7 @@ The rebuilt UEFI was RAM-tested without replacing the verified image:
 
 Log: `logs/041710-run.log`, SHA-256
 `e62b25dc98d0e860087bfba74441422a8042a544670d0c928f87ebdc08d523d5`.
+
+The same UEFI also passed the complete UFS + Wi-Fi + Safari + Bluetooth
+workload in `logs/042810-run.log`, SHA-256
+`f024a0b15f061feb49649097f708293bf591f117c81d9bde4a68f8514b137328`.

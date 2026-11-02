@@ -274,3 +274,29 @@ six LUNs, validated every GPT header/table CRC, and listed the complete
 partition set including `super`, `userdata`, both boot slots, `xbl_a/b`,
 `tz_a/b`, `modem_a/b` and the loader's partition hashes. This is a read-only
 PASS; no write path or installer is accepted by this result.
+
+### UFS-capable full wireless baseline
+
+The same UFS-capable UEFI then passed the complete wireless workload in one RAM
+boot. The input set was:
+
+```text
+source 25a20d7c
+kernel a443cbbdb18a
+UEFI   3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d
+image  2e074fddf19c1b241e59e552a2b104ef81929356bdf379b1e7248b1961f53e47
+scene  373a75aeac33
+```
+
+The run enumerated all six UFS LUNs and partitions, then completed:
+
+- Wi-Fi 5 GHz join, four-way handshake and DHCP;
+- Safari HTTPS loading;
+- Wi-Fi power off/on and a second successful join;
+- Bluetooth LE discovery with zero queue errors.
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/042810-run.log` | `f024a0b15f061feb49649097f708293bf591f117c81d9bde4a68f8514b137328` |
+| `logs/ufs-full-safari.png` | `dfb5ca5eab694969a4bfc8db48b72ae2d4afaceef39e88b48ffbfdab8a0cbad4` |
+| `logs/ufs-full-bt.png` | `4667ea92b8a0bac68af0a64c12c661c0887734a6e8cb2569a17631bbdbb4a0a6` |
