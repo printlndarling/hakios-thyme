@@ -37,6 +37,21 @@ The active THYME platform now includes the phone's `UFSDxe`, `DiskIoDxe` and
 | `SILICIUM_UEFI.fd` (3 MiB) | `7203aeaafcd16ad4332d7f007fc3fda1dde0ece9c745bffab3f9537182aae468` |
 | `out/thyme-boot/xnu-ufs.img` | `f6797dfae5d889e4992a878f8c777c82a691482d2ee6005a286e5f27de9d7604` |
 
-`tools/uefi-modules.py` confirms that the generated FD contains `UFSDxe`,
-`DiskIoDxe` and `PartitionDxe`. Hardware boot and GPT enumeration were not yet
-verified at that build point.
+`tools/uefi-modules.py` confirmed that the generated FD contains `UFSDxe`,
+`DiskIoDxe` and `PartitionDxe`.
+
+## Hardware result
+
+The rebuilt UEFI was RAM-tested without replacing the verified image:
+
+- boot image `out/thyme-boot/xnu-ufs.img`
+  `2e074fddf19c1b241e59e552a2b104ef81929356bdf379b1e7248b1961f53e47`;
+- the BDS hook calls `EfiBootManagerConnectAll()` before starting XNU;
+- UFSDxe reported six LUNs and valid GPT header/table CRCs;
+- DiskIoDxe/PartitionDxe exposed partition information;
+- the loader enumerated `super`, `userdata`, both boot slots, firmware and
+  modem partitions;
+- no partition was written.
+
+Log: `logs/041710-run.log`, SHA-256
+`e62b25dc98d0e860087bfba74441422a8042a544670d0c928f87ebdc08d523d5`.

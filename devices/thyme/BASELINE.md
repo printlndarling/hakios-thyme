@@ -234,7 +234,7 @@ list contained only `Accessory` when the second row was tapped. No pairing was
 attempted. `HONOR X10 Max` is an intermittent nearby advertisement, not yet a
 controlled peer; the known-peer Bluetooth gate remains open.
 
-## THYME UFS survey blocker
+## THYME UFS survey
 
 The official loader survey was run read-only with `ufs=1` on the full THYME boot
 argument set. Survey log `logs/025212-run.log`, SHA-256
@@ -264,3 +264,13 @@ image:
 
 Their PE32 hashes and the next UEFI integration step are recorded in
 `docs/uefi-ufs-modules.md`. The vendor binaries remain local and untracked.
+
+The blocker was then removed in the isolated THYME UEFI build. The DXE platform
+now carries the phone's own `UFSDxe`, `DiskIoDxe` and `PartitionDxe`, and its BDS
+hook performs `EfiBootManagerConnectAll()` before starting the resident loader.
+The RAM test `logs/041710-run.log`, SHA-256
+`e62b25dc98d0e860087bfba74441422a8042a544670d0c928f87ebdc08d523d5`, enumerated
+six LUNs, validated every GPT header/table CRC, and listed the complete
+partition set including `super`, `userdata`, both boot slots, `xbl_a/b`,
+`tz_a/b`, `modem_a/b` and the loader's partition hashes. This is a read-only
+PASS; no write path or installer is accepted by this result.

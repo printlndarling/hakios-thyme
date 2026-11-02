@@ -29,6 +29,11 @@ tools, and writes:
 Mu-Silicium/Build/umiPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
 ```
 
+The BDS hook calls `EfiBootManagerConnectAll()` before starting the XNU loader.
+This is required for UFSDxe -> DiskIoDxe -> PartitionDxe to publish GPT
+partition handles. The rebuilt firmware passed a read-only `ufs=1` RAM survey
+on the physical phone; no write path was enabled.
+
 ## Storage additions
 
 The original UMI platform intentionally omitted storage drivers. The current

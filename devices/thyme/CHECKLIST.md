@@ -179,7 +179,7 @@ No item moves to `PASS` from source inspection alone.
 | Brightness control | PARTIAL | iOS hook and DSI DCS `0x51` completion are verified; human comparison and automatic brightness remain missing |
 | Display sleep and wake | TODO | exercise the power path under the current board-gating fix |
 | APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
-| UFS read-only survey | FAIL, firmware integration pending | `ufs=1` reached the loader survey, but THYME Silicium exposed no partition information. `UFSDxe`, `PartitionDxe` and `SdccDxe` were found in the phone's own XBL and extracted read-only; their INF integration and a new RAM UEFI build are the next gate. No write was attempted (`logs/025212-run.log`, `docs/uefi-ufs-modules.md`) |
+| UFS read-only survey | PASS | The rebuilt THYME UEFI exposed 6 UFS LUNs with valid GPT CRCs and enumerated `super`, `userdata`, both boot slots and firmware partitions. The loader read and hashed `xbl`, `tz`, `aop`, `modem` and other partitions without writing (`logs/041710-run.log`, `docs/uefi-ufs-modules.md`) |
 | Persistent system/user storage | TODO | no accepted design; preserve Android and do not write partitions yet |
 | Safe return to Android | PASS | RAM runs return through the loader; Android remains installed and bootable |
 | Standalone installer/recovery | TODO | requires carve, guarded-write, RAM-boot-from-flash, slot-switch and recovery gates from `docs/install-safe.md` |
@@ -201,8 +201,8 @@ No item moves to `PASS` from source inspection alone.
 
 ## Later product work
 
-- [ ] Integrate the phone's extracted UFSDxe/PartitionDxe/SdccDxe into the
-  THYME UEFI, expose BlockIo/PartitionInfo, then repeat the read-only survey.
+- [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
+  THYME UEFI, expose BlockIo/PartitionInfo, and pass the read-only survey.
 - [ ] After that survey, make a separate accepted design for persistent storage.
 - [ ] Rear camera and torch.
 - [ ] Cellular modem, SIM, and network registration.
