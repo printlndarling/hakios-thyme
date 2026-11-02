@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 382 symbols in 19 groups; 42 are set, 33 of them drivers built in.
+# 383 symbols in 19 groups; 42 are set, 33 of them drivers built in.
 #
 
 #
@@ -1030,7 +1030,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_CAM_VBLANK is not set
 
 #
-# Haptics and torch (8)
+# Haptics and torch (9)
 #
 
 # the vibration motor (5 is what the README's phone line uses) [needs fw-haptic/ from the phone]
@@ -1041,6 +1041,9 @@ CONFIG_MODEM_AGAIN=y
 
 # measure the LRA's continuous-mode f0 and BEMF once, then restore its registers
 # CONFIG_HAPTIC_F0_PROBE is not set
+
+# print 50 ms f0/BEMF register samples during the continuous-mode probe
+# CONFIG_HAPTIC_F0_TRACE is not set
 
 # diagnostic AW8697 waveform gain, capped at 0x40
 # CONFIG_HAPTIC_GAIN is not set

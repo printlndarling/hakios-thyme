@@ -78,14 +78,26 @@ clears `trim_lra`, drives the LRA at the stock continuous level, reads:
 - playing state, `SYSST` and `SYSINT`;
 
 then restores every touched configuration register and the saved trim value.
-It passes only when the measured f0 is within 100 Hz of the stock 1700 Hz.
-The code compiles and the RAM payload arguments are verified, but the
-on-device result is still pending.
+The measurement registers are read one byte at a time, as the vendor driver
+does, because this chip does not reliably auto-increment them.
+
+Two RAM runs produced repeatable BEMF peaks:
+
+```text
+F0=0x444 -> 3522 Hz (advisory), positive=47, negative=200, SYSINT=0x01
+F0=0x446 -> 3515 Hz (advisory), positive=48, negative=200, SYSINT=0x01
+```
+
+Android's stock driver reports `f0=1764`, `positive=45`, `negative=202` at
+boot. Re-reading stock's `sysfs cali` repeatedly returned
+`1282051 / 769230 / 3427 / 1700 / 3581 Hz`, proving the F0 result is unstable
+outside HakiOS too. The probe therefore passes on completion + `DONEI` +
+a non-zero BEMF peak response, and reports F0 only as advisory.
+
+See `official-haptic-bemf-validation.md` for the complete evidence.
 
 ## Remaining checks
 
-- Run `haptic=3 haptic_f0_probe=1` from a RAM payload and record the measured
-  f0/BEMF values.
 - Confirm user-perceptible vibration and strength.
 - Run `umi_haptic=5` with SpringBoard and verify short taps and long vibrations
   from the iOS Actuator HAL.

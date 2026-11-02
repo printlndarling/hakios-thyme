@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **352 arguments**: 300 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **353 arguments**: 301 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -341,13 +341,14 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `net_trace` | K | `hakios.net.c` | `CONFIG_NET_TRACE` |  |
 | `virtio_net` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET` |  |
 
-## Haptics and torch (8)
+## Haptics and torch (9)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `haptic` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC` |  |
 | `haptic_effect` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_EFFECT` |  |
 | `haptic_f0_probe` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_F0_PROBE` |  |
+| `haptic_f0_trace` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_F0_TRACE` |  |
 | `haptic_gain` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_GAIN` |  |
 | `torch` | KL | `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
 | `torch_max_s` | K | `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |

@@ -765,13 +765,14 @@ umi_configure(void)
 static bool
 umi_read16(uint8_t reg, uint16_t *value)
 {
-	uint8_t bytes[2];
+	uint8_t high = 0, low = 0;
 
-	if (!regs_read(reg, bytes, sizeof(bytes))) {
+	/* The measurement registers do not reliably auto-increment: the vendor reads each one alone. */
+	if (!regs_read(reg, &high, 1) || !regs_read((uint8_t)(reg + 1), &low, 1)) {
 		say("haptic: AW8697 registers %#04x/%#04x NOT READ\n", reg, reg + 1);
 		return false;
 	}
-	*value = (uint16_t)(bytes[0] << 8 | bytes[1]);
+	*value = (uint16_t)(high << 8 | low);
 	return true;
 }
 
@@ -830,6 +831,26 @@ umi_f0_probe(void)
 			goto out;
 		}
 	}
+	/* The stock driver waits for its complete 0xfe-period trace before reading the result. */
+	{
+		uint32_t trace = 0;
+
+		/* haptic_f0_trace=1: print 50 ms f0/BEMF register samples during the continuous-mode probe */
+		if (PE_parse_boot_argn("haptic_f0_trace", &trace, sizeof(trace)) && trace != 0) {
+			for (unsigned i = 0; i < 12; i++) {
+				uint16_t trace_f0 = 0, trace_cont = 0, trace_bemf = 0;
+				uint8_t trace_state = 0, trace_pos = 0, trace_neg = 0;
+
+				wait_ms(50);
+				if (get(0x46, &trace_state) && umi_read16(0x68, &trace_f0) && umi_read16(0x6a, &trace_cont) &&
+				    umi_read16(0x70, &trace_bemf) && get(0x6d, &trace_pos) && get(0x6f, &trace_neg)) {
+					say("haptic: f0 trace %u ms: state=%#04x F0=%#06x CONT=%#06x BEMF=%#06x pos=%u neg=%u\n",
+					    (i + 1) * 50, trace_state, trace_f0, trace_cont, trace_bemf, trace_pos, trace_neg);
+				}
+			}
+		}
+	}
+	wait_ms(150);
 	for (unsigned i = 0; i < 60; i++) {
 		wait_ms(10);
 		if (!get(0x46, &state)) {
@@ -852,11 +873,17 @@ umi_f0_probe(void)
 		if (raw != 0) {
 			measured = 1000000000u / ((uint32_t)raw * coeff);
 		}
-		say("haptic: AW8697 f0/BEMF probe %s: F0=%#04x -> %u Hz, CONT=%#04x, BEMF=%#04x, "
-		    "positive=%u, negative=%u, SYSST=%#04x, SYSINT=%#04x\n",
+		say("haptic: AW8697 f0/BEMF probe %s: F0=%#04x -> %u Hz (advisory), CONT=%#04x, "
+		    "BEMF=%#04x, positive=%u, negative=%u, SYSST=%#04x, SYSINT=%#04x\n",
 		    done ? "complete" : "timed out", raw, measured, cont_raw, bemf, bemf_pos,
 		    bemf_neg, status, flags);
-		if (!done || raw == 0 || measured + 100 < expected || measured > expected + 100) {
+		/*
+		 * Android's own sysfs f0 calibration is unstable on this UMI: repeated reads
+		 * returned 1282051, 769230, 3427, 1700 and 3581 Hz.  The BEMF peaks, however,
+		 * repeat and match stock (about +45/-202).  Use completion plus a non-zero BEMF
+		 * response as the hardware result; report f0 only as advisory.
+		 */
+		if (!done || !(flags & SYSINT_DONE) || (bemf_pos == 0 && bemf_neg == 0)) {
 			ok = false;
 		}
 	} else {

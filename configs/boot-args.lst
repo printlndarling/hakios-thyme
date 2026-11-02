@@ -147,6 +147,7 @@ hakios_kver	k
 haptic	k
 haptic_effect	k
 haptic_f0_probe	k
+haptic_f0_trace	k
 haptic_gain	k
 hv_wdt_pet	k
 loader_return_after	kl

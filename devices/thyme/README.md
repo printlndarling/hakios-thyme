@@ -56,8 +56,10 @@ through `/dev/hakios-mic` with no skipped frames. See
 `docs/official-mic-path.md`. The AW8697 motor driver follows Xiaomi's stock activation sequence, loads
 and verifies Android's 1700 Hz LRA waveforms, and completed repeated
 waveform-11 playback without a fatal fault. A microphone cross-check was
-inconclusive because the actuator was below the capture noise floor; a stock
-continuous-mode BEMF/f0 diagnostic is compiled for physical validation.
+inconclusive because the actuator was below the capture noise floor. The
+continuous-mode probe then measured repeatable BEMF peaks matching Android's
+stock driver; its F0 reading is advisory because the vendor path itself is
+unstable on this UMI. User-perceptible feel remains unconfirmed.
 Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. The device-owned QCA6390 Wi-Fi stack now

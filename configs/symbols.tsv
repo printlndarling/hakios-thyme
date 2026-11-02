@@ -135,6 +135,7 @@ GPU_KEEP	arg	gpu_keep	GPU and display	k	hakios.gpu.cpp,hakios.thyme_gpu.cpp
 GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
 HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c,hakios.thyme_haptic.c	
 HAPTIC_F0_PROBE	arg	haptic_f0_probe	Haptics and torch	k	hakios.thyme_haptic.c	measure the LRA's continuous-mode f0 and BEMF once, then restore its registers
+HAPTIC_F0_TRACE	arg	haptic_f0_trace	Haptics and torch	k	hakios.thyme_haptic.c	print 50 ms f0/BEMF register samples during the continuous-mode probe
 HAPTIC_GAIN	arg	haptic_gain	Haptics and torch	k	hakios.thyme_haptic.c	diagnostic AW8697 waveform gain, capped at 0x40
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
 MEMBENCH	arg	membench	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	run the memory benchmark after CPU probing (2 runs it on a background thread)
