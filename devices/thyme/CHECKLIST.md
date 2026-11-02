@@ -180,6 +180,7 @@ No item moves to `PASS` from source inspection alone.
 | Display sleep and wake | TODO | exercise the power path under the current board-gating fix |
 | APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
 | UFS read-only survey | PASS | The rebuilt THYME UEFI exposed 6 UFS LUNs with valid GPT CRCs and enumerated `super`, `userdata`, both boot slots and firmware partitions. The final packaged `prebuilt/xnu-usb.img` repeated this successfully (`logs/043951-run.log`); no write was attempted |
+| Storage layout survey | PASS, read-only | Six LUNs and both liblp metadata slots validated. `super` uses 6.25/8.50 GB in slot A with 2.24 GB uncovered; `userdata` is about 111.4 GB and ends near LUN0's end. No free GPT partition exists (`docs/storage-layout.md`) |
 | Persistent system/user storage | TODO | no accepted design; preserve Android and do not write partitions yet |
 | Safe return to Android | PASS | RAM runs return through the loader; Android remains installed and bootable |
 | Standalone installer/recovery | TODO | requires carve, guarded-write, RAM-boot-from-flash, slot-switch and recovery gates from `docs/install-safe.md` |

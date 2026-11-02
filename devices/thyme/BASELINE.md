@@ -317,3 +317,11 @@ The log `logs/043951-run.log`, SHA-256
 `c1b0b98a05e08ac2c460d08d0c57e4de682b6e8fb4d6477ab7f7ab5372ea8cb9`,
 repeated the six-LUN/GPT enumeration and completed the bounded RAM return to
 Android.
+
+### Storage layout
+
+The same survey was parsed with `tools/ufs-super.py`. Both liblp metadata slots
+validated, and slot A uses 6.25 GB of the 8.50 GB `super`, leaving 2.24 GB
+uncovered. `userdata` is about 111.4 GB and ends within 24 KB of LUN 0's end.
+There is no free GPT partition. The read-only layout and the persistent-storage
+options are recorded in `docs/storage-layout.md`.

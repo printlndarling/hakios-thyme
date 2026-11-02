@@ -54,7 +54,11 @@ b=bytearray(p.read_bytes())
 import hashlib
 if len(b) <= 0xd469:
  raise SystemExit(f'TzDxeLA is too short for the app-loaded flag: {len(b)} bytes')
-print('TzDxeLA source sha256', hashlib.sha256(b).hexdigest(), 'size', len(b))
+source_sha=hashlib.sha256(b).hexdigest()
+expected='dfc36c4c0ee54d251b9bb9cae1a5782526305d815af7ce23b3ca9b3406e57601'
+print('TzDxeLA source sha256', source_sha, 'size', len(b))
+if source_sha != expected:
+ raise SystemExit(f'TzDxeLA revision changed: expected {expected}, got {source_sha}; refusing to patch blindly')
 b[0xd469]=1
 p.write_bytes(b)
 print('TzDxeLA patched sha256', hashlib.sha256(b).hexdigest())
