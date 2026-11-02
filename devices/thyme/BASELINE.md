@@ -93,3 +93,28 @@ phone actually received rather than only the current Git checkout.
 
 When several ADB devices are attached, set `XL_ADB_SERIAL` or use
 `ram-regress.sh`; otherwise `xl` correctly fails closed instead of choosing one.
+
+## Repeated wireless regression on the pinned inputs
+
+Two separate cold RAM boots used the same kernel (`cb57723fc501`), wireless
+scene image (`ba246c0e5b3d`) and THYME loader (`60a0fa9c11c9`). Both passed the
+Wi-Fi discovery, Wi-Fi power-cycle and Bluetooth LE gate:
+
+| Run | Source | Log SHA-256 |
+|---|---|---|
+| `logs/225307-run.log` | `7f475447` | `e7f5763b307a4f8a3cf26534053ec87cfd9f064912671c6ed4d95a3220a26087` |
+| `logs/230506-run.log` | `5aaf2e22` | `445a32afd1a1235118c60d5a16f138fbfd16e6002a5c91be75dd7aaff8d04bbb` |
+
+The second run is the current UI reference:
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/wirelessregress-wifi.png` | `192f46543fb87b0e20a3141cec9cc868bcf7a1a25ca030ab749fc4d8e65fc7ab` |
+| `logs/wirelessregress-bt.png` | `db222e129cd1ae0a8c4a361850f8614073a9cddd82f57f64cf7e2e8adfbdf3c6` |
+
+The Wi-Fi page shows the switch on and real 2.4 GHz and 5 GHz networks. The
+Bluetooth page shows the switch on and the discovered `Accessory`. In the
+second run, `net_test` returned three APs in 0.6 s, Wi-Fi off removed the
+interface, Wi-Fi on restarted the radio, and the following scan again returned
+networks. The H4 transport ended with 528 LE reports, `queue=0`,
+`queue-err=0`, and `enqueue-errors=0`.

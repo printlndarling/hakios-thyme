@@ -89,9 +89,10 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PARTIAL; pairing broken | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`); pairing FAIL because accepted LE Create Connection `0x200d` produced no Connection Complete before timeout (`logs/212033-run.log`). Reconnect remains unverified |
-| Wi-Fi | PARTIAL; clean-main scan PASS | Clean main scanned three APs and displayed networks in stock Settings (`logs/201710-run.log`). Power off/on recovery, association, DHCP and boot-to-boot stability still require the pinned baseline |
-| Wi-Fi power off/on recovery | PASS | On the pinned clean main, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio started in 0.1 s); the post-toggle scan returned networks and Settings displayed them (`logs/203537-run.log`) |
+| Bluetooth | PARTIAL; pairing broken | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log` and `logs/230506-run.log`); pairing FAIL because accepted LE Create Connection `0x200d` produced no Connection Complete before timeout (`logs/212033-run.log`). Reconnect remains unverified |
+| Wi-Fi discovery/startup | PASS | Two consecutive cold boots on identical kernel/scene/loader hashes opened Wi-Fi, returned APs through `net_test`, and displayed real 2.4 GHz and 5 GHz networks in Settings (`logs/225307-run.log`, `logs/230506-run.log`, `logs/wirelessregress-wifi.png`) |
+| Wi-Fi power off/on recovery | PASS | On both pinned regression boots, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted); the following scan returned networks (`logs/225307-run.log`, `logs/230506-run.log`) |
+| Wi-Fi association/DHCP | PARTIAL | WPA2 association, DHCP and TCP through en0 were verified historically; they have not yet been repeated on the current pinned wireless baseline |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
@@ -162,8 +163,8 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard home screen | PASS in historical RAM runs; current fixed build awaits retest | SpringBoard reaches the home screen and renders through the Adreno OpenGL ES path |
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
-| Wi-Fi Settings UI | PARTIAL | Clean main displays real nearby networks. Wi-Fi power off/on recovery and joining still need validation on the pinned baseline |
-| Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed an `Accessory`; selecting it timed out in LE connection establishment, so no peer has paired or reconnected |
+| Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on on two consecutive cold boots. Joining a network from Settings remains unvalidated on this baseline |
+| Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed an `Accessory` on two consecutive cold boots (`logs/wirelessregress-bt.png`); selecting it timed out in LE connection establishment, so no peer has paired or reconnected |
 | Notifications, audio routing and background apps | TODO | requires a sustained interactive session with representative applications |
 | Lock/unlock and passcode | PARTIAL | lock-screen navigation works through injected input; passcode, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
