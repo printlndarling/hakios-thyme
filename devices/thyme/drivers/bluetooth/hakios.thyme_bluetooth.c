@@ -592,6 +592,12 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     bt_log_address("LE create connection peer", 0, tx.bytes + 10);
                 } else if(opcode==0x200e) {
                     hakios_tl("UMI BT: LE create connection cancel\n");
+                } else if(opcode==0x2011 && tx.used>=11) {
+                    hakios_tl("UMI BT: LE whitelist add address-type=%u\n",tx.bytes[4]);
+                    bt_log_address("LE whitelist add",0,tx.bytes+5);
+                } else if(opcode==0x2012 && tx.used>=11) {
+                    hakios_tl("UMI BT: LE whitelist remove address-type=%u\n",tx.bytes[4]);
+                    bt_log_address("LE whitelist remove",0,tx.bytes+5);
                 }
                 error=bt_uart_tx(bt_control_uart,tx.bytes,tx.used);
                 memset(&tx,0,sizeof(tx));
