@@ -1,0 +1,3 @@
+# Short network diagnostic: join, DHCP, dynamic-store state, and one lookup.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store resolve example.com
