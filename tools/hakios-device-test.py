@@ -33,6 +33,10 @@ def tool(root, name, *args):
 
 
 work = tempfile.mkdtemp(prefix="hakios-device-test-")
+# A test-created device repository commits without relying on the host's global Git identity.
+for key, value in (("GIT_AUTHOR_NAME", "HakiOS device test"), ("GIT_AUTHOR_EMAIL", "device-test@example.invalid"),
+                   ("GIT_COMMITTER_NAME", "HakiOS device test"), ("GIT_COMMITTER_EMAIL", "device-test@example.invalid")):
+    os.environ.setdefault(key, value)
 try:
     root = os.path.join(work, "root")
     os.makedirs(os.path.join(root, "tools"))
@@ -49,6 +53,24 @@ try:
             os.makedirs(os.path.join(root, "drivers", sub))
             shutil.copy(os.path.join(ROOT, "drivers", sub, "conf"), os.path.join(root, "drivers", sub, "conf"))
     shutil.copytree(os.path.join(ROOT, "devices", "qemu"), os.path.join(root, "devices", "qemu"))
+    # The integrated fork lists drivers from checked-out device layers in common_defconfig. Copy the
+    # definitions, not their large prebuilt/firmware trees, so the synthetic common root stays coherent.
+    for name in os.listdir(os.path.join(ROOT, "devices")):
+        if name == "qemu":
+            continue
+        source = os.path.join(ROOT, "devices", name)
+        if not os.path.isfile(os.path.join(source, "device.conf")):
+            continue
+        destination = os.path.join(root, "devices", name)
+        os.makedirs(destination)
+        for entry in ("device.conf", "configs", "drivers", "soc"):
+            origin = os.path.join(source, entry)
+            if os.path.exists(origin):
+                if os.path.isdir(origin):
+                    shutil.copytree(origin, os.path.join(destination, entry),
+                                    ignore=shutil.ignore_patterns(".git", "__pycache__"))
+                else:
+                    shutil.copy2(origin, os.path.join(destination, entry))
 
     r = tool(root, "hakios-device.py", "new", "fakephone", "--soc", "fakesoc", "--title", "Fake Phone")
     check("new: a device repository that check passes", r.returncode == 0 and "all hold together" in r.stdout, r.stdout + r.stderr)
@@ -87,8 +109,9 @@ try:
     r = tool(root, "hakios-config.py", "help", "HAKIOS_FAKETOUCH")
     check("a device's driver is a symbol like the common ones", r.returncode == 0 and "devices/fakephone/drivers/input/conf" in r.stdout, r.stdout + r.stderr)
     r = tool(root, "hakios-config.py", "external-files")
-    check("external-files: its file, and where it goes in the tree",
-          r.stdout.strip() == "%s\tbsd/dev/hakios.faketouch.c" % os.path.join(d, "hakios.faketouch.c"), r.stdout + r.stderr)
+    expected_external = "%s\tbsd/dev/hakios.faketouch.c" % os.path.join(d, "hakios.faketouch.c")
+    check("external-files: it names the device's file and its place in the kernel tree",
+          r.stdout.startswith(expected_external + "\n"), r.stdout + r.stderr)
     r = tool(root, "hakios-config.py", "defconfig", "fakephone")
     check("make fakephone_defconfig: found in the device's repository, the driver built", r.returncode == 0 and
           "CONFIG_HAKIOS_FAKETOUCH=y" in open(os.path.join(root, ".config")).read(), r.stdout + r.stderr)
