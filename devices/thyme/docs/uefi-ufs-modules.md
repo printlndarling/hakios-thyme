@@ -26,3 +26,17 @@ Repeat with `PartitionDxe` and `SdccDxe`. The next build step is to place these
 PE32 images in an active THYME Mu-Silicium platform package and include their
 INF descriptions in the DXE/FDF, then verify BlockIo/GPT enumeration through
 `ufs=1` RAM boot. No storage write is allowed before that read-only gate passes.
+
+## First integrated build
+
+The active THYME platform now includes the phone's `UFSDxe`, `DiskIoDxe` and
+`PartitionDxe`. A Release Mu-Silicium build succeeded:
+
+| Artifact | SHA-256 |
+|---|---|
+| `SILICIUM_UEFI.fd` (3 MiB) | `7203aeaafcd16ad4332d7f007fc3fda1dde0ece9c745bffab3f9537182aae468` |
+| `out/thyme-boot/xnu-ufs.img` | `f6797dfae5d889e4992a878f8c777c82a691482d2ee6005a286e5f27de9d7604` |
+
+`tools/uefi-modules.py` confirms that the generated FD contains `UFSDxe`,
+`DiskIoDxe` and `PartitionDxe`. Hardware boot and GPT enumeration were not yet
+verified at that build point.
