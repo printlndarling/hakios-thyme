@@ -301,6 +301,23 @@ static void bt_log_address(const char *kind, unsigned report, const uint8_t *add
         address[5], address[4], address[3], address[2], address[1], address[0]);
 }
 
+static void bt_le_report_name(const uint8_t *data, unsigned data_length, char name[32])
+{
+    unsigned name_length = 0;
+    for (unsigned i = 0; i + 1 < data_length; ) {
+        unsigned field_length = data[i], field_type = data[i + 1];
+        if (field_length < 1 || i + field_length + 1 > data_length) break;
+        if ((field_type == 0x08 || field_type == 0x09) && field_length > 1) {
+            for (unsigned j = 1; j < field_length && name_length + 1 < 32; j++) {
+                uint8_t c = data[i + 1 + j];
+                name[name_length++] = c >= 0x20 && c < 0x7f ? c : '?';
+            }
+        }
+        i += field_length + 1;
+    }
+    name[name_length] = 0;
+}
+
 static void bt_log_le_report(const uint8_t event[BT_EVENT_MAX], unsigned length)
 {
     if (length < 5 || event[2] < 2 || (unsigned)event[2] + 3 > length) return;
@@ -315,19 +332,7 @@ static void bt_log_le_report(const uint8_t event[BT_EVENT_MAX], unsigned length)
         at += data_length;
         int rssi = (int8_t)event[at++];
         char name[32];
-        unsigned name_length = 0;
-        for (unsigned i = 0; i + 1 < data_length; ) {
-            unsigned field_length = data[i], field_type = data[i + 1];
-            if (field_length < 1 || i + field_length + 1 > data_length) break;
-            if ((field_type == 0x08 || field_type == 0x09) && field_length > 1) {
-                for (unsigned j = 1; j < field_length && name_length + 1 < sizeof(name); j++) {
-                    uint8_t c = data[i + 1 + j];
-                    name[name_length++] = c >= 0x20 && c < 0x7f ? c : '?';
-                }
-            }
-            i += field_length + 1;
-        }
-        name[name_length] = 0;
+        bt_le_report_name(data, data_length, name);
         bt_log_address("LE report", report, address);
         hakios_tl("UMI BT: LE report %u type=%#x address-type=%u rssi=%d name=\"%s\"\n",
             report, type, address_type, rssi, name);
@@ -634,11 +639,14 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     bt_le_report_entries+=reports;
                     if(14+data_length<receive_length) {
                         uint8_t rssi=receive[14+data_length];
-                    if(bt_le_reports_logged++<64)
+                        if(bt_le_reports_logged++<64) {
+                            char name[32];
+                            bt_le_report_name(receive+14,data_length,name);
                             hakios_tl("UMI BT: LE advertising report type=%#x address=%02x:%02x:%02x:%02x:%02x:%02x "
-                                "data=%u RSSI=%d report=%u\n",receive[5],
+                                "data=%u RSSI=%d report=%u name=\"%s\"\n",receive[5],
                                 receive[12],receive[11],receive[10],receive[9],receive[8],receive[7],
-                                data_length,(int)(int8_t)rssi,reports);
+                                data_length,(int)(int8_t)rssi,reports,name);
+                        }
                     }
                 }
             }
