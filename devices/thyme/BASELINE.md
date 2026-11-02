@@ -233,3 +233,23 @@ A later named-peer attempt, `logs/024316-run.log`, kept Wi-Fi connected but the
 list contained only `Accessory` when the second row was tapped. No pairing was
 attempted. `HONOR X10 Max` is an intermittent nearby advertisement, not yet a
 controlled peer; the known-peer Bluetooth gate remains open.
+
+## THYME UFS survey blocker
+
+The official loader survey was run read-only with `ufs=1` on the full THYME boot
+argument set. Survey log `logs/025212-run.log`, SHA-256
+`d62c7ecc3c3dc4633085561dd13dd248dff8a730999e173704f0edce25749a87`,
+contains the loader result:
+
+```text
+ufs: no partition information in this UEFI
+```
+
+The loader did execute `ufs_survey`; the failure occurs because the current
+Silicium UEFI did not publish any UEFI partition-information handle for the
+phone's UFS. There is therefore no BlockIo/GPT path for the survey or for the
+kernel's loader-backed block service. The run performed no storage writes.
+
+Before an installer or persistent-storage design can be accepted, the THYME
+Silicium UEFI must expose the UFS controller/LUNs and GPT partitions, or an
+equivalent read-only native UFS path must be brought up and verified.

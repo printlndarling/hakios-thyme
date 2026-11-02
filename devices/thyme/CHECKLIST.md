@@ -179,7 +179,7 @@ No item moves to `PASS` from source inspection alone.
 | Brightness control | PARTIAL | iOS hook and DSI DCS `0x51` completion are verified; human comparison and automatic brightness remain missing |
 | Display sleep and wake | TODO | exercise the power path under the current board-gating fix |
 | APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
-| UFS read-only survey | TODO | run the official-main read-only survey before considering any write path |
+| UFS read-only survey | FAIL, firmware blocker | `ufs=1` reached the loader survey, but THYME Silicium UEFI exposed no partition information: `ufs: no partition information in this UEFI`. No BlockIo/GPT handles were available, so the loader/kernel could not enumerate or hash storage. No write was attempted (`logs/025212-run.log`) |
 | Persistent system/user storage | TODO | no accepted design; preserve Android and do not write partitions yet |
 | Safe return to Android | PASS | RAM runs return through the loader; Android remains installed and bootable |
 | Standalone installer/recovery | TODO | requires carve, guarded-write, RAM-boot-from-flash, slot-switch and recovery gates from `docs/install-safe.md` |
@@ -201,8 +201,8 @@ No item moves to `PASS` from source inspection alone.
 
 ## Later product work
 
-- [ ] UFS read-only survey, then a separate accepted design for persistent
-  storage.
+- [ ] Expose THYME UFS BlockIo/PartitionInfo in the boot UEFI, then repeat the
+  read-only survey and make a separate accepted design for persistent storage.
 - [ ] Rear camera and torch.
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
