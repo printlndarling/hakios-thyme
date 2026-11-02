@@ -253,3 +253,14 @@ kernel's loader-backed block service. The run performed no storage writes.
 Before an installer or persistent-storage design can be accepted, the THYME
 Silicium UEFI must expose the UFS controller/LUNs and GPT partitions, or an
 equivalent read-only native UFS path must be brought up and verified.
+
+The phone's own `xbl_a.img` contains the vendor modules the current image
+omits. `tools/uefi-modules.py` identified and extracted, without modifying the
+image:
+
+- `UFSDxe` `0d35cd8e-97ea-4f9a-96af-0f0d89f76567`;
+- `PartitionDxe` `1fa1f39e-feff-4aae-bd7b-38a070a3b609`;
+- `SdccDxe` `f10f76db-42c1-533f-34a8-69be24653110`.
+
+Their PE32 hashes and the next UEFI integration step are recorded in
+`docs/uefi-ufs-modules.md`. The vendor binaries remain local and untracked.
