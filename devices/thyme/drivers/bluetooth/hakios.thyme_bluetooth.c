@@ -416,6 +416,10 @@ static uint8_t bt_tx_queue[BT_TX_QUEUE_SIZE];
 static unsigned bt_tx_head,bt_tx_tail;
 static bool bt_control_fault;
 static struct termios bt_control_termios;
+static unsigned bt_event_seen[256];
+static unsigned bt_le_meta_seen[256];
+static unsigned bt_le_reports_logged;
+static unsigned bt_scan_complete_seen;
 
 static errno_t bt_control_connect(kern_ctl_ref ref,struct sockaddr_ctl *address,void **info)
 {
@@ -548,6 +552,37 @@ static void bt_control_worker(void *unused,wait_result_t result)
             if(state<0) error=-state;
             if(state>0 && receive_length>=7 && receive[0]==4 && receive[1]==0x0e && receive[6])
                 hakios_tl("UMI BT: HCI command rejected opcode=%#x status=%#x\n",bt_le16(receive+4),receive[6]);
+        }
+        /*
+         * bluetoothd owns the HCI interpretation, but without a count of what reached it a UI
+         * with no nearby devices cannot be distinguished from a controller that never reported
+         * one. Log each event kind once and the first few complete LE advertising reports.
+         */
+        if(receive_length>=3 && receive[0]==4) {
+            uint8_t event=receive[1];
+            if(!bt_event_seen[event]++)
+                hakios_tl("UMI BT: HCI event=%#x length=%u\n",event,receive_length-3);
+            if(event==0x0e && receive_length>=7) {
+                uint16_t opcode=bt_le16(receive+4);
+                if((opcode==0x200b || opcode==0x200c) && bt_scan_complete_seen++<16)
+                    hakios_tl("UMI BT: HCI command complete opcode=%#x status=%#x\n",opcode,receive[6]);
+            }
+            if(event==0x3e && receive_length>=5) {
+                uint8_t subevent=receive[3];
+                if(!bt_le_meta_seen[subevent]++)
+                    hakios_tl("UMI BT: LE meta subevent=%#x length=%u\n",subevent,receive_length-5);
+                if(subevent==0x02 && receive_length>=15) {
+                    unsigned reports=receive[4], data_length=receive[13];
+                    if(14+data_length<receive_length) {
+                        uint8_t rssi=receive[14+data_length];
+                        if(bt_le_reports_logged++<8)
+                            hakios_tl("UMI BT: LE advertising report type=%#x address=%02x:%02x:%02x:%02x:%02x:%02x "
+                                "data=%u RSSI=%d report=%u\n",receive[5],
+                                receive[12],receive[11],receive[10],receive[9],receive[8],receive[7],
+                                data_length,(int)(int8_t)rssi,reports);
+                    }
+                }
+            }
         }
         if(!error) error=bt_service_ibs(bt_control_uart);
         if(error && !fault) {

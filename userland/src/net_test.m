@@ -480,6 +480,120 @@ struct apple80211req {
 #define SIOCSA80211     0x802869c8u
 #define SIOCGA80211     0xc02869c9u
 
+struct apple80211_channel {
+	uint32_t version, channel, flags;
+};
+
+struct apple80211_scan_request {
+	uint32_t version, bss_type;
+	uint8_t bssid[6], unused_0[2];
+	uint32_t ssid_length;
+	uint8_t ssid[32];
+	uint32_t scan_type, phy_mode;
+	uint16_t dwell_ms, unused_1;
+	uint32_t rest_ms, channel_count;
+	struct apple80211_channel channels[400];
+	uint64_t flags;
+	uint32_t unused_2, name_count;
+	uint8_t names[10][56];
+	uint32_t short_ssid, unused_3;
+};
+
+struct apple80211_scan_result {
+	uint32_t version;
+	struct apple80211_channel channel;
+	uint16_t noise_known;
+	int16_t noise, snr, rssi;
+	uint16_t beacon_interval, capability;
+	uint8_t bssid[6];
+	uint8_t rate_count, unused_0;
+	uint32_t rates[15];
+	uint8_t ssid_length, ssid[32], unused_1[3];
+	uint32_t age_ms;
+	uint8_t flags, unused_2;
+	uint16_t elements_length;
+	uint8_t elements[1024];
+};
+
+_Static_assert(sizeof(struct apple80211_scan_request) == 5456, "scan request layout");
+_Static_assert(sizeof(struct apple80211_scan_result) == 1164, "scan result layout");
+
+/*
+ * Ask for the same SCAN_REQ wifid sends, then read SCAN_RESULT until the kernel
+ * says EIO. This bypasses the Settings UI while still exercising the complete
+ * user/kernel Apple80211 boundary and reports what the radio actually heard.
+ */
+static void
+scan(void)
+{
+	struct apple80211_scan_request *asked = calloc(1, sizeof(*asked));
+	struct apple80211_scan_result result;
+	struct apple80211req request = { .name = "en0" };
+	double start = seconds();
+	unsigned networks = 0, empty = 0;
+	int s;
+
+	if (asked == NULL) {
+		perror("net_test: scan: calloc");
+		return;
+	}
+	asked->version = 1;
+	asked->scan_type = 1;
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		perror("net_test: scan: socket");
+		free(asked);
+		return;
+	}
+	request.type = 10;
+	request.length = sizeof(*asked);
+	request.data = asked;
+	if (ioctl(s, SIOCSA80211, &request) != 0) {
+		printf("net_test: scan: the kernel refuses SCAN_REQ: %s\n", strerror(errno));
+		close(s);
+		free(asked);
+		return;
+	}
+	printf("net_test: scan: SCAN_REQ accepted; waiting for results\n");
+	for (;;) {
+		memset(&result, 0, sizeof(result));
+		memset(&request, 0, sizeof(request));
+		strlcpy(request.name, "en0", sizeof(request.name));
+		request.type = 11;
+		request.length = sizeof(result);
+		request.data = &result;
+		if (ioctl(s, SIOCGA80211, &request) != 0) {
+			if (errno == EIO && networks != 0) {
+				break;
+			}
+			if (++empty >= 30) {
+				printf("net_test: scan: no result after %.1f s: %s\n", seconds() - start, strerror(errno));
+				break;
+			}
+		} else {
+			char ssid[33];
+			size_t length = result.ssid_length <= sizeof(result.ssid) ? result.ssid_length : 0;
+
+			for (size_t i = 0; i < length; i++) {
+				ssid[i] = result.ssid[i] >= 0x20 && result.ssid[i] < 0x7f ? result.ssid[i] : '?';
+			}
+			ssid[length] = 0;
+			printf("net_test: scan: %u channel %u rssi %d bssid %02x:%02x:%02x:%02x:%02x:%02x "
+			    "elements %u ssid \"%s\"\n", networks + 1, result.channel.channel, result.rssi,
+			    result.bssid[0], result.bssid[1], result.bssid[2], result.bssid[3], result.bssid[4], result.bssid[5],
+			    result.elements_length, ssid);
+			networks++;
+			empty = 0;
+		}
+		if (seconds() - start > 40) {
+			break;
+		}
+		usleep(200000);
+	}
+	printf("net_test: scan: %u networks in %.1f s\n", networks, seconds() - start);
+	close(s);
+	free(asked);
+}
+
 static void
 wrongjoin(void)
 {
@@ -555,6 +669,8 @@ main(int argc, char **argv)
 
 			if (strcmp(step, "show") == 0) {
 				show(NULL, false);
+			} else if (strcmp(step, "scan") == 0) {
+				scan();
 			} else if (strcmp(step, "store") == 0) {
 				store(i + 1 < argc && strchr(argv[i + 1], ':') != NULL ? argv[++i] : NULL);
 			} else if (strcmp(step, "dhcp") == 0 && i + 1 < argc) {

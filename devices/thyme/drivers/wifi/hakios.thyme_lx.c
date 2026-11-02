@@ -244,7 +244,7 @@ lx_os_option(const char *name)
 		if (strcmp(name, "wifi_scan") == 0) return umi_wifi_normal_session() ? 0 : 1;
 		if (strcmp(name, "wifi_station") == 0) return umi_wifi_normal_session() ? 1 : 0;
 		if (strcmp(name, "wifi_ba") == 0 || strcmp(name, "wifi_wide") == 0) return 1;
-		if (strcmp(name, "wifi_quiet") == 0) return 1;
+		if (strcmp(name, "wifi_quiet") == 0) return hakios_wifi_option("wifi_loud") ? 0 : 1;
 	}
 	return hakios_wifi_option(name);
 }

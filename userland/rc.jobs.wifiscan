@@ -1,0 +1,3 @@
+# Wait for a minimal Wi-Fi-only RAM boot to finish cold calibration and firmware start,
+# then ask through the same Apple80211 SCAN_REQ path wifid uses and print the results.
+/redwood/bin/net_test wait 90 scan

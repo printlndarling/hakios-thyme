@@ -72,6 +72,7 @@ static LCK_MTX_DECLARE(umi_mhi_lock, &umi_wifi_lck_grp);
 static bool umi_poll_wanted, umi_poll_finished;
 static struct umi_pcie *umi_active_pcie;
 static bool umi_normal_session, umi_service_wanted, umi_service_finished = true;
+static bool umi_service_ready;
 static struct {
 	unsigned type;
 	unsigned long size;
@@ -745,6 +746,8 @@ umi_wifi_firmware_diagnostic(void *context)
 			if (!error) {
 				error = hakios_lx_start();
 				if (!error && umi_normal_session) {
+					os_atomic_store(&umi_service_ready, true, release);
+					wakeup(&umi_service_ready);
 					hakios_tl("UMI Wi-Fi: station ready for iOS Wi-Fi requests\n");
 					while (os_atomic_load(&umi_service_wanted, acquire) &&
 					    !os_atomic_load(&umi_poll_finished, acquire)) {
@@ -792,7 +795,9 @@ umi_wifi_service_thread(__unused void *argument)
 {
 	int error = umi_wifi_pcie_diagnostic(10);
 	hakios_tl("UMI Wi-Fi: service stopped, errno=%d\n", error);
+	os_atomic_store(&umi_service_ready, false, release);
 	os_atomic_store(&umi_service_finished, true, release);
+	wakeup(&umi_service_ready);
 }
 
 void
@@ -861,15 +866,39 @@ umi_wifi_init(void)
 	PE_parse_boot_argn("wifi", &enabled, sizeof(enabled));
 	if (!step && enabled == 1) {
 		umi_normal_session = true;
+		os_atomic_store(&umi_service_ready, false, release);
 		os_atomic_store(&umi_service_finished, false, relaxed);
 		os_atomic_store(&umi_service_wanted, true, release);
 		hakios_lx_net_early();
 		int error = lx_os_thread("umi-wifi", umi_wifi_service_thread, NULL);
 		if (error) {
+			os_atomic_store(&umi_service_ready, false, release);
 			os_atomic_store(&umi_service_finished, true, release);
 			os_atomic_store(&umi_service_wanted, false, release);
 		}
 		hakios_tl("UMI Wi-Fi: background startup requested, errno=%d\n", error);
+		/*
+		 * The firmware's cold-boot calibration is latency-sensitive. Starting the audio DSP,
+		 * haptics and the full SpringBoard workload in parallel was observed to leave it
+		 * waiting until the 60-second QMI timeout. Let the Wi-Fi driver reach mission mode
+		 * before the remaining bring-up hooks run; on failure, boot continues after a bound.
+		 */
+		if (!error && umi_normal_session) {
+			uint64_t began, now;
+
+			absolutetime_to_nanoseconds(mach_absolute_time(), &began);
+			for (unsigned i = 0; i < 200 && !os_atomic_load(&umi_service_ready, acquire) &&
+			    !os_atomic_load(&umi_service_finished, acquire); i++) {
+				struct timespec pause = { .tv_sec = 0, .tv_nsec = 100 * NSEC_PER_MSEC };
+
+				msleep(&umi_service_ready, NULL, PZERO, "umi-wifi-ready", &pause);
+			}
+			absolutetime_to_nanoseconds(mach_absolute_time(), &now);
+			hakios_tl("UMI Wi-Fi: startup gate %s after %llu ms\n",
+			    os_atomic_load(&umi_service_ready, acquire) ? "opened" :
+			    os_atomic_load(&umi_service_finished, acquire) ? "closed by failure" : "timed out",
+			    (now - began) / NSEC_PER_MSEC);
+		}
 		return true;
 	}
 	if (step == 1 && back == 1) {

@@ -4230,20 +4230,29 @@ hakios_wifi_driver_file(const char *name, uint64_t *size)
  * The radio's own address. Its firmware has none (it says zeros): Android keeps the phone's in
  * its storage and hands it to the radio's driver (dt: "use-nv-mac"). Here it is given to the
  * kernel when that is started -- boot-arg wifi_mac, six bytes in hexadecimal with colons
- * between -- and is nowhere in these sources. The log says that one was given and how long it
- * was, not which.
+ * between. If it is omitted, use a stable locally administered address: unlike the firmware's
+ * all-zero address it is valid for a station, and unlike a random address it does not change
+ * across boots. The log says which source was used, not only that an address exists.
  */
 bool
 hakios_wifi_radio_address(uint8_t *address)
 {
+	static const uint8_t fallback[6] = { 0x02, 'T', 'H', 'Y', 'M', 'E' };
 	char text[32] = "";
 	uint8_t bytes[6];
 	unsigned count = 0, digits = 0, value = 0;
 	bool good;
 
 	if (!PE_parse_boot_arg_str("wifi_mac", text, sizeof(text)) || text[0] == 0) {
-		printf("wifi: %u: the driver asks for the radio's address: none was given (wifi_mac)\n", step);
-		return false;
+		/*
+		 * This device's firmware reports 00:00:00:00:00:00 and the platform identity has no
+		 * persistent Wi-Fi address yet. 02:54:48:59:4d:45 is locally administered, unicast and
+		 * stable; wifi_mac= still overrides it when the phone's original address is known.
+		 */
+		printf("wifi: %u: the driver asks for the radio's address: none was given (wifi_mac); using the stable "
+		    "local address 02:54:48:59:4d:45\n", step);
+		memcpy(address, fallback, sizeof(fallback));
+		return true;
 	}
 	good = true;
 	for (const char *c = text;; c++) {
