@@ -19,8 +19,8 @@ devices/thyme/uefi/build.sh
 
 `apply.sh` clones the pinned HakiOS UEFI common tree and Mu-Silicium revision,
 initializes only the build dependencies, applies HakiOS's common changes,
-installs this platform, and extracts matching vendor modules from the phone's
-own XBL.
+installs this platform, creates `venv-uefi` when needed, and extracts matching
+vendor modules from the phone's own XBL.
 
 `build.sh` installs the EDK2 build dependencies in `venv-uefi`, updates external
 tools, and writes:

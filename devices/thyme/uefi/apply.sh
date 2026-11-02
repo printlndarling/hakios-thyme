@@ -15,6 +15,10 @@ PYTHON=${UEFI_PYTHON:-$ROOT/venv-uefi/bin/python}
 [ -f "$DTB" ] || { echo "thyme-uefi: no device tree: $DTB" >&2; exit 1; }
 [ -f "$XBL" ] || { echo "thyme-uefi: no XBL image: $XBL" >&2; exit 1; }
 [ ! -e "$MU" ] || { echo "thyme-uefi: $MU already exists" >&2; exit 1; }
+if [ ! -x "$PYTHON" ]; then
+	python3 -m venv "$ROOT/venv-uefi"
+fi
+"$PYTHON" -m pip install -q --disable-pip-version-check uefi_firmware==1.16
 
 git clone https://github.com/Project-Silicium/Mu-Silicium.git "$MU"
 git -C "$MU" checkout -q "$(tr -d '\r\n' < "$COMMON/BASE")"
