@@ -38,6 +38,8 @@
 #               image is built, else HakiOS's U-Boot: docs/u-boot.md); either way from RAM, nothing is flashed
 #   XL_ADB_SERIAL=serial   the Android device to reboot when more than one is attached. Fastboot is
 #               left alone because its loader has its own serial.
+#   XL_BOOT_IMAGE=file   boot this ready-made image from RAM instead of repacking the loader and
+#               payload. XL_LOADER selects the loader used when an image is repacked.
 #   XL_SB_DELAY seconds SpringBoard waits before it starts (default 8; see userland/src/inject_sb.c)
 #               Among XL_CMDLINE, for the phone: bootcpu=7 runs the kernel on the biggest core instead of
 #               the small one the firmware starts on (the loader then watches from the first core, and a
@@ -60,7 +62,7 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 # the kernel and the loader built here, or else the ones that come with the repository
 K=hakios-kernel                 # make kernel makes it
 [ -f $K ] || K=prebuilt/hakios-kernel
-L=xnuloader/loader.efi
+L=${XL_LOADER:-xnuloader/loader.efi}
 if [ ! -f $L ]; then
 	L=prebuilt/loader.efi
 	echo "xl: no xnuloader/loader.efi: using prebuilt/loader.efi, which has no iPhone identity in it (Darwin will not start; make loader builds one from your own IPSW)" >&2
@@ -157,15 +159,26 @@ enter() {
 		[ "$(state)" = absent ] && { echo "xl: phone not reachable"; return 1; }
 		enter; return ;;
 	esac
-	xnuloader/mkpayload.py -o usb-payload.bin loader.efi=$L --usb >/dev/null || { echo "xl: payload build failed"; return 1; }
-	case "$(firmware)" in
-	u-boot) tools/mkubootimg.py -d "${DEVICE:-redwood}" -l $L -p usb-payload.bin -o xnu-usb.img >/dev/null ;;
-	*) ./mkxnuimg.py -p usb-payload.bin -o xnu-usb.img >/dev/null ;;
-	esac || { echo "xl: image build failed ($(firmware))"; return 1; }
+	local image=${XL_BOOT_IMAGE:-}
+	if [ -n "$image" ]; then
+		[ -f "$image" ] || { echo "xl: boot image not found: $image"; return 1; }
+	else
+		xnuloader/mkpayload.py -o usb-payload.bin loader.efi=$L --usb >/dev/null || { echo "xl: payload build failed"; return 1; }
+		local imgargs=(-d "${DEVICE:-redwood}")
+		[ -z "${XL_FD_BASE:-}" ] || imgargs+=(--fd-base "$XL_FD_BASE")
+		[ -z "${XL_FD_SIZE:-}" ] || imgargs+=(--fd-size "$XL_FD_SIZE")
+		[ -z "${XL_PAYLOAD_BASE:-}" ] || imgargs+=(--payload-base "$XL_PAYLOAD_BASE")
+		case "$(firmware)" in
+		u-boot) tools/mkubootimg.py -d "${DEVICE:-redwood}" -l $L -p usb-payload.bin -o xnu-usb.img >/dev/null ;;
+		*) ./mkxnuimg.py "${imgargs[@]}" -p usb-payload.bin -o xnu-usb.img >/dev/null ;;
+		esac || { echo "xl: image build failed ($(firmware))"; return 1; }
+		image=xnu-usb.img
+	fi
+	echo "xl: boot image $(sha256sum "$image" | cut -c1-12) ($image)"
 	# Right after the phone enters fastboot the first "boot" is sometimes not taken: try twice.
 	local try
 	for try in 1 2; do
-		FB_TIMEOUT=40 fb boot xnu-usb.img | grep -q OKAY || { sleep 3; continue; }
+		FB_TIMEOUT=40 fb boot "$image" | grep -q OKAY || { sleep 3; continue; }
 		sleep 6
 		wait_for loader 30 && { rm -f $PHONE.ran; return 0; }
 		[ "$(state)" = fastboot ] || break

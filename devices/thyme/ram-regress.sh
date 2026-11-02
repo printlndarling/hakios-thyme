@@ -16,6 +16,8 @@ cd "$ROOT"
 
 export XL_ADB_SERIAL=${XL_ADB_SERIAL-5290780a}
 export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
+export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
+export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 SCENARIO=${1:-out/thyme-boot/root-wirelessregress.apfs}
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
