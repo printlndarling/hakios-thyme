@@ -423,6 +423,11 @@ static struct termios bt_control_termios;
 static unsigned bt_event_seen[256];
 static unsigned bt_le_meta_seen[256];
 static unsigned bt_le_reports_logged;
+static unsigned long long bt_le_report_events;
+static unsigned long long bt_le_report_entries;
+static unsigned long long bt_events_enqueued;
+static unsigned bt_enqueue_errors;
+static unsigned bt_command_status_logged;
 static unsigned bt_scan_complete_seen;
 static unsigned bt_scan_status_seen;
 
@@ -568,6 +573,9 @@ static void bt_control_worker(void *unused,wait_result_t result)
             uint8_t event=receive[1];
             if(!bt_event_seen[event]++)
                 hakios_tl("UMI BT: HCI event=%#x length=%u\n",event,receive_length-3);
+            if(event==0x0f && receive_length>=6 && bt_command_status_logged++<64)
+                hakios_tl("UMI BT: command status opcode=%#x status=%#x\n",
+                    bt_le16(receive+5),receive[3]);
             if(event==0x0e && receive_length>=7) {
                 uint16_t opcode=bt_le16(receive+4);
                 if((opcode==0x200b || opcode==0x200c) && bt_scan_complete_seen++<16)
@@ -584,6 +592,8 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     hakios_tl("UMI BT: LE meta subevent=%#x length=%u\n",subevent,receive_length-5);
                 if(subevent==0x02 && receive_length>=15) {
                     unsigned reports=receive[4], data_length=receive[13];
+                    bt_le_report_events++;
+                    bt_le_report_entries+=reports;
                     if(14+data_length<receive_length) {
                         uint8_t rssi=receive[14+data_length];
                         if(bt_le_reports_logged++<8)
@@ -604,14 +614,23 @@ static void bt_control_worker(void *unused,wait_result_t result)
         /* Never enqueue while holding bt_control_lock: socket callbacks acquire it. */
         if(receive_length) {
             int queued=unit?ctl_enqueuedata(bt_control,unit,receive,receive_length,0):ENOTCONN;
+            if(queued==0) bt_events_enqueued++;
+            else if(queued!=ENOBUFS && bt_enqueue_errors++<16)
+                hakios_tl("UMI BT: event enqueue failed errno=%d event=%#x length=%u\n",
+                    queued,receive_length>=2?receive[1]:0,receive_length);
             if(queued!=ENOBUFS) receive_length=0;
         }
         if(unit && ++transport_ticks>=5000) {
+            uint32_t queued_packets=0;
+            int queue_error=ctl_getenqueuepacketcount(bt_control,unit,&queued_packets);
             transport_ticks=0;
-            hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu\n",
+            hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu "
+                "events=%llu le-events=%llu le-reports=%llu queue=%u queue-err=%d enqueue-errors=%u\n",
                 bt_read(bt_control_uart,0x40),bt_read(bt_control_uart,0x804),
                 bt_read(bt_control_uart,0x640),bt_host_awake,
-                bt_rx_words,bt_rx_bytes,bt_rx_frames);
+                bt_rx_words,bt_rx_bytes,bt_rx_frames,bt_events_enqueued,
+                bt_le_report_events,bt_le_report_entries,queued_packets,queue_error,
+                bt_enqueue_errors);
         }
         delay(1000);
     }
