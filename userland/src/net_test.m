@@ -730,37 +730,44 @@ joinfile(const char *path)
 		printf("net_test: joinfile: socket: %s\n", strerror(errno));
 		return;
 	}
-	request.type = 20;
-	request.length = sizeof(assoc);
-	request.data = assoc;
 	start = seconds();
-	if (ioctl(s, SIOCSA80211, &request) != 0) {
-		printf("net_test: joinfile: the kernel refuses ASSOCIATE: %s\n", strerror(errno));
-		close(s);
-		return;
-	}
-	printf("net_test: joinfile: ASSOCIATE asked for a name of %zu bytes, a passphrase of %zu bytes, %s access point\n",
-	    ssid_length, passphrase_length, bssid_text[0] != 0 ? "a selected" : "any");
-	for (;;) {
+	for (unsigned attempt = 1; attempt <= 3; attempt++) {
+		double attempt_start = seconds();
+
 		memset(&request, 0, sizeof(request));
 		strlcpy(request.name, "en0", sizeof(request.name));
-		request.type = 21;
-		if (ioctl(s, SIOCGA80211, &request) != 0) {
-			printf("net_test: joinfile: ASSOCIATE_RESULT failed: %s\n", strerror(errno));
+		request.type = 20;
+		request.length = sizeof(assoc);
+		request.data = assoc;
+		if (ioctl(s, SIOCSA80211, &request) != 0) {
+			printf("net_test: joinfile: the kernel refuses ASSOCIATE: %s\n", strerror(errno));
 			break;
 		}
-		result = (unsigned)request.value;
-		if (result != 0) {
+		printf("net_test: joinfile: attempt %u asked for a name of %zu bytes, a passphrase of %zu bytes, %s access point\n",
+		    attempt, ssid_length, passphrase_length, bssid_text[0] != 0 ? "a selected" : "any");
+		result = 0;
+		for (;;) {
+			memset(&request, 0, sizeof(request));
+			strlcpy(request.name, "en0", sizeof(request.name));
+			request.type = 21;
+			if (ioctl(s, SIOCGA80211, &request) != 0) {
+				printf("net_test: joinfile: ASSOCIATE_RESULT failed: %s\n", strerror(errno));
+				break;
+			}
+			result = (unsigned)request.value;
+			if (result != 0 || seconds() - attempt_start > 10) {
+				break;
+			}
+			usleep(200000);
+		}
+		printf("net_test: joinfile: attempt %u result %u after %.1f s%s\n", attempt, result, seconds() - attempt_start,
+		    result == 1 ? " (joined)" : result == 21 ? " (invalid passphrase)" : result == 9 ? " (timeout)" : "");
+		if (result == 1 || result == 21) {
 			break;
 		}
-		if (seconds() - start > 60) {
-			printf("net_test: joinfile: no final result after %.1f s\n", seconds() - start);
-			break;
-		}
-		usleep(200000);
+		usleep(2000000);
 	}
-	printf("net_test: joinfile: result %u after %.1f s%s\n", result, seconds() - start,
-	    result == 1 ? " (joined)" : result == 21 ? " (invalid passphrase)" : result == 9 ? " (timeout)" : "");
+	printf("net_test: joinfile: final result %u after %.1f s\n", result, seconds() - start);
 	close(s);
 }
 
