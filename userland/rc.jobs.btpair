@@ -1,6 +1,11 @@
 # Bluetooth-only pairing reproduction against a discovered BLE Accessory.
+# A weak advertiser can take longer than a minute to appear, so wait 90 s and
+# retry the row once. This prevents a missed first tap from looking like a pair
+# failure in the HCI log.
 /redwood/bin/rwtouch wait 35
 /redwood/bin/battery_test open prefs:root=Bluetooth
-/redwood/bin/rwtouch wait 35
+/redwood/bin/rwtouch wait 55
 /redwood/bin/rwtouch tap 0.5 0.35
-/redwood/bin/rwtouch wait 60
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.35
+/redwood/bin/rwtouch wait 80
