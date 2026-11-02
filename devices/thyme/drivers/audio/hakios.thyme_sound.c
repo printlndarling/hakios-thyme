@@ -1092,6 +1092,8 @@ static const int16_t tone[48] = {
 	-3277, -3249, -3165, -3028, -2838, -2600, -2317, -1995, -1638, -1254, -848, -428,
 };
 static uint32_t tone_at;
+/* sound_channel=1: test tone on the left channel only; 2: right only; default 0: both */
+static uint32_t test_channel;
 
 static void
 period_fill(unsigned period, bool silent)
@@ -1101,8 +1103,8 @@ period_fill(unsigned period, bool silent)
 	for (unsigned frame = 0; frame < PERIOD_FRAMES; frame++) {
 		int16_t sample = silent ? 0 : tone[tone_at++ % 48];
 
-		samples[2 * frame] = sample;
-		samples[2 * frame + 1] = sample;
+		samples[2 * frame] = test_channel == 2 ? 0 : sample;
+		samples[2 * frame + 1] = test_channel == 1 ? 0 : sample;
 	}
 	for (vm_offset_t line = (vm_offset_t)samples; line < (vm_offset_t)samples + PERIOD_BYTES; line += 64) {
 		__asm__ volatile ("dc cvac, %0" : : "r" (line));        /* the DSP reads memory, not our caches */
@@ -1616,8 +1618,9 @@ sound_thread(__unused void *parameter, __unused wait_result_t result)
 
 		announce("UMI protected speaker test: OTP trims, board limits, firmware and a capped test tone");
 		if (!umi_speaker_prepare() || !umi_speaker_start() || !umi_speaker_volume(below, 50)) goto out;
-		say("sound: UMI SPEAKER TONE NOW: %u s, 1 kHz at -20 dBFS, %u.%03u dB under unity\n",
-		    test_seconds, below / 8, below % 8 * 125);
+		say("sound: UMI SPEAKER TONE NOW: %u s, 1 kHz at -20 dBFS on %s, %u.%03u dB under unity\n",
+		    test_seconds, test_channel == 1 ? "the left channel only" : test_channel == 2 ? "the right channel only" :
+		    "both channels", below / 8, below % 8 * 125);
 		ok = play(test_seconds * 1000, true);
 		goto out;
 	}
@@ -1715,6 +1718,10 @@ hakios_sound_dsp_up(void)
 	}
 	PE_parse_boot_argn("sound_secs", &seconds, sizeof(seconds));
 	PE_parse_boot_argn("sound_below", &below, sizeof(below));
+	PE_parse_boot_argn("sound_channel", &test_channel, sizeof(test_channel));
+	if (test_channel > 2) {
+		test_channel = 0;
+	}
 	if (below > 2048) below = 2048;
 	PE_parse_boot_argn("sound_pause", &pause_ms, sizeof(pause_ms));
 	PE_parse_boot_argn("sound_guard_as", &guard_as, sizeof(guard_as));

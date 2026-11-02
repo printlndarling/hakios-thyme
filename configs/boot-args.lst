@@ -253,6 +253,7 @@ soc_smem_size	k
 socinfo	k
 sound	k
 sound_below	k
+sound_channel	k
 sound_gain	k
 sound_guard_as	k
 sound_pause	k
