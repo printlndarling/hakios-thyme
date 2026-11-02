@@ -316,7 +316,7 @@ ramdisk() { # ramdisk [<file>|none]
 screenshot() { # screenshot [file.png]
 	enter || return 1
 	local out=${1:-logs/screen.png} geom
-	geom=$(fb getvar screen | sed -n 's/^screen: //p')
+	geom=$(fb getvar screen | tr -d '\r' | sed -n 's/^screen: //p')
 	[ -n "$geom" ] && fb oem screenshot | grep -q OKAY || { echo "xl: the loader has no display"; return 1; }
 	FB_TIMEOUT=60 fb get_staged logs/screen.raw >/dev/null
 	python3 - logs/screen.raw "$out" $geom <<'PY' && rm -f logs/screen.raw && echo "xl: $out ($geom)"

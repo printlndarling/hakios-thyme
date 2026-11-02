@@ -98,6 +98,7 @@ static uint8_t bt_supported_commands[64];
 static uint8_t bt_rx_raw[BT_RX_RAW_SIZE];
 static unsigned bt_rx_head, bt_rx_tail;
 static bool bt_host_awake;
+static unsigned long long bt_rx_words, bt_rx_bytes, bt_rx_frames;
 static int bt_rx_capture(vm_offset_t uart)
 {
     uint32_t irq=bt_read(uart,0x640);
@@ -105,12 +106,14 @@ static int bt_rx_capture(vm_offset_t uart)
     for(unsigned budget=0;budget<64;budget++) {
         uint32_t status=bt_read(uart,0x804),words=status&0x1ffffff;
         if(!words) return 0;
+        bt_rx_words+=words;
         if(words>((bt_read(uart,0xe28)>>16)&0x3f)) return EIO;
         unsigned last=(status>>28)&7;
         unsigned bytes=words==1 && (status>>31) && last ? last : 4;
         if(bytes>4) return EIO;
         if(BT_RX_RAW_SIZE-(bt_rx_head-bt_rx_tail)<bytes) return ENOBUFS;
         uint32_t word=bt_read(uart,0x780);
+        bt_rx_bytes+=bytes;
         for(unsigned b=0;b<bytes;b++) bt_rx_raw[bt_rx_head++&(BT_RX_RAW_SIZE-1)]=(word>>(8*b))&0xff;
     }
     return 0;
@@ -129,6 +132,7 @@ static int bt_rx_frame(vm_offset_t uart,uint8_t *frame,unsigned capacity,unsigne
             if(byte==0xfc) bt_host_awake=true;
         }
         if(result!=1 || (events_only && bt_rx_packet.bytes[0]!=4)) continue;
+        bt_rx_frames++;
         if(bt_rx_packet.used>capacity) return -EMSGSIZE;
         *length=bt_rx_packet.used;
         memcpy(frame,bt_rx_packet.bytes,*length);
@@ -420,6 +424,7 @@ static unsigned bt_event_seen[256];
 static unsigned bt_le_meta_seen[256];
 static unsigned bt_le_reports_logged;
 static unsigned bt_scan_complete_seen;
+static unsigned bt_scan_status_seen;
 
 static errno_t bt_control_connect(kern_ctl_ref ref,struct sockaddr_ctl *address,void **info)
 {
@@ -507,6 +512,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
     unsigned receive_length=0;
     uint32_t generation=0;
     unsigned commands=0;
+    unsigned transport_ticks=0;
     bool waking=false;
     uint64_t wake_deadline=0;
     for(;;) {
@@ -567,6 +573,11 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 if((opcode==0x200b || opcode==0x200c) && bt_scan_complete_seen++<16)
                     hakios_tl("UMI BT: HCI command complete opcode=%#x status=%#x\n",opcode,receive[6]);
             }
+            if(event==0x0f && receive_length>=7) {
+                uint16_t opcode=bt_le16(receive+5);
+                if((opcode==0x200b || opcode==0x200c) && bt_scan_status_seen++<16)
+                    hakios_tl("UMI BT: HCI command status opcode=%#x status=%#x\n",opcode,receive[3]);
+            }
             if(event==0x3e && receive_length>=5) {
                 uint8_t subevent=receive[3];
                 if(!bt_le_meta_seen[subevent]++)
@@ -594,6 +605,13 @@ static void bt_control_worker(void *unused,wait_result_t result)
         if(receive_length) {
             int queued=unit?ctl_enqueuedata(bt_control,unit,receive,receive_length,0):ENOTCONN;
             if(queued!=ENOBUFS) receive_length=0;
+        }
+        if(unit && ++transport_ticks>=5000) {
+            transport_ticks=0;
+            hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu\n",
+                bt_read(bt_control_uart,0x40),bt_read(bt_control_uart,0x804),
+                bt_read(bt_control_uart,0x640),bt_host_awake,
+                bt_rx_words,bt_rx_bytes,bt_rx_frames);
         }
         delay(1000);
     }

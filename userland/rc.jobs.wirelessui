@@ -1,0 +1,8 @@
+# Open the two stock Settings pages that make wifid and bluetoothd discover
+# nearby devices, then ask Apple80211 for a scan as an independent check.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 25
+/redwood/bin/battery_test open prefs:root=WIFI
+/redwood/bin/rwtouch wait 20
+/redwood/bin/net_test scan

@@ -1,0 +1,5 @@
+# Open the stock Bluetooth Settings page and give discovery time to report
+# nearby LE and classic devices.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 45
