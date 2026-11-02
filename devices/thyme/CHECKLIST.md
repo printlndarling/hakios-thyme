@@ -41,6 +41,37 @@ Post-fix RAM test image:
 |---|---|
 | `out/thyme-boot/root-battery-ui-2.apfs` | `11a23b1b9db35d58a3d732e941b7b5f3a69162624511a23ccb30623cf061df58` |
 
+## Canonical regression after UFS enablement (2026-11-03)
+
+The tested source revision `b63f5aa8` on `main` was cold-booted from RAM with the pinned
+UEFI-capable image and the complete wireless scenario. The worktree was clean,
+and the kernel (`a443cbbdb18a`), boot image (`2d662c991a5a`), loader
+(`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
+(`373a75aeac33`) all matched `ram-baseline.conf`.
+
+One boot completed:
+
+- 5 GHz WPA2 authentication, association, four-way handshake and key install;
+- DHCP address `192.168.0.103`;
+- Wi-Fi power off, interface removal, power on and radio restart;
+- a second scan and second successful association;
+- Safari opening `https://example.com`;
+- Bluetooth Settings opening while HCI LE scanning continued with zero queue
+  or enqueue errors.
+
+Evidence: `logs/050148-run.log` (SHA-256
+`faa989024fb6103199328211731faca0b7b11a5158f137fb40b2327480a65a40`) and
+`logs/wirelessregress-wifi.png` (SHA-256
+`1749ff4885211e28b64f5d1f211f083c51a0d2fcf10633bc2b49113341548eee`).
+The later radio teardown in the log is the intentional
+`loader_return_after` shutdown, not a Wi-Fi failure.
+
+The regression command now uses `out/thyme-boot/root-wirelessfull.apfs` by
+default and refuses any kernel, boot image, UEFI, loader, system image,
+scenario or boot-argument hash that differs from
+`devices/thyme/ram-baseline.conf`. This prevents a supposedly fixed feature
+from being tested with stale local artifacts or a Bluetooth-only scenario.
+
 ## Wireless startup and coexistence (2026-11-02)
 
 The board-gating fix in `66500d7` is now verified on the physical phone:
@@ -85,16 +116,16 @@ No item moves to `PASS` from source inspection alone.
 | Item | Status | Evidence / next action |
 |---|---|---|
 | Charging while iOS runs | PASS | Full 30-minute run stayed connected; the charging indicator was also confirmed by the user on the current RAM boot |
-| Battery percentage display | FAIL, fixed source awaits RAM retest | Kernel telemetry is valid, but the current run had no `IOPMPowerSource`; commit `66500d7` feeds the status-bar aggregator from the kernel's battery sysctls and requests a refresh every five seconds |
+| Battery percentage display | PASS | The current status bar shows a stable percentage and charging state; kernel telemetry remains valid |
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
 | Bluetooth | PARTIAL; peer-pairing gate pending | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`, `logs/230506-run.log`). The `Accessory` is a connectable-undirected advertiser at -99..-105 dBm; it reached `LE Enhanced Connection Complete status=0`, then disconnected with reason `0x3e` before remote feature exchange (`logs/002232-run.log`). A known-good peer close to the phone is required before calling host pairing broken |
-| Wi-Fi discovery/startup | PASS | Two consecutive cold boots on identical kernel/scene/loader hashes opened Wi-Fi, returned APs through `net_test`, and displayed real 2.4 GHz and 5 GHz networks in Settings (`logs/225307-run.log`, `logs/230506-run.log`, `logs/wirelessregress-wifi.png`) |
-| Wi-Fi power off/on recovery | PASS | On both pinned regression boots, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted); the following scan returned networks (`logs/225307-run.log`, `logs/230506-run.log`) |
+| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/050148-run.log`, `logs/wirelessregress-wifi.png`) |
+| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/050148-run.log`) |
 | Wi-Fi association/DHCP | PASS | The current 5 GHz AP completed authentication, association, the four-way handshake and key installation. DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS servers `192.168.1.1`/`192.168.0.1` (`logs/022344-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari loaded `https://www.apple.com/library/test/success.html` through en0 and displayed `Success`; MobileSafari/WebKit/trustd established multiple TLS connections and transferred about 40 MB (`logs/wifisafari-success.png`) |
-| Combined wireless regression | PASS | One cold boot completed Wi-Fi join/DHCP, Safari HTTPS, Wi-Fi power off/on, second association, and Bluetooth discovery. Settings displayed both `Accessory` and `HONOR X10 Max` while the Wi-Fi status icon remained active (`logs/023242-run.log`, `logs/wirelessfull-safari.png`, `logs/wirelessfull-bt.png`) |
+| Combined wireless regression | PASS | The current canonical cold boot completed Wi-Fi join/DHCP, Safari, Wi-Fi power off/on, a second association, and Bluetooth Settings discovery while HCI scanning stayed healthy (`logs/050148-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |

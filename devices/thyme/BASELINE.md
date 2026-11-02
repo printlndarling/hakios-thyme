@@ -9,44 +9,72 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Commit | `0f28e9c33ed1a1881628869609776eb23c24668e` |
+| Verified source | `b63f5aa8` (`Back up THYME A/B bootchain partitions`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
 
 | Artifact | SHA-256 |
 |---|---|
-| `devices/thyme/prebuilt/xnu-usb.img` | `a559fa38ab4e684459dd9f4d49066486da5ce734038ae723b17c9f632d2d93be` |
+| `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
+| `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
+| `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
-| `out/thyme-boot/root-wirelessui.apfs` | `0e770d4a9a73f1bd661cc948c946699b138990fc029a1b607c9211900ac97b11` |
-| clean-main `hakios-kernel` | `86a4f3423e1858ef27e51790ef6da54611cb6714db3ad7ffd2e19f7e74c99cff` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
+| clean-main `hakios-kernel` | `a443cbbdb18a9dbe0de1266d6fe30bb8857fcb9e85935572fb82f98484ffb543` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
 recorded for a hardware run.
 
+`devices/thyme/ram-baseline.conf` is the machine-checked copy of these local
+artifact hashes. `ram-regress.sh` refuses to boot different bytes unless
+`ALLOW_NEW_BASELINE=1` is explicit, and a verified new candidate must update
+that manifest in the same commit.
+
 ## Boot arguments
 
 ```text
-debug=0x8 rd=md0 battery_shared_pa=0x00000000998de000
-loader_return_after=170 sb_delay=8 touchscreen=1 buttons=1
-umi_touch=1 umi_keys=1 bootcpu=7 cpus=7 cpufreq=1 thermal=1
-thermal_stop=95 battery=1 adsp=1 sound=4 mic=4 haptic=5
-umi_haptic=5 wifi=1 bt=1 touch_lat=1 wifi_mac=<phone-wifi-mac>
+touchscreen=1 buttons=1 umi_touch=1 umi_keys=1 bootcpu=7 cpus=7
+cpufreq=1 thermal=1 thermal_stop=95 battery=1 adsp=1 sound=4 mic=4
+haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1
 ```
 
 `system.apfs` is loaded once with `./xl ramdisk`; the scenario image is passed
-as `XL_RAMDISK`. A RAM boot is:
+as `XL_RAMDISK`. The only canonical RAM regression entry point is:
 
 ```sh
-adb -s 5290780a reboot bootloader
-fastboot boot devices/thyme/prebuilt/xnu-usb.img
-./xl ramdisk devices/thyme/prebuilt/system.apfs
-XL_RAMDISK=out/thyme-boot/root-wirelessui.apfs \
-XL_SECS=190 XL_HOME=fastboot XL_CMDLINE='...' ./xl run
+devices/thyme/ram-regress.sh
 ```
 
-## Verified run
+The script selects the THYME ADB serial, boots the pinned UEFI-capable image,
+uploads the system image, checks every input against `ram-baseline.conf`,
+uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
+
+## Current verified run
+
+The clean `b63f5aa8` boot completed all of these in one RAM run:
+
+- 5 GHz WPA2 association and four-way handshake;
+- DHCP address `192.168.0.103`;
+- Wi-Fi off removed the interface;
+- Wi-Fi on restarted the radio;
+- the second scan found the configured 5 GHz and 2.4 GHz networks;
+- the second association installed both keys and made en0 usable;
+- Safari opened `https://example.com`;
+- Bluetooth Settings opened and the HCI scan path remained healthy.
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/050148-run.log` | `faa989024fb6103199328211731faca0b7b11a5158f137fb40b2327480a65a40` |
+| `logs/wirelessregress-wifi.png` | `1749ff4885211e28b64f5d1f211f083c51a0d2fcf10633bc2b49113341548eee` |
+
+The screenshot shows the Wi-Fi switch on and real nearby networks after the
+power cycle. The run's later radio teardown happened after
+`loader_return_after` expired, during the intentional return to the loader; it
+is not a Wi-Fi startup failure.
+
+## Historical verified run
 
 - Loader log: `logs/201710-run.log`, SHA-256
   `e180cfa3ea5ff13a842780c7f1740f5791caf5b98829bdaa04e134781027b8b8`
@@ -65,7 +93,7 @@ Wi-Fi power-cycle gate:
 - Both `set 19 (POWER)` requests were accepted. The radio was removed when
   switched off, restarted in 0.1 s when switched on, and scanned networks again.
 
-This clean-main run proves that the committed Wi-Fi path still works after a
+The historical clean-main run proves that the committed Wi-Fi path still works after a
 fresh boot. If a later run fails, compare the source commit, worktree state,
 artifact hashes, boot arguments, and loader log before changing driver code.
 
