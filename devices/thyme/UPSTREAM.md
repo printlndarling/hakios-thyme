@@ -39,3 +39,15 @@ make kernel -j8
 ```
 
 Do not merge a new official revision without a successful THYME RAM boot.
+
+## Inspected candidate
+
+On 2026-11-02, `upstream/main` advanced from `a48d2b2` to `acc0e88`. The three
+new commits change the Mesa AIR/IR3 tooling, `userland/build.sh`, and add the
+Metal probe job. They contain no THYME device driver changes.
+
+They are not imported yet: the fork policy requires a successful THYME RAM
+boot before accepting a new official revision, and the current Mesa compositor
+already provides the validated GPU path. Re-evaluate this candidate with a
+Metal-focused RAM test rather than carrying it into a stability or device
+diagnostic payload.
