@@ -65,8 +65,9 @@ and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. A physical LE scan found nine unique
 advertisers with valid RSSI and name decoding, and classic inquiry completed
 cleanly; pairing and reconnect remain pending. The device-owned QCA6390 Wi-Fi stack now
-scans, associates to a WPA2 access point, completes DHCP and carries TCP traffic
-through en0.
+scans, associates to a WPA2 access point, completes DHCP and carries DNS/TCP/TLS
+traffic through en0. On the current pinned baseline Safari rendered Apple's
+HTTPS success page in the phone's user space.
 The SM8250 EPSS CPU frequency domains and both TSENS blocks are also live on
 official main. All three clusters reached 1804/2419/3187 MHz, the governor
 physically throttled the big-core domain at 75.9 C, and an artificially low

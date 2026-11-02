@@ -92,7 +92,8 @@ No item moves to `PASS` from source inspection alone.
 | Bluetooth | PARTIAL; peer-pairing gate pending | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`, `logs/230506-run.log`). The `Accessory` is a connectable-undirected advertiser at -99..-105 dBm; it reached `LE Enhanced Connection Complete status=0`, then disconnected with reason `0x3e` before remote feature exchange (`logs/002232-run.log`). A known-good peer close to the phone is required before calling host pairing broken |
 | Wi-Fi discovery/startup | PASS | Two consecutive cold boots on identical kernel/scene/loader hashes opened Wi-Fi, returned APs through `net_test`, and displayed real 2.4 GHz and 5 GHz networks in Settings (`logs/225307-run.log`, `logs/230506-run.log`, `logs/wirelessregress-wifi.png`) |
 | Wi-Fi power off/on recovery | PASS | On both pinned regression boots, Settings switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted); the following scan returned networks (`logs/225307-run.log`, `logs/230506-run.log`) |
-| Wi-Fi association/DHCP | PARTIAL | WPA2 association, DHCP and TCP through en0 were verified historically; they have not yet been repeated on the current pinned wireless baseline |
+| Wi-Fi association/DHCP | PASS | The current 5 GHz AP completed authentication, association, the four-way handshake and key installation. DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS servers `192.168.1.1`/`192.168.0.1` (`logs/022344-run.log`) |
+| Wi-Fi TCP/TLS and Safari | PASS | Safari loaded `https://www.apple.com/library/test/success.html` through en0 and displayed `Success`; MobileSafari/WebKit/trustd established multiple TLS connections and transferred about 40 MB (`logs/wifisafari-success.png`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
@@ -149,7 +150,7 @@ No item moves to `PASS` from source inspection alone.
 | Haptics | PARTIAL: repeated BEMF peaks match stock, proving continuous drive and back-EMF; F0 is advisory and unstable in both HakiOS and Android; BSTERRI is the vendor-ignored boost latch | confirm physical feel, then test iOS taps and long vibrations from the Actuator HAL |
 | QCA6390 PCIe/MHI | PASS on official main; firmware reaches mission mode | port and retest |
 | QMI / WLFW service | PASS; QCA6390 firmware `0x1016046e` ready | diagnose any long-run reconnect failures |
-| Wi-Fi station / join / DHCP | PASS; WPA2 association, DHCP and en0 TCP traffic | test 2.4/5 GHz and reconnect |
+| Wi-Fi station / join / DHCP | PASS on the current baseline: WPA2 5 GHz association, four-way handshake, DHCP, DNS, TLS and Safari page rendering (`logs/022344-run.log`) | test 2.4/5 GHz switching, reconnect after link loss, and sleep/wake |
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
 | Scan / pair / connect | PARTIAL: LE scan and classic inquiry PASS, including address/RSSI/name decoding | pair a known LE peer from iOS, reconnect after disabling/enabling Bluetooth, then test data or audio transfer |
@@ -163,9 +164,9 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard home screen | PASS in historical RAM runs; current fixed build awaits retest | SpringBoard reaches the home screen and renders through the Adreno OpenGL ES path |
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
-| Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on on two consecutive cold boots. Joining a network from Settings remains unvalidated on this baseline |
+| Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on. The current join was issued through the same Apple80211 ASSOCIATE request that Settings uses; entering credentials through the Settings keyboard remains unvalidated |
 | Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed a connectable `Accessory`. Its signal was only -99..-105 dBm, and it disconnected with reason `0x3e` after link establishment; pairing with a known-good peripheral in close range remains the next gate |
-| Notifications, audio routing and background apps | TODO | requires a sustained interactive session with representative applications |
+| Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | lock-screen navigation works through injected input; passcode, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
 

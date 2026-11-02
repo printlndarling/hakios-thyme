@@ -174,3 +174,34 @@ found stronger connectable advertisers, but the strongest unnamed one was
 -84 dBm and the named candidates were still -97/-98 dBm. Stock Settings
 continued to select the approximately -100 dBm anonymous peer. A known,
 close-range BLE peer is therefore still required before this gate can pass.
+
+## Current-baseline Wi-Fi network gate
+
+The current THYME Wi-Fi driver does not implement the legacy generic driver's
+`wifi_join=1`. `net_test joinfile` now reads a gitignored two-line credential
+file and issues the same Apple80211 `ASSOCIATE` request Settings uses. It retries
+transient joins. This tests the live driver without exposing credentials in the
+boot command line or log.
+
+The successful run used kernel `a443cbbdb18a`, scene image
+`69dfabccb130`, and loader `60a0fa9c11c9`:
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/022344-run.log` | `fad384f09a7810064df64baff463cfc767ae05595d80c4717d0f42bf0bd77942` |
+| `logs/wifisafari-example.png` | `9af0847b3e87c52454650144d3aabcd9b85bdb24b31bb945100cab5e75917178` |
+| `logs/wifisafari-success.png` | `6731631914a9ab1879de3cc9c5e1dca4d2454deef82883bfe5eeb567e9724da2` |
+
+Observed on hardware:
+
+- Authentication and association succeeded on 5 GHz;
+- all four handshake messages completed and pairwise/group keys were installed;
+- DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS
+  `192.168.1.1`, `192.168.0.1`;
+- DNS queries and replies reached both servers;
+- MobileSafari/WebKit/trustd established TLS connections through en0;
+- Safari rendered the HTTPS Apple success page.
+
+`net_test`'s direct `getaddrinfo` call still reports a 30-second failure while
+mDNSResponder and Safari resolve the same names later in the same boot. This is
+tracked as a test-harness problem, not a network PASS failure.
