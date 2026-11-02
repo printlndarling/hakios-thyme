@@ -58,17 +58,18 @@ USER = re.compile(r'strstr\(\s*(?:arguments|args|argument)\s*,\s*"([a-z][a-z0-9_
 
 # the group an argument is listed under: by the file that reads it (the first match decides)
 GROUPS = [
-    ("GPU and display", r"hakios\.(adreno|gpu)\.|MiniIO(Surface|MobileFramebuffer)|gl_osmesa|eagl\.c"),
+    ("GPU and display", r"hakios\.(adreno|gpu)\.|hakios\.thyme_(adreno|gpu|display)\.|MiniIO(Surface|MobileFramebuffer)|gl_osmesa|eagl\.c"),
     ("Security stand-ins", r"kern_minimac|miniamfi"),
-    ("Wi-Fi", r"hakios\.(wifi|wlfw|lx|sta|apple80211)\.|^lx_[a-z0-9]+\.c$"),     # wifi/lx/src/lx_*.c: the Linux layer
+    ("Wi-Fi", r"hakios\.(wifi|wlfw|lx|sta|apple80211)\.|hakios\.thyme_(wifi|wlfw|lx|sta|apple80211|qmi|qca6390|mhi|pcie)\.|^lx_[a-z0-9]+\.c$"),     # wifi/lx/src/lx_*.c: the Linux layer
+    ("Bluetooth", r"hakios\.thyme_bluetooth\."),
     ("Cellular", r"hakios\.(mpss|ipa|cell|nas|qmi)\."),
-    ("Audio and battery", r"hakios\.(adsp|audio|sound|speaker|mic|virtio_sound|battery|battguard)\."),
+    ("Audio and battery", r"hakios\.(adsp|audio|sound|speaker|mic|virtio_sound|battery|battguard)\.|hakios\.thyme_(adsp|audio|sound|speaker|mic|guard|battery|battguard)\."),
     ("Cameras", r"hakios\.camera\."),
-    ("Touch and buttons", r"hakios\.(goodix|input|buttons|virtio_input)\."),
+    ("Touch and buttons", r"hakios\.(goodix|input|buttons|virtio_input)\.|hakios\.thyme_(touch|keys|rpmh)\."),
     ("Storage and APFS", r"hakios\.(ufs|ufshc|virtio_blk|sparse|apfs_check)\.|apfs_vfsops\."),
     ("Network", r"hakios\.(net|virtio_net)\."),
-    ("Haptics and torch", r"hakios\.(haptic|torch)\."),
-    ("Chip, thermal and PMIC", r"hakios\.(socinfo|thermal|pmic)\."),
+    ("Haptics and torch", r"hakios\.(haptic|torch)\.|hakios\.thyme_haptic\."),
+    ("Chip, thermal and PMIC", r"hakios\.(socinfo|thermal|pmic)\.|hakios\.thyme_(thermal|cpufreq|board|pmic)\."),
     ("Version", r"hakios\.version\."),
     ("CPU, memory and boot", r"hakios\.cpufreq\.|GenericARMPE|loader_return|\(patch\)"),
     ("Debugging", r"user_exception_trace"),
@@ -109,6 +110,8 @@ def scan(root, keep=None):
     for f in tracked(root):
         if not f.endswith((".c", ".cpp", ".m", ".h", ".patch")):
             continue
+        if f.startswith("devices/") and "/reference/" in f:
+            continue                    # historical source, not compiled into this kernel
         try:
             text = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
         except OSError:

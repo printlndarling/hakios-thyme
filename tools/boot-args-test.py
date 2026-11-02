@@ -71,6 +71,12 @@ FILES = {
     "xnu/files/bsd/dev/hakios.comment.c": '/* boot-arg adreno_zap=0 for the second run; nothing reads it now */\nvoid q(void) {}\n',
     "userland/src/apfs_mmap_test.c": 'void r(char *line) { strstr(line, "metadata"); strstr(line, "not_u_other=1"); }\n',     # strstr on another buffer
     "xnu/files/bsd/dev/hakios.dt.c": 'static TUNABLE_DT(uint32_t, gD, "/chosen", "name", "not_k_dt", 0, 0);\n',                    # a device-tree tunable: not a plain boot-arg
+    # historical device sources are not compiled: an argument only there must not enter the catalogue,
+    # and a same-named active file must still provide the description
+    "devices/fakephone/drivers/input/hakios.faketouch.c":
+        '/* fakearg=1: active touch argument */\nvoid f(void) { PE_parse_boot_argn("fakearg", &v, 4); }\n',
+    "devices/fakephone/reference/drivers/input/hakios.faketouch.c":
+        'void f(void) { PE_parse_boot_argn("legacy_only", &v, 4); }\n',
 }
 
 d = repo(FILES)
@@ -80,7 +86,7 @@ try:
                          ("k_wifi_helper", "k"), ("k_wifi_lx", "k"), ("l_arg", "l"), ("u_strstr", "u"), ("u_helper", "u"),
                          ("ku_both", "klu")):
         check("found: %-14s layers %s" % (name, layers), got.get(name) == layers, "got %r" % got.get(name))
-    for name in ("not_k_no_definition", "adreno_zap", "metadata", "not_u_other", "not_k_dt", "name", "arguments"):
+    for name in ("not_k_no_definition", "adreno_zap", "metadata", "not_u_other", "not_k_dt", "name", "arguments", "legacy_only"):
         check("NOT found: %s" % name, name not in got, "it is in the catalogue as %r" % got.get(name))
     check("drivers/ is scanned as well as xnu/files/", "k_tunable" in got)
     check("the groups: the GPU file's argument is under GPU and display", "## GPU and display" in run(d, "--markdown").stdout)
@@ -91,6 +97,8 @@ try:
     check("a symbol for each argument (and none for loader_return_after-style ones set by the tools)", "k_direct" in symbols and "u_helper" in symbols, sorted(symbols))
     check("the symbol's name is the argument's, upper case", symbols["k_tunable"][0] == "K_TUNABLE", symbols.get("k_tunable"))
     check("an argument read as text still gets a symbol", "k_string" in symbols, sorted(symbols))
+    check("reference sources do not hide an active driver's argument description",
+          symbols.get("fakearg", ["", "", "", "", "", "", ""])[6] == "active touch argument", symbols.get("fakearg"))
     check("without a documentation line the meaning is who reads it", "read by hakios.adreno.c" in symbols["k_direct"][6] or symbols["k_direct"][6] == "", symbols["k_direct"])
     # the check: missing files; current files; a driver that adds an argument; a table symbol nobody reads
     r = run(d, "--check")

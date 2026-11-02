@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **340 arguments**: 288 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **352 arguments**: 300 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -93,10 +93,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `privs` | K | `kern_minimac.c` | `CONFIG_PRIVS` |  |
 
-## Wi-Fi (32)
+## Wi-Fi (34)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `umi_wifi_return` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_RETURN` |  |
+| `umi_wifi_step` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_STEP` |  |
 | `wifi` | K | `hakios.thyme_qca6390.c`, `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI` |  |
 | `wifi_again` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_AGAIN` |  |
 | `wifi_ask` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_ASK` |  |
@@ -129,6 +131,14 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `wifi_wait` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_WAIT` |  |
 | `wifi_watch` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_WATCH` |  |
 | `wifi_wide` | K | `lx_80211.c` | `CONFIG_WIFI_WIDE` | implied by wifi=1 |
+
+## Bluetooth (3)
+
+| Argument | Layer | Read by | Configuration | Set by |
+|---|---|---|---|---|
+| `bt` | K | `hakios.bt.c`, `hakios.thyme_bluetooth.c` | `CONFIG_BT` |  |
+| `umi_bt` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT` |  |
+| `umi_bt_probe` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT_PROBE` |  |
 
 ## Cellular (53)
 
@@ -188,7 +198,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `soc_pas_mpss` | K | `hakios.mpss.c` | `CONFIG_SOC_PAS_MPSS` |  |
 | `soc_smem` | K | `hakios.mpss.c`, `hakios.socinfo.c` | `CONFIG_SOC_SMEM` |  |
 
-## Audio and battery (33)
+## Audio and battery (46)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -201,6 +211,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `adsp_pause` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_PAUSE` |  |
 | `adsp_return` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_RETURN` |  |
 | `adsp_step` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_STEP` |  |
+| `adsp_umi` | K | `hakios.thyme_adsp.c`, `hakios.thyme_sound.c` | `CONFIG_ADSP_UMI` |  |
 | `adsp_wait` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_WAIT` |  |
 | `battery` | KL | `hakios.adsp.c`, `hakios.battery.c`, `hakios.thyme_adsp.c`, `loader.c` | `CONFIG_BATTERY` |  |
 | `battery_shared_pa` | K | `hakios.battery.c` |  | the loader (the address of its charger page) |
@@ -209,10 +220,21 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `battmgr` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_BATTMGR` |  |
 | `mic` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC` |  |
 | `mic_adc` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_ADC` |  |
+| `mic_channels` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_CHANNELS` |  |
+| `mic_chmask` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_CHMASK` |  |
+| `mic_dmic` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_DMIC` |  |
+| `mic_dmic_probe` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_DMIC_PROBE` |  |
 | `mic_input` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_INPUT` |  |
 | `mic_main` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_MAIN` |  |
+| `mic_path` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_PATH` |  |
+| `mic_reset_mux` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_RESET_MUX` |  |
 | `mic_secs` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_SECS` |  |
+| `mic_stage` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_STAGE` |  |
 | `mic_tap` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_TAP` |  |
+| `mic_tap_count` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_TAP_COUNT` |  |
+| `mic_tap_on_ms` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_TAP_ON_MS` |  |
+| `mic_tap_period_ms` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_TAP_PERIOD_MS` |  |
+| `mic_tap_start_ms` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_TAP_START_MS` |  |
 | `mic_test` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_TEST` |  |
 | `rec_sound` | K | `hakios.audio.c` | `CONFIG_REC_SOUND` |  |
 | `rec_sound_fed` | K | `hakios.audio.c` | `CONFIG_REC_SOUND_FED` |  |
@@ -224,6 +246,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `sound_pause` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_PAUSE` |  |
 | `sound_secs` | K | `hakios.sound.c`, `hakios.thyme_sound.c` | `CONFIG_SOUND_SECS` |  |
 | `speaker_probe` | K | `hakios.speaker.c`, `hakios.thyme_speaker.c` | `CONFIG_SPEAKER_PROBE` |  |
+| `umi_amp_probe` | K | `hakios.thyme_speaker.c` | `CONFIG_UMI_AMP_PROBE` |  |
 | `virtio_sound` | K | `hakios.virtio_sound.c` | `CONFIG_VIRTIO_SOUND` |  |
 
 ## Cameras (13)
@@ -244,7 +267,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_shutter` | K | `hakios.camera.c` | `CONFIG_CAM_SHUTTER` |  |
 | `cam_vblank` | K | `hakios.camera.c` | `CONFIG_CAM_VBLANK` |  |
 
-## Touch and buttons (10)
+## Touch and buttons (13)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -257,6 +280,9 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `touch_rate` | K | `hakios.goodix.c` | `CONFIG_TOUCH_RATE` |  |
 | `touch_spi_hz` | K | `hakios.goodix.c` | `CONFIG_TOUCH_SPI_HZ` |  |
 | `touchscreen` | K | `hakios.buttons.c`, `hakios.goodix.c`, `hakios.thyme_touch.c` | `CONFIG_TOUCHSCREEN` |  |
+| `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
+| `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |
+| `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
 | `virtio_input` | K | `hakios.virtio_input.c` | `CONFIG_VIRTIO_INPUT` |  |
 
 ## Storage and APFS (43)
@@ -315,20 +341,29 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `net_trace` | K | `hakios.net.c` | `CONFIG_NET_TRACE` |  |
 | `virtio_net` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET` |  |
 
-## Haptics and torch (5)
+## Haptics and torch (8)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `haptic` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC` |  |
 | `haptic_effect` | K | `hakios.haptic.c`, `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_EFFECT` |  |
+| `haptic_f0_probe` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_F0_PROBE` |  |
+| `haptic_gain` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_GAIN` |  |
 | `torch` | KL | `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
 | `torch_max_s` | K | `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |
 | `torch_secs` | K | `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
+| `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 
-## Chip, thermal and PMIC (10)
+## Chip, thermal and PMIC (16)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `cpufreq` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPUFREQ` |  |
+| `cpuload` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPULOAD` |  |
+| `ddr` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR` |  |
+| `ddr_rest` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_REST` |  |
+| `ddr_vote` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_VOTE` |  |
+| `membench` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_MEMBENCH` |  |
 | `pmic` | K | `hakios.pmic.c` | `CONFIG_PMIC` |  |
 | `pmic_list` | K | `hakios.pmic.c` | `CONFIG_PMIC_LIST` |  |
 | `soc_smem_size` | K | `hakios.socinfo.c` | `CONFIG_SOC_SMEM_SIZE` |  |
@@ -346,23 +381,17 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `hakios_kver` | K | `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
 
-## CPU, memory and boot (23)
+## CPU, memory and boot (17)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `applog` | K | `(patch)` | `CONFIG_APPLOG` |  |
 | `applog_name` | K | `(patch)` | `CONFIG_APPLOG_NAME` |  |
 | `bootcpu` | KL | `loader.c`, `loader_return.c` | `CONFIG_BOOTCPU` |  |
-| `cpufreq` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPUFREQ` |  |
-| `cpuload` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPULOAD` |  |
-| `ddr` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR` |  |
-| `ddr_rest` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_REST` |  |
-| `ddr_vote` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_VOTE` |  |
 | `epoch` | K | `GenericARMPE.cpp` |  | xl (the host's clock) |
 | `hv_wdt_pet` | K | `loader_return.c` |  | the loader, when it has armed the watchdog (the runner also passes it) |
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
 | `machine_name` | K | `GenericARMPE.cpp` | `CONFIG_MACHINE_NAME` |  |
-| `membench` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_MEMBENCH` |  |
 | `rd` | KL | `(patch)`, `loader.c` | `CONFIG_RD` |  |
 | `regtrace` | K | `(patch)` | `CONFIG_REGTRACE` |  |
 | `return_cpu` | K | `loader_return.c` | `CONFIG_RETURN_CPU` |  |
@@ -396,13 +425,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (27)
+## User space (15)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `adsp_umi` | K | `hakios.thyme_adsp.c`, `hakios.thyme_sound.c` | `CONFIG_ADSP_UMI` |  |
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
-| `bt` | K | `hakios.bt.c`, `hakios.thyme_bluetooth.c` | `CONFIG_BT` |  |
 | `bt_again` | K | `hakios.bt.c` | `CONFIG_BT_AGAIN` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
@@ -412,18 +439,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `glno` | U | `inject.c` | `CONFIG_GLNO` |  |
 | `glsb3` | U | `inject.c` | `CONFIG_GLSB3` |  |
 | `glyes` | U | `inject.c` | `CONFIG_GLYES` |  |
-| `haptic_gain` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_GAIN` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
-| `umi_amp_probe` | K | `hakios.thyme_speaker.c` | `CONFIG_UMI_AMP_PROBE` |  |
-| `umi_bt` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT` |  |
-| `umi_bt_probe` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT_PROBE` |  |
-| `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
-| `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
-| `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |
-| `umi_wifi_return` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_RETURN` |  |
-| `umi_wifi_step` | K | `hakios.thyme_qca6390.c` | `CONFIG_UMI_WIFI_STEP` |  |
-| `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |

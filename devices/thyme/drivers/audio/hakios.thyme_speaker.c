@@ -2349,6 +2349,7 @@ hakios_speaker_init(void)
 	thread_t thread;
 	uint32_t umi_amp_probe = 0;
 
+	/* umi_amp_probe=1..5: select THYME CS35L41 bring-up level instead of the generic probe */
 	if (PE_parse_boot_argn("umi_amp_probe", &umi_amp_probe, sizeof(umi_amp_probe))) {
 		if (umi_amp_probe >= 1 && umi_amp_probe <= 5) {
 			umi_amp_probe_level = umi_amp_probe;

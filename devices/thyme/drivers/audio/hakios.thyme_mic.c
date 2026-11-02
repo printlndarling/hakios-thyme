@@ -1065,9 +1065,13 @@ static uint8_t bank_now;
 static uint32_t adc_on = 1;             /* boot-arg mic_adc=0 (a test): ADC1 and its mic bias left off, the port alone */
 static uint32_t main_timing;            /* boot-arg mic_main=1 (a test): the bus and ports of Android's one-microphone tables */
 static uint32_t tap;                    /* boot-arg mic_tap=1 (a test): run the vibration motor (haptic=5) while listening */
-static uint32_t tap_count = 1;          /* mic_tap_count: pulses, default one from 2 s to 3 s */
+/* mic_tap_count=N: number of haptic test pulses (default 1) */
+static uint32_t tap_count = 1;
+/* mic_tap_start_ms=N: delay before the first haptic test pulse (default 2000) */
 static uint32_t tap_start_ms = 2000;
+/* mic_tap_period_ms=N: time between haptic pulse starts (default 1000) */
 static uint32_t tap_period_ms = 1000;
+/* mic_tap_on_ms=N: how long each haptic test pulse asks for drive (default 1000) */
 static uint32_t tap_on_ms = 1000;
 static uint32_t test_bits;              /* boot-arg mic_test=N (tests): 1 no mic bias, 2 the ADC's input held (HPF init) */
 

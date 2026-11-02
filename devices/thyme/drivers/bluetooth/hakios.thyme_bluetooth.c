@@ -706,10 +706,12 @@ cleanup:
 void umi_bluetooth_init(void)
 {
     uint32_t probe = 0, enabled = 0;
+    /* umi_bt=1: start the THYME QCA6390 Bluetooth runtime service */
     bool runtime = PE_parse_boot_argn("bt", &enabled, sizeof(enabled)) && enabled == 1;
     if (!runtime) {
         runtime = PE_parse_boot_argn("umi_bt", &enabled, sizeof(enabled)) && enabled == 1;
     }
+    /* umi_bt_probe=1..5: run a THYME QCA6390 Bluetooth diagnostic level */
     bool diagnostic = PE_parse_boot_argn("umi_bt_probe", &probe, sizeof(probe));
     if (runtime && diagnostic) { hakios_tl("UMI BT: choose runtime or diagnostic mode\n"); return; }
     if (runtime) probe = 5;

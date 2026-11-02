@@ -854,7 +854,9 @@ umi_wifi_init(void)
 	if (!umi_wifi_is_umi()) {
 		return false;
 	}
+	/* umi_wifi_step=N: choose a THYME QCA6390 firmware diagnostic step */
 	PE_parse_boot_argn("umi_wifi_step", &step, sizeof(step));
+	/* umi_wifi_return=1: return to the loader after the step-1 Wi-Fi survey */
 	PE_parse_boot_argn("umi_wifi_return", &back, sizeof(back));
 	PE_parse_boot_argn("wifi", &enabled, sizeof(enabled));
 	if (!step && enabled == 1) {

@@ -273,6 +273,7 @@ umi_fts_initialize(void)
 	/* Scan mode 1 was validated on this UMI. The vendor also supports
 	 * 0x20 (no calibration). Do not stop sensing before this command. */
 	unsigned scan = 1;
+	/* umifts_scan=N: select FTS521 scan mode, where N is 0x01 or 0x20 */
 	(void)PE_parse_boot_argn("umifts_scan", &scan, sizeof(scan));
 	if (scan != 0x01 && scan != 0x20) {
 		return EINVAL;
@@ -454,6 +455,7 @@ void umi_touch_init(void)
     uint32_t enabled = 0;
     DTEntry chosen; const void *board; unsigned size;
     if (!PE_parse_boot_argn("touchscreen", &enabled, sizeof(enabled))) {
+        /* umi_touch=1: enable the THYME FTS521 path when the generic touchscreen arg is absent */
         (void)PE_parse_boot_argn("umi_touch", &enabled, sizeof(enabled));
     }
     if (st.started || enabled != 1) return;

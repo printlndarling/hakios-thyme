@@ -184,6 +184,7 @@ umi_keys_init(void)
 	thread_t thread;
 
     if (!PE_parse_boot_argn("buttons", &enabled, sizeof(enabled))) {
+        /* umi_keys=1: enable the PM8150 power and volume keys when the generic buttons arg is absent */
         (void)PE_parse_boot_argn("umi_keys", &enabled, sizeof(enabled));
     }
     if (keys_started || enabled != 1) {

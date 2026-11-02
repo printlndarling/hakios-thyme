@@ -3426,6 +3426,7 @@ hakios_adsp_init(void)
 	uint32_t on = 0, umi = 0;
 	thread_t thread;
 
+	/* adsp_umi=1: select THYME's 37 MiB ADSP PAS memory range (compatibility switch) */
 	if (PE_parse_boot_argn("adsp_umi", &umi, sizeof(umi)) && umi != 0) {
 		adsp_memory = HAKIOS_ADSP_MEMORY;
 		adsp_memory_size = HAKIOS_ADSP_SIZE;

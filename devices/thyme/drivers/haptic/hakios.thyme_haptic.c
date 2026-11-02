@@ -1082,6 +1082,7 @@ play_effect(unsigned effect)
 	if (umi_chip) {
 		uint32_t gain = UMI_HAPTIC_STOCK_GAIN;
 
+		/* haptic_gain=N: diagnostic AW8697 waveform gain, capped at 0x40 */
 		(void)PE_parse_boot_argn("haptic_gain", &gain, sizeof(gain));
 		if (umi_chip && gain > UMI_HAPTIC_MAX_GAIN) {
 			gain = UMI_HAPTIC_MAX_GAIN;
@@ -1481,6 +1482,7 @@ haptic_thread(__unused void *parameter, __unused wait_result_t result)
 			if (ready) {
 				uint32_t f0_probe = 0;
 
+				/* haptic_f0_probe=1: measure the LRA's continuous-mode f0 and BEMF once, then restore its registers */
 				if (PE_parse_boot_argn("haptic_f0_probe", &f0_probe, sizeof(f0_probe)) && f0_probe != 0) {
 					ready = umi_f0_probe();
 				}
@@ -1513,6 +1515,7 @@ hakios_haptic_init(void)
 {
 	thread_t thread;
 
+	/* umi_haptic=1..5: select the THYME AW8697 diagnostic level or the iOS actuator service */
 	if (PE_parse_boot_argn("umi_haptic", &level, sizeof(level))) {
 		umi_chip = true;
 	} else if (!PE_parse_boot_argn("haptic", &level, sizeof(level))) {

@@ -18,7 +18,7 @@ ADSP_NEW	arg	adsp_new	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c
 ADSP_PAUSE	arg	adsp_pause	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
 ADSP_RETURN	arg	adsp_return	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
 ADSP_STEP	arg	adsp_step	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
-ADSP_UMI	arg	adsp_umi	User space	k	hakios.thyme_adsp.c,hakios.thyme_sound.c	
+ADSP_UMI	arg	adsp_umi	Audio and battery	k	hakios.thyme_adsp.c,hakios.thyme_sound.c	select THYME's 37 MiB ADSP PAS memory range (compatibility switch)
 ADSP_WAIT	arg	adsp_wait	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
 APFS_CHEAP	arg	apfs_cheap	Storage and APFS	k	apfs_vfsops.c	
 APFS_CHECK	arg	apfs_check	Storage and APFS	k	hakios.apfs_check.c	walk the whole volume and print only the totals
@@ -54,7 +54,7 @@ APPLOG_NAME	arg	applog_name	CPU, memory and boot	k	(patch)
 AUTOUNLOCK	arg	autounlock	User space	u	inject_sb.c	
 BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.thyme_adsp.c,loader.c	
 BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	every property once, for the log (which number is which on this phone's firmware)
-BT	arg	bt	User space	k	hakios.bt.c,hakios.thyme_bluetooth.c	
+BT	arg	bt	Bluetooth	k	hakios.bt.c,hakios.thyme_bluetooth.c	start the Bluetooth controller path selected by the build
 BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds later (0: no second look; 30)
 BUTTONS	arg	buttons	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
 BUTTONS_STEPS	arg	buttons_steps	Touch and buttons	k	hakios.buttons.c	
@@ -73,11 +73,11 @@ CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
-CPULOAD	arg	cpuload	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
+CPULOAD	arg	cpuload	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
 CPUMASK	arg	cpumask	Loader	l	loader.c	
-DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
-DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
-DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
+DDR	arg	ddr	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
+DDR_REST	arg	ddr_rest	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	DDR bandwidth vote left while the test rests (zero sends BCM_COMMIT)
+DDR_VOTE	arg	ddr_vote	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	initial DDR bandwidth vote in the command database (default 0x3fff)
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
@@ -134,15 +134,27 @@ GPU_EXACT	arg	gpu_exact	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c
 GPU_KEEP	arg	gpu_keep	GPU and display	k	hakios.gpu.cpp,hakios.thyme_gpu.cpp	
 GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
 HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c,hakios.thyme_haptic.c	
-HAPTIC_GAIN	arg	haptic_gain	User space	k	hakios.thyme_haptic.c	
+HAPTIC_F0_PROBE	arg	haptic_f0_probe	Haptics and torch	k	hakios.thyme_haptic.c	measure the LRA's continuous-mode f0 and BEMF once, then restore its registers
+HAPTIC_GAIN	arg	haptic_gain	Haptics and torch	k	hakios.thyme_haptic.c	diagnostic AW8697 waveform gain, capped at 0x40
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
-MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	
+MEMBENCH	arg	membench	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	run the memory benchmark after CPU probing (2 runs it on a background thread)
 METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp	only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 MIC_ADC	arg	mic_adc	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
+MIC_CHANNELS	arg	mic_channels	Audio and battery	k	hakios.thyme_mic.c	ASM/ADM/AFE channel count (default 2)
+MIC_CHMASK	arg	mic_chmask	Audio and battery	k	hakios.thyme_mic.c	AFE active-channel mask override
+MIC_DMIC	arg	mic_dmic	Audio and battery	k	hakios.thyme_mic.c	DMIC channel 0..5 for the direct-DMIC path (default 1)
+MIC_DMIC_PROBE	arg	mic_dmic_probe	Audio and battery	k	hakios.thyme_mic.c	count transitions on the selected DMIC data pin
 MIC_INPUT	arg	mic_input	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
 MIC_MAIN	arg	mic_main	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
+MIC_PATH	arg	mic_path	Audio and battery	k	hakios.thyme_mic.c	use the base DMIC1/DEC2 path
+MIC_RESET_MUX	arg	mic_reset_mux	Audio and battery	k	hakios.thyme_mic.c	GPIO32 mux override (default 0, the hardware-validated value)
 MIC_SECS	arg	mic_secs	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
+MIC_STAGE	arg	mic_stage	Audio and battery	k	hakios.thyme_mic.c	stop after reset, SWR pins, TX clocks, master or codec
 MIC_TAP	arg	mic_tap	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
+MIC_TAP_COUNT	arg	mic_tap_count	Audio and battery	k	hakios.thyme_mic.c	number of haptic test pulses (default 1)
+MIC_TAP_ON_MS	arg	mic_tap_on_ms	Audio and battery	k	hakios.thyme_mic.c	how long each haptic test pulse asks for drive (default 1000)
+MIC_TAP_PERIOD_MS	arg	mic_tap_period_ms	Audio and battery	k	hakios.thyme_mic.c	time between haptic pulse starts (default 1000)
+MIC_TAP_START_MS	arg	mic_tap_start_ms	Audio and battery	k	hakios.thyme_mic.c	delay before the first haptic test pulse (default 2000)
 MIC_TEST	arg	mic_test	Audio and battery	k	hakios.mic.c,hakios.thyme_mic.c	
 MODEM_APN	arg	modem_apn	Cellular	k	hakios.mpss.c	a session to that APN instead of the default profile
 MODEM_DATA_NOBIND	arg	modem_data_nobind	Cellular	k	hakios.mpss.c	
@@ -251,15 +263,15 @@ UFS_NATIVE_LEAVE	arg	ufs_native_leave	Storage and APFS	k	hakios.ufshc.c
 UFS_NATIVE_SLOTS	arg	ufs_native_slots	Storage and APFS	k	hakios.ufshc.c	
 UFS_NATIVE_SPIN	arg	ufs_native_spin	Storage and APFS	k	hakios.ufshc.c	
 UFS_PROBE	arg	ufs_probe	Loader	l	loader.c	
-UMI_AMP_PROBE	arg	umi_amp_probe	User space	k	hakios.thyme_speaker.c	
-UMI_BT	arg	umi_bt	User space	k	hakios.thyme_bluetooth.c	
-UMI_BT_PROBE	arg	umi_bt_probe	User space	k	hakios.thyme_bluetooth.c	
-UMI_HAPTIC	arg	umi_haptic	User space	k	hakios.thyme_haptic.c	
-UMI_KEYS	arg	umi_keys	User space	k	hakios.thyme_keys.c	
-UMI_TOUCH	arg	umi_touch	User space	k	hakios.thyme_touch.c	
-UMI_WIFI_RETURN	arg	umi_wifi_return	User space	k	hakios.thyme_qca6390.c	
-UMI_WIFI_STEP	arg	umi_wifi_step	User space	k	hakios.thyme_qca6390.c	
-UMIFTS_SCAN	arg	umifts_scan	User space	k	hakios.thyme_touch.c	
+UMI_AMP_PROBE	arg	umi_amp_probe	Audio and battery	k	hakios.thyme_speaker.c	select THYME CS35L41 bring-up level instead of the generic probe
+UMI_BT	arg	umi_bt	Bluetooth	k	hakios.thyme_bluetooth.c	start the THYME QCA6390 Bluetooth runtime service
+UMI_BT_PROBE	arg	umi_bt_probe	Bluetooth	k	hakios.thyme_bluetooth.c	run a THYME QCA6390 Bluetooth diagnostic level
+UMI_HAPTIC	arg	umi_haptic	Haptics and torch	k	hakios.thyme_haptic.c	select the THYME AW8697 diagnostic level or the iOS actuator service
+UMI_KEYS	arg	umi_keys	Touch and buttons	k	hakios.thyme_keys.c	enable the PM8150 power and volume keys when the generic buttons arg is absent
+UMI_TOUCH	arg	umi_touch	Touch and buttons	k	hakios.thyme_touch.c	enable the THYME FTS521 path when the generic touchscreen arg is absent
+UMI_WIFI_RETURN	arg	umi_wifi_return	Wi-Fi	k	hakios.thyme_qca6390.c	return to the loader after the step-1 Wi-Fi survey
+UMI_WIFI_STEP	arg	umi_wifi_step	Wi-Fi	k	hakios.thyme_qca6390.c	choose a THYME QCA6390 firmware diagnostic step
+UMIFTS_SCAN	arg	umifts_scan	Touch and buttons	k	hakios.thyme_touch.c	select FTS521 scan mode, where N is 0x01 or 0x20
 USTACKS	arg	ustacks	Debugging	k	user_exception_trace.c	
 USTACKS_AT	arg	ustacks_at	Debugging	k	user_exception_trace.c	
 USTACKS_COUNT	arg	ustacks_count	Debugging	k	user_exception_trace.c	

@@ -567,6 +567,7 @@ ddr_raise(void)
 {
 	uint32_t vote = 0x3fff;
 
+	/* ddr_vote=N: initial DDR bandwidth vote in the command database (default 0x3fff) */
 	PE_parse_boot_argn("ddr_vote", &vote, sizeof(vote));
 	ddr_mc0 = cmd_db_address("MC0");
 	ddr_sh0 = cmd_db_address("SH0");
@@ -594,6 +595,7 @@ hakios_ddr_quiesce(void)
 		return;
 	}
 	ddr_voted = false;
+	/* ddr_rest=N: DDR bandwidth vote left while the test rests (zero sends BCM_COMMIT) */
 	PE_parse_boot_argn("ddr_rest", &rest, sizeof(rest));
 	rest = MIN(rest, 0x3fff);
 	data[0] = data[1] = rest != 0 ? BCM_VOTE(rest, rest) : BCM_COMMIT;     /* 0: no request */
@@ -633,6 +635,7 @@ hakios_cpufreq_init(void)
 	}
 	printf("cpufreq: on core %u a loop ran at %u, now at %u\n", here, before, loop_speed());
 	/* membench has its own variable: when the boot-arg is absent, the cpufreq value (2 means on) must not start the benchmark */
+	/* membench=1: run the memory benchmark after CPU probing (2 runs it on a background thread) */
 	PE_parse_boot_argn("membench", &membench, sizeof(membench));
 	if (membench == 1) {
 		memory_bench();

@@ -121,6 +121,7 @@ bt_init(void)
 	uint32_t enabled = 0, value;
 	uint64_t deadline;
 
+	/* bt=1: start the Bluetooth controller path selected by the build */
 	if (!PE_parse_boot_argn("bt", &enabled, sizeof(enabled)) || !enabled) {
 		return;
 	}
