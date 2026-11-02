@@ -42,8 +42,17 @@ echo "ram-regress: args=$ARGS"
 
 ./xl enter
 ./xl ramdisk "$SYSTEM_IMAGE"
+(
+	sleep "${WIFI_CAPTURE_DELAY:-75}"
+	./xl screenshot "${WIFI_SCREENSHOT:-logs/wirelessregress-wifi.png}" || true
+	sleep "$(( ${BT_CAPTURE_DELAY:-155} - ${WIFI_CAPTURE_DELAY:-75} ))"
+	./xl screenshot "${BT_SCREENSHOT:-logs/wirelessregress-bt.png}" || true
+) &
+CAPTURE_PID=$!
+
 XL_SECS=${XL_SECS:-190} \
 XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} \
 XL_RAMDISK="$SCENARIO" \
 XL_CMDLINE="$ARGS" \
 	./xl run
+wait "$CAPTURE_PID" || true
