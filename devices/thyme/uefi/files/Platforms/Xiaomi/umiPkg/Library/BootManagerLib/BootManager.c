@@ -125,6 +125,12 @@ PlatformBootManagerAfterConsole ()
 
   // Execute Secondary After Console
   DeviceBootManagerAfterConsole ();
+
+  // Connect the UFS BlockIo/disk stack before starting the resident loader.
+  // PartitionDxe only creates the GPT partition handles during this connect
+  // pass; without it UFSDxe is live but the loader sees no partitions.
+  EfiBootManagerConnectAll ();
+
   UmiStartPayloadLoader ();
 }
 
