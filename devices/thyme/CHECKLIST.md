@@ -43,7 +43,7 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `b63f5aa8` on `main` was cold-booted from RAM with the pinned
+The tested source revision `3b096da1` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
 and the kernel (`a443cbbdb18a`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
@@ -59,10 +59,12 @@ One boot completed:
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
   or enqueue errors.
 
-Evidence: `logs/050148-run.log` (SHA-256
-`faa989024fb6103199328211731faca0b7b11a5158f137fb40b2327480a65a40`) and
+Evidence: `logs/052011-run.log` (SHA-256
+`82d12f8aab1242ee8474daac55ebf0f72e68a8eda483cf1e2d1c61d146a0d36d`),
 `logs/wirelessregress-wifi.png` (SHA-256
-`1749ff4885211e28b64f5d1f211f083c51a0d2fcf10633bc2b49113341548eee`).
+`2710015bdf8c9d2b20b4c3055cac32bff068f4366fd8315f352d04ba1da8ae44`) and
+`logs/wirelessregress-bt.png` (SHA-256
+`a624afc80cf694bb82d0e5ff5674ebeda94041e232e170173e089a18baca7331`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -121,11 +123,11 @@ No item moves to `PASS` from source inspection alone.
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
 | Bluetooth | PARTIAL; peer-pairing gate pending | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`, `logs/230506-run.log`). The `Accessory` is a connectable-undirected advertiser at -99..-105 dBm; it reached `LE Enhanced Connection Complete status=0`, then disconnected with reason `0x3e` before remote feature exchange (`logs/002232-run.log`). A known-good peer close to the phone is required before calling host pairing broken |
-| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/050148-run.log`, `logs/wirelessregress-wifi.png`) |
-| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/050148-run.log`) |
+| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/052011-run.log`, `logs/wirelessregress-wifi.png`) |
+| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/052011-run.log`) |
 | Wi-Fi association/DHCP | PASS | The current 5 GHz AP completed authentication, association, the four-way handshake and key installation. DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS servers `192.168.1.1`/`192.168.0.1` (`logs/022344-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari loaded `https://www.apple.com/library/test/success.html` through en0 and displayed `Success`; MobileSafari/WebKit/trustd established multiple TLS connections and transferred about 40 MB (`logs/wifisafari-success.png`) |
-| Combined wireless regression | PASS | The current canonical cold boot completed Wi-Fi join/DHCP, Safari, Wi-Fi power off/on, a second association, and Bluetooth Settings discovery while HCI scanning stayed healthy (`logs/050148-run.log`) |
+| Combined wireless regression | PASS | The current canonical cold boot completed Wi-Fi join/DHCP, Safari, Wi-Fi power off/on, a second association, and Bluetooth Settings discovery while HCI scanning stayed healthy (`logs/052011-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |

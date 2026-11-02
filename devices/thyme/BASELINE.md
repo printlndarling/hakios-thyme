@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `b63f5aa8` (`Back up THYME A/B bootchain partitions`) |
+| Verified source | `3b096da1` (`Pin the canonical THYME wireless regression`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -53,7 +53,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `b63f5aa8` boot completed all of these in one RAM run:
+The clean `3b096da1` boot completed all of these in one 230-second RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -66,11 +66,13 @@ The clean `b63f5aa8` boot completed all of these in one RAM run:
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/050148-run.log` | `faa989024fb6103199328211731faca0b7b11a5158f137fb40b2327480a65a40` |
-| `logs/wirelessregress-wifi.png` | `1749ff4885211e28b64f5d1f211f083c51a0d2fcf10633bc2b49113341548eee` |
+| `logs/052011-run.log` | `82d12f8aab1242ee8474daac55ebf0f72e68a8eda483cf1e2d1c61d146a0d36d` |
+| `logs/wirelessregress-wifi.png` | `2710015bdf8c9d2b20b4c3055cac32bff068f4366fd8315f352d04ba1da8ae44` |
+| `logs/wirelessregress-bt.png` | `a624afc80cf694bb82d0e5ff5674ebeda94041e232e170173e089a18baca7331` |
 
-The screenshot shows the Wi-Fi switch on and real nearby networks after the
-power cycle. The run's later radio teardown happened after
+The screenshots show the Wi-Fi switch on with real nearby networks after the
+power cycle, then stock Bluetooth Settings discovering `Accessory` while the
+Wi-Fi status icon is still active. The run's later radio teardown happened after
 `loader_return_after` expired, during the intentional return to the loader; it
 is not a Wi-Fi startup failure.
 
