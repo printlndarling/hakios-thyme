@@ -45,7 +45,7 @@ Post-fix RAM test image:
 
 The tested source revision `8a55dec6` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`c594cafc9ac1`), boot image (`2d662c991a5a`), loader
+and the kernel (`5d89a7dbb023`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -59,12 +59,12 @@ One boot completed:
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
   or enqueue errors.
 
-Evidence: `logs/062313-run.log` (SHA-256
-`d0086465cdc259e8a7d30d0aa5c0d7aa63f8c7086724b3ae8bfe51e6933a3acf`),
-`logs/061901-wifi.png` (SHA-256
-`674c7efc33dd6479ab15bf53487abfdaa3127cfe5162db2ee5c60836d40feb19`) and
-`logs/061901-bt.png` (SHA-256
-`492914edf897d92b5242e9978244ac9cef6bfdfc00386b033445826bc3e7b079`).
+Evidence: `logs/070050-run.log` (SHA-256
+`0cbe2ac5c88322e1d054837ed7f18cebe2bd879434f2697608379faeaf8ecd32`),
+`logs/065501-wifi.png` (SHA-256
+`6d3ccfdaa5ff780ab448e9885086f0bec43d3a3f93346186532bf4698191697f`) and
+`logs/065501-bt.png` (SHA-256
+`8381337feed93928925af1788a27c5c3c220efe63d5724e92dbbbbe3a67d5b8e`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -98,6 +98,11 @@ The Windows GATT provider does not publish a local name through this path, so
 iOS collapses nearby unnamed connectable advertisers into one `Accessory`
 entry. A named, known BLE peripheral remains required for a valid end-to-end
 pairing result.
+
+A temporary diagnostic that replaced the white-list address with the strongest
+connectable advertiser did reach the Windows radio, but `bluetoothd` exited
+immediately because the connection-complete address no longer matched the peer
+iOS selected. That experiment was removed and is not part of the baseline.
 
 ## Wireless startup and coexistence (2026-11-02)
 
