@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `57db9c8b` (`Port THYME PM8150L flashlight`) |
+| Verified source | `b12838cc` (`Port THYME camera identification path`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -21,7 +21,7 @@ experimental kernel or with an older resident system image.
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `a869ab46000009640ba3a6a6880fd5730c6abac78b62395c359f256b8fec565a` |
+| clean-main `hakios-kernel` | `b110d08ffb5414f261d3c0d068d196dafa6946585aadc574abaeb37dd67b9be1` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
@@ -55,7 +55,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `57db9c8b` boot completed all of these in one 230-second RAM run:
+The clean `b12838cc` boot completed all of these in one 230-second RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -68,9 +68,9 @@ The clean `57db9c8b` boot completed all of these in one 230-second RAM run:
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/082732-run.log` | `bd835bbd9daf6f433b0775e961eff20321a931e0cc0a58b7690fc41c3808fa46` |
-| `logs/082501-wifi.png` | `3cf2ff8653a9bb41a7d013466ec74621eb50b0d158926cacc1a71f24f3c16369` |
-| `logs/082501-bt.png` | `c3316d457baaf0088875a01b3de766b30fa91c28f3242b350ecfa96a1ac8b863` |
+| `logs/101932-run.log` | `3b49b31b493bc27c189653749b581e39772ebb4993debefd99237ab5e158e8fd` |
+| `logs/101901-wifi.png` | `4280a171467d9a7827dd02773f921107a3fb2a9247aa47e5d63c1cd852a1e2af` |
+| `logs/101901-bt.png` | `b51f23fe88c556f3a5a35b4a94db416c05d4385f49effd10f71c256244745969` |
 
 The screenshots show the Wi-Fi switch on with real nearby networks after the
 power cycle, then stock Bluetooth Settings discovering `Accessory` while the
@@ -130,6 +130,26 @@ ON (iOS asked for 1000 of 1000)
 Each illumination was followed by the five-second limit and returned dark.
 Evidence: `logs/091200-run.log`, SHA-256
 `1350d74549e927bb7bc751bf455ea666cf09d6c0d6cfbdf2807d4971605276a7`.
+
+### THYME rear camera identification
+
+The THYME camera driver now reuses the UMI sensor/power implementation with
+the official camera service. A `cam=2 cam_after=0` RAM run reached the sensor
+and reported:
+
+```text
+UMI camera: S5KHMX ID 0x1ad0, revision register 0xa000
+UMI camera: module sensor-version source register 0x000e=0x1301
+UMI camera: release supply 2 error=0
+UMI camera: release supply 1 error=0
+UMI camera: release supply 0 error=0
+UMI camera: sensor probe finished error=0; sensor stream was not started
+```
+
+This proves the THYME GPIO, PMIC, MCLK, CCI and sensor identification/power
+sequence. It does not yet prove CSI frames or camera capture.
+Evidence: `logs/101242-run.log`, SHA-256
+`56994b92e8a30dd9b65f5f9ec13c128189b9849ed1a0d5989e40fe99eddf63e9`.
 
 ## Historical verified run
 

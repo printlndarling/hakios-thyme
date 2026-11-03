@@ -43,9 +43,9 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `57db9c8b` on `main` was cold-booted from RAM with the pinned
+The tested source revision `b12838cc` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`a869ab460000`), boot image (`2d662c991a5a`), loader
+and the kernel (`b110d08ffb54`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -59,12 +59,12 @@ One boot completed:
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
   or enqueue errors.
 
-Evidence: `logs/082732-run.log` (SHA-256
-`bd835bbd9daf6f433b0775e961eff20321a931e0cc0a58b7690fc41c3808fa46`),
-`logs/082501-wifi.png` (SHA-256
-`3cf2ff8653a9bb41a7d013466ec74621eb50b0d158926cacc1a71f24f3c16369`) and
-`logs/082501-bt.png` (SHA-256
-`c3316d457baaf0088875a01b3de766b30fa91c28f3242b350ecfa96a1ac8b863`).
+Evidence: `logs/101932-run.log` (SHA-256
+`3b49b31b493bc27c189653749b581e39772ebb4993debefd99237ab5e158e8fd`),
+`logs/101901-wifi.png` (SHA-256
+`4280a171467d9a7827dd02773f921107a3fb2a9247aa47e5d63c1cd852a1e2af`) and
+`logs/101901-bt.png` (SHA-256
+`b51f23fe88c556f3a5a35b4a94db416c05d4385f49effd10f71c256244745969`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -260,6 +260,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
+| Rear camera sensor/power probe | PASS | `cam=2` reached the S5KHMX sensor: ID `0x1ad0`, revision `0xa000`, module selector `0x1301`; all three supplies released with error 0 (`logs/101242-run.log`) |
 | Torch/flash | PASS | Hardware pulse: PM8150L channel 97 ramped up and cleaned up (`logs/081934-run.log`). End-to-end userspace and stock Control Center: AVFlashlight/mediaserverd requested 1000, 250 and 850 through `/dev/hakios-torch`; every request reached the kernel and the safety timer returned it to dark (`logs/090116-run.log`, `logs/091200-run.log`) |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
