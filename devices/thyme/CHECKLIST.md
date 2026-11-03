@@ -43,9 +43,9 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `b12838cc` on `main` was cold-booted from RAM with the pinned
+The tested source revision `cfece83a` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`b110d08ffb54`), boot image (`2d662c991a5a`), loader
+and the kernel (`1b8ead5e8439`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -59,12 +59,12 @@ One boot completed:
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
   or enqueue errors.
 
-Evidence: `logs/101932-run.log` (SHA-256
-`3b49b31b493bc27c189653749b581e39772ebb4993debefd99237ab5e158e8fd`),
-`logs/101901-wifi.png` (SHA-256
-`4280a171467d9a7827dd02773f921107a3fb2a9247aa47e5d63c1cd852a1e2af`) and
-`logs/101901-bt.png` (SHA-256
-`b51f23fe88c556f3a5a35b4a94db416c05d4385f49effd10f71c256244745969`).
+Evidence: `logs/120114-run.log` (SHA-256
+`270a055e7d4c26a43215df21d6824974b384d2a5f826340afffcf0232f3704ec`),
+`logs/120001-wifi.png` (SHA-256
+`a949269f511fc151b890fccd9062788f459afd7ac803605df8005991722458e3`) and
+`logs/120001-bt.png` (SHA-256
+`e2e1a25a6e884de89afb53bc9d95f92b2c7f6f3499745061c4bf8fefe06bf9d2`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 

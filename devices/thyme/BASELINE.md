@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `b12838cc` (`Port THYME camera identification path`) |
+| Verified source | `cfece83a` (`Record THYME camera userspace pipeline`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -21,7 +21,7 @@ experimental kernel or with an older resident system image.
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `b110d08ffb5414f261d3c0d068d196dafa6946585aadc574abaeb37dd67b9be1` |
+| clean-main `hakios-kernel` | `1b8ead5e843984a3a23a349c620320081e07376a22619bc7e2882ef2b837cb8a` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
@@ -68,9 +68,9 @@ The clean `b12838cc` boot completed all of these in one 230-second RAM run:
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/101932-run.log` | `3b49b31b493bc27c189653749b581e39772ebb4993debefd99237ab5e158e8fd` |
-| `logs/101901-wifi.png` | `4280a171467d9a7827dd02773f921107a3fb2a9247aa47e5d63c1cd852a1e2af` |
-| `logs/101901-bt.png` | `b51f23fe88c556f3a5a35b4a94db416c05d4385f49effd10f71c256244745969` |
+| `logs/120114-run.log` | `270a055e7d4c26a43215df21d6824974b384d2a5f826340afffcf0232f3704ec` |
+| `logs/120001-wifi.png` | `a949269f511fc151b890fccd9062788f459afd7ac803605df8005991722458e3` |
+| `logs/120001-bt.png` | `e2e1a25a6e884de89afb53bc9d95f92b2c7f6f3499745061c4bf8fefe06bf9d2` |
 
 The screenshots show the Wi-Fi switch on with real nearby networks after the
 power cycle, then stock Bluetooth Settings discovering `Accessory` while the
