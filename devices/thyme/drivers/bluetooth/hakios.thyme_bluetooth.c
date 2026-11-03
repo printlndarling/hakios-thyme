@@ -295,6 +295,29 @@ static int bt_qca_firmware(vm_offset_t uart)
     if (!nonzero || (bt_public_address[0]&1)) return EINVAL;
     return 0;
 }
+static int bt_set_local_name(vm_offset_t uart)
+{
+    uint8_t name[248] = {0};
+    uint8_t event[BT_EVENT_MAX];
+    unsigned length = 0;
+
+    /* RAM userland has no persistent UserAssignedDeviceName.  Give the
+     * controller a stable identity instead of letting Settings render (null). */
+    strlcpy((char *)name, "HakiOS Mi 10S", sizeof(name));
+    int error = bt_hci_command(uart, 0x0c13, name, sizeof(name), true, event, &length);
+    if (error) {
+        hakios_tl("UMI BT: write local name failed errno=%d\n", error);
+        return error;
+    }
+    error = bt_hci_command(uart, 0x0c14, NULL, 0, true, event, &length);
+    if (error || length < 8) {
+        hakios_tl("UMI BT: read local name failed errno=%d length=%u\n", error, length);
+        return error ? error : EILSEQ;
+    }
+    hakios_tl("UMI BT: local name readback status=%#x name=\"%.40s\"\n",
+        event[6], (const char *)(event + 7));
+    return 0;
+}
 static void bt_log_address(const char *kind, unsigned report, const uint8_t *address)
 {
     hakios_tl("UMI BT: %s %u address=%02x:%02x:%02x:%02x:%02x:%02x\n", kind, report,
@@ -822,7 +845,8 @@ static bool bt_hci_probe(vm_offset_t gcc,vm_offset_t gpio,vm_offset_t uart,bool 
             error=bt_qca_firmware(uart);
             if(!error && !runtime) error=bt_radio_scan(uart);
             if(!error && runtime) {
-                error=bt_control_start(uart);
+                error=bt_set_local_name(uart);
+                if(!error) error=bt_control_start(uart);
                 if(!error) return true;
             }
         }
