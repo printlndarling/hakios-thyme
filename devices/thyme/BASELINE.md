@@ -99,12 +99,35 @@ The `torch=3` userspace path was then exercised with `torch_test`:
   turned on;
 - the kernel's 30-second safety limit switched it off.
 
-The explicit level-0/`turnPowerOff` request did not reach the kernel promptly,
-so only the ON path and watchdog OFF are proven. The evidence runs are
-`logs/084252-run.log` (SHA-256
-`0f18c4b81e29c43f19d7dff0d357c3896b588705ce9936081c13b0a644671f20`) and
-`logs/085312-run.log` (SHA-256
-`6badd947cb14573ccd64401224babcc2123c991711fb116dc4f1dd0f1a45de78`).
+The same `torch_test` process then held one `AVFlashlight` instance across the
+full sequence: set level 1, wait five seconds, set level 0, and read the kernel
+state. The kernel log records:
+
+```text
+torch: 159.648 s: ON (iOS asked for 1000 of 1000; the battery 28 C)
+torch: 164.647 s: off (iOS asked for 0)
+```
+
+This proves the userspace ON and OFF path used by Control Center.
+Evidence: `logs/090116-run.log`, SHA-256
+`d8ed668fbf15c9b5408a08347777e7cb278b50599c6b256a24540140927a0631`.
+
+The complete `userland/rc.jobs.torch` scene was then run with
+`torch=3 torch_max_s=5`. It exercised both the programmatic path and the stock
+Control Center: `AVFlashlight` requested 1000 then 250, the Control Center taps
+requested 850, and every request reached the kernel and was bounded by the
+configured safety timer. The kernel's summary records:
+
+```text
+ON (iOS asked for 1000 of 1000)
+ON (iOS asked for 250 of 1000)
+ON (iOS asked for 850 of 1000)
+ON (iOS asked for 1000 of 1000)
+```
+
+Each illumination was followed by the five-second limit and returned dark.
+Evidence: `logs/091200-run.log`, SHA-256
+`1350d74549e927bb7bc751bf455ea666cf09d6c0d6cfbdf2807d4971605276a7`.
 
 ## Historical verified run
 

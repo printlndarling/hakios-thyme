@@ -260,7 +260,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
-| Torch/flash | PARTIAL | Hardware pulse PASS: PM8150L channel 97 at 125 mA ramped up (`INT_RT_STS=0x90`) and turned off cleanly (`logs/081934-run.log`). The `torch=3` path also proves `AVFlashlight` and mediaserverd can turn it on through `/dev/hakios-torch`, but the immediate level-0/`turnPowerOff` request does not yet reach the kernel; the 30-second safety limit still shuts it off |
+| Torch/flash | PASS | Hardware pulse: PM8150L channel 97 ramped up and cleaned up (`logs/081934-run.log`). End-to-end userspace and stock Control Center: AVFlashlight/mediaserverd requested 1000, 250 and 850 through `/dev/hakios-torch`; every request reached the kernel and the safety timer returned it to dark (`logs/090116-run.log`, `logs/091200-run.log`) |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
 | ALS / auto-brightness | FAIL | no usable ambient-light sensor path; brightness is manual |
@@ -274,7 +274,7 @@ No item moves to `PASS` from source inspection alone.
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
   THYME UEFI, expose BlockIo/PartitionInfo, and pass the read-only survey.
 - [ ] After that survey, make a separate accepted design for persistent storage.
-- [ ] Rear camera; torch userspace/Control Center integration (the bounded hardware path is already PASS).
+- [ ] Rear camera.
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.

@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 384 symbols in 19 groups; 42 are set, 33 of them drivers built in.
+# 385 symbols in 19 groups; 43 are set, 34 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (33)
+# Drivers built in (34)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -102,6 +102,9 @@ CONFIG_HAKIOS_THYME_AUDIO=y
 
 # QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth ... [hakios.thyme_bluetooth.c, hakios.thyme_bluetooth.cpp]
 CONFIG_HAKIOS_THYME_BT=y
+
+# the Xiaomi Mi 10S PM8150L flash LED module, channel 0 only (torch=1 read, torch=2 bounded pulse, torch=3 ... [hakios.thyme_torch.c]
+CONFIG_HAKIOS_THYME_TORCH=y
 
 # the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight and the kern.hakios.brightness sysctl used by ... [hakios.thyme_display.c]
 CONFIG_HAKIOS_THYME_DISPLAY=y
