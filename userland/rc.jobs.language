@@ -1,0 +1,4 @@
+# Language gate: start SpringBoard and open the language/region pane for a
+# physical switch test against the retained zh-Hans/zh-Hant resources.
+/redwood/bin/sound_test springboard
+/redwood/bin/battery_test open prefs:root=General&path=INTERNATIONAL

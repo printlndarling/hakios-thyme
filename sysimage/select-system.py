@@ -93,7 +93,10 @@ BIG_PROGRAM = 10 << 20           # daemons bigger than this (locationd, lskdd, .
 AUDIO = ('Library/Audio/Plug-Ins/', 'Library/Audio/Tunings/D22/', 'Library/Audio/Tunings/Generic/',
          'System/Library/Audio/UISounds/')
 SKIP_AUDIO = ('System/Library/Audio/UISounds/nano/',)
-KEEP_LANG = ('en', 'Base', 'English', 'en_US', 'en_GB')
+# Keep Chinese localizations so Settings can switch the UI without a reboot to
+# an image that lacks every zh-Hans/zh-Hant resource.
+KEEP_LANG = ('en', 'Base', 'English', 'en_US', 'en_GB',
+             'zh-Hans', 'zh-Hant', 'zh_CN', 'zh_TW')
 
 
 def entries(listing):
