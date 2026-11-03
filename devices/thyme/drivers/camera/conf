@@ -1,0 +1,6 @@
+# drivers/camera/conf: the THYME PM8150L flashlight.
+
+driver THYME_TORCH
+	file    bsd/dev/hakios.thyme_torch.c
+	help    the Xiaomi Mi 10S PM8150L flash LED module, channel 0 only
+	help    (torch=1 read, torch=2 bounded pulse, torch=3 /dev/hakios-torch).

@@ -135,7 +135,7 @@ void hakios_haptic_quiesce(void) {}
 void hakios_haptic_pretend(__unused uint32_t peak) {}
 #endif
 
-#ifndef HAKIOS_TORCH
+#if !defined(HAKIOS_TORCH) && !defined(HAKIOS_THYME_TORCH)
 void hakios_torch_init(void) {}
 void hakios_torch_quiesce(void) {}
 #endif
