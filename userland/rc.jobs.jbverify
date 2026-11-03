@@ -1,0 +1,7 @@
+# Rootless package-manager gate: install a locally supplied Procursus package,
+# query it with dpkg, run it, then open Sileo. This gate is offline on purpose.
+/var/jb/usr/bin/dpkg --version
+/var/jb/usr/bin/dpkg -i /redwood/share/jb-offline/tree/tree_2.0.1_iphoneos-arm64.deb
+/var/jb/usr/bin/dpkg-query -W tree
+/var/jb/usr/bin/tree -L 1 /var/jb
+/var/jb/usr/bin/uiopen sileo://

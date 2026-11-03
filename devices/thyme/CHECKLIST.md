@@ -361,6 +361,49 @@ No item moves to `PASS` from source inspection alone.
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
 
+### Rootless package manager (2026-11-04)
+
+A RAM candidate was built from the current main with the locally fetched
+Procursus rootless bootstrap. The system image hash was
+`8de2133113576ff0ad817c51095acc7d5d72e2ed4772918702bb68073dca579d`;
+the focused scenario hash was
+`bb3c06ab09ebddfa4406f0e7432238eeca670dcbd579aea3d657ec14b7954864`.
+The default Wi-Fi/Bluetooth baseline was not replaced.
+
+On the phone:
+
+- init reported `/var/jb from /jb` with 439 directories, 6416 files/links
+  and resolvable users;
+- `dpkg --version` reported Procursus `1.22.6 (iphoneos-arm64)`;
+- `dpkg -i` selected, unpacked and configured `tree 2.0.1`;
+- `dpkg-query -W tree` returned `tree 2.0.1` and
+  `/var/jb/usr/bin/tree -L 1 /var/jb` listed the prefix;
+- a separate run launched and rendered Sileo.
+
+The offline package was fetched and SHA-256 checked by
+`devices/thyme/tools/prepare-jbverify.py`. The scenario is
+`userland/rc.jobs.jbverify`. Neither the package nor the generated prefix is
+tracked.
+
+Still open:
+
+- online repository installation through Sileo; one focused run was blocked by
+  AP authentication status 1, so this is not counted as a package-manager
+  failure or PASS;
+- Sileo longevity: the later screenshot run rendered Sileo and then the process
+  exited, returning to SpringBoard;
+- dpkg emitted missing `.list` warnings for pre-seeded ElleKit, Sileo and
+  OpenSSH packages. Install/query passed, but uninstall and upgrade metadata
+  need repair before calling the environment complete.
+
+Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/054304-run.log` | `8607f9d64e661df6cbb87792a3ce2426403da6de740e551ac0369e16e80402a7` |
+| `logs/jbverify8-sileo.png` | `fe94d269bbc02df44066e854e55405e4f1c89f9459e89d669c27a60734348566` |
+| `logs/jbverify5-sileo.png` (Sileo rendered) | `bef5e7239a613306e117bf5f2a0b29b442d275a4fb00d8d5b4f58775e626e30c` |
+
 ## Display, storage, and installation
 
 | Check | Status | Evidence / next action |
@@ -404,5 +447,7 @@ No item moves to `PASS` from source inspection alone.
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.
+- [x] Rootless Procursus prefix and offline package installation.
+- [ ] Online repository installation and Sileo long-run stability.
 - [ ] Performance and thermal soak under daily use.
 - [ ] Battery-cycle integrity and no unexplained percentage jumps.
