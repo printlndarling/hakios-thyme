@@ -50,6 +50,7 @@ static unsigned char initial_random_address[6];
 static void (*scanner_device_found)(id,SEL,id);
 static unsigned scanner_devices_logged;
 static unsigned scanner_handler_logged;
+static unsigned scanner_forced_logged;
 typedef void (^scanner_handler_t)(id);
 static scanner_handler_t scanner_handler;
 static void (^scanner_handler_wrapper)(id)=^(id device) {
@@ -60,6 +61,7 @@ static void (^scanner_handler_wrapper)(id)=^(id device) {
 };
 static void log_scanner_device(id self,SEL command,id device)
 {
+    id handler=*(id *)((char *)self+0x98);
     if(scanner_devices_logged++<32) {
         const char *text=NULL;
         if(device) {
@@ -67,12 +69,16 @@ static void log_scanner_device(id self,SEL command,id device)
             if(description)
                 text=((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String"));
         }
-        id handler=*(id *)((char *)self+0x98);
         uint64_t flags=*(uint64_t *)((char *)self+0x70);
         fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx %s\n",
             handler,(unsigned long long)flags,text?text:"(null)");
     }
     scanner_device_found(self,command,device);
+    if(handler) {
+        if(scanner_forced_logged++<32)
+            fprintf(stderr,"UMI Bluetooth: BLE scanner forced handler delivery\n");
+        ((scanner_handler_t)handler)(device);
+    }
 }
 static void (*scanner_set_handler)(id,SEL,id);
 static void hook_scanner_handler(id self,SEL command,id handler)
