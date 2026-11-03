@@ -73,10 +73,11 @@ database have file lists. The builder now rejects a prefix with a package that
 has no file list. See the rootless package-manager section in
 CHECKLIST.md, userland/rc.jobs.jbverify and tools/jb-add-metadata.py.
 
-Online repository installation remains PARTIAL. One focused run lost Wi-Fi at
-association time (AP authentication status 1), so the offline install/remove
-gate is the reproducible result. Longer Sileo repository refresh and dependency
-repair also remain open.
+Online repository installation remains PARTIAL. A later run associated on
+5 GHz and installed CCMP keys, and Sileo advanced, but the loader console did
+not retain the apt command output. The offline install/remove gate remains the
+reproducible result. Longer Sileo repository refresh and dependency repair also
+remain open.
 
 The test uses devices/thyme/tools/prepare-jbverify.py to fetch and hash-check
 the pinned package. Neither the package nor the generated prefix is committed.

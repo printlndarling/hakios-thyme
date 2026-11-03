@@ -197,6 +197,42 @@ Evidence:
 | `logs/jiggle-60.png` | `18221b7ce78edef5fd1b287f1ea3dd8e1933df5c65b30721d6cf74407fb0a0d3` |
 | `logs/jiggle-90.png` | `fb105681ee1d2d4dea55fca296189119579eb63fc903458eb0d6bf3a9206ffb8` |
 
+### CPU-monitor log flood and Bluetooth regression (2026-11-04)
+
+The XNU CPU-monitor denial path logged every refused request. During a boot,
+lsd alone produced tens of thousands of identical lines and pushed useful
+user-space output out of the loader log. Candidate kernel
+`89382c29e3ee` capped the diagnostic at eight detailed lines plus one
+summary line. The same cap survived a second build from thyme_defconfig
+(`1d845b989735`).
+
+Evidence from `logs/063408-run.log`:
+
+- exactly eight `denied attempt to escape CPU monitor` lines, followed by
+  the suppression notice;
+- Wi-Fi associated on 5 GHz, installed CCMP keys and opened Sileo.
+
+A full default regression was then run with the candidate kernel and the
+restored, non-JB system image `4f0f3f8b1ba0`. Wi-Fi and Safari still worked,
+but Bluetooth Settings showed its master switch off. The failure repeated in a
+second default run. Low-level Bluetooth is not the failing layer:
+`logs/071505-run.log` shows `3 Mbaud`, firmware patch/NVM accepted,
+HCI reset and the persistent `com.hakios.bluetooth` H4 endpoint ready. The
+missing step is Bluetooth daemon/user-space startup, not the UART or firmware.
+
+The candidate is not promoted to `ram-baseline.conf`. The committed baseline
+remains kernel `e73e82d4e5da`, system `4f0f3f8b1ba0` and scenario
+`6e04e0b91ced` until Bluetooth Settings starts cleanly with it.
+
+Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/063408-run.log` | `9c06818d7297109f9ecd714213a33b4042743168813970c424eef37e0a53dc1f` |
+| `logs/070235-run.log` (BT off) | `b3b4886184e2379d281f685cea609861d87c835f905394c04c9306d827fa2ae9` |
+| `logs/logfix2-wifi.png` | `3a4bd7b5592a99453c239cb30bba818c06c2c3cb9013376389a311ffe9250596` |
+| `logs/logfix2-bt.png` (BT off) | `5f16e4f57309b4eb8e5a175d0832052e9b6f45de478a83c8256586a83a6a638c` |
+
 ### Historical unnamed-accessory diagnosis
 
 The HCI trace now records the address in the LE white-list add/remove commands.
@@ -391,15 +427,16 @@ The builder now runs `tools/jb-check-prefix.py` and fails if a package has
 no file list.
 
 The offline package was fetched and SHA-256 checked by
-`devices/thyme/tools/prepare-jbverify.py`. The scenario is
-`userland/rc.jobs.jbverify`. Neither the package nor the generated prefix is
-tracked.
+`devices/thyme/tools/prepare-jbverify.py`. The offline scenario is
+`userland/rc.jobs.jbverify`; `userland/rc.jobs.jbupdate` is the online
+diagnostic and contains no credentials. Neither the package nor the generated
+prefix is tracked.
 
 Still open:
 
-- online repository installation through Sileo; one focused run was blocked by
-  AP authentication status 1, so this is not counted as a package-manager
-  failure or PASS;
+- online repository installation through Sileo; a later run reached 5 GHz
+  association, accepted CCMP keys and advanced Sileo, but the loader console
+  did not retain the apt command output, so this is not counted as PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 

@@ -1,0 +1,12 @@
+# Rootless online-package gate: let Darwin settle before joining Wi-Fi, then
+# refresh Procursus, install tree through apt, run it and remove it again.
+/redwood/bin/net_test wait 120 joinfile /redwood/fw/network
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 store
+/var/jb/usr/bin/apt-get update
+/var/jb/usr/bin/apt-get install -y tree
+/var/jb/usr/bin/dpkg-query -W tree
+/var/jb/usr/bin/tree -L 1 /var/jb
+/var/jb/usr/bin/dpkg -r tree
+/var/jb/usr/bin/dpkg-query -W tree
+/var/jb/usr/bin/uiopen sileo://

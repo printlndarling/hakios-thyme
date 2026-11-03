@@ -3502,3 +3502,18 @@ index 3ebc295117a3..de101eafc83b 100755
  def find_non_ascii(s):
      for c in s:
          if ord(c) >= 0x80: return True
+diff --git a/osfmk/kern/task_policy.c b/osfmk/kern/task_policy.c
+--- a/osfmk/kern/task_policy.c
++++ b/osfmk/kern/task_policy.c
+@@ -165,0 +166 @@
++static _Atomic uint32_t cpumon_denied_warnings;
+@@ -2867,2 +2868,7 @@
+-				printf("process %s[%d] denied attempt to escape CPU monitor"
+-				    " (missing required entitlement).\n", procname, pid);
++				uint32_t denied = os_atomic_inc_orig(&cpumon_denied_warnings, relaxed);
++				if (denied < 8) {
++					printf("process %s[%d] denied attempt to escape CPU monitor"
++					    " (missing required entitlement).\n", procname, pid);
++				} else if (denied == 8) {
++					printf("CPU-monitor denial warnings suppressed; further occurrences are not logged\n");
++				}
