@@ -452,6 +452,8 @@ static unsigned bt_le_meta_seen[256];
 static unsigned bt_le_reports_logged;
 static unsigned long long bt_le_report_events;
 static unsigned long long bt_le_report_entries;
+static unsigned long long bt_le_report_types[8];
+static unsigned long long bt_le_named_entries;
 static unsigned long long bt_events_enqueued;
 static unsigned bt_enqueue_errors;
 static unsigned bt_command_status_logged;
@@ -640,19 +642,27 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 if(subevent==0x01 || subevent==0x0a)
                     bt_log_le_connection(receive,receive_length,subevent);
                 if(subevent==0x02 && receive_length>=15) {
-                    unsigned reports=receive[4], data_length=receive[13];
+                    unsigned reports=receive[4], at=14;
                     bt_le_report_events++;
                     bt_le_report_entries+=reports;
-                    if(14+data_length<receive_length) {
-                        uint8_t rssi=receive[14+data_length];
-                        if(bt_le_reports_logged++<64) {
-                            char name[32];
-                            bt_le_report_name(receive+14,data_length,name);
-                            hakios_tl("UMI BT: LE advertising report type=%#x address=%02x:%02x:%02x:%02x:%02x:%02x "
-                                "data=%u RSSI=%d report=%u name=\"%s\"\n",receive[5],
-                                receive[12],receive[11],receive[10],receive[9],receive[8],receive[7],
-                                data_length,(int)(int8_t)rssi,reports,name);
-                        }
+                    for(unsigned report=0;report<reports && at+10<=receive_length;report++) {
+                        unsigned type=receive[at], address_type=receive[at+1];
+                        unsigned data_length=receive[at+8];
+                        if(at+9+data_length>=receive_length) break;
+                        const uint8_t *data=receive+at+9;
+                        uint8_t rssi=receive[at+9+data_length];
+                        char name[32];
+                        bt_le_report_name(data,data_length,name);
+                        if(type<sizeof(bt_le_report_types)/sizeof(bt_le_report_types[0]))
+                            bt_le_report_types[type]++;
+                        if(name[0]) bt_le_named_entries++;
+                        if(bt_le_reports_logged++<64)
+                            hakios_tl("UMI BT: LE advertising report type=%#x address-type=%u "
+                                "address=%02x:%02x:%02x:%02x:%02x:%02x data=%u RSSI=%d report=%u name=\"%s\"\n",
+                                type,address_type,receive[at+7],receive[at+6],receive[at+5],
+                                receive[at+4],receive[at+3],receive[at+2],data_length,
+                                (int)(int8_t)rssi,reports,name);
+                        at+=9+data_length+1;
                     }
                 }
             }
@@ -680,11 +690,15 @@ static void bt_control_worker(void *unused,wait_result_t result)
             int queue_error=ctl_getenqueuepacketcount(bt_control,unit,&queued_packets);
             transport_ticks=0;
             hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu "
-                "events=%llu le-events=%llu le-reports=%llu queue=%u queue-err=%d enqueue-errors=%u\n",
+                "events=%llu le-events=%llu le-reports=%llu le-types=%llu/%llu/%llu/%llu/%llu "
+                "le-named=%llu queue=%u queue-err=%d enqueue-errors=%u\n",
                 bt_read(bt_control_uart,0x40),bt_read(bt_control_uart,0x804),
                 bt_read(bt_control_uart,0x640),bt_host_awake,
                 bt_rx_words,bt_rx_bytes,bt_rx_frames,bt_events_enqueued,
-                bt_le_report_events,bt_le_report_entries,queued_packets,queue_error,
+                bt_le_report_events,bt_le_report_entries,
+                bt_le_report_types[0],bt_le_report_types[1],bt_le_report_types[2],
+                bt_le_report_types[3],bt_le_report_types[4],bt_le_named_entries,
+                queued_packets,queue_error,
                 bt_enqueue_errors);
         }
         delay(1000);
