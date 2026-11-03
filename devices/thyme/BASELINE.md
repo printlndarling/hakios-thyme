@@ -84,6 +84,12 @@ Bluetooth screenshot shows Settings discovery. The kernel log records both
 CCMP key installations and both successful associations. The same run has
 `FD650`/`THE GPU STAYS ON` and zero `softpipe` occurrences.
 
+A focused animation run at `logs/041711-run.log` presented approximately
+60 fps during the home-screen edit-mode animation (`302/301/301/301` frames in
+four consecutive five-second windows). This confirms frame pacing at the
+panel's current 60 Hz mode. The later softpipe context occurs only after the
+run deliberately hands the GPU back for shutdown, not during active use.
+
 A focused Bluetooth-audio run at `logs/231436-run.log` waited for the paired
 headset to appear, then observed:
 

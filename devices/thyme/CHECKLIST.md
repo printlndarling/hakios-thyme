@@ -176,6 +176,27 @@ Evidence:
 | `logs/022305-run.log` | `a6490eb47b0efc3102c8285d60f2c1ec719b8b9c941a61766b23c96ed577d282` |
 | `logs/thyme-zh-hans-final.png` | `0f62b092635f95837527778d59c4bb29d0b81fde889599a35b8f5407af5a5d8a` |
 
+### UI animation frame pacing (2026-11-04)
+
+The `rc.jobs.jiggle` home-screen edit-mode animation was run with the pinned
+GPU baseline. For consecutive five-second windows during the animation, the
+framebuffer presented `302`, `301`, `301` and `301` frames, i.e. approximately
+60 fps. The GPU path reported FD650, about 1.1-2.4 ms in the framebuffer driver
+and 1.8-2.5 ms waiting for the GPU per interval. No softpipe context appeared
+during active use.
+
+The softpipe context later in the log appears only after the run deliberately
+returns the GPU before shutdown and backboardd respawns. It is not a runtime
+fallback during the animation.
+
+Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/041711-run.log` | `f0a8d27dfa216afde5f5de4da7c81f7013156cf64de294f16bad2d9bd122c5ba` |
+| `logs/jiggle-60.png` | `18221b7ce78edef5fd1b287f1ea3dd8e1933df5c65b30721d6cf74407fb0a0d3` |
+| `logs/jiggle-90.png` | `fb105681ee1d2d4dea55fca296189119579eb63fc903458eb0d6bf3a9206ffb8` |
+
 ### Historical unnamed-accessory diagnosis
 
 The HCI trace now records the address in the LE white-list add/remove commands.
@@ -262,7 +283,8 @@ No item moves to `PASS` from source inspection alone.
 | Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`) |
-| UI smoothness | PARTIAL | Rendering is now definitely GPU-backed; residual stutter/refresh pacing remains and needs frame-time tuning. It is not evidence of CPU/softpipe rendering |
+| UI animation frame pacing | PASS at 60 Hz | GPU-backed jiggle animation presented about 60 fps in four consecutive five-second windows (`302/301/301/301` frames), with software fallback absent during active use (`logs/041711-run.log`) |
+| 90 Hz panel refresh | TODO | The current panel mode still runs at about 60 Hz. 90 Hz switching and its DSI command-DMA path remain unimplemented |
 | Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
