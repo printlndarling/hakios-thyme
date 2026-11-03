@@ -1,4 +1,11 @@
-# drivers/camera/conf: the THYME PM8150L flashlight.
+# drivers/camera/conf: the THYME camera hardware and PM8150L flashlight.
+
+driver THYME_CAMERA
+	file    bsd/dev/hakios.thyme_camera.c
+	file    bsd/dev/hakios.thyme_umi_camera.c
+	file    bsd/dev/hakios.thyme_camera_dma.c
+	help    the Xiaomi Mi 10S S5KHMX sensor, PM8150L rails, CCI/MCLK,
+	help    Kona CamCC and IFE-lite/CSID-lite diagnostics (cam=1..4,6).
 
 driver THYME_TORCH
 	file    bsd/dev/hakios.thyme_torch.c
