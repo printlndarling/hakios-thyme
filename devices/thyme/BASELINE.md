@@ -30,7 +30,9 @@ recorded for a hardware run.
 `devices/thyme/ram-baseline.conf` is the machine-checked copy of these local
 artifact hashes. `ram-regress.sh` refuses to boot different bytes unless
 `ALLOW_NEW_BASELINE=1` is explicit, and a verified new candidate must update
-that manifest in the same commit.
+that manifest in the same commit. The manifest also hashes the complete
+effective boot-argument string, including `RAM_EXTRA_ARGS`, so a focused test
+cannot silently disable `wifi`, `bt` or another subsystem.
 
 ## Boot arguments
 

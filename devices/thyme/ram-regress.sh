@@ -44,6 +44,8 @@ if [ -n "$DIRTY" ] && [ "${ALLOW_DIRTY:-0}" != 1 ]; then
 	exit 1
 fi
 
+CANDIDATE=0
+
 baseline_value() {
 	sed -n "s/^$1=//p" "$BASELINE"
 }
@@ -61,6 +63,7 @@ check_hash() { # check_hash <label> <file> <manifest key>
 			echo "ram-regress: rebuild the canonical inputs, or set ALLOW_NEW_BASELINE=1 for a new candidate" >&2
 			exit 1
 		fi
+		CANDIDATE=1
 	fi
 }
 
@@ -72,14 +75,34 @@ check_hash "system image" "$SYSTEM_IMAGE" SYSTEM_SHA256
 check_hash "scenario" "$SCENARIO" SCENARIO_SHA256
 check_hash "boot arguments" devices/thyme/ram.args RAM_ARGS_SHA256
 
+actual_args_sha=$(printf '%s' "$ARGS" | sha256sum | cut -d' ' -f1)
+expected_args_sha=$(baseline_value BOOT_ARGS_SHA256)
+[ -n "$expected_args_sha" ] || { echo "ram-regress: baseline has no BOOT_ARGS_SHA256" >&2; exit 1; }
+if [ "$actual_args_sha" != "$expected_args_sha" ]; then
+	echo "ram-regress: effective boot arguments do not match the committed baseline:" >&2
+	echo "  expected $expected_args_sha" >&2
+	echo "  actual   $actual_args_sha" >&2
+	echo "  arguments $ARGS" >&2
+	if [ "${ALLOW_NEW_BASELINE:-0}" != 1 ]; then
+		echo "ram-regress: use the complete ram.args, or set ALLOW_NEW_BASELINE=1 for a new candidate" >&2
+		exit 1
+	fi
+	CANDIDATE=1
+fi
+
 HEAD=$(git rev-parse --short=8 HEAD)
 DIRTY_MARK=
 [ -z "$DIRTY" ] || DIRTY_MARK=-dirty
 echo "ram-regress: source=$HEAD$DIRTY_MARK kernel=$(sha256sum hakios-kernel | cut -c1-12) scenario=$(sha256sum "$SCENARIO" | cut -c1-12)"
 echo "ram-regress: boot=$(sha256sum "$XL_BOOT_IMAGE" | cut -c1-12) uefi=$(sha256sum "$UEFI" | cut -c1-12) system=$(sha256sum "$SYSTEM_IMAGE" | cut -c1-12)"
 echo "ram-regress: args=$ARGS"
+echo "ram-regress: args_sha=$actual_args_sha"
 if [ "${VERIFY_ONLY:-0}" = 1 ]; then
-	echo "ram-regress: all inputs match the committed baseline"
+	if [ "$CANDIDATE" = 1 ]; then
+		echo "ram-regress: candidate inputs differ from the committed baseline and were explicitly allowed"
+	else
+		echo "ram-regress: all inputs match the committed baseline"
+	fi
 	exit 0
 fi
 
