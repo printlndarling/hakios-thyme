@@ -1,8 +1,23 @@
 diff --git a/tools/probe.cpp b/tools/probe.cpp
-index 89cc762..ee28a3c 100644
+index 89cc762..aaf5420 100644
 --- a/tools/probe.cpp
 +++ b/tools/probe.cpp
-@@ -1898,6 +1898,54 @@ int main(int argc, char** argv) {
+@@ -375,12 +375,14 @@ static const char* dimName(uint8_t dim) {
+ 
+ int main(int argc, char** argv) {
+     bool recover = false, bisect = false, binTrace = false;
++    int bisectIndex = -1;
+     compute::Options chosen;   // what the dispatches of stage 5 are encoded with
+     std::vector<std::pair<std::string, std::string>> metallibs;   // --metallib FILE FUNCTION: a kernel of the phone's own image
+     for (int i = 1; i < argc; i++) {
+         recover = recover || strcmp(argv[i], "--recover") == 0;
+         bisect = bisect || strcmp(argv[i], "--bisect") == 0;
+         binTrace = binTrace || strcmp(argv[i], "--bin-trace") == 0;
++        if (strncmp(argv[i], "--bisect-index=", 15) == 0) bisectIndex = atoi(argv[i] + 15);
+         // --notail: no end-of-dispatch events and waits of our own; the kernel's own CACHE_FLUSH_TS fence closes the
+         // submission (28 October: with them every dispatch hung, without them end_only completed in 48 us)
+         if (strcmp(argv[i], "--notail") == 0) chosen.tail = false;
+@@ -1898,6 +1900,57 @@ int main(int argc, char** argv) {
  
          // 9a. one triangle
          auto t = makeTarget(kTextureUsageRenderTarget | kTextureUsageRead, "9a");
@@ -44,7 +59,10 @@ index 89cc762..ee28a3c 100644
 +            without("without the tail's LRZ_FLUSH", [](render::Options& o) { o.tailLrzFlush = false; });
 +            without("without CACHE_FLUSH_TS and its wait", [](render::Options& o) { o.tailCacheFlush = false; });
 +            without("with RB_DONE_TS and its wait (compute's tail)", [](render::Options& o) { o.tailRbDone = true; });
-+            for (const Variant& v : variants) {
++            for (size_t variantIndex = 0; variantIndex < variants.size(); variantIndex++) {
++                if (bisectIndex >= 0 && size_t(bisectIndex) != variantIndex) continue;
++                const Variant& v = variants[variantIndex];
++                std::printf("probe: (bisect variant %zu/%zu: %s)\n", variantIndex + 1, variants.size(), v.name);
 +                fillBo(*t, canary);
 +                auto cb = drawInto(*t, flat, drawOf(0, 3), v.o);
 +                TriReadback r = compareTriangle(*t, flatColour, canary, lowerLeft);

@@ -69,6 +69,21 @@ requirement for the Metal bring-up.
 Evidence: `logs/033837-run.log`, SHA-256
 `51692c55af66800272effbcc682214d421c5797a75594ce76ee2c0b8834a34b1`.
 
+Single-variant cold boots were then run from the same resident system image.
+Each run started a fresh kernel and selected one render option:
+
+| Option removed or changed | Log | Result |
+|---|---|---|
+| RM6 direct-render marker | `logs/035359-run.log` | hung; 6/2016 interior pixels painted |
+| pass begin | `logs/040028-run.log` | hung; 6/2016 interior pixels painted |
+| rasterizer registers | `logs/040201-run.log` | hung; 6/2016 interior pixels painted |
+| viewport and scissors | `logs/040334-run.log` | hung; 0/2016 interior pixels painted |
+| `CACHE_FLUSH_TS` and its wait | `logs/040506-run.log` | hung; 6/2016 interior pixels painted |
+
+All five retained `FAULTS 0`. None of these optional state groups alone removes
+the hang. The next comparison should be between the first 3D submission from
+the working Mesa/FD650 path and the corresponding `hakios-metal` submission.
+
 ## Consequence
 
 - Do not enable `METAL_PLUGIN=ca` or the window server on Metal yet.
