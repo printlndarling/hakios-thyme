@@ -435,12 +435,21 @@ if [ -f ../fw-wifi/wpss.mdt ]; then
 	for f in bd_m20gl.elf regdb_xiaomi.bin; do
 		[ -f ../fw-wifi/qca6750/$f ] && install -m 0644 ../fw-wifi/qca6750/$f root/fw/
 	done
-	# the network the radio is to join: its name on the first line, its passphrase on the second. Yours, and
-	# so not in the repository; it goes where the firmware goes and the kernel reads it there (wifi_join=1)
-	rm -f root/fw/network
-	# SHARE=1: leave it out, for an image that is going to somebody else -- it is a passphrase
-	if [ -z "$SHARE" ] && [ -f ../fw-wifi/network ]; then install -m 0600 ../fw-wifi/network root/fw/network; fi
 fi
+# THYME's QCA6390 has a board-specific firmware directory instead of wpss.mdt.
+if [ -d ../fw-wifi/qca6390 ]; then
+	mkdir -p root/fw/qca6390
+	chmod u+rwx root/fw/qca6390
+	cp -R ../fw-wifi/qca6390/. root/fw/qca6390/
+	chmod -R u+rwX root/fw/qca6390
+fi
+# The network the radio is to join: its name on the first line, its passphrase
+# on the second. It is local and Git-ignored, and independent of whether the
+# separately extracted wpss firmware happens to be present in this checkout.
+mkdir -p root/fw
+rm -f root/fw/network
+# SHARE=1 leaves it out of an image that is going to somebody else.
+if [ -z "$SHARE" ] && [ -f ../fw-wifi/network ]; then install -m 0600 ../fw-wifi/network root/fw/network; fi
 # ... and the vibration motor's waveforms, the phone's /vendor/firmware/aw8697_haptic.bin, from ../fw-haptic
 # (drivers/haptic/hakios.haptic.c, haptic=3; 3.6 KB, the vendor's and not in the repository either)
 if [ -f ../fw-haptic/aw8697_haptic.bin ]; then
