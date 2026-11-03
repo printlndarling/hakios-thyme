@@ -10,6 +10,7 @@
 #include <mach-o/loader.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -60,9 +61,8 @@ static void log_scanner_device(id self,SEL command,id device)
                 text=((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String"));
         }
         uint64_t flags=*(uint64_t *)((char *)self+0x70);
-        bool connectable=device?((BOOL(*)(id,SEL))objc_msgSend)(device,sel_registerName("connectable")):false;
-        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx connectable=%u %s\n",
-            handler,(unsigned long long)flags,connectable,text?text:"(null)");
+        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx %s\n",
+            handler,(unsigned long long)flags,text?text:"(null)");
     }
     scanner_device_found(self,command,device);
 }
@@ -86,6 +86,28 @@ static void log_discovery_report_found(id self,SEL command,id device)
     }
     discovery_report_found(self,command,device);
 }
+static void install_discovery_probe(void)
+{
+    Class discovery=objc_getClass("CBDiscovery");
+    Method report=discovery?class_getInstanceMethod(discovery,sel_registerName("reportDeviceFound:")):NULL;
+    if(report) {
+        discovery_report_found=(void *)method_getImplementation(report);
+        method_setImplementation(report,(IMP)log_discovery_report_found);
+        fprintf(stderr,"UMI Bluetooth: CBDiscovery probe installed\n");
+    }
+}
+static void *discovery_probe_thread(void *unused)
+{
+    for(unsigned i=0;i<1200;i++) {
+        if(objc_getClass("CBDiscovery")) {
+            install_discovery_probe();
+            return NULL;
+        }
+        usleep(100000);
+    }
+    fprintf(stderr,"UMI Bluetooth: CBDiscovery probe unavailable\n");
+    return NULL;
+}
 static void install_scanner_probe(void)
 {
     Class scanner=objc_getClass("CBStackBLEScannerBTStack");
@@ -96,14 +118,9 @@ static void install_scanner_probe(void)
     }
     scanner_device_found=(void *)method_getImplementation(method);
     method_setImplementation(method,(IMP)log_scanner_device);
-    Class discovery=objc_getClass("CBDiscovery");
-    Method report=discovery?class_getInstanceMethod(discovery,sel_registerName("reportDeviceFound:")):NULL;
-    if(report) {
-        discovery_report_found=(void *)method_getImplementation(report);
-        method_setImplementation(report,(IMP)log_discovery_report_found);
-    }
-    fprintf(stderr,"UMI Bluetooth: scanner probe installed discovery-hook=%u\n",
-        report?1:0);
+    pthread_t thread;
+    if(!pthread_create(&thread,NULL,discovery_probe_thread,NULL)) pthread_detach(thread);
+    fprintf(stderr,"UMI Bluetooth: BLE scanner probe installed\n");
 }
 static void initial_address_complete(unsigned status)
 {
