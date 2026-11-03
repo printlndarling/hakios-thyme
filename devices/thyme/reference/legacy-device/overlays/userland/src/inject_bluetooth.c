@@ -60,8 +60,9 @@ static void log_scanner_device(id self,SEL command,id device)
                 text=((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String"));
         }
         uint64_t flags=*(uint64_t *)((char *)self+0x70);
-        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx %s\n",
-            handler,(unsigned long long)flags,text?text:"(null)");
+        bool connectable=device?((BOOL(*)(id,SEL))objc_msgSend)(device,sel_registerName("connectable")):false;
+        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx connectable=%u %s\n",
+            handler,(unsigned long long)flags,connectable,text?text:"(null)");
     }
     scanner_device_found(self,command,device);
 }
