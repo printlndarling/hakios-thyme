@@ -4,4 +4,6 @@
 /var/jb/usr/bin/dpkg -i /redwood/share/jb-offline/tree/tree_2.0.1_iphoneos-arm64.deb
 /var/jb/usr/bin/dpkg-query -W tree
 /var/jb/usr/bin/tree -L 1 /var/jb
+/var/jb/usr/bin/dpkg -r tree
+/var/jb/usr/bin/dpkg-query -W tree
 /var/jb/usr/bin/uiopen sileo://

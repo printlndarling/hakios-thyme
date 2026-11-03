@@ -58,14 +58,8 @@ tar -C "$OUT/root" -xf "$TMP"/data.tar.* 2>/dev/null ||
 # bit means what it says there.
 chmod 4755 "$OUT/root/var/jb/Applications/Sileo.app/giveMeRoot"
 
-# dpkg is to know that Sileo is installed, or Sileo itself will offer to install it again
-mkdir -p "$TMP/control" && tar -C "$TMP/control" -xf "$TMP"/control.tar.* 2>/dev/null ||
-	zstd -dc "$TMP/control.tar.zst" | tar -C "$TMP/control" -xf -
-{
-	sed '/^$/d' "$TMP/control/control"
-	echo "Status: install ok installed"
-	echo
-} >> "$OUT/root/var/jb/Library/dpkg/status"
+# dpkg metadata and file lists, including Sileo postinst/prerm/triggers
+python3 "$ROOT/tools/jb-add-metadata.py" "$OUT/root" "$OUT/debs/sileo.deb"
 
 # ElleKit: the tweak-injection framework (Cydia Substrate's modern replacement). It is what loads a
 # tweak's .dylib into a process and does the function and method hooking; on a rootless jailbreak the
@@ -90,13 +84,8 @@ mkdir -p "$OUT/root/var/jb/Library/MobileSubstrate"
 rm -rf "$OUT/root/var/jb/Library/MobileSubstrate/DynamicLibraries"
 ln -s /var/jb/usr/lib/TweakInject "$OUT/root/var/jb/Library/MobileSubstrate/DynamicLibraries"
 # dpkg is to know ElleKit is installed, with what it Provides, so apt satisfies tweaks' "mobilesubstrate"
-{
-	mkdir -p "$EKTMP/control" && { tar -C "$EKTMP/control" -xf "$EKTMP"/control.tar.* 2>/dev/null ||
-		zstd -dc "$EKTMP"/control.tar.zst | tar -C "$EKTMP/control" -xf -; }
-	sed '/^$/d' "$EKTMP/control/control"
-	echo "Status: install ok installed"
-	echo
-} >> "$OUT/root/var/jb/Library/dpkg/status"
+# dpkg metadata and file lists for the files just placed in the prefix
+python3 "$ROOT/tools/jb-add-metadata.py" "$OUT/root" "$OUT/debs/$EK"
 
 # Newer versions of what the bootstrap carries, and anything else worth having before the first boot:
 # the bootstrap is a snapshot, and some of it is older than the repository (debianutils, launchctl).
@@ -234,6 +223,7 @@ exit 0
 PREP
 chmod 755 "$OUT/root/var/jb/prep.sh"
 rm -f "$OUT/root/var/jb/prep_bootstrap.sh"
-
+python3 "$ROOT/tools/jb-check-prefix.py" "$OUT/root"
+echo "          $(grep -c '^Package:' "$OUT/root/var/jb/Library/dpkg/status") packages in dpkg database"
 echo "mk-jb.sh: $OUT/root/var/jb ($(du -sh "$OUT/root/var/jb" | cut -f1), $(find "$OUT/root/var/jb" | wc -l) entries)"
-echo "          Sileo $(grep -m1 '^Version:' "$TMP/control/control" | cut -d' ' -f2), $(grep -c '^Package:' "$OUT/root/var/jb/Library/dpkg/status") packages in dpkg's database"
+echo "          $(grep -c '^Package:' $OUT/root/var/jb/Library/dpkg/status) packages in dpkg database"

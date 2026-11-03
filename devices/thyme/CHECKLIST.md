@@ -357,6 +357,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi Settings UI | PASS for radio, join recovery and discovery | The final regression shows active Wi-Fi, Safari traffic and two complete associations. Entering credentials through the Settings keyboard remains unvalidated because the test uses the local Git-ignored join file |
 | Bluetooth Settings/pairing UI | PASS for discovery, pairing, connection and audible A2DP | The footer renders `HakiOS Mi 10S`, devices are discovered, a headset connects and 3 Mbaud playback is clean. HFP, AVRCP controls and deliberate reconnect remain open |
 | Chinese UI and fonts | PASS | The automated Settings gate switched the primary language to 简体中文; the entire Language & Region page rendered in Chinese without tofu glyphs (`logs/thyme-zh-hans-final.png`) |
+| Rootless package manager (Sileo) | PARTIAL; offline install/remove and Sileo render PASS | The Procursus prefix grafted, dpkg installed/queried/removed tree 2.0.1 without missing file-list warnings, and Sileo rendered. Online repository install remains unverified; see below |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
@@ -365,9 +366,9 @@ No item moves to `PASS` from source inspection alone.
 
 A RAM candidate was built from the current main with the locally fetched
 Procursus rootless bootstrap. The system image hash was
-`8de2133113576ff0ad817c51095acc7d5d72e2ed4772918702bb68073dca579d`;
+`b7e22d95764ec68a8609160227f1abdc49ab07df79ff831b387a46690728ff99`;
 the focused scenario hash was
-`bb3c06ab09ebddfa4406f0e7432238eeca670dcbd579aea3d657ec14b7954864`.
+`8323a216e68025402ae78a4d53c4440af8bf648f2292789a72ce44dc794b8eff`.
 The default Wi-Fi/Bluetooth baseline was not replaced.
 
 On the phone:
@@ -378,7 +379,16 @@ On the phone:
 - `dpkg -i` selected, unpacked and configured `tree 2.0.1`;
 - `dpkg-query -W tree` returned `tree 2.0.1` and
   `/var/jb/usr/bin/tree -L 1 /var/jb` listed the prefix;
-- a separate run launched and rendered Sileo.
+- `dpkg -r tree` removed it and the next query reported no package;
+- Sileo launched, rendered its Featured page and remained up through the
+  capture window.
+
+The host prefix now carries `.list`, `md5sums`, `conffiles`,
+maintainer scripts and triggers for packages merged by `tools/mk-jb.sh` and
+`tools/jb-preinstall.py`. All 70 packages in the generated dpkg database
+have a file list, and the device run emitted no missing-file-list warnings.
+The builder now runs `tools/jb-check-prefix.py` and fails if a package has
+no file list.
 
 The offline package was fetched and SHA-256 checked by
 `devices/thyme/tools/prepare-jbverify.py`. The scenario is
@@ -390,19 +400,15 @@ Still open:
 - online repository installation through Sileo; one focused run was blocked by
   AP authentication status 1, so this is not counted as a package-manager
   failure or PASS;
-- Sileo longevity: the later screenshot run rendered Sileo and then the process
-  exited, returning to SpringBoard;
-- dpkg emitted missing `.list` warnings for pre-seeded ElleKit, Sileo and
-  OpenSSH packages. Install/query passed, but uninstall and upgrade metadata
-  need repair before calling the environment complete.
+- Sileo on-line repository refresh and a longer interactive session;
+- dependency repair after installing a package that needs additional packages.
 
 Evidence:
 
 | File | SHA-256 |
 |---|---|
-| `logs/054304-run.log` | `8607f9d64e661df6cbb87792a3ce2426403da6de740e551ac0369e16e80402a7` |
-| `logs/jbverify8-sileo.png` | `fe94d269bbc02df44066e854e55405e4f1c89f9459e89d669c27a60734348566` |
-| `logs/jbverify5-sileo.png` (Sileo rendered) | `bef5e7239a613306e117bf5f2a0b29b442d275a4fb00d8d5b4f58775e626e30c` |
+| `logs/060438-run.log` | `bdca7a132549bec6dbd899adb081c4701a8d300296bba0d95503be4e6184619c` |
+| `logs/jbmeta-sileo.png` | `d9cbdd35279824497bb778fd4c885b4429fba7ffdc38e14207d5943eb0bf76f9` |
 
 ## Display, storage, and installation
 
@@ -447,7 +453,7 @@ Evidence:
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.
-- [x] Rootless Procursus prefix and offline package installation.
+- [x] Rootless Procursus prefix, dpkg metadata and offline install/remove verification.
 - [ ] Online repository installation and Sileo long-run stability.
 - [ ] Performance and thermal soak under daily use.
 - [ ] Battery-cycle integrity and no unexplained percentage jumps.

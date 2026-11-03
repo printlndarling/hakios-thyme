@@ -99,6 +99,7 @@ def main():
     jb = os.path.join(prefix, 'var/jb')
     status_path = os.path.join(jb, 'Library/dpkg/status')
     index = open(index_path, encoding='utf-8', errors='replace').read()
+    metadata = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jb-add-metadata.py")
 
     best = {}
     for stanza in stanzas(index):
@@ -161,15 +162,8 @@ def main():
                 # refuses; where the files land is checked above instead.
                 tar.extract(member, prefix, set_attrs=True, filter='fully_trusted')
         os.unlink(tmp)
-        # dpkg's database: the new stanza in place of the old one, or added
-        entry = '\n'.join(line for line in stanza.split('\n')
-                          if not line.startswith(('Filename:', 'Size:', 'MD5sum:', 'SHA1:', 'SHA256:', 'SHA512:',
-                                                  'Description-md5:'))) + '\nStatus: install ok installed\n'
-        if have is not None:
-            status = '\n\n'.join(entry if field(s, 'Package') == name else s for s in stanzas(status)) + '\n'
-        else:
-            status = status.rstrip('\n') + '\n\n' + entry + '\n'
-        done.append('%s %s%s' % (name, version, ' (was %s)' % have if have else ''))
+        subprocess.run([sys.executable, metadata, prefix, deb], check=True)
+        done.append("%s %s%s" % (name, version, " (was %s)" % have if have else ""))
     # A package that still writes to Cydia Substrate's old directory turns the link ElleKit put there
     # into a real one when it is unpacked here; put the tweaks where they belong and the link back.
     old_dir = os.path.join(jb, 'Library/MobileSubstrate/DynamicLibraries')
@@ -181,7 +175,6 @@ def main():
         os.rmdir(old_dir)
         os.symlink('/var/jb/usr/lib/TweakInject', old_dir)
         print('jb-preinstall.py: the tweaks moved to usr/lib/TweakInject, the old directory a link again')
-    open(status_path, 'w', encoding='utf-8').write(status)
     if done:
         print('jb-preinstall.py: ' + ', '.join(done))
 

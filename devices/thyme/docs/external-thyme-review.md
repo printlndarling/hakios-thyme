@@ -61,18 +61,24 @@ Result on the phone:
 - /var/jb was grafted from the system image with 439 directories and 6416
   files/links, with users resolvable;
 - Procursus dpkg reported version 1.22.6;
-- an offline tree_2.0.1_iphoneos-arm64.deb was unpacked and configured;
-- dpkg-query -W tree returned tree 2.0.1, and /var/jb/usr/bin/tree -L 1
-  /var/jb ran successfully;
-- Sileo launched and rendered in a separate run.
+- an offline tree_2.0.1_iphoneos-arm64.deb was installed, queried, executed,
+  removed and queried again;
+- Sileo launched, rendered its Featured page and stayed up through the capture
+  window.
 
-See the rootless package-manager row in CHECKLIST.md and
-userland/rc.jobs.jbverify. Online repository installation remains PARTIAL:
-one focused run lost Wi-Fi at association time (AP authentication status 1), so
-the offline package test is the reproducible gate. Sileo also exited in the
-later screenshot run after rendering once, so UI longevity is not yet a PASS.
+The offline package test now emits no missing-file-list warnings. A follow-up
+fix generates .list, md5sums, conffiles, maintainer scripts and triggers for
+packages merged by mk-jb.sh and jb-preinstall.py; all 70 packages in the generated
+database have file lists. The builder now rejects a prefix with a package that
+has no file list. See the rootless package-manager section in
+CHECKLIST.md, userland/rc.jobs.jbverify and tools/jb-add-metadata.py.
 
-The test adds devices/thyme/tools/prepare-jbverify.py to fetch and hash-check
+Online repository installation remains PARTIAL. One focused run lost Wi-Fi at
+association time (AP authentication status 1), so the offline install/remove
+gate is the reproducible result. Longer Sileo repository refresh and dependency
+repair also remain open.
+
+The test uses devices/thyme/tools/prepare-jbverify.py to fetch and hash-check
 the pinned package. Neither the package nor the generated prefix is committed.
 
 ## Rule for future reviews
