@@ -261,6 +261,7 @@ No item moves to `PASS` from source inspection alone.
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
 | Rear camera sensor/power probe | PASS | `cam=2` reached the S5KHMX sensor: ID `0x1ad0`, revision `0xa000`, module selector `0x1301`; all three supplies released with error 0 (`logs/101242-run.log`) |
+| Camera CSID/IFE test pattern | PASS | `cam=6` wrote a whole 320x240 RAW/Bayer frame through the THYME DMA path; `xl camera` exported `logs/cam-tpg-0.png` (`logs/104221-run.log`) |
 | Torch/flash | PASS | Hardware pulse: PM8150L channel 97 ramped up and cleaned up (`logs/081934-run.log`). End-to-end userspace and stock Control Center: AVFlashlight/mediaserverd requested 1000, 250 and 850 through `/dev/hakios-torch`; every request reached the kernel and the safety timer returned it to dark (`logs/090116-run.log`, `logs/091200-run.log`) |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |

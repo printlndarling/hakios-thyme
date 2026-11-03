@@ -151,6 +151,26 @@ sequence. It does not yet prove CSI frames or camera capture.
 Evidence: `logs/101242-run.log`, SHA-256
 `56994b92e8a30dd9b65f5f9ec13c128189b9849ed1a0d5989e40fe99eddf63e9`.
 
+The same camera stack then ran `cam=6 cam_after=0` with the complete THYME
+scene and captured the CSID/IFE test pattern through the DMA path:
+
+```text
+UMI CSID TPG: 320x240, stride 400, format 1, bayer 0,
+1 frame written whole, the last in place 0
+```
+
+The extracted frame is `logs/cam-tpg-0.png`, with raw bytes in
+`logs/cam-tpg-0-raw.png`. Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/104221-run.log` | `9b94e67ba6f84cceaedc934d64293644f56b4e05334a1304fa2778bf069fbdf5` |
+| `logs/cam-tpg-0.png` | `a7c9ef8099417362271040cc4c178732df035b1ea7531d39a57c394742aa8a7f` |
+| `logs/cam-tpg-0-raw.png` | `59e44ef203036979517327cd2a269c14f6e09881bf76c863e5146015b6984496` |
+
+This is a PASS for the board-level CSID/IFE/DMA capture path, not yet for
+frames produced by the S5KHMX sensor.
+
 ## Historical verified run
 
 - Loader log: `logs/201710-run.log`, SHA-256
