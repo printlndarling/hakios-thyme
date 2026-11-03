@@ -49,6 +49,15 @@ static unsigned (*send_hci)(unsigned,void (*)(unsigned),...);
 static unsigned char initial_random_address[6];
 static void (*scanner_device_found)(id,SEL,id);
 static unsigned scanner_devices_logged;
+static unsigned scanner_handler_logged;
+typedef void (^scanner_handler_t)(id);
+static scanner_handler_t scanner_handler;
+static void (^scanner_handler_wrapper)(id)=^(id device) {
+    if(scanner_handler_logged++<32)
+        fprintf(stderr,"UMI Bluetooth: BLE scanner handler delivered %s\n",
+            device?"a device":"nil");
+    if(scanner_handler) scanner_handler(device);
+};
 static void log_scanner_device(id self,SEL command,id device)
 {
     if(scanner_devices_logged++<32) {
@@ -58,20 +67,33 @@ static void log_scanner_device(id self,SEL command,id device)
             if(description)
                 text=((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String"));
         }
-        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound %s\n",text?text:"(null)");
+        id handler=*(id *)((char *)self+0x98);
+        uint64_t flags=*(uint64_t *)((char *)self+0x70);
+        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx %s\n",
+            handler,(unsigned long long)flags,text?text:"(null)");
     }
     scanner_device_found(self,command,device);
+}
+static void (*scanner_set_handler)(id,SEL,id);
+static void hook_scanner_handler(id self,SEL command,id handler)
+{
+    scanner_handler=(scanner_handler_t)handler;
+    fprintf(stderr,"UMI Bluetooth: BLE scanner handler set=%p\n",handler);
+    scanner_set_handler(self,command,handler?(id)scanner_handler_wrapper:nil);
 }
 static void install_scanner_probe(void)
 {
     Class scanner=objc_getClass("CBStackBLEScannerBTStack");
     Method method=scanner?class_getInstanceMethod(scanner,sel_registerName("deviceFound:")):NULL;
-    if(!method) {
+    Method setter=scanner?class_getInstanceMethod(scanner,sel_registerName("setDeviceFoundHandler:")):NULL;
+    if(!method || !setter) {
         fprintf(stderr,"UMI Bluetooth: BLE scanner probe unavailable\n");
         return;
     }
     scanner_device_found=(void *)method_getImplementation(method);
     method_setImplementation(method,(IMP)log_scanner_device);
+    scanner_set_handler=(void *)method_getImplementation(setter);
+    method_setImplementation(setter,(IMP)hook_scanner_handler);
     fprintf(stderr,"UMI Bluetooth: BLE scanner probe installed\n");
 }
 static void initial_address_complete(unsigned status)
