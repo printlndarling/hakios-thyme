@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `80f0fedc` (`Record THYME Bluetooth target diagnosis`) |
+| Verified source | `823ebae` (`Port THYME power-key test injection`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -21,7 +21,7 @@ experimental kernel or with an older resident system image.
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `5d89a7dbb0239b868c314ee24c51e5de1449293e93e8180e56f9b0bbdd2c702a` |
+| clean-main `hakios-kernel` | `c555626225e66e09f568f8bdebf7b23e2af0c5aa69271d4af499aa42a5be20be` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
@@ -53,7 +53,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `80f0fedc` boot completed all of these in one 230-second RAM run:
+The clean `823ebae` boot completed all of these in one RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -63,12 +63,13 @@ The clean `80f0fedc` boot completed all of these in one 230-second RAM run:
 - the second association installed both keys and made en0 usable;
 - Safari opened `https://example.com`;
 - Bluetooth Settings opened and the HCI scan path remained healthy.
+- a short power-key press blanked the display, and the second press woke it.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/070050-run.log` | `0cbe2ac5c88322e1d054837ed7f18cebe2bd879434f2697608379faeaf8ecd32` |
-| `logs/065501-wifi.png` | `6d3ccfdaa5ff780ab448e9885086f0bec43d3a3f93346186532bf4698191697f` |
-| `logs/065501-bt.png` | `8381337feed93928925af1788a27c5c3c220efe63d5724e92dbbbbe3a67d5b8e` |
+| `logs/075530-run.log` | `0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d` |
+| `logs/power-full-off.png` | `c88708288d58480014ea496a5f5af8ce770189fbc93984fae77ede3d96d5a8cb` |
+| `logs/power-full-on.png` | `64bc92c9a1b8d2b50d313713f2359c8f9dfa9f87c51c7b0e95f3105cd1f009fc` |
 
 The screenshots show the Wi-Fi switch on with real nearby networks after the
 power cycle, then stock Bluetooth Settings discovering `Accessory` while the

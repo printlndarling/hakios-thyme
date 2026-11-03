@@ -43,9 +43,9 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `8a55dec6` on `main` was cold-booted from RAM with the pinned
+The tested source revision `823ebae` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`5d89a7dbb023`), boot image (`2d662c991a5a`), loader
+and the kernel (`c555626225e6`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -57,14 +57,16 @@ One boot completed:
 - a second scan and second successful association;
 - Safari opening `https://example.com`;
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
-  or enqueue errors.
+  or enqueue errors;
+- a short power-key press blanking the display and a second short press
+  waking it with `changeSource: LockButton`.
 
-Evidence: `logs/070050-run.log` (SHA-256
-`0cbe2ac5c88322e1d054837ed7f18cebe2bd879434f2697608379faeaf8ecd32`),
-`logs/065501-wifi.png` (SHA-256
-`6d3ccfdaa5ff780ab448e9885086f0bec43d3a3f93346186532bf4698191697f`) and
-`logs/065501-bt.png` (SHA-256
-`8381337feed93928925af1788a27c5c3c220efe63d5724e92dbbbbe3a67d5b8e`).
+Evidence: `logs/075530-run.log` (SHA-256
+`0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d`),
+`logs/power-full-off.png` (SHA-256
+`c88708288d58480014ea496a5f5af8ce770189fbc93984fae77ede3d96d5a8cb`) and
+`logs/power-full-on.png` (SHA-256
+`64bc92c9a1b8d2b50d313713f2359c8f9dfa9f87c51c7b0e95f3105cd1f009fc`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -185,9 +187,9 @@ No item moves to `PASS` from source inspection alone.
 | 30-minute UI stability | PASS; continuous SpringBoard rendering, stable memory and orderly return (`docs/official-ui-soak.md`) | PASS |
 | FTS521 touch polling | PASS, 415 events in the GPU run / `errors=0` | PASS |
 | Tap, drag, gestures | PASS, backboardd touching/none and gesture handling | PASS |
-| Power key | PASS, pressed/released captured | PASS |
+| Power key | PASS; short press blanks the display and the next press wakes it | PASS |
 | Volume keys | PASS, pressed/released captured | PASS |
-| Display off and wake | TODO | PASS |
+| Display off and wake | PASS; `Set Blanked: YES` and `Set Blanked: NO` with `changeSource: LockButton` (`logs/075530-run.log`) | PASS |
 
 ## Power and charging
 
@@ -231,7 +233,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on. The current join was issued through the same Apple80211 ASSOCIATE request that Settings uses; entering credentials through the Settings keyboard remains unvalidated |
 | Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed a connectable `Accessory`. Its signal was only -99..-105 dBm, and it disconnected with reason `0x3e` after link establishment; pairing with a known-good peripheral in close range remains the next gate |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
-| Lock/unlock and passcode | PARTIAL | lock-screen navigation works through injected input; passcode, secure storage and reboot persistence are not validated |
+| Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
 
 ## Display, storage, and installation
