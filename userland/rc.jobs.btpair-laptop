@@ -1,0 +1,9 @@
+# Pair with the nearby Windows laptop after the stock Bluetooth Settings list has
+# populated. The row is centred near 30% of the 1080x2340 display.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 55
+/redwood/bin/rwtouch tap 0.5 0.30
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.30
+/redwood/bin/rwtouch wait 80
