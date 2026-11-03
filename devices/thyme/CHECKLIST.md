@@ -84,7 +84,42 @@ scenario or boot-argument hash that differs from
 `devices/thyme/ram-baseline.conf`. This prevents a supposedly fixed feature
 from being tested with stale local artifacts or a Bluetooth-only scenario.
 
-### Bluetooth pairing target diagnosis
+### Bluetooth identity and headset pairing (2026-11-03)
+
+The Bluetooth Settings footer was not derived from the HCI local name or
+`MGCopyAnswer("UserAssignedDeviceName")`. Disassembly of the iOS 16.5
+`BluetoothSettings` bundle shows `-[BTSDevicesController
+tableView:viewForFooterInSection:]` calling
+`SCDynamicStoreCopyComputerName(NULL, ...)` and inserting the returned string
+into `DISCOVERABLE_IPHONE`. That API returned `NULL`, which is why the UI showed
+`(null)` even while HCI readback reported `HakiOS Mi 10S`.
+
+`com.hakios.scname` now runs at boot and uses the private but present
+SystemConfiguration preferences API to set `ComputerName`, then commits and
+applies it. The job is idempotent and retries if it exits unsuccessfully. In the
+cold run it reported:
+
+```text
+scname: preferences lock=1 set=1 commit=1 apply=1
+scname: write "HakiOS Mi 10S" preferences=1 dynamic=1
+```
+
+The stock Settings footer then rendered `This iPhone is discoverable as
+"HakiOS Mi 10S" while Bluetooth Settings is open.` The user also confirmed on
+the current RAM boot that a Bluetooth headset connects and Wi-Fi remains usable.
+This makes discovery, pairing and connection PASS. Headset audio routing,
+microphone use and reconnection after a deliberate Bluetooth power cycle still
+need instrumented validation.
+
+Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/203908-run.log` | `43ff2f7cb4409eb978f471a0102b739d3271ea1ae4ebd5cfdb8a73bcb632065e` |
+| `logs/scname-prefs2-bt.png` | `2c8f35a555f5f3e5fb569d098a27b745ed838d2f2e574efb75efacfabf5052ca` |
+| `logs/204854-run.log` | `a29100f695293db6acebce060b71656f1751883954ae5270bc34d0bfa275ad75` |
+
+### Historical unnamed-accessory diagnosis
 
 The HCI trace now records the address in the LE white-list add/remove commands.
 This closes the ambiguity in the earlier pairing failures:
@@ -162,12 +197,12 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PASS for discovery; PARTIAL for pairing | Firmware, HCI reset, H4 transport, LE scanning and the Settings device list PASS: the current canonical run displayed `LAPTOP-69NFHNVP` after the kernel counted scan responses and named advertisements. Earlier pair attempts reached `LE Enhanced Connection Complete status=0` but disconnected with reason `0x3e`; pairing and data transfer remain the next gate (`logs/162111-run.log`) |
-| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/162111-run.log`, `logs/baseline-final-wifi.png`) |
-| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/162111-run.log`) |
-| Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP and en0 traffic remained usable after the power cycle (`logs/162111-run.log`) |
-| Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0, MobileSafari/WebKit completed TLS connections and transferred tens of KB after each association (`logs/162111-run.log`) |
-| Combined wireless regression | PASS for discovery | The current canonical cold boot passed Wi-Fi join, Safari, power off/on, a second association and Bluetooth Settings discovery of `LAPTOP-69NFHNVP` (`logs/162111-run.log`) |
+| Bluetooth | PASS for discovery, pairing and connection; PARTIAL for audio | Firmware, HCI reset, H4 transport, LE scanning and the Settings device list PASS. The Settings local name now renders from SystemConfiguration, and the user confirmed a Bluetooth headset connects on the current RAM boot. Headset audio routing, microphone use and reconnection after a deliberate power cycle remain unverified (`logs/204854-run.log`) |
+| Wi-Fi discovery/startup | PASS | The current run opened Wi-Fi and returned real 2.4 GHz and 5 GHz networks; the user also confirmed Wi-Fi remains usable on the current RAM boot (`logs/204854-run.log`) |
+| Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/204854-run.log`) |
+| Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/204854-run.log`) |
+| Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/204854-run.log`) |
+| Combined wireless regression | PASS | The current cold boot passed the automatic Bluetooth-name job, Wi-Fi join, Safari, power off/on, a second association and Bluetooth LE discovery; the user then confirmed headset connection and usable Wi-Fi in the same RAM boot (`logs/204854-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
@@ -227,7 +262,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi station / join / DHCP | PASS on the current baseline: WPA2 5 GHz association, four-way handshake, DHCP, DNS, TLS and Safari page rendering (`logs/022344-run.log`) | test 2.4/5 GHz switching, reconnect after link loss, and sleep/wake |
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
-| Scan / pair / connect | PARTIAL: LE scan and classic inquiry PASS, including address/RSSI/name decoding | pair a known LE peer from iOS, reconnect after disabling/enabling Bluetooth, then test data or audio transfer |
+| Scan / pair / connect | PASS for scan, pairing and connection; PARTIAL for audio/reconnect | the user confirmed a known Bluetooth headset connects on the current RAM boot; next verify A2DP/HFP routing and reconnect after disabling/enabling Bluetooth |
 | ALS / proximity / accelerometer | FAIL | no usable sensor path |
 
 ## User space and daily use
@@ -239,7 +274,7 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
 | Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on. The current join was issued through the same Apple80211 ASSOCIATE request that Settings uses; entering credentials through the Settings keyboard remains unvalidated |
-| Bluetooth Settings/pairing UI | PASS for discovery; PARTIAL for pairing | The current canonical run displayed `LAPTOP-69NFHNVP` after the scan-response and named-advertisement counters advanced. Selecting the row, completing pairing and transferring data remain unverified |
+| Bluetooth Settings/pairing UI | PASS for discovery, pairing and connection; PARTIAL for audio | The footer now renders `HakiOS Mi 10S`, devices are discovered, and the user connected a headset on the current RAM boot. Audio transfer and reconnect behavior remain unverified (`logs/scname-prefs2-bt.png`) |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |

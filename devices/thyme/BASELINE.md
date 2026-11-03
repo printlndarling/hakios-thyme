@@ -9,8 +9,11 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `0c7b589e` (`Promote THYME Bluetooth diagnostic baseline`) |
-| Worktree | clean (`git status --porcelain` empty) |
+| Verified functional source | `bde073c` (`Publish THYME Bluetooth Settings computer name`) |
+| Worktree | clean after this baseline update |
+
+The kernel sources are unchanged from `44b5922`; `bde073c` changes only the
+user-space Bluetooth identity path and its boot job.
 
 ## RAM artifacts
 
@@ -20,12 +23,14 @@ experimental kernel or with an older resident system image.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `66a3008f02ab5d54d07823a67d9fd37ba3d82e846c10c9375b4a812fb2a99611` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `35a9de39c5c782b9e21c52f06dcd7250ff52408c9936c9c26b7a9856cab659f7` |
+| clean-main `hakios-kernel` | `cea38303c4f06e01b3c63eb0db525df6931894dc3671d15a6d6fb92e1963a236` |
 
-The kernel binary hash changes when the build metadata changes. The source
-commit, clean worktree, build log, and artifact hashes above must all be
-recorded for a hardware run.
+The kernel binary hash changes when build metadata changes. The scenario is a
+local, Git-ignored RAM test image; its hash pins the tested bytes without
+committing test credentials or other private data. The source commit, clean
+worktree, build log and artifact hashes above must all be recorded for a
+hardware run.
 
 `devices/thyme/ram-baseline.conf` is the machine-checked copy of these local
 artifact hashes. `ram-regress.sh` refuses to boot different bytes unless
@@ -55,33 +60,35 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `0c7b589e` boot completed all of these in one 230-second RAM run:
+The 230-second cold RAM run at `logs/204854-run.log` completed:
 
-- 5 GHz WPA2 association and four-way handshake;
-- DHCP address `192.168.0.103`;
-- Wi-Fi off removed the interface;
-- Wi-Fi on restarted the radio;
-- the second scan found the configured 5 GHz and 2.4 GHz networks;
-- the second association installed both keys and made en0 usable;
-- Safari opened `https://example.com`;
-- Bluetooth Settings opened and displayed the nearby `LAPTOP-69NFHNVP` device
-  after discovery;
-- the kernel counted 69 scan responses and 65 named advertisements by the end of
-  the run, with zero queue or enqueue errors.
+- the `com.hakios.scname` boot job automatically completed preferences lock,
+  set, commit and apply with result 1 and exited 0;
+- a 2.4 GHz WPA2 association, four-way handshake, CCMP pairwise/group key
+  installation and DHCP address `192.168.0.103`;
+- Wi-Fi off, interface removal, Wi-Fi on and a second full association;
+- DNS, TCP and TLS traffic through en0, plus Safari page loading;
+- Bluetooth HCI scanning with multiple named LE advertisements.
+
+A focused UI run then rendered the stock Bluetooth Settings footer as
+`HakiOS Mi 10S` instead of `(null)`. On the current RAM boot the user also
+confirmed that a Bluetooth headset connects and Wi-Fi remains usable. Headset
+audio routing, microphone use and reconnection after a deliberate Bluetooth
+power cycle remain separate checks.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/162111-run.log` | `24a8241c0bbe1792557bb48cff4a1d2f811aa7ad8c5fc374c3ebff7a7e470e6a` |
-| `logs/baseline-final-wifi.png` | `21808cfe32feeb414033598264cd6b464712089c329e9b2edfdb6a1067fea73c` |
-| `logs/baseline-final-bt.png` | `55d9cf7dda64accab7d862896ea74d4a407d29dccf95c28f3f9ac300b6a2707c` |
+| `logs/204854-run.log` | `a29100f695293db6acebce060b71656f1751883954ae5270bc34d0bfa275ad75` |
+| `logs/203908-run.log` | `43ff2f7cb4409eb978f471a0102b739d3271ea1ae4ebd5cfdb8a73bcb632065e` |
+| `logs/scname-prefs2-bt.png` | `2c8f35a555f5f3e5fb569d098a27b745ed838d2f2e574efb75efacfabf5052ca` |
+| `logs/name-final-bt.png` | `4b074f3fb6ea673144c6612e986b79b0d1f77d6beb1c4a2effa41c853447deb7` |
 
-The Wi-Fi screenshot shows the switch on with real nearby networks after the
-power cycle. The Bluetooth screenshot was captured 20 seconds after Settings
-opened and shows `LAPTOP-69NFHNVP`. The current production image therefore has
-a verified user-visible Bluetooth discovery path. Pairing and data transfer
-remain separate, unfinished gates. The run's later radio teardown happened
-after `loader_return_after` expired, during the intentional return to the
-loader; it is not a Wi-Fi startup failure.
+The final combined-run screenshots were affected by interactive device use and
+are not the primary evidence for the Settings pane. The focused Settings
+screenshot and log above are the identity evidence; the combined-run log is
+the wireless regression evidence. The radio teardown near the end of the run
+is the intentional return to the loader after `loader_return_after`, not a
+Wi-Fi failure.
 
 A separate full-system `press_power=90` run blanked the display on the first
 short press and woke it on the second. Evidence: `logs/075530-run.log`,
