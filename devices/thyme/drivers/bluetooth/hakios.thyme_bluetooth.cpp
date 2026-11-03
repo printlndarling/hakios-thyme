@@ -6,7 +6,8 @@
 #include <libkern/c++/OSData.h>
 #include <sys/errno.h>
 
-extern "C" int umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64]);
+extern "C" int umi_bluetooth_publish(const uint8_t address[6],
+    const uint8_t commands[64],uint32_t transport_speed);
 static IOService *bluetooth_service;
 extern "C" void umi_bluetooth_set_ready(bool ready);
 extern "C" void umi_bluetooth_set_ready(bool ready)
@@ -14,7 +15,8 @@ extern "C" void umi_bluetooth_set_ready(bool ready)
     if (bluetooth_service) bluetooth_service->setProperty("HakiosBluetoothReady", ready);
 }
 extern "C" int
-umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64])
+umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64],
+    uint32_t transport_speed)
 {
     IOService *provider = IOService::getPlatform();
     IOService *service = new IOService;
@@ -31,7 +33,7 @@ umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64])
     published = service->setProperty("HakiosBluetoothSupportedCommands",supported);
     supported->release();
     if (!published) { service->release(); return ENOMEM; }
-    service->setProperty("transport-speed", 115200, 32);
+    service->setProperty("transport-speed", transport_speed, 32);
     service->setProperty("compatible", "qcom,qca6390-bt");
     service->setProperty("HakiosBluetoothReady", false);
     if (!service->attach(provider)) { service->release(); return EIO; }

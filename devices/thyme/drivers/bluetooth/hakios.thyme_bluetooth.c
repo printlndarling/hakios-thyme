@@ -19,8 +19,14 @@ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern void loader_return(void);
 extern int umi_rpmh_bluetooth_power(void);
-extern int umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64]);
+extern int umi_bluetooth_publish(const uint8_t address[6],
+    const uint8_t commands[64],uint32_t transport_speed);
 extern void umi_bluetooth_set_ready(bool ready);
+#define BT_DEFAULT_SPEED 115200u
+#define BT_HIGH_SPEED 3000000u
+#define BT_QCA_BAUDRATE_115200 0u
+#define BT_QCA_BAUDRATE_3000000 14u
+static uint32_t bt_transport_speed = BT_DEFAULT_SPEED;
 static uint32_t bt_read(vm_offset_t base, uint32_t offset)
 {
     uint32_t value = *(volatile uint32_t *)(base + offset);
@@ -265,8 +271,12 @@ static int bt_qca_firmware(vm_offset_t uart)
     if (mode != 0 && mode != 3) return EINVAL;
     if (nvm_size > sizeof(bt_nvm_work)) return E2BIG;
     memcpy(bt_nvm_work, nvm, nvm_size);
-    if (hakios_bt_qca6390_nvm_prepare(bt_nvm_work, nvm_size)) return EINVAL;
-    hakios_tl("UMI BT: loading htbtfw20/htnv20 at 115200 baud (Hastings tag17 byte1)\n");
+    uint8_t qca_baudrate = bt_transport_speed == BT_HIGH_SPEED ?
+        BT_QCA_BAUDRATE_3000000 : BT_QCA_BAUDRATE_115200;
+    if (hakios_bt_qca6390_nvm_prepare(bt_nvm_work, nvm_size, qca_baudrate))
+        return EINVAL;
+    hakios_tl("UMI BT: loading htbtfw20/htnv20 at %u baud (Hastings tag17 byte1)\n",
+        bt_transport_speed);
     error = bt_qca_download(uart, patch, (uint32_t)patch_size, mode == 3);
     if (error) return error;
     delay(10000);
@@ -483,6 +493,11 @@ static unsigned bt_command_status_logged;
 static unsigned bt_scan_complete_seen;
 static unsigned bt_scan_status_seen;
 static unsigned bt_conn_status_seen;
+static unsigned long long bt_tx_packets[6];
+static unsigned long long bt_tx_bytes[6];
+static unsigned long long bt_tx_nanos,bt_tx_max_nanos;
+static unsigned long long bt_completed_events,bt_completed_packets;
+static unsigned bt_tx_high_water;
 
 static errno_t bt_control_connect(kern_ctl_ref ref,struct sockaddr_ctl *address,void **info)
 {
@@ -494,6 +509,11 @@ static errno_t bt_control_connect(kern_ctl_ref ref,struct sockaddr_ctl *address,
         bt_control_unit=address->sc_unit;
         bt_control_generation++;
         bt_tx_head=bt_tx_tail=0;
+        bt_tx_high_water=0;
+        memset(bt_tx_packets,0,sizeof(bt_tx_packets));
+        memset(bt_tx_bytes,0,sizeof(bt_tx_bytes));
+        bt_tx_nanos=bt_tx_max_nanos=0;
+        bt_completed_events=bt_completed_packets=0;
         *info=NULL;
         hakios_tl("UMI BT: H4 client connected uid=%u unit=%u\n",uid,bt_control_unit);
     }
@@ -526,6 +546,8 @@ static errno_t bt_control_send(kern_ctl_ref ref,uint32_t unit,void *info,mbuf_t 
         for(size_t i=0;i<count;i++) bt_tx_queue[bt_tx_head++&(BT_TX_QUEUE_SIZE-1)]=bytes[i];
         offset+=count;
     }
+    if(!error && bt_tx_head-bt_tx_tail>bt_tx_high_water)
+        bt_tx_high_water=bt_tx_head-bt_tx_tail;
     lck_mtx_unlock(&bt_control_lock);
     mbuf_freem(message);
     return error;
@@ -551,8 +573,8 @@ static errno_t bt_control_setopt(kern_ctl_ref ref,uint32_t unit,void *info,int o
     if(opt==(uint32_t)TIOCSETA || opt==(uint32_t)TIOCSETAW || opt==(uint32_t)TIOCSETAF) {
         if(length!=sizeof(struct termios) || !data) return EINVAL;
         const struct termios *settings=data;
-        if((settings->c_ispeed && settings->c_ispeed!=115200) ||
-            (settings->c_ospeed && settings->c_ospeed!=115200)) return EINVAL;
+        if((settings->c_ispeed && settings->c_ispeed!=bt_transport_speed) ||
+            (settings->c_ospeed && settings->c_ospeed!=bt_transport_speed)) return EINVAL;
         lck_mtx_lock(&bt_control_lock);
         bt_control_termios=*settings;
         lck_mtx_unlock(&bt_control_lock);
@@ -624,7 +646,18 @@ static void bt_control_worker(void *unused,wait_result_t result)
                     hakios_tl("UMI BT: LE whitelist remove address-type=%u\n",tx.bytes[4]);
                     bt_log_address("LE whitelist remove",0,tx.bytes+5);
                 }
+                uint8_t type=tx.bytes[0];
+                uint64_t began=mach_absolute_time(),nanos=0;
                 error=bt_uart_tx(bt_control_uart,tx.bytes,tx.used);
+                if(!error) {
+                    if(type<sizeof(bt_tx_packets)/sizeof(bt_tx_packets[0])) {
+                        bt_tx_packets[type]++;
+                        bt_tx_bytes[type]+=tx.used;
+                    }
+                    absolutetime_to_nanoseconds(mach_absolute_time()-began,&nanos);
+                    bt_tx_nanos+=nanos;
+                    if(nanos>bt_tx_max_nanos) bt_tx_max_nanos=nanos;
+                }
                 memset(&tx,0,sizeof(tx));
             }
         }
@@ -692,6 +725,10 @@ static void bt_control_worker(void *unused,wait_result_t result)
             if(event==0x05 && receive_length>=7)
                 hakios_tl("UMI BT: disconnection complete status=%#x handle=%#x reason=%#x\n",
                     receive[3],bt_le16(receive+4),receive[6]);
+            if(event==0x13 && receive_length>=7) {
+                bt_completed_events++;
+                bt_completed_packets+=bt_le16(receive+5);
+            }
         }
         if(!error) error=bt_service_ibs(bt_control_uart);
         if(error && !fault) {
@@ -714,13 +751,17 @@ static void bt_control_worker(void *unused,wait_result_t result)
             transport_ticks=0;
             hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu "
                 "events=%llu le-events=%llu le-reports=%llu le-types=%llu/%llu/%llu/%llu/%llu "
-                "le-named=%llu queue=%u queue-err=%d enqueue-errors=%u\n",
+                "le-named=%llu tx=%llu/%llu cmd=%llu acl=%llu/%llu completed=%llu/%llu "
+                "tx-us=%llu tx-max-us=%llu high=%u queue=%u queue-err=%d enqueue-errors=%u\n",
                 bt_read(bt_control_uart,0x40),bt_read(bt_control_uart,0x804),
                 bt_read(bt_control_uart,0x640),bt_host_awake,
                 bt_rx_words,bt_rx_bytes,bt_rx_frames,bt_events_enqueued,
                 bt_le_report_events,bt_le_report_entries,
                 bt_le_report_types[0],bt_le_report_types[1],bt_le_report_types[2],
                 bt_le_report_types[3],bt_le_report_types[4],bt_le_named_entries,
+                bt_tx_packets[1],bt_tx_bytes[1],bt_tx_packets[2],bt_tx_bytes[2],
+                bt_completed_events,bt_completed_packets,
+                bt_tx_nanos/1000,bt_tx_max_nanos/1000,bt_tx_high_water,
                 queued_packets,queue_error,
                 bt_enqueue_errors);
         }
@@ -740,10 +781,11 @@ static int bt_control_start(vm_offset_t uart)
     registration.ctl_getopt=bt_control_getopt;
     registration.ctl_setopt=bt_control_setopt;
     bt_control_termios.c_cflag=CS8|CREAD|CLOCAL;
-    bt_control_termios.c_ispeed=bt_control_termios.c_ospeed=115200;
+    bt_control_termios.c_ispeed=bt_control_termios.c_ospeed=bt_transport_speed;
     int error=ctl_register(&registration,&bt_control);
     if(error) return error;
-    error=umi_bluetooth_publish(bt_public_address,bt_supported_commands);
+    error=umi_bluetooth_publish(bt_public_address,bt_supported_commands,
+        bt_transport_speed);
     if(error) { ctl_deregister(bt_control); return error; }
     bt_control_uart=uart;
     bt_host_awake=false;
@@ -755,13 +797,20 @@ static int bt_control_start(vm_offset_t uart)
     hakios_tl("UMI BT: persistent H4 endpoint ready: com.hakios.bluetooth\n");
     return 0;
 }
-/* Set the documented QUPv3 fractional root to 7.3728 MHz. GPLL0_OUT_EVEN
- * is parent selector 6; 384/15625 gives an exact UART sampling clock. */
-static bool bt_uart_clock(vm_offset_t gcc)
+/* GPLL0_OUT_EVEN is 300 MHz. Program an exact fractional root for the QUP's
+ * 16x UART sampling clock; 115200 uses /4 and 3 Mbaud uses /1. */
+static bool bt_uart_clock(vm_offset_t gcc,uint32_t clock_hz)
 {
-    bt_write(gcc,0x17738,384);
-    bt_write(gcc,0x1773c,~(15625u-384u)&0xffff);
-    bt_write(gcc,0x17740,~15625u&0xffff);
+    const uint64_t parent_hz = 300000000ull, denominator = 15625ull;
+    uint64_t numerator = (uint64_t)clock_hz * denominator / parent_hz;
+    if (!numerator || numerator * parent_hz != (uint64_t)clock_hz * denominator ||
+        numerator > 0xffff) {
+        hakios_tl("UMI BT: unsupported UART root %u Hz\n",clock_hz);
+        return false;
+    }
+    bt_write(gcc,0x17738,(uint32_t)numerator);
+    bt_write(gcc,0x1773c,~(uint32_t)(denominator-numerator)&0xffff);
+    bt_write(gcc,0x17740,~(uint32_t)denominator&0xffff);
     bt_write(gcc,0x17734,0x2601); /* dual-edge M/N, GPLL0-even, /1 */
     bt_write(gcc,0x17730,1);
     for(unsigned i=0;i<10000;i++) {
@@ -769,6 +818,54 @@ static bool bt_uart_clock(vm_offset_t gcc)
         delay(1);
     }
     return false;
+}
+static int bt_uart_configure_divider(vm_offset_t uart,uint32_t speed)
+{
+    uint32_t divider;
+    if (speed == BT_DEFAULT_SPEED) {
+        divider = 4;
+    } else if (speed == BT_HIGH_SPEED) {
+        divider = 1;
+    } else {
+        return EINVAL;
+    }
+    uint32_t config=(divider<<4)|1;
+    bt_write(uart,0x48,config);
+    bt_write(uart,0x4c,config);
+    bt_write(uart,0x7c,0);
+    delay(1000);
+    return 0;
+}
+static int bt_uart_configure_speed(vm_offset_t gcc,vm_offset_t uart,uint32_t speed)
+{
+    uint32_t root = speed == BT_DEFAULT_SPEED ? 7372800 :
+        (speed == BT_HIGH_SPEED ? 48000000 : 0);
+    if (!root) return EINVAL;
+    if (!bt_uart_clock(gcc,root)) return EIO;
+    int error=bt_uart_configure_divider(uart,speed);
+    if(error) return error;
+    hakios_tl("UMI BT: UART %u baud root=%u cfg=%#x\n",
+        speed,root,bt_read(uart,0x48));
+    return 0;
+}
+static int bt_qca_set_speed(vm_offset_t gcc,vm_offset_t uart,uint32_t speed)
+{
+    if (speed == BT_DEFAULT_SPEED) return 0;
+    if (speed != BT_HIGH_SPEED) return EINVAL;
+    uint8_t command[] = {1,0x48,0xfc,1,BT_QCA_BAUDRATE_3000000};
+    int error=bt_uart_tx(uart,command,sizeof(command));
+    if (error) {
+        hakios_tl("UMI BT: high-speed command failed errno=%d\n",error);
+        return error;
+    }
+    /* QCA6390 is not in Linux's short-settle switch; use its 300 ms path. */
+    delay(300000);
+    error=bt_uart_configure_speed(gcc,uart,speed);
+    if (error) return error;
+    bt_rx_head=bt_rx_tail=0;
+    memset(&bt_rx_packet,0,sizeof(bt_rx_packet));
+    hakios_tl("UMI BT: controller and host moved to %u baud\n",speed);
+    return 0;
 }
 static void bt_gpio(vm_offset_t gpio,unsigned pin,unsigned cfg,bool high)
 {
@@ -809,7 +906,7 @@ static bool bt_hci_probe(vm_offset_t gcc,vm_offset_t gpio,vm_offset_t uart,bool 
     unsigned i;
     for(i=0;i<10000;i++) if(!((bt_read(gcc,0x17004)|bt_read(gcc,0x17008)|bt_read(gcc,0x1772c))&0x80000000)) break; else delay(1);
     int error= i==10000 ? ETIMEDOUT : bt_uart_quiesce(uart);
-    if(!error && !bt_uart_clock(gcc)) error=ETIMEDOUT;
+    if(!error && !bt_uart_clock(gcc,7372800)) error=EIO;
     if(!error) error=umi_rpmh_bluetooth_power();
     if(error) { hakios_tl("UMI BT: power/clock setup failed errno=%d\n",error); goto cleanup; }
     /* Reset low, sideband awake, then release reset as the Android driver does. */
@@ -823,7 +920,7 @@ static bool bt_hci_probe(vm_offset_t gcc,vm_offset_t gpio,vm_offset_t uart,bool 
         uint32_t cfg=pin==17 ? 5u : (pin==18 ? 7u : 4u);
         bt_write(gpio,pin*0x1000,cfg);
     }
-    bt_write(uart,0x48,0x41); bt_write(uart,0x4c,0x41);
+    if(!error) error=bt_uart_configure_divider(uart,BT_DEFAULT_SPEED);
     bt_write(uart,0x258,0); bt_write(uart,0x22c,0);
     bt_write(uart,0x25c,2); bt_write(uart,0x280,0);
     bt_write(uart,0x260,0xf); bt_write(uart,0x264,0);
@@ -842,7 +939,8 @@ static bool bt_hci_probe(vm_offset_t gcc,vm_offset_t gpio,vm_offset_t uart,bool 
         hakios_tl("UMI BT: cold HCI=%#x manufacturer=%u LMP subversion=%#x\n",
             event[7],bt_le16(event+11),bt_le16(event+13));
         if(firmware) {
-            error=bt_qca_firmware(uart);
+            error=bt_qca_set_speed(gcc,uart,bt_transport_speed);
+            if(!error) error=bt_qca_firmware(uart);
             if(!error && !runtime) error=bt_radio_scan(uart);
             if(!error && runtime) {
                 error=bt_set_local_name(uart);
@@ -870,7 +968,16 @@ cleanup:
 }
 void umi_bluetooth_init(void)
 {
-    uint32_t probe = 0, enabled = 0;
+    uint32_t probe = 0, enabled = 0, requested_speed = 0;
+    if (PE_parse_boot_argn("bt_baud", &requested_speed, sizeof(requested_speed))) {
+        if (requested_speed == BT_DEFAULT_SPEED || requested_speed == BT_HIGH_SPEED) {
+            bt_transport_speed = requested_speed;
+        } else {
+            hakios_tl("UMI BT: unsupported bt_baud=%u; using %u\n",
+                requested_speed, BT_DEFAULT_SPEED);
+        }
+    }
+    hakios_tl("UMI BT: requested transport speed=%u\n",bt_transport_speed);
     /* umi_bt=1: start the THYME QCA6390 Bluetooth runtime service */
     bool runtime = PE_parse_boot_argn("bt", &enabled, sizeof(enabled)) && enabled == 1;
     if (!runtime) {

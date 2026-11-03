@@ -63,8 +63,10 @@ static inline int hakios_bt_qca_tlv_ack(const uint8_t *e, size_t n)
          e[3] == 0 && e[4] == 4 && e[5] == 0);
 }
 /* Hastings/WCN3991+ tag 17 puts baud in byte 1; Rome used byte 2.
- * Validate all records before changing anything. Preserve the adjacent flags. */
-static inline int hakios_bt_qca6390_nvm_prepare(uint8_t *data, size_t n)
+ * Validate all records before changing anything. Match btqca.c by enabling
+ * controller-side in-band sleep while setting the requested UART speed. */
+static inline int hakios_bt_qca6390_nvm_prepare(uint8_t *data, size_t n,
+    uint8_t baudrate)
 {
     if (n < 4 || data[0] != 2 ||
         ((uint32_t)data[1] | (uint32_t)data[2] << 8 | (uint32_t)data[3] << 16) != n - 4)
@@ -82,7 +84,8 @@ static inline int hakios_bt_qca6390_nvm_prepare(uint8_t *data, size_t n)
         off += 12 + len;
     }
     if (!hci) return -1;
-    data[hci + 1] = 0; /* QCA_BAUDRATE_115200 */
+    data[hci] |= 0x80;
+    data[hci + 1] = baudrate;
     return 0;
 }
 #endif
