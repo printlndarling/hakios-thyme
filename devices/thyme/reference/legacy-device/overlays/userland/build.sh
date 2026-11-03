@@ -425,11 +425,14 @@ if [ -f ../fw-wifi/wpss.mdt ]; then
 	for f in bd_m20gl.elf regdb_xiaomi.bin; do
 		[ -f ../fw-wifi/qca6750/$f ] && install -m 0644 ../fw-wifi/qca6750/$f root/fw/
 	done
-	# the network the radio is to join: its name on the first line, its passphrase on the second. Yours, and
-	# so not in the repository; it goes where the firmware goes and the kernel reads it there (wifi_join=1)
+	# The radio can join one test network from an external two-line file: its name,
+	# then its passphrase. Personal credentials are never part of a normal image.
+	# SHARE=1 keeps them out of redistributed images; WIFI_TEST_CREDENTIALS=1 is
+	# an explicit opt-in for a disposable local RAM test only.
 	rm -f root/fw/network
-	# SHARE=1: leave it out, for an image that is going to somebody else -- it is a passphrase
-	if [ -z "$SHARE" ] && [ -f ../fw-wifi/network ]; then install -m 0600 ../fw-wifi/network root/fw/network; fi
+	if [ -z "$SHARE" ] && [ "${WIFI_TEST_CREDENTIALS:-0}" = 1 ] && [ -f ../fw-wifi/network ]; then
+		install -m 0600 ../fw-wifi/network root/fw/network
+	fi
 fi
 # UMI has a QCA6390 CNSS/PCIe radio, not Redwood's WCN6750/WPSS device. Keep its firmware
 # under its vendor directory so the future CNSS path can request the expected names.
