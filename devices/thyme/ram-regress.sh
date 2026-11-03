@@ -112,7 +112,10 @@ fi
 (
 	sleep "${WIFI_CAPTURE_DELAY:-145}"
 	./xl screenshot "${WIFI_SCREENSHOT:-logs/wirelessregress-wifi.png}" || true
-	sleep "$(( ${BT_CAPTURE_DELAY:-205} - ${WIFI_CAPTURE_DELAY:-145} ))"
+	# The full wireless scene opens Bluetooth Settings at about 205 s and keeps it open
+	# for 35 s. Capture after discovery has had time to populate the device list; capturing
+	# on the same tick as the transition only records the expected spinner.
+	sleep "$(( ${BT_CAPTURE_DELAY:-225} - ${WIFI_CAPTURE_DELAY:-145} ))"
 	./xl screenshot "${BT_SCREENSHOT:-logs/wirelessregress-bt.png}" || true
 ) &
 CAPTURE_PID=$!
