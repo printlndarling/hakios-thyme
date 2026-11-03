@@ -1,0 +1,21 @@
+diff --git a/include/hakios-metal/a6xx.hpp b/include/hakios-metal/a6xx.hpp
+index b01af4c..6234622 100644
+--- a/include/hakios-metal/a6xx.hpp
++++ b/include/hakios-metal/a6xx.hpp
+@@ -3970,12 +3970,11 @@ constexpr uint32_t regVfdDestCntlInstr(uint32_t i) { return REG_A6XX_VFD_DEST_CN
+ // --- floats in registers -------------------------------------------------------------------------------------------------------
+ 
+ // The bits of a float, as Mesa's fui() (util/u_math.h) gives them to the encoders of the GRAS_CL_VPORT_*, Z_CLAMP,
+-// Z_BOUNDS, POLY_OFFSET and BLEND_*_F32 registers. Written out by hand because C++17 has no constexpr bit_cast: the
+-// exponent is found by halving or doubling (both exact), the mantissa is what is left below the leading one, scaled
+-// by 2^23 (exact: a float has 24 significant bits). A finite value round-trips exactly (tests/a6xx_test.cpp holds it
+-// to memcpy); NaN gives the quiet NaN, an infinity 0x7f800000 with its sign.
++// Z_BOUNDS, POLY_OFFSET and BLEND_*_F32 registers. C++17 has no constexpr bit_cast, but Clang's builtin is usable in
++// constant expressions; use it only for the sign so the existing NaN canonicalization and finite-value
++// round-trip remain unchanged (tests/a6xx_test.cpp holds the result to memcpy).
+ constexpr uint32_t fui(float f) {
+-    uint32_t sign = __builtin_signbit(f) ? 0x80000000u : 0u;
++    uint32_t sign = __builtin_bit_cast(uint32_t, f) & 0x80000000u;
+     if (f != f) {
+         return 0x7fc00000u;
+     }
