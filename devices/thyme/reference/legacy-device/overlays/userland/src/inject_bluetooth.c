@@ -87,6 +87,46 @@ static void hook_scanner_handler(id self,SEL command,id handler)
     fprintf(stderr,"UMI Bluetooth: BLE scanner handler set=%p\n",handler);
     scanner_set_handler(self,command,handler?(id)scanner_handler_wrapper:nil);
 }
+static const char *object_description(id object,char *buffer,size_t size)
+{
+    if(!object) return "(null)";
+    id description=((id(*)(id,SEL))objc_msgSend)(object,sel_registerName("description"));
+    const char *text=description?((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String")):NULL;
+    if(!text) return "(no description)";
+    snprintf(buffer,size,"%s",text);
+    return buffer;
+}
+static void (*server_ble_found)(id,SEL,id);
+static unsigned server_ble_found_logged;
+static void log_server_ble_found(id self,SEL command,id device)
+{
+    if(server_ble_found_logged++<32) {
+        char text[256];
+        fprintf(stderr,"UMI Bluetooth: daemon BLE found %s\n",object_description(device,text,sizeof(text)));
+    }
+    server_ble_found(self,command,device);
+}
+static void (*server_classic_found)(id,SEL,id);
+static unsigned server_classic_found_logged;
+static void log_server_classic_found(id self,SEL command,id device)
+{
+    if(server_classic_found_logged++<32) {
+        char text[256];
+        fprintf(stderr,"UMI Bluetooth: daemon classic found %s\n",object_description(device,text,sizeof(text)));
+    }
+    server_classic_found(self,command,device);
+}
+static void (*server_discovery_add)(id,SEL,unsigned long long,id);
+static unsigned server_discovery_add_logged;
+static void log_server_discovery_add(id self,SEL command,unsigned long long token,id info)
+{
+    if(server_discovery_add_logged++<32) {
+        char text[512];
+        fprintf(stderr,"UMI Bluetooth: daemon discovery add token=%#llx info=%s\n",
+            token,object_description(info,text,sizeof(text)));
+    }
+    server_discovery_add(self,command,token,info);
+}
 static void install_scanner_probe(void)
 {
     Class scanner=objc_getClass("CBStackBLEScannerBTStack");
@@ -100,6 +140,22 @@ static void install_scanner_probe(void)
     method_setImplementation(method,(IMP)log_scanner_device);
     scanner_set_handler=(void *)method_getImplementation(setter);
     method_setImplementation(setter,(IMP)hook_scanner_handler);
+    Class server=objc_getClass("CBDaemonServer");
+    Method ble_found=server?class_getInstanceMethod(server,sel_registerName("_stackBLEScannerDeviceFound:")):NULL;
+    Method classic_found=server?class_getInstanceMethod(server,sel_registerName("_stackClassicScannerDeviceFound:")):NULL;
+    Method discovery_add=server?class_getInstanceMethod(server,sel_registerName("_xpcPublisherDiscoveryAddToken:info:")):NULL;
+    if(ble_found) {
+        server_ble_found=(void *)method_getImplementation(ble_found);
+        method_setImplementation(ble_found,(IMP)log_server_ble_found);
+    }
+    if(classic_found) {
+        server_classic_found=(void *)method_getImplementation(classic_found);
+        method_setImplementation(classic_found,(IMP)log_server_classic_found);
+    }
+    if(discovery_add) {
+        server_discovery_add=(void *)method_getImplementation(discovery_add);
+        method_setImplementation(discovery_add,(IMP)log_server_discovery_add);
+    }
     fprintf(stderr,"UMI Bluetooth: BLE scanner probe installed\n");
 }
 static void initial_address_complete(unsigned status)
