@@ -1542,6 +1542,14 @@ main(int argc, char **argv, char **envp)
 
 		if (dev != NULL) {
 			flash_root(dev);
+		} else {
+			/* A RAM-root boot still gets the same vendor audio plug-ins as a flash-root boot. */
+			struct stat st;
+
+			if (stat(in_image("/hal"), &st) == 0 && stat("/System/Library/Audio/Plug-Ins/HAL", &st) == 0) {
+				check(bind_dir(in_image("/hal"), "/System/Library/Audio/Plug-Ins/HAL"),
+				    "our audio plug-ins over Darwin's");
+			}
 		}
 	}
 

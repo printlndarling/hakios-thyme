@@ -18,6 +18,11 @@
  *   file PATH                          a sound file, played as a system sound
  *   route                              where Darwin says its sound goes: the audio session's outputs and volume,
  *                                      and the devices of the system's output context
+ *   playback                           activate a Playback session that allows HFP and A2DP, then print the
+ *                                      route: what a music player does before it sends audio to a headset
+ *   sessions                           list audio categories and test Playback with no, HFP, A2DP and
+ *                                      combined route options
+ *   hal                                list the audio server's loaded plug-ins and devices
  *   haptic [SECONDS]                   haptics the way an application (and UIKit's feedback generators) plays
  *                                      them, through CoreHaptics: a tap, then a vibration of SECONDS (default
  *                                      0.3, at most 3: the kernel cuts a vibration at 1 s) at half strength, then
@@ -247,6 +252,148 @@ route(void)
 	}
 }
 
+/* CoreAudio's HAL API is private in the iOS SDK; these are the stable public signatures. */
+typedef UInt32 HakiosAudioObjectID;
+typedef struct {
+	UInt32 selector, scope, element;
+} HakiosAudioObjectPropertyAddress;
+extern OSStatus AudioObjectGetPropertyDataSize(HakiosAudioObjectID object, const HakiosAudioObjectPropertyAddress *address,
+    UInt32 qualifier_size, const void *qualifier, UInt32 *size);
+extern OSStatus AudioObjectGetPropertyData(HakiosAudioObjectID object, const HakiosAudioObjectPropertyAddress *address,
+    UInt32 qualifier_size, const void *qualifier, UInt32 *size, void *data);
+
+#define HAKIOS_AUDIO_OBJECT_SYSTEM 1
+#define HAKIOS_AUDIO_PROPERTY_GLOBAL 'glob'
+#define HAKIOS_AUDIO_PLUGIN_LIST 'plug'
+#define HAKIOS_AUDIO_PLUGIN_BUNDLE 'piid'
+#define HAKIOS_AUDIO_DEVICE_LIST 'dev#'
+#define HAKIOS_AUDIO_DEVICE_UID 'uid '
+#define HAKIOS_AUDIO_DEVICE_NAME 'lnam'
+#define HAKIOS_AUDIO_DEVICE_TRANSPORT 'tran'
+
+static void
+show_objects(const char *what, UInt32 selector, UInt32 item_selector)
+{
+	HakiosAudioObjectPropertyAddress list = { selector, HAKIOS_AUDIO_PROPERTY_GLOBAL, 0 };
+	UInt32 size = 0, count = 0; HakiosAudioObjectID *objects = NULL;
+
+	if (AudioObjectGetPropertyDataSize(HAKIOS_AUDIO_OBJECT_SYSTEM, &list, 0, NULL, &size) != 0 || size == 0 ||
+	    (objects = malloc(size)) == NULL) {
+		printf("sound_test: HAL: %s: none (size %u)\n", what, size);
+		return;
+	}
+	if (AudioObjectGetPropertyData(HAKIOS_AUDIO_OBJECT_SYSTEM, &list, 0, NULL, &size, objects) != 0) {
+		printf("sound_test: HAL: %s: query failed\n", what);
+		free(objects);
+		return;
+	}
+	count = size / sizeof(*objects);
+	printf("sound_test: HAL: %u %s\n", count, what);
+	for (UInt32 i = 0; i < count; i++) {
+		HakiosAudioObjectPropertyAddress item = { item_selector, HAKIOS_AUDIO_PROPERTY_GLOBAL, 0 };
+		CFStringRef string = NULL; UInt32 item_size = sizeof(string);
+		if (AudioObjectGetPropertyData(objects[i], &item, 0, NULL, &item_size, &string) == 0 && string != NULL) {
+			printf("sound_test: HAL:   %u %s\n", objects[i], text((id)string));
+			CFRelease(string);
+		} else {
+			printf("sound_test: HAL:   %u (unnamed)\n", objects[i]);
+		}
+	}
+	free(objects);
+}
+
+static int
+hal_devices(void)
+{
+	show_objects("audio plug-ins", HAKIOS_AUDIO_PLUGIN_LIST, HAKIOS_AUDIO_PLUGIN_BUNDLE);
+	show_objects("audio devices", HAKIOS_AUDIO_DEVICE_LIST, HAKIOS_AUDIO_DEVICE_NAME);
+	return 0;
+}
+
+static void
+report_category(id session, const char *label, id category, id mode, unsigned long options)
+{
+	id error = NULL;
+	BOOL configured = ((BOOL (*)(id, SEL, id, id, unsigned long, id *))objc_msgSend)(session,
+	    sel_registerName("setCategory:mode:options:error:"), category, mode, options, &error);
+
+	printf("sound_test: session: %s: %s", label, configured ? "yes" : "NO");
+	if (!configured) {
+		printf(" (%s)", text(send(error, "localizedDescription")));
+	}
+	printf("\n");
+}
+
+/* Try the combinations that separate a bad category from unsupported Bluetooth options. */
+static int
+session_diagnostic(void)
+{
+	id session = send((id)objc_getClass("AVAudioSession"), "sharedInstance");
+	id *playback_symbol = dlsym(RTLD_DEFAULT, "AVAudioSessionCategoryPlayback");
+	id *mode_symbol = dlsym(RTLD_DEFAULT, "AVAudioSessionModeDefault");
+	id playback = playback_symbol ? *playback_symbol : (id)CFSTR("AVAudioSessionCategoryPlayback");
+	id mode = mode_symbol ? *mode_symbol : (id)CFSTR("AVAudioSessionModeDefault");
+	id categories, current;
+
+	if (session == NULL) {
+		printf("sound_test: session: no AVAudioSession\n");
+		return 1;
+	}
+	current = send(session, "category");
+	categories = send(session, "availableCategories");
+	printf("sound_test: session: current category %s, mode %s, options %#lx\n", text(current),
+	    text(send(session, "mode")), ((unsigned long (*)(id, SEL))objc_msgSend)(session, sel_registerName("categoryOptions")));
+	unsigned long count = categories ? ((unsigned long (*)(id, SEL))objc_msgSend)(categories, sel_registerName("count")) : 0;
+	printf("sound_test: session: %lu available categories\n", count);
+	for (unsigned long i = 0; i < count; i++) {
+		printf("sound_test: session:   %s\n", text(((id (*)(id, SEL, unsigned long))objc_msgSend)(categories,
+		    sel_registerName("objectAtIndex:"), i)));
+	}
+	report_category(session, "Playback/default/no options", playback, mode, 0);
+	report_category(session, "Playback/default/A2DP", playback, mode, 0x20);
+	report_category(session, "Playback/default/HFP", playback, mode, 0x04);
+	report_category(session, "Playback/default/A2DP+HFP", playback, mode, 0x24);
+	report_category(session, "Playback/default/no options (restore)", playback, mode, 0);
+	route();
+	return 0;
+}
+
+/* Make this process a playback client, as a music player does, and report the resulting route. */
+static int
+playback(void)
+{
+	id session = send((id)objc_getClass("AVAudioSession"), "sharedInstance");
+	id *category_symbol = dlsym(RTLD_DEFAULT, "AVAudioSessionCategoryPlayback");
+	id *mode_symbol = dlsym(RTLD_DEFAULT, "AVAudioSessionModeDefault");
+	id category = category_symbol ? *category_symbol : (id)CFSTR("AVAudioSessionCategoryPlayback");
+	id mode = mode_symbol ? *mode_symbol : (id)CFSTR("AVAudioSessionModeDefault");
+	id error = NULL;
+	BOOL configured, active;
+
+	if (session == NULL) {
+		printf("sound_test: playback: no AVAudioSession\n");
+		return 1;
+	}
+	/* AVAudioSessionCategoryOptionAllowBluetooth | AllowBluetoothA2DP */
+	configured = ((BOOL (*)(id, SEL, id, id, unsigned long, id *))objc_msgSend)(session,
+	    sel_registerName("setCategory:mode:options:error:"), category, mode, 0x24, &error);
+	printf("sound_test: playback: category Playback, mode Default, HFP/A2DP options: %s", configured ? "yes" : "NO");
+	if (!configured) {
+		printf(" (%s)", text(send(error, "localizedDescription")));
+	}
+	printf("\n");
+	error = NULL;
+	active = ((BOOL (*)(id, SEL, BOOL, id *))objc_msgSend)(session,
+	    sel_registerName("setActive:error:"), YES, &error);
+	printf("sound_test: playback: active: %s", active ? "yes" : "NO");
+	if (!active) {
+		printf(" (%s)", text(send(error, "localizedDescription")));
+	}
+	printf("\n");
+	route();
+	return configured && active ? 0 : 1;
+}
+
 /* CoreHaptics' constants (NSString *) by name, the framework opened when first asked for */
 static id
 haptics_constant(const char *name)
@@ -384,6 +531,12 @@ main(int argc, char **argv)
 			wait_for_ringer();
 		} else if (strcmp(argv[i], "route") == 0) {
 			route();
+		} else if (strcmp(argv[i], "playback") == 0) {
+			failed |= playback();
+		} else if (strcmp(argv[i], "sessions") == 0) {
+			failed |= session_diagnostic();
+		} else if (strcmp(argv[i], "hal") == 0) {
+			failed |= hal_devices();
 		} else if (strcmp(argv[i], "restart") == 0) {
 			restart();
 		} else if (strcmp(argv[i], "haptic") == 0) {

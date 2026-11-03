@@ -122,7 +122,7 @@ IOS_JOBS=${JOBS-"
 # WIFID=0 leaves it out.
 [ "${WIFID-1}" != 0 ] && IOS_JOBS="$IOS_JOBS com.apple.wifid"
 # UMI's optional QCA6390 H4 endpoint is enabled in XNU with umi_bt=1.
-[ "${BLUETOOTH-0}" != 1 ] || IOS_JOBS="$IOS_JOBS com.apple.bluetoothd com.apple.BlueTool"
+[ "${BLUETOOTH-0}" != 1 ] || IOS_JOBS="$IOS_JOBS com.apple.bluetoothd com.apple.BlueTool com.apple.BTServer.le com.apple.BTServer.avrcp com.apple.BTServer.map com.apple.BTServer.pbap com.apple.bluetoothuserd"
 # AudioSession and CoreHaptics need mediaserverd; its AVAudioSession setup waits for NanoRegistry's
 # paired-device Mach service. Keep both jobs in every image so the server and its clients can start.
 IOS_JOBS="$IOS_JOBS com.apple.mediaserverd com.apple.nanoregistryd"
@@ -204,7 +204,7 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 		$DYN -framework CoreFoundation -o obj/svc_test src/svc_test.c
 		$DYN -Wno-four-char-constants -framework CoreFoundation -framework IOSurface -o obj/surf_test src/surf_test.c
 		$DYN -o obj/rwtouch src/rwtouch.c
-		$DYN -framework CoreFoundation -framework AudioToolbox -framework AVFoundation -lobjc -o obj/sound_test src/sound_test.c
+		$DYN -framework CoreFoundation -framework AudioToolbox -framework CoreAudio -framework AVFoundation -lobjc -o obj/sound_test src/sound_test.c
 		$DYN -framework CoreFoundation -lMobileGestalt -o obj/mg_test src/mg_test.c
 		$DYN -framework CoreFoundation -framework AVFoundation -lobjc -o obj/torch_test src/torch_test.c
 		$DYN -O2 -o obj/camera_test src/camera_test.c src/camera_isp.c
@@ -570,6 +570,11 @@ for f in extensions.plist extensions.plist.sig; do
 	[ -f $IOS/rootfs/System/Library/xpc/$f ] && cp $IOS/rootfs/System/Library/xpc/$f root/xpc/
 done
 [ -d root/lib/HakiosAudio.driver ] && ln -s /redwood/lib/HakiosAudio.driver root/hal/HakiosAudio.driver
+# Apple's Bluetooth audio HAL is a vendor component extracted locally from the matching IPSW.
+# It stays out of Git and is overlaid with the Hakios driver, rather than modifying system.apfs.
+if [ -d ../fw-bt-audio/BTAudioHALPlugin.driver ]; then
+	cp -a ../fw-bt-audio/BTAudioHALPlugin.driver root/hal/
+fi
 # the image: zlib where it saves room (a small file whole in its attribute, as Apple keeps them); fw/
 # as it is, which the kernel's drivers use where it lies in memory (drivers/storage/hakios.image.c)
 python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs redwood=root | tail -1

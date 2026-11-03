@@ -1,0 +1,5 @@
+# Audio HAL capability gate: let bluetoothd start BTLEServer and BTAvrcp first,
+# then verify CoreAudio and the Bluetooth category options.
+/redwood/bin/sound_test springboard
+/redwood/bin/sound_test wait 75
+/redwood/bin/sound_test hal sessions route
