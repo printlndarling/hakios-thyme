@@ -8,9 +8,6 @@
 #include <libkern/OSCacheControl.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
-#include <objc/message.h>
-#include <objc/runtime.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -48,80 +45,6 @@ static void skip_optional_error_reporting(void)
 }
 static unsigned (*send_hci)(unsigned,void (*)(unsigned),...);
 static unsigned char initial_random_address[6];
-static void (*scanner_device_found)(id,SEL,id);
-static unsigned scanner_devices_logged;
-static void log_scanner_device(id self,SEL command,id device)
-{
-    id handler=*(id *)((char *)self+0x98);
-    if(scanner_devices_logged++<32) {
-        const char *text=NULL;
-        if(device) {
-            id description=((id(*)(id,SEL))objc_msgSend)(device,sel_registerName("description"));
-            if(description)
-                text=((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String"));
-        }
-        uint64_t flags=*(uint64_t *)((char *)self+0x70);
-        fprintf(stderr,"UMI Bluetooth: BLE scanner deviceFound handler=%p flags=%#llx %s\n",
-            handler,(unsigned long long)flags,text?text:"(null)");
-    }
-    scanner_device_found(self,command,device);
-}
-static const char *object_description(id object,char *buffer,size_t size)
-{
-    if(!object) return "(null)";
-    id description=((id(*)(id,SEL))objc_msgSend)(object,sel_registerName("description"));
-    const char *text=description?((const char *(*)(id,SEL))objc_msgSend)(description,sel_registerName("UTF8String")):NULL;
-    if(!text) return "(no description)";
-    snprintf(buffer,size,"%s",text);
-    return buffer;
-}
-static void (*discovery_report_found)(id,SEL,id);
-static unsigned discovery_report_found_logged;
-static void log_discovery_report_found(id self,SEL command,id device)
-{
-    if(discovery_report_found_logged++<32) {
-        char text[256];
-        fprintf(stderr,"UMI Bluetooth: CBDiscovery reportDeviceFound %s\n",
-            object_description(device,text,sizeof(text)));
-    }
-    discovery_report_found(self,command,device);
-}
-static void install_discovery_probe(void)
-{
-    Class discovery=objc_getClass("CBDiscovery");
-    Method report=discovery?class_getInstanceMethod(discovery,sel_registerName("reportDeviceFound:")):NULL;
-    if(report) {
-        discovery_report_found=(void *)method_getImplementation(report);
-        method_setImplementation(report,(IMP)log_discovery_report_found);
-        fprintf(stderr,"UMI Bluetooth: CBDiscovery probe installed\n");
-    }
-}
-static void *discovery_probe_thread(void *unused)
-{
-    for(unsigned i=0;i<1200;i++) {
-        if(objc_getClass("CBDiscovery")) {
-            install_discovery_probe();
-            return NULL;
-        }
-        usleep(100000);
-    }
-    fprintf(stderr,"UMI Bluetooth: CBDiscovery probe unavailable\n");
-    return NULL;
-}
-static void install_scanner_probe(void)
-{
-    Class scanner=objc_getClass("CBStackBLEScannerBTStack");
-    Method method=scanner?class_getInstanceMethod(scanner,sel_registerName("deviceFound:")):NULL;
-    if(!method) {
-        fprintf(stderr,"UMI Bluetooth: BLE scanner probe unavailable\n");
-        return;
-    }
-    scanner_device_found=(void *)method_getImplementation(method);
-    method_setImplementation(method,(IMP)log_scanner_device);
-    pthread_t thread;
-    if(!pthread_create(&thread,NULL,discovery_probe_thread,NULL)) pthread_detach(thread);
-    fprintf(stderr,"UMI Bluetooth: BLE scanner probe installed\n");
-}
 static void initial_address_complete(unsigned status)
 {
     fprintf(stderr,"UMI Bluetooth: initial LE random address completion status=%u\n",status);
@@ -139,7 +62,6 @@ static void prepare_legacy_address(void)
 }
 __attribute__((constructor)) static void initialize(void)
 {
-    install_scanner_probe();
     io_service_t service=IOServiceGetMatchingService(0,IOServiceNameMatching("bluetooth"));
     if(!service) return;
     CFTypeRef mask=IORegistryEntryCreateCFProperty(service,CFSTR("HakiosBluetoothSupportedCommands"),kCFAllocatorDefault,0);
