@@ -171,6 +171,26 @@ The extracted frame is `logs/cam-tpg-0.png`, with raw bytes in
 This is a PASS for the board-level CSID/IFE/DMA capture path, not yet for
 frames produced by the S5KHMX sensor.
 
+### Synthetic camera through the iOS stack
+
+The `cam=5 cam_fake=1` scene exercised the userspace path:
+
+- AVFoundation listed a Back Camera with 16 formats and a Front Camera with
+  18 formats;
+- Camera.app opened the preview;
+- mediaserverd's `libhakios.media` received synthetic 1280x720 frames from
+  `/dev/hakios-camera`;
+- the kernel delivered hundreds of frames while Camera.app was active.
+
+This is a PASS for the AVFoundation/camera-daemon/kernel-device integration
+with synthetic frames. It says nothing yet about the physical S5KHMX stream.
+
+| Evidence | SHA-256 |
+|---|---|
+| `logs/110735-run.log` | `c0d1439ffbc8ea2dc5fbdd550e99d39fc5eb717b0d6aa8589d234bea95ae97f4` |
+| `logs/camera-fake-preview.png` | `510455f7d091365e1b986db8de3ad3e67fddfb603904fcdc29b10220a0ba5560` |
+| `logs/camera-fake-late.png` | `c2ed0c7f456a1039c7e7f403ce64477d403be5a7031bf75ff1fa2e086c424414` |
+
 ### Camera userspace and synthetic-frame path
 
 The `cam=5 cam_fake=1` scene was also run through the complete iOS path:
