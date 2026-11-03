@@ -642,7 +642,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 if(subevent==0x01 || subevent==0x0a)
                     bt_log_le_connection(receive,receive_length,subevent);
                 if(subevent==0x02 && receive_length>=15) {
-                    unsigned reports=receive[4], at=14;
+                    unsigned reports=receive[4], at=5;
                     bt_le_report_events++;
                     bt_le_report_entries+=reports;
                     for(unsigned report=0;report<reports && at+10<=receive_length;report++) {
