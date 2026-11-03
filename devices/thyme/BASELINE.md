@@ -9,13 +9,15 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `1984332` (`Add THYME Bluetooth audio route wait test`) |
+| Verified functional source | `1166c6b` (`Restore local Wi-Fi inputs in userland images`) |
 | Worktree | clean after this baseline update |
 
-The kernel sources are unchanged from `44b5922`. The user-space side now
-includes the SystemConfiguration identity job, Apple Bluetooth HAL overlay,
-BTServer profile jobs and AVAudioSession/A2DP diagnostics. The vendor HAL is
-extracted locally from the matching IPSW and remains Git-ignored.
+The kernel now includes the opt-in-then-default QCA6390 3 Mbaud transport, the
+upstream Metal/CoreAnimation merge and THYME's existing board drivers. The
+user-space image keeps Simplified and Traditional Chinese resources, overlays
+the Apple Bluetooth HAL extracted locally from the matching IPSW, and rebuilds
+the UI from the IPSW sources. Vendor firmware and local Wi-Fi input remain
+Git-ignored.
 
 ## RAM artifacts
 
@@ -24,9 +26,10 @@ extracted locally from the matching IPSW and remains Git-ignored.
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
-| `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `25bc4e83f5cead28e23072e0771ad92a411dbe6344b17a6bd85e4de59edf9aa1` |
-| clean-main `hakios-kernel` | `cea38303c4f06e01b3c63eb0db525df6931894dc3671d15a6d6fb92e1963a236` |
+| `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `9b4ad98b31f7dfede561b144a640e10835a63ad439864f0f24f67ffc22ffe517` |
+| `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
+| clean-main `hakios-kernel` | `e73e82d4e5da2409ae5e916d86d4a161ca94a5be737e9c3124eb7ef4740fad62` |
 
 The kernel binary hash changes when build metadata changes. The scenario is a
 local, Git-ignored RAM test image; its hash pins the tested bytes without
@@ -62,19 +65,20 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean 230-second cold RAM run at `logs/232341-run.log` completed:
+The cold RAM run at `logs/022912-run.log` completed:
 
 - the `com.hakios.scname` boot job automatically published the local name;
-- BTServer LE and AVRCP jobs started after the Bluetooth path became active;
-- a WPA2 association, four-way handshake, CCMP pairwise/group key installation
-  and DHCP address `192.168.0.103`;
+- the Bluetooth controller and host moved from 115200 to 3 Mbaud before patch
+  download and stayed up without an H4 fault or TX timeout;
+- a WPA2 association, CCMP pairwise/group key installation and DHCP address
+  `192.168.0.103`;
 - Wi-Fi off, interface removal, Wi-Fi on and a second full association;
 - DNS, TCP and TLS traffic through en0;
 - Bluetooth scanning and Settings navigation.
 
-The automated screenshot conversion in this run failed in the host-side `xl`
-helper, so the screenshots are not used as evidence. The kernel and launchd log
-above records the completed wireless operations.
+The Wi-Fi screenshot shows the radio active and Safari on `example.com`; the
+Bluetooth screenshot shows Settings discovery. The kernel log records both
+CCMP key installations and both successful associations.
 
 A focused Bluetooth-audio run at `logs/231436-run.log` waited for the paired
 headset to appear, then observed:
@@ -87,16 +91,17 @@ sound_test: 144000 of 144000 frames handed over
 sound_test: route:   BluetoothA2DPOutput "..."
 ```
 
-This proves the Bluetooth HAL plugin loads and the system selects an A2DP
-output route; AudioQueue accepted the test stream. It does not prove that the
-encoded stream reached the headset at real-time rate. Direct listening on this
-build produced continuous hoarse, crackling audio. A2DP routing is therefore
-PASS, but audible A2DP quality is FAIL.
+At 115200 8N1 this route produced continuous hoarse, crackling audio. The
+11.5 KB/s transport is below normal encoded A2DP throughput. Linux `hci_qca`
+uses a 3 Mbaud operational speed, so the THYME driver now sends
+`0xFC48(0x0E)`, waits 300 ms, changes the QUP root to 48 MHz and uses a
+16x-sampling divider of one. The NVM HCI tag is updated at the same time.
 
-The HCI UART is currently fixed at 115200 8N1, about 11.5 KB/s. That is below
-the encoded bitrate of normal SBC/A2DP streams and is the leading hypothesis,
-not yet a proven root cause. A same-headset A/B run is required before changing
-the default speed.
+With that path active, the user confirmed both a ringtone and ordinary
+Bluetooth audio were clean. A2DP audible quality is PASS at 3 Mbaud. The
+default is now 3 Mbaud; `bt_baud=115200` remains as an explicit rollback.
+One later default-speed run did not reconnect the headset within 150 seconds,
+so automatic reconnect remains an independent open item.
 
 AVRCP transport controls, HFP microphone/SCO, Bluetooth-off/on recovery and
 deliberate reconnect remain to be confirmed separately.
@@ -108,8 +113,24 @@ request those options themselves.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/232341-run.log` | `42f29de2b2b3f1a51b692bbb7ecfd083d2274c540886ffc8abc76a1e36240f39` |
-| `logs/231436-run.log` | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
+| `logs/022912-run.log` | `5f0bee294acdaba63d2d8771b407b66429dbdd3545ba24d92c16e0d54ad42bc1` |
+| `logs/wirelessregress-wifi.png` | `1b9deac6574e81974114be5382a2a3f8df1745b94f36600c3578fb49eb840940` |
+| `logs/wirelessregress-bt.png` | `4e8823eb6785740cf3680a95141949020ab9f7e9954134bb304a434ca9026c93` |
+| `logs/231436-run.log` (115200 crackling baseline) | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
+
+## Chinese UI
+
+The system-image selection previously kept only English `.lproj` resources.
+`sysimage/select-system.py` now keeps `zh-Hans`, `zh-Hant`, `zh_CN` and
+`zh_TW`; PingFang trimming also keeps the Medium faces. The focused
+`rc.jobs.language` gate opens Language & Region, adds Simplified Chinese and
+confirms it. Settings then renders in Chinese, including region and date
+format labels, without tofu glyphs.
+
+Evidence: `logs/022305-run.log`, SHA-256
+`a6490eb47b0efc3102c8285d60f2c1ec719b8b9c941a61766b23c96ed577d282`.
+The final screenshot is `logs/thyme-zh-hans-final.png`, SHA-256
+`0f62b092635f95837527778d59c4bb29d0b81fde889599a35b8f5407af5a5d8a`.
 
 The radio teardown near the end of the run is the intentional return to the
 loader after `loader_return_after`, not a Wi-Fi failure.
