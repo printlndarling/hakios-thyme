@@ -260,7 +260,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
-| Torch/flash | PARTIAL | Hardware pulse PASS: PM8150L channel 97 at 125 mA ramped up (`INT_RT_STS=0x90`) and turned off cleanly (`logs/081934-run.log`). Control Center, mediaserverd and `/dev/hakios-torch` still need an end-to-end UI test |
+| Torch/flash | PARTIAL | Hardware pulse PASS: PM8150L channel 97 at 125 mA ramped up (`INT_RT_STS=0x90`) and turned off cleanly (`logs/081934-run.log`). The `torch=3` path also proves `AVFlashlight` and mediaserverd can turn it on through `/dev/hakios-torch`, but the immediate level-0/`turnPowerOff` request does not yet reach the kernel; the 30-second safety limit still shuts it off |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
 | ALS / auto-brightness | FAIL | no usable ambient-light sensor path; brightness is manual |

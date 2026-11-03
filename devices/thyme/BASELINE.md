@@ -89,8 +89,22 @@ The final readback was `enable=0000 channels=0000 target=0000 (dark)`.
 
 Evidence: `logs/081934-run.log`, SHA-256
 `6b6d07900ad0abf4fefc6a8af4bd17b3534f70d9250d5f941d3d475ffed30301`.
-This is a hardware-level PASS for the bounded torch path. Control Center,
-mediaserverd and `/dev/hakios-torch` still need an end-to-end userspace test.
+This is a hardware-level PASS for the bounded torch path.
+
+The `torch=3` userspace path was then exercised with `torch_test`:
+
+- `AVFlashlight` reported `hasFlashlight YES` and was available;
+- mediaserverd opened `/dev/hakios-torch`;
+- the flashlight's level request reached the kernel at 1000/1000 and the LED
+  turned on;
+- the kernel's 30-second safety limit switched it off.
+
+The explicit level-0/`turnPowerOff` request did not reach the kernel promptly,
+so only the ON path and watchdog OFF are proven. The evidence runs are
+`logs/084252-run.log` (SHA-256
+`0f18c4b81e29c43f19d7dff0d357c3896b588705ce9936081c13b0a644671f20`) and
+`logs/085312-run.log` (SHA-256
+`6badd947cb14573ccd64401224babcc2123c991711fb116dc4f1dd0f1a45de78`).
 
 ## Historical verified run
 
