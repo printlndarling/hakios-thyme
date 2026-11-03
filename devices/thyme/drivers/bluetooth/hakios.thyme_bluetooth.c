@@ -22,8 +22,9 @@ extern int umi_rpmh_bluetooth_power(void);
 extern int umi_bluetooth_publish(const uint8_t address[6],
     const uint8_t commands[64],uint32_t transport_speed);
 extern void umi_bluetooth_set_ready(bool ready);
-#define BT_DEFAULT_SPEED 115200u
+#define BT_LOW_SPEED 115200u
 #define BT_HIGH_SPEED 3000000u
+#define BT_DEFAULT_SPEED BT_HIGH_SPEED
 #define BT_QCA_BAUDRATE_115200 0u
 #define BT_QCA_BAUDRATE_3000000 14u
 static uint32_t bt_transport_speed = BT_DEFAULT_SPEED;
@@ -824,7 +825,7 @@ static bool bt_uart_clock(vm_offset_t gcc,uint32_t clock_hz)
 static int bt_uart_configure_divider(vm_offset_t uart,uint32_t speed)
 {
     uint32_t divider;
-    if (speed == BT_DEFAULT_SPEED) {
+    if (speed == BT_LOW_SPEED) {
         divider = 4;
     } else if (speed == BT_HIGH_SPEED) {
         divider = 1;
@@ -840,7 +841,7 @@ static int bt_uart_configure_divider(vm_offset_t uart,uint32_t speed)
 }
 static int bt_uart_configure_speed(vm_offset_t gcc,vm_offset_t uart,uint32_t speed)
 {
-    uint32_t root = speed == BT_DEFAULT_SPEED ? 7372800 :
+    uint32_t root = speed == BT_LOW_SPEED ? 7372800 :
         (speed == BT_HIGH_SPEED ? 48000000 : 0);
     if (!root) return EINVAL;
     if (!bt_uart_clock(gcc,root)) return EIO;
@@ -852,7 +853,7 @@ static int bt_uart_configure_speed(vm_offset_t gcc,vm_offset_t uart,uint32_t spe
 }
 static int bt_qca_set_speed(vm_offset_t gcc,vm_offset_t uart,uint32_t speed)
 {
-    if (speed == BT_DEFAULT_SPEED) return 0;
+    if (speed == BT_LOW_SPEED) return 0;
     if (speed != BT_HIGH_SPEED) return EINVAL;
     uint8_t command[] = {1,0x48,0xfc,1,BT_QCA_BAUDRATE_3000000};
     int error=bt_uart_tx(uart,command,sizeof(command));
@@ -922,7 +923,7 @@ static bool bt_hci_probe(vm_offset_t gcc,vm_offset_t gpio,vm_offset_t uart,bool 
         uint32_t cfg=pin==17 ? 5u : (pin==18 ? 7u : 4u);
         bt_write(gpio,pin*0x1000,cfg);
     }
-    if(!error) error=bt_uart_configure_divider(uart,BT_DEFAULT_SPEED);
+    if(!error) error=bt_uart_configure_divider(uart,BT_LOW_SPEED);
     bt_write(uart,0x258,0); bt_write(uart,0x22c,0);
     bt_write(uart,0x25c,2); bt_write(uart,0x280,0);
     bt_write(uart,0x260,0xf); bt_write(uart,0x264,0);
@@ -972,7 +973,7 @@ void umi_bluetooth_init(void)
 {
     uint32_t probe = 0, enabled = 0, requested_speed = 0;
     if (PE_parse_boot_argn("bt_baud", &requested_speed, sizeof(requested_speed))) {
-        if (requested_speed == BT_DEFAULT_SPEED || requested_speed == BT_HIGH_SPEED) {
+        if (requested_speed == BT_LOW_SPEED || requested_speed == BT_HIGH_SPEED) {
             bt_transport_speed = requested_speed;
         } else {
             hakios_tl("UMI BT: unsupported bt_baud=%u; using %u\n",
