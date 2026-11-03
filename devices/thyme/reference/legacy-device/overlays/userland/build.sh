@@ -199,7 +199,7 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 		$DYN -o obj/hello_dyn src/hello_dyn.c
 		if [ "${BLUETOOTH-0}" = 1 ]; then
 			$DYN -fblocks -framework CoreFoundation -framework IOKit -o obj/umi_bluetool src/umi_bluetool.c
-			$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetooth.dylib -framework CoreFoundation -framework IOKit -o obj/libhakios.bluetooth.dylib src/inject_bluetooth.c
+			$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetooth.dylib -framework CoreFoundation -framework IOKit -lobjc -o obj/libhakios.bluetooth.dylib src/inject_bluetooth.c
 		fi
 		$DYN -framework CoreFoundation -o obj/svc_test src/svc_test.c
 		$DYN -Wno-four-char-constants -framework CoreFoundation -framework IOSurface -o obj/surf_test src/surf_test.c
