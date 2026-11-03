@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `220dd01d` (`Wait for THYME Bluetooth discovery before capture`) |
+| Verified source | `0c7b589e` (`Promote THYME Bluetooth diagnostic baseline`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -21,7 +21,7 @@ experimental kernel or with an older resident system image.
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `1b8ead5e843984a3a23a349c620320081e07376a22619bc7e2882ef2b837cb8a` |
+| clean-main `hakios-kernel` | `66a3008f02ab5d54d07823a67d9fd37ba3d82e846c10c9375b4a812fb2a99611` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
@@ -55,7 +55,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `220dd01d` boot completed all of these in one 230-second RAM run:
+The clean `0c7b589e` boot completed all of these in one 230-second RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -64,24 +64,24 @@ The clean `220dd01d` boot completed all of these in one 230-second RAM run:
 - the second scan found the configured 5 GHz and 2.4 GHz networks;
 - the second association installed both keys and made en0 usable;
 - Safari opened `https://example.com`;
-- Bluetooth Settings opened, HCI commands completed and LE reports continued to
-  arrive, but Settings displayed no device row after 20 seconds.
+- Bluetooth Settings opened and displayed the nearby `LAPTOP-69NFHNVP` device
+  after discovery;
+- the kernel counted 69 scan responses and 65 named advertisements by the end of
+  the run, with zero queue or enqueue errors.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/130503-run.log` | `bc4a31baf063d8021276aa496f4ef89d2b26077e7846ee828a244943f920bde3` |
-| `logs/wirelessregress-wifi.png` | `8f8fecc13986e5642abb69c700f43a3122accd618cc277dfd5288b1208b49a4a` |
-| `logs/wirelessregress-bt.png` | `2725b11cc04827216fc95a102525e03543de871d64967610e094111ae67d2a13` |
+| `logs/162111-run.log` | `24a8241c0bbe1792557bb48cff4a1d2f811aa7ad8c5fc374c3ebff7a7e470e6a` |
+| `logs/baseline-final-wifi.png` | `21808cfe32feeb414033598264cd6b464712089c329e9b2edfdb6a1067fea73c` |
+| `logs/baseline-final-bt.png` | `55d9cf7dda64accab7d862896ea74d4a407d29dccf95c28f3f9ac300b6a2707c` |
 
 The Wi-Fi screenshot shows the switch on with real nearby networks after the
 power cycle. The Bluetooth screenshot was captured 20 seconds after Settings
-opened and still showed only the discovery spinner, not a transient page-entry
-frame. `logs/120001-bt.png` has the same empty result; an older run
-`logs/023242-run.log` did display `Accessory` and `HONOR X10 Max`. Bluetooth UI
-discovery is therefore intermittent and remains `PARTIAL`, even though the HCI
-transport and LE event path work. The run's later radio teardown happened after
-`loader_return_after` expired, during the intentional return to the loader; it
-is not a Wi-Fi startup failure.
+opened and shows `LAPTOP-69NFHNVP`. The current production image therefore has
+a verified user-visible Bluetooth discovery path. Pairing and data transfer
+remain separate, unfinished gates. The run's later radio teardown happened
+after `loader_return_after` expired, during the intentional return to the
+loader; it is not a Wi-Fi startup failure.
 
 A separate full-system `press_power=90` run blanked the display on the first
 short press and woke it on the second. Evidence: `logs/075530-run.log`,
@@ -407,8 +407,8 @@ The complete cold-boot gate used `userland/rc.jobs.wirelessfull` with the same
 full Wi-Fi/Bluetooth argument set. It first joined the private network, obtained
 DHCP settings, and opened Apple's HTTPS success page. It then switched Wi-Fi
 power off and on, associated again, and finally opened Bluetooth Settings. The
-current `220dd01d` rerun passes every Wi-Fi stage but does not reproduce the
-Bluetooth device rows seen in this older run.
+current `0c7b589e` rerun passes every Wi-Fi stage and again populates the
+Bluetooth device list.
 
 | Evidence | SHA-256 |
 |---|---|
@@ -426,10 +426,11 @@ Observed:
 - Bluetooth Settings listed both `Accessory` and `HONOR X10 Max`;
 - the Wi-Fi status icon remained active in the final Bluetooth screenshot.
 
-A current `220dd01d` rerun (`logs/130503-run.log`) repeated both Wi-Fi joins and
-the power cycle. Its LE report counter rose from 90 when Settings opened to 258
-by the end of the run, but the device list stayed empty. The overall gate is
-`PARTIAL`: Wi-Fi is verified, while Bluetooth discovery is not repeatable.
+A current `0c7b589e` rerun (`logs/162111-run.log`) repeated both Wi-Fi joins,
+the power cycle and Bluetooth discovery. Its final counters were 157 ordinary
+advertisements, 136 scannable advertisements and 69 scan responses, with 65
+named advertisements. Settings displayed `LAPTOP-69NFHNVP`. The complete
+wireless discovery gate is therefore PASS; pairing remains separate.
 
 A later named-peer attempt, `logs/024316-run.log`, kept Wi-Fi connected but the
 list contained only `Accessory` when the second row was tapped. No pairing was
