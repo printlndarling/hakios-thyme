@@ -9,13 +9,13 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `404af36` (`Promote THYME wireless and Bluetooth identity baseline`) |
+| Verified functional source | `1984332` (`Add THYME Bluetooth audio route wait test`) |
 | Worktree | clean after this baseline update |
 
-The kernel sources are unchanged from `44b5922`; `bde073c` changes only the
-user-space Bluetooth identity path and its boot job. The clean regression below
-was started with `404af36`; `02852b6` later adds only an explicit opt-in guard
-for disposable RAM-test Wi-Fi credentials and does not change these artifacts.
+The kernel sources are unchanged from `44b5922`. The user-space side now
+includes the SystemConfiguration identity job, Apple Bluetooth HAL overlay,
+BTServer profile jobs and AVAudioSession/A2DP diagnostics. The vendor HAL is
+extracted locally from the matching IPSW and remains Git-ignored.
 
 ## RAM artifacts
 
@@ -25,7 +25,7 @@ for disposable RAM-test Wi-Fi credentials and does not change these artifacts.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `35a9de39c5c782b9e21c52f06dcd7250ff52408c9936c9c26b7a9856cab659f7` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `25bc4e83f5cead28e23072e0771ad92a411dbe6344b17a6bd85e4de59edf9aa1` |
 | clean-main `hakios-kernel` | `cea38303c4f06e01b3c63eb0db525df6931894dc3671d15a6d6fb92e1963a236` |
 
 The kernel binary hash changes when build metadata changes. The scenario is a
@@ -62,32 +62,57 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean 230-second cold RAM run at `logs/210532-run.log` completed:
+The clean 230-second cold RAM run at `logs/232341-run.log` completed:
 
-- the `com.hakios.scname` boot job automatically completed preferences lock,
-  set, commit and apply with result 1 and exited 0;
-- a 2.4 GHz WPA2 association, four-way handshake, CCMP pairwise/group key
-  installation and DHCP address `192.168.0.103`;
+- the `com.hakios.scname` boot job automatically published the local name;
+- BTServer LE and AVRCP jobs started after the Bluetooth path became active;
+- a WPA2 association, four-way handshake, CCMP pairwise/group key installation
+  and DHCP address `192.168.0.103`;
 - Wi-Fi off, interface removal, Wi-Fi on and a second full association;
-- DNS, TCP and TLS traffic through en0, plus Safari page loading;
-- Bluetooth HCI scanning with multiple named LE advertisements.
+- DNS, TCP and TLS traffic through en0;
+- Bluetooth scanning and Settings navigation.
 
-A focused UI run then rendered the stock Bluetooth Settings footer as
-`HakiOS Mi 10S` instead of `(null)`. On the current RAM boot the user also
-confirmed that a Bluetooth headset connects and Wi-Fi remains usable. Headset
-audio routing, microphone use and reconnection after a deliberate Bluetooth
-power cycle remain separate checks.
+The automated screenshot conversion in this run failed in the host-side `xl`
+helper, so the screenshots are not used as evidence. The kernel and launchd log
+above records the completed wireless operations.
+
+A focused Bluetooth-audio run at `logs/231436-run.log` waited for the paired
+headset to appear, then observed:
+
+```text
+sound_test: awaitbluetooth: BluetoothA2DPOutput after 125 s
+sound_test: route:   BluetoothA2DPOutput "..." (...-tacl)
+sound_test: a tone ... AudioQueueStart: 0
+sound_test: 144000 of 144000 frames handed over
+sound_test: route:   BluetoothA2DPOutput "..."
+```
+
+This proves the Bluetooth HAL plugin loads and the system selects an A2DP
+output route; AudioQueue accepted the test stream. It does not prove that the
+encoded stream reached the headset at real-time rate. Direct listening on this
+build produced continuous hoarse, crackling audio. A2DP routing is therefore
+PASS, but audible A2DP quality is FAIL.
+
+The HCI UART is currently fixed at 115200 8N1, about 11.5 KB/s. That is below
+the encoded bitrate of normal SBC/A2DP streams and is the leading hypothesis,
+not yet a proven root cause. A same-headset A/B run is required before changing
+the default speed.
+
+AVRCP transport controls, HFP microphone/SCO, Bluetooth-off/on recovery and
+deliberate reconnect remain to be confirmed separately.
+
+`AVAudioSession` still rejects explicit `AllowBluetooth` and
+`AllowBluetoothA2DP` category options with `OSStatus -50`, even though the
+system-selected route is A2DP. That API gap remains open for applications that
+request those options themselves.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/210532-run.log` | `d15603d5db14f911754beb7d12c631b442cac09119cca4c92ea0acfab9d3f9f0` |
-| `logs/clean-main-wifi-210532.png` | `e7c0669c68f4b122b705f5504c96971bb0fed1851351f80f15de6d2b47f0c1a5` |
-| `logs/clean-main-bt-210532.png` | `d0b3078c35bc0dd7e01874973a69e70916246f0a190f87e9f7ab75e073f1a70f` |
+| `logs/232341-run.log` | `42f29de2b2b3f1a51b692bbb7ecfd083d2274c540886ffc8abc76a1e36240f39` |
+| `logs/231436-run.log` | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
 
-The clean Wi-Fi screenshot shows the switch enabled with a populated nearby
-network list, and the clean Bluetooth screenshot shows the name footer without
-`(null)`. The radio teardown near the end of the run is the intentional return
-to the loader after `loader_return_after`, not a Wi-Fi failure.
+The radio teardown near the end of the run is the intentional return to the
+loader after `loader_return_after`, not a Wi-Fi failure.
 
 A separate full-system `press_power=90` run blanked the display on the first
 short press and woke it on the second. Evidence: `logs/075530-run.log`,

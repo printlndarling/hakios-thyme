@@ -119,6 +119,42 @@ Evidence:
 | `logs/clean-main-wifi-210532.png` | `e7c0669c68f4b122b705f5504c96971bb0fed1851351f80f15de6d2b47f0c1a5` |
 | `logs/clean-main-bt-210532.png` | `d0b3078c35bc0dd7e01874973a69e70916246f0a190f87e9f7ab75e073f1a70f` |
 
+### Bluetooth audio route (2026-11-03)
+
+The reduced system image did not include the stock Bluetooth audio HAL. A local,
+Git-ignored copy of `BTAudioHALPlugin.driver` extracted from the matching 16.5
+IPSW is now overlaid through `/redwood/hal` for both RAM-root and flash-root
+boots. The missing `com.apple.BTServer.le`, `.avrcp`, `.map` and `.pbap` jobs,
+plus `bluetoothuserd`, are now part of the Bluetooth job set.
+
+On the physical phone, a focused run waited for the paired headset and observed
+the system route change to `BluetoothA2DPOutput`; AudioQueue then accepted a
+3-second test tone with `144000/144000` frames handed over while the A2DP route
+remained selected. This is PASS for HAL loading and A2DP routing.
+
+Direct listening on the same RAM build found continuous hoarse, crackling
+audio. The frame handover only proves that the audio API accepted the buffer;
+it does not prove real-time delivery to the headset. A2DP audible quality is
+therefore FAIL. The HCI UART remains fixed at 115200 8N1 (about 11.5 KB/s),
+which is below normal encoded A2DP throughput and is the leading hypothesis.
+A same-headset A/B run must confirm the root cause before a higher speed can
+become the default.
+
+AVRCP controls, HFP microphone/SCO, Bluetooth-off/on recovery and reconnection
+after a deliberate power cycle still require separate checks.
+
+`AVAudioSession` still returns `OSStatus -50` when an application explicitly
+sets `AllowBluetooth` or `AllowBluetoothA2DP`; selecting Playback without those
+options succeeds, and the system-selected A2DP route remains active. This API
+compatibility gap remains open.
+
+Evidence:
+
+| File | SHA-256 |
+|---|---|
+| `logs/231436-run.log` | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
+| `logs/232341-run.log` | `42f29de2b2b3f1a51b692bbb7ecfd083d2274c540886ffc8abc76a1e36240f39` |
+
 ### Historical unnamed-accessory diagnosis
 
 The HCI trace now records the address in the LE white-list add/remove commands.
@@ -197,12 +233,12 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PASS for discovery, pairing and connection; PARTIAL for audio | Firmware, HCI reset, H4 transport, LE scanning and the Settings device list PASS. The Settings local name now renders from SystemConfiguration, and the user confirmed a Bluetooth headset connects on the current RAM boot. Headset audio routing, microphone use and reconnection after a deliberate power cycle remain unverified (`logs/210532-run.log`) |
+| Bluetooth | PASS for discovery, pairing, connection and A2DP route; FAIL for audible A2DP quality | Firmware, HCI, H4, LE scan, Settings discovery, headset connection and the A2DP route PASS. Direct listening found hoarse, crackling audio; `144000/144000` AudioQueue handover does not prove real-time delivery. HFP/SCO, AVRCP, microphone and deliberate reconnect remain unverified (`logs/231436-run.log`) |
 | Wi-Fi discovery/startup | PASS | The current run opened Wi-Fi and returned real 2.4 GHz and 5 GHz networks; the user also confirmed Wi-Fi remains usable on the current RAM boot (`logs/210532-run.log`) |
 | Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/210532-run.log`) |
 | Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/210532-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/210532-run.log`) |
-| Combined wireless regression | PASS | The current cold boot passed the automatic Bluetooth-name job, Wi-Fi join, Safari, power off/on, a second association and Bluetooth LE discovery; the user then confirmed headset connection and usable Wi-Fi in the same RAM boot (`logs/210532-run.log`) |
+| Combined wireless regression | PASS | The current cold boot passed the automatic Bluetooth-name job, BTServer profile startup, Wi-Fi join, power off/on, a second association and Bluetooth LE discovery (`logs/232341-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
@@ -274,7 +310,7 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
 | Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on. The current join was issued through the same Apple80211 ASSOCIATE request that Settings uses; entering credentials through the Settings keyboard remains unvalidated |
-| Bluetooth Settings/pairing UI | PASS for discovery, pairing and connection; PARTIAL for audio | The footer now renders `HakiOS Mi 10S`, devices are discovered, and the user connected a headset on the current RAM boot. Audio transfer and reconnect behavior remain unverified (`logs/clean-main-bt-210532.png`) |
+| Bluetooth Settings/pairing UI | PASS for discovery, pairing and connection; FAIL for audible A2DP quality | The footer renders `HakiOS Mi 10S`, devices are discovered and a headset reaches Connected. The route exists, but direct listening is crackling and hoarse; HFP, AVRCP controls and deliberate reconnect remain open (`logs/231436-run.log`) |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
