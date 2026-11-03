@@ -1,10 +1,5 @@
-# Bluetooth audio playback gate: keep Settings open and play one short tone at
-# three points, so reconnect timing cannot hide a working A2DP route.
+# Bluetooth audio gate: open Settings, then wait for a Bluetooth route and play
+# a test tone as soon as the user's headset connects.
 /redwood/bin/sound_test springboard
 /redwood/bin/battery_test open prefs:root=Bluetooth
-/redwood/bin/sound_test wait 40
-/redwood/bin/sound_test playback route tone 3 route
-/redwood/bin/sound_test wait 30
-/redwood/bin/sound_test playback route tone 3 route
-/redwood/bin/sound_test wait 30
-/redwood/bin/sound_test playback route tone 3 route
+/redwood/bin/sound_test awaitbluetooth 150

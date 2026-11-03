@@ -23,6 +23,7 @@
  *   sessions                           list audio categories and test Playback with no, HFP, A2DP and
  *                                      combined route options
  *   hal                                list the audio server's loaded plug-ins and devices
+ *   awaitbluetooth [SECONDS]           wait for a Bluetooth route, then activate playback and play a test tone
  *   haptic [SECONDS]                   haptics the way an application (and UIKit's feedback generators) plays
  *                                      them, through CoreHaptics: a tap, then a vibration of SECONDS (default
  *                                      0.3, at most 3: the kernel cuts a vibration at 1 s) at half strength, then
@@ -394,6 +395,38 @@ playback(void)
 	return configured && active ? 0 : 1;
 }
 
+/* Wait until the session route is a Bluetooth port, then play through it at once. */
+static int
+await_bluetooth(unsigned seconds)
+{
+	for (unsigned elapsed = 0; elapsed <= seconds; elapsed++) {
+		id session = send((id)objc_getClass("AVAudioSession"), "sharedInstance");
+		id outputs = send(send(session, "currentRoute"), "outputs");
+		unsigned long count = outputs ? ((unsigned long (*)(id, SEL))objc_msgSend)(outputs, sel_registerName("count")) : 0;
+
+		for (unsigned long i = 0; i < count; i++) {
+			id port = ((id (*)(id, SEL, unsigned long))objc_msgSend)(outputs, sel_registerName("objectAtIndex:"), i);
+			const char *type = text(send(port, "portType"));
+			if (strncmp(type, "Bluetooth", 9) == 0) {
+				int playback_result;
+				printf("sound_test: awaitbluetooth: %s after %u s\n", type, elapsed);
+				playback_result = playback();
+				printf("sound_test: awaitbluetooth: playback result %d; playing a test tone\n", playback_result);
+				(void)playback_result;
+				(void)tone(3);
+				route();
+				return 0;
+			}
+		}
+		if (elapsed % 10 == 0) {
+			printf("sound_test: awaitbluetooth: waiting for a Bluetooth route (%u/%u s)\n", elapsed, seconds);
+		}
+		if (elapsed < seconds) sleep(1);
+	}
+	printf("sound_test: awaitbluetooth: no Bluetooth route after %u s\n", seconds);
+	return 1;
+}
+
 /* CoreHaptics' constants (NSString *) by name, the framework opened when first asked for */
 static id
 haptics_constant(const char *name)
@@ -537,6 +570,9 @@ main(int argc, char **argv)
 			failed |= session_diagnostic();
 		} else if (strcmp(argv[i], "hal") == 0) {
 			failed |= hal_devices();
+		} else if (strcmp(argv[i], "awaitbluetooth") == 0) {
+			unsigned seconds = i + 1 < argc ? (unsigned)atoi(argv[++i]) : 120;
+			failed |= await_bluetooth(seconds);
 		} else if (strcmp(argv[i], "restart") == 0) {
 			restart();
 		} else if (strcmp(argv[i], "haptic") == 0) {
