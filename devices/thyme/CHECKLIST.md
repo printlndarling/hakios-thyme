@@ -43,9 +43,9 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `823ebae` on `main` was cold-booted from RAM with the pinned
+The tested source revision `57db9c8b` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
-and the kernel (`c555626225e6`), boot image (`2d662c991a5a`), loader
+and the kernel (`a869ab460000`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
 (`373a75aeac33`) all matched `ram-baseline.conf`.
 
@@ -57,18 +57,22 @@ One boot completed:
 - a second scan and second successful association;
 - Safari opening `https://example.com`;
 - Bluetooth Settings opening while HCI LE scanning continued with zero queue
-  or enqueue errors;
-- a short power-key press blanking the display and a second short press
-  waking it with `changeSource: LockButton`.
+  or enqueue errors.
 
-Evidence: `logs/075530-run.log` (SHA-256
-`0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d`),
-`logs/power-full-off.png` (SHA-256
-`c88708288d58480014ea496a5f5af8ce770189fbc93984fae77ede3d96d5a8cb`) and
-`logs/power-full-on.png` (SHA-256
-`64bc92c9a1b8d2b50d313713f2359c8f9dfa9f87c51c7b0e95f3105cd1f009fc`).
+Evidence: `logs/082732-run.log` (SHA-256
+`bd835bbd9daf6f433b0775e961eff20321a931e0cc0a58b7690fc41c3808fa46`),
+`logs/082501-wifi.png` (SHA-256
+`3cf2ff8653a9bb41a7d013466ec74621eb50b0d158926cacc1a71f24f3c16369`) and
+`logs/082501-bt.png` (SHA-256
+`c3316d457baaf0088875a01b3de766b30fa91c28f3242b350ecfa96a1ac8b863`).
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
+
+A separate full-system power-key run pressed the lock key at 90 and 100
+seconds: `backboardd` reported `displayState: off` and `Set Blanked: YES`,
+then the second press produced `Main will unblank` and `Set Blanked: NO`
+with `changeSource: LockButton`. Evidence: `logs/075530-run.log`, SHA-256
+`0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d`.
 
 The regression command now uses `out/thyme-boot/root-wirelessfull.apfs` by
 default and refuses any kernel, boot image, UEFI, loader, system image,
@@ -256,7 +260,7 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
-| Torch/flash | TODO | not yet exercised on the official-main port |
+| Torch/flash | PARTIAL | Hardware pulse PASS: PM8150L channel 97 at 125 mA ramped up (`INT_RT_STS=0x90`) and turned off cleanly (`logs/081934-run.log`). Control Center, mediaserverd and `/dev/hakios-torch` still need an end-to-end UI test |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
 | ALS / auto-brightness | FAIL | no usable ambient-light sensor path; brightness is manual |
@@ -270,7 +274,7 @@ No item moves to `PASS` from source inspection alone.
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
   THYME UEFI, expose BlockIo/PartitionInfo, and pass the read-only survey.
 - [ ] After that survey, make a separate accepted design for persistent storage.
-- [ ] Rear camera and torch.
+- [ ] Rear camera; torch userspace/Control Center integration (the bounded hardware path is already PASS).
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.

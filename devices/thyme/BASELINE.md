@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `823ebae` (`Port THYME power-key test injection`) |
+| Verified source | `57db9c8b` (`Port THYME PM8150L flashlight`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -21,7 +21,7 @@ experimental kernel or with an older resident system image.
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `fae315dd2ec82a5eb6100c6cc23c11ca5a39a453188932545bdefa1913f55ad4` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `373a75aeac33f568fe610f1cf5298163e2c9c92be43b2976b932537e835ecbd1` |
-| clean-main `hakios-kernel` | `c555626225e66e09f568f8bdebf7b23e2af0c5aa69271d4af499aa42a5be20be` |
+| clean-main `hakios-kernel` | `a869ab46000009640ba3a6a6880fd5730c6abac78b62395c359f256b8fec565a` |
 
 The kernel binary hash changes when the build metadata changes. The source
 commit, clean worktree, build log, and artifact hashes above must all be
@@ -53,7 +53,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `823ebae` boot completed all of these in one RAM run:
+The clean `57db9c8b` boot completed all of these in one 230-second RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -63,19 +63,34 @@ The clean `823ebae` boot completed all of these in one RAM run:
 - the second association installed both keys and made en0 usable;
 - Safari opened `https://example.com`;
 - Bluetooth Settings opened and the HCI scan path remained healthy.
-- a short power-key press blanked the display, and the second press woke it.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/075530-run.log` | `0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d` |
-| `logs/power-full-off.png` | `c88708288d58480014ea496a5f5af8ce770189fbc93984fae77ede3d96d5a8cb` |
-| `logs/power-full-on.png` | `64bc92c9a1b8d2b50d313713f2359c8f9dfa9f87c51c7b0e95f3105cd1f009fc` |
+| `logs/082732-run.log` | `bd835bbd9daf6f433b0775e961eff20321a931e0cc0a58b7690fc41c3808fa46` |
+| `logs/082501-wifi.png` | `3cf2ff8653a9bb41a7d013466ec74621eb50b0d158926cacc1a71f24f3c16369` |
+| `logs/082501-bt.png` | `c3316d457baaf0088875a01b3de766b30fa91c28f3242b350ecfa96a1ac8b863` |
 
 The screenshots show the Wi-Fi switch on with real nearby networks after the
 power cycle, then stock Bluetooth Settings discovering `Accessory` while the
 Wi-Fi status icon is still active. The run's later radio teardown happened after
 `loader_return_after` expired, during the intentional return to the loader; it
 is not a Wi-Fi startup failure.
+
+A separate full-system `press_power=90` run blanked the display on the first
+short press and woke it on the second. Evidence: `logs/075530-run.log`,
+SHA-256 `0d91ebdba4e4615eb7314180d0b288f22515392592eaf73ba9a93d951c61b85d`.
+
+### PM8150L flashlight pulse
+
+A separate bounded `torch=2 torch_secs=2` RAM run identified the PM8150L flash
+module on SPMI channel 97, set channel 0 to 125 mA, observed
+`INT_RT_STS=0x90` (the LED ramped up), and switched it off after two seconds.
+The final readback was `enable=0000 channels=0000 target=0000 (dark)`.
+
+Evidence: `logs/081934-run.log`, SHA-256
+`6b6d07900ad0abf4fefc6a8af4bd17b3534f70d9250d5f941d3d475ffed30301`.
+This is a hardware-level PASS for the bounded torch path. Control Center,
+mediaserverd and `/dev/hakios-torch` still need an end-to-end userspace test.
 
 ## Historical verified run
 
