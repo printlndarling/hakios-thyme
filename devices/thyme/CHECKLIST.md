@@ -155,9 +155,9 @@ Evidence:
 
 | File | SHA-256 |
 |---|---|
-| `logs/022912-run.log` | `5f0bee294acdaba63d2d8771b407b66429dbdd3545ba24d92c16e0d54ad42bc1` |
-| `logs/wirelessregress-wifi.png` | `1b9deac6574e81974114be5382a2a3f8df1745b94f36600c3578fb49eb840940` |
-| `logs/wirelessregress-bt.png` | `4e8823eb6785740cf3680a95141949020ab9f7e9954134bb304a434ca9026c93` |
+| `logs/024949-run.log` | `291723a6aa6a6ee40202e22460e4e3b4ba2dc46abb6ff4a3db85d5f60c802307` |
+| `logs/wirelessregress-wifi.png` | `dc1d814b6edbd5af963e7bd0c7004954c1266b0512f64da04cf24ab88c36a60b` |
+| `logs/wirelessregress-bt.png` | `cfb8ed1fd6fdab808958a36570204012a082a513d3f1e501e66ff051b3999470` |
 | `logs/231436-run.log` | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
 | `logs/232341-run.log` | `42f29de2b2b3f1a51b692bbb7ecfd083d2274c540886ffc8abc76a1e36240f39` |
 
@@ -259,10 +259,10 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/210532-run.log`) |
 | Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/210532-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/210532-run.log`) |
-| Combined wireless regression | PASS | The current cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, and reached Bluetooth Settings discovery without H4 faults (`logs/022912-run.log`) |
+| Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
-| GPU acceleration | PASS | Adreno 650 hardware submits drive SpringBoard with zero GPU-wait time in the current run and no softpipe fallback (`logs/022912-run.log`) |
-| UI smoothness | PARTIAL | Rendering is GPU-backed, but observed frame cadence still varies from a few frames per second on static Settings pages to smoother transitions. This is a performance/refresh-scheduling issue, not evidence of CPU software rendering |
+| GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`) |
+| UI smoothness | PARTIAL | Rendering is now definitely GPU-backed; residual stutter/refresh pacing remains and needs frame-time tuning. It is not evidence of CPU/softpipe rendering |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
 

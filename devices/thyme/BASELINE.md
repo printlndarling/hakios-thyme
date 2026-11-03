@@ -27,7 +27,7 @@ Git-ignored.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `9b4ad98b31f7dfede561b144a640e10835a63ad439864f0f24f67ffc22ffe517` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `6e04e0b91ced03822f5f4a90fb90edc082fddbf6f4aa1cdcde922db3aac68b6f` |
 | `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
 | clean-main `hakios-kernel` | `e73e82d4e5da2409ae5e916d86d4a161ca94a5be737e9c3124eb7ef4740fad62` |
 
@@ -49,7 +49,7 @@ cannot silently disable `wifi`, `bt` or another subsystem.
 ```text
 touchscreen=1 buttons=1 umi_touch=1 umi_keys=1 bootcpu=7 cpus=7
 cpufreq=1 thermal=1 thermal_stop=95 battery=1 adsp=1 sound=4 mic=4
-haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1
+haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1 gpu=1
 ```
 
 `system.apfs` is loaded once with `./xl ramdisk`; the scenario image is passed
@@ -65,9 +65,12 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The cold RAM run at `logs/022912-run.log` completed:
+The GPU-enabled cold RAM run at `logs/024949-run.log` completed:
 
 - the `com.hakios.scname` boot job automatically published the local name;
+- `gpu=1` initialized the THYME Adreno 650/GMU path and kept `HakiosGPU`
+  running; the window server submitted more than 760 `hakios-gl` frames with
+  no softpipe fallback;
 - the Bluetooth controller and host moved from 115200 to 3 Mbaud before patch
   download and stayed up without an H4 fault or TX timeout;
 - a WPA2 association, CCMP pairwise/group key installation and DHCP address
@@ -78,7 +81,8 @@ The cold RAM run at `logs/022912-run.log` completed:
 
 The Wi-Fi screenshot shows the radio active and Safari on `example.com`; the
 Bluetooth screenshot shows Settings discovery. The kernel log records both
-CCMP key installations and both successful associations.
+CCMP key installations and both successful associations. The same run has
+`FD650`/`THE GPU STAYS ON` and zero `softpipe` occurrences.
 
 A focused Bluetooth-audio run at `logs/231436-run.log` waited for the paired
 headset to appear, then observed:
@@ -113,9 +117,9 @@ request those options themselves.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/022912-run.log` | `5f0bee294acdaba63d2d8771b407b66429dbdd3545ba24d92c16e0d54ad42bc1` |
-| `logs/wirelessregress-wifi.png` | `1b9deac6574e81974114be5382a2a3f8df1745b94f36600c3578fb49eb840940` |
-| `logs/wirelessregress-bt.png` | `4e8823eb6785740cf3680a95141949020ab9f7e9954134bb304a434ca9026c93` |
+| `logs/024949-run.log` | `291723a6aa6a6ee40202e22460e4e3b4ba2dc46abb6ff4a3db85d5f60c802307` |
+| `logs/wirelessregress-wifi.png` | `dc1d814b6edbd5af963e7bd0c7004954c1266b0512f64da04cf24ab88c36a60b` |
+| `logs/wirelessregress-bt.png` | `cfb8ed1fd6fdab808958a36570204012a082a513d3f1e501e66ff051b3999470` |
 | `logs/231436-run.log` (115200 crackling baseline) | `73ba4941c833d03233c9dca59460a72f0f8e9c10781a175b1a084654ef11474d` |
 
 ## Chinese UI
