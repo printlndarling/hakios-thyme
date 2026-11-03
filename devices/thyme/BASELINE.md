@@ -177,6 +177,9 @@ and 179 mode-table writes completed, and the sensor read back
 `0x0100=0` (stream still off). All three camera supplies were then released
 with error 0. Evidence: `logs/114440-run.log`, SHA-256
 `5f700417ba963e44fbb2a4f29c735382ef40d96e1c454494475e3ae9d5ef84cf`.
+The complete-scene mode regression is reproducible with
+`devices/thyme/camera-mode.sh` (`CAM_MODE=3` by default); the DMA test pattern
+uses `devices/thyme/camera-tpg.sh`.
 
 ### Synthetic camera through the iOS stack
 
