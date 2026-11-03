@@ -43,7 +43,7 @@ Post-fix RAM test image:
 
 ## Canonical regression after UFS enablement (2026-11-03)
 
-The tested source revision `cfece83a` on `main` was cold-booted from RAM with the pinned
+The tested source revision `220dd01d` on `main` was cold-booted from RAM with the pinned
 UEFI-capable image and the complete wireless scenario. The worktree was clean,
 and the kernel (`1b8ead5e8439`), boot image (`2d662c991a5a`), loader
 (`7bc139e4b1e4`), system image (`fae315dd2ec8`) and scenario
@@ -56,15 +56,19 @@ One boot completed:
 - Wi-Fi power off, interface removal, power on and radio restart;
 - a second scan and second successful association;
 - Safari opening `https://example.com`;
-- Bluetooth Settings opening while HCI LE scanning continued with zero queue
-  or enqueue errors.
+- Bluetooth firmware, HCI command flow, LE reports and the Settings scan path
+  remained healthy, but Settings still displayed no device row after 20 seconds.
 
-Evidence: `logs/120114-run.log` (SHA-256
-`270a055e7d4c26a43215df21d6824974b384d2a5f826340afffcf0232f3704ec`),
-`logs/120001-wifi.png` (SHA-256
-`a949269f511fc151b890fccd9062788f459afd7ac803605df8005991722458e3`) and
-`logs/120001-bt.png` (SHA-256
-`e2e1a25a6e884de89afb53bc9d95f92b2c7f6f3499745061c4bf8fefe06bf9d2`).
+Evidence: `logs/130503-run.log` (SHA-256
+`bc4a31baf063d8021276aa496f4ef89d2b26077e7846ee828a244943f920bde3`),
+`logs/wirelessregress-wifi.png` (SHA-256
+`8f8fecc13986e5642abb69c700f43a3122accd618cc277dfd5288b1208b49a4a`) and
+`logs/wirelessregress-bt.png` (SHA-256
+`2725b11cc04827216fc95a102525e03543de871d64967610e094111ae67d2a13`).
+The Bluetooth screenshot was taken 20 seconds after Settings opened; it is not
+the expected transient spinner at page entry. An older pinned run did display
+`Accessory` and `HONOR X10 Max`, so the UI path exists, but current discovery is
+not reproducible and must not be recorded as a PASS.
 The later radio teardown in the log is the intentional
 `loader_return_after` shutdown, not a Wi-Fi failure.
 
@@ -158,12 +162,12 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PARTIAL; peer-pairing gate pending | Firmware, HCI reset, H4 transport, LE reception and Settings discovery PASS (`logs/204958-run.log`, `logs/230506-run.log`). The `Accessory` is a connectable-undirected advertiser at -99..-105 dBm; it reached `LE Enhanced Connection Complete status=0`, then disconnected with reason `0x3e` before remote feature exchange (`logs/002232-run.log`). A known-good peer close to the phone is required before calling host pairing broken |
-| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/052011-run.log`, `logs/wirelessregress-wifi.png`) |
-| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/052011-run.log`) |
-| Wi-Fi association/DHCP | PASS | The current 5 GHz AP completed authentication, association, the four-way handshake and key installation. DHCP assigned `192.168.0.105`, router `192.168.0.1`, and DNS servers `192.168.1.1`/`192.168.0.1` (`logs/022344-run.log`) |
-| Wi-Fi TCP/TLS and Safari | PASS | Safari loaded `https://www.apple.com/library/test/success.html` through en0 and displayed `Success`; MobileSafari/WebKit/trustd established multiple TLS connections and transferred about 40 MB (`logs/wifisafari-success.png`) |
-| Combined wireless regression | PASS | The current canonical cold boot completed Wi-Fi join/DHCP, Safari, Wi-Fi power off/on, a second association, and Bluetooth Settings discovery while HCI scanning stayed healthy (`logs/052011-run.log`) |
+| Bluetooth | PARTIAL; discovery and peer-pairing gates pending | Firmware, HCI reset, H4 transport and LE reception PASS. A prior run displayed `Accessory` and `HONOR X10 Max` (`logs/023242-run.log`), and a pair attempt reached `LE Enhanced Connection Complete status=0` before disconnecting with reason `0x3e` (`logs/002232-run.log`). The current canonical rerun delivered 258 LE reports while Settings remained empty 20 seconds after opening (`logs/130503-run.log`, `logs/wirelessregress-bt.png`), so UI discovery is not currently reproducible |
+| Wi-Fi discovery/startup | PASS | The current canonical run opened Wi-Fi, returned 2.4 GHz and 5 GHz networks, and displayed them in Settings (`logs/130503-run.log`, `logs/wirelessregress-wifi.png`) |
+| Wi-Fi power off/on recovery | PASS | The current canonical run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/130503-run.log`) |
+| Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP and en0 traffic remained usable after the power cycle (`logs/130503-run.log`) |
+| Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0, MobileSafari/WebKit completed TLS connections and transferred tens of KB after each association (`logs/130503-run.log`) |
+| Combined wireless regression | PARTIAL | The current canonical cold boot passed Wi-Fi join, Safari, power off/on and a second association. Bluetooth HCI scanning stayed healthy, but the Settings device list remained empty (`logs/130503-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU | PASS | Adreno 650 hardware rendering drives SpringBoard without softpipe fallback |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
@@ -235,7 +239,7 @@ No item moves to `PASS` from source inspection alone.
 | SpringBoard settings and status bar | PARTIAL | Reduce Transparency, Reduce Motion and battery/status-bar hooks exist; battery charging state still needs the current-build RAM retest |
 | Settings and application launch | PARTIAL | URL openings, Settings panes and application launch navigation work in scripted runs; broad application compatibility is unverified |
 | Wi-Fi Settings UI | PARTIAL | The pinned baseline displays real 2.4 GHz and 5 GHz networks and recovers after off/on. The current join was issued through the same Apple80211 ASSOCIATE request that Settings uses; entering credentials through the Settings keyboard remains unvalidated |
-| Bluetooth Settings/pairing UI | PARTIAL | Stock Settings discovered and displayed a connectable `Accessory`. Its signal was only -99..-105 dBm, and it disconnected with reason `0x3e` after link establishment; pairing with a known-good peripheral in close range remains the next gate |
+| Bluetooth Settings/pairing UI | PARTIAL | A prior run displayed `Accessory` and `HONOR X10 Max`; the current canonical rerun delivered LE reports but displayed no row after 20 seconds. Pairing still needs a controlled peripheral in close range, and discovery must be made repeatable before pairing can be judged |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |

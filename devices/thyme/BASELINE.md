@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified source | `cfece83a` (`Record THYME camera userspace pipeline`) |
+| Verified source | `220dd01d` (`Wait for THYME Bluetooth discovery before capture`) |
 | Worktree | clean (`git status --porcelain` empty) |
 
 ## RAM artifacts
@@ -55,7 +55,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The clean `b12838cc` boot completed all of these in one 230-second RAM run:
+The clean `220dd01d` boot completed all of these in one 230-second RAM run:
 
 - 5 GHz WPA2 association and four-way handshake;
 - DHCP address `192.168.0.103`;
@@ -64,17 +64,22 @@ The clean `b12838cc` boot completed all of these in one 230-second RAM run:
 - the second scan found the configured 5 GHz and 2.4 GHz networks;
 - the second association installed both keys and made en0 usable;
 - Safari opened `https://example.com`;
-- Bluetooth Settings opened and the HCI scan path remained healthy.
+- Bluetooth Settings opened, HCI commands completed and LE reports continued to
+  arrive, but Settings displayed no device row after 20 seconds.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/120114-run.log` | `270a055e7d4c26a43215df21d6824974b384d2a5f826340afffcf0232f3704ec` |
-| `logs/120001-wifi.png` | `a949269f511fc151b890fccd9062788f459afd7ac803605df8005991722458e3` |
-| `logs/120001-bt.png` | `e2e1a25a6e884de89afb53bc9d95f92b2c7f6f3499745061c4bf8fefe06bf9d2` |
+| `logs/130503-run.log` | `bc4a31baf063d8021276aa496f4ef89d2b26077e7846ee828a244943f920bde3` |
+| `logs/wirelessregress-wifi.png` | `8f8fecc13986e5642abb69c700f43a3122accd618cc277dfd5288b1208b49a4a` |
+| `logs/wirelessregress-bt.png` | `2725b11cc04827216fc95a102525e03543de871d64967610e094111ae67d2a13` |
 
-The screenshots show the Wi-Fi switch on with real nearby networks after the
-power cycle, then stock Bluetooth Settings discovering `Accessory` while the
-Wi-Fi status icon is still active. The run's later radio teardown happened after
+The Wi-Fi screenshot shows the switch on with real nearby networks after the
+power cycle. The Bluetooth screenshot was captured 20 seconds after Settings
+opened and still showed only the discovery spinner, not a transient page-entry
+frame. `logs/120001-bt.png` has the same empty result; an older run
+`logs/023242-run.log` did display `Accessory` and `HONOR X10 Max`. Bluetooth UI
+discovery is therefore intermittent and remains `PARTIAL`, even though the HCI
+transport and LE event path work. The run's later radio teardown happened after
 `loader_return_after` expired, during the intentional return to the loader; it
 is not a Wi-Fi startup failure.
 
@@ -401,7 +406,9 @@ tracked as a test-harness problem, not a network PASS failure.
 The complete cold-boot gate used `userland/rc.jobs.wirelessfull` with the same
 full Wi-Fi/Bluetooth argument set. It first joined the private network, obtained
 DHCP settings, and opened Apple's HTTPS success page. It then switched Wi-Fi
-power off and on, associated again, and finally opened Bluetooth Settings.
+power off and on, associated again, and finally opened Bluetooth Settings. The
+current `220dd01d` rerun passes every Wi-Fi stage but does not reproduce the
+Bluetooth device rows seen in this older run.
 
 | Evidence | SHA-256 |
 |---|---|
@@ -418,6 +425,11 @@ Observed:
   installed;
 - Bluetooth Settings listed both `Accessory` and `HONOR X10 Max`;
 - the Wi-Fi status icon remained active in the final Bluetooth screenshot.
+
+A current `220dd01d` rerun (`logs/130503-run.log`) repeated both Wi-Fi joins and
+the power cycle. Its LE report counter rose from 90 when Settings opened to 258
+by the end of the run, but the device list stayed empty. The overall gate is
+`PARTIAL`: Wi-Fi is verified, while Bluetooth discovery is not repeatable.
 
 A later named-peer attempt, `logs/024316-run.log`, kept Wi-Fi connected but the
 list contained only `Accessory` when the second row was tapped. No pairing was
