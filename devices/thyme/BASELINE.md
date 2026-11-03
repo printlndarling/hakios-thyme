@@ -171,6 +171,13 @@ The extracted frame is `logs/cam-tpg-0.png`, with raw bytes in
 This is a PASS for the board-level CSID/IFE/DMA capture path, not yet for
 frames produced by the S5KHMX sensor.
 
+`cam=3` mode preparation also passed on hardware: 259 initialization writes
+and 179 mode-table writes completed, and the sensor read back
+`0x034c=0x0bc0`, `0x034e=0x08d0`, `0x0342=0x3ea0`, `0x0340=0x0945`, with
+`0x0100=0` (stream still off). All three camera supplies were then released
+with error 0. Evidence: `logs/114440-run.log`, SHA-256
+`5f700417ba963e44fbb2a4f29c735382ef40d96e1c454494475e3ae9d5ef84cf`.
+
 ### Synthetic camera through the iOS stack
 
 The `cam=5 cam_fake=1` scene exercised the userspace path:

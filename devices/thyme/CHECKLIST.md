@@ -261,6 +261,7 @@ No item moves to `PASS` from source inspection alone.
 | Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
 | Front camera capture | TODO | not exercised |
 | Rear camera sensor/power probe | PASS | `cam=2` reached the S5KHMX sensor: ID `0x1ad0`, revision `0xa000`, module selector `0x1301`; all three supplies released with error 0 (`logs/101242-run.log`) |
+| Camera sensor mode programming | PASS | `cam=3` applied 259 init and 179 mode writes; dimensions `3008x2256`, line/frame lengths `0x3ea0/0x0945`, stream register `0x0100=0`, then powered down cleanly (`logs/114440-run.log`) |
 | Camera CSID/IFE test pattern | PASS | `cam=6` wrote a whole 320x240 RAW/Bayer frame through the THYME DMA path; `xl camera` exported `logs/cam-tpg-0.png` (`logs/104221-run.log`) |
 | Camera userspace / AVFoundation | PASS with synthetic frames | `cam=5 cam_fake=1` exposed Back/Front cameras, 16/18 formats, Camera.app preview and hundreds of 1280x720 frames; this validates the iOS capture stack and `/dev/hakios-camera`, not the physical S5KHMX stream (`logs/110735-run.log`) |
 | Camera userspace / AVFoundation | PASS with synthetic frames | `cam=5 cam_fake=1` exposed Back/Front cameras, 16/18 formats, Camera.app preview and hundreds of 1280x720 frames; this validates libhakios.media and the iOS capture graph, not the physical S5KHMX stream (`logs/110735-run.log`) |
