@@ -9,11 +9,13 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `bde073c` (`Publish THYME Bluetooth Settings computer name`) |
+| Verified functional source | `404af36` (`Promote THYME wireless and Bluetooth identity baseline`) |
 | Worktree | clean after this baseline update |
 
 The kernel sources are unchanged from `44b5922`; `bde073c` changes only the
-user-space Bluetooth identity path and its boot job.
+user-space Bluetooth identity path and its boot job. The clean regression below
+was started with `404af36`; `02852b6` later adds only an explicit opt-in guard
+for disposable RAM-test Wi-Fi credentials and does not change these artifacts.
 
 ## RAM artifacts
 
@@ -60,7 +62,7 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The 230-second cold RAM run at `logs/204854-run.log` completed:
+The clean 230-second cold RAM run at `logs/210532-run.log` completed:
 
 - the `com.hakios.scname` boot job automatically completed preferences lock,
   set, commit and apply with result 1 and exited 0;
@@ -78,17 +80,14 @@ power cycle remain separate checks.
 
 | Evidence | SHA-256 |
 |---|---|
-| `logs/204854-run.log` | `a29100f695293db6acebce060b71656f1751883954ae5270bc34d0bfa275ad75` |
-| `logs/203908-run.log` | `43ff2f7cb4409eb978f471a0102b739d3271ea1ae4ebd5cfdb8a73bcb632065e` |
-| `logs/scname-prefs2-bt.png` | `2c8f35a555f5f3e5fb569d098a27b745ed838d2f2e574efb75efacfabf5052ca` |
-| `logs/name-final-bt.png` | `4b074f3fb6ea673144c6612e986b79b0d1f77d6beb1c4a2effa41c853447deb7` |
+| `logs/210532-run.log` | `d15603d5db14f911754beb7d12c631b442cac09119cca4c92ea0acfab9d3f9f0` |
+| `logs/clean-main-wifi-210532.png` | `e7c0669c68f4b122b705f5504c96971bb0fed1851351f80f15de6d2b47f0c1a5` |
+| `logs/clean-main-bt-210532.png` | `d0b3078c35bc0dd7e01874973a69e70916246f0a190f87e9f7ab75e073f1a70f` |
 
-The final combined-run screenshots were affected by interactive device use and
-are not the primary evidence for the Settings pane. The focused Settings
-screenshot and log above are the identity evidence; the combined-run log is
-the wireless regression evidence. The radio teardown near the end of the run
-is the intentional return to the loader after `loader_return_after`, not a
-Wi-Fi failure.
+The clean Wi-Fi screenshot shows the switch enabled with a populated nearby
+network list, and the clean Bluetooth screenshot shows the name footer without
+`(null)`. The radio teardown near the end of the run is the intentional return
+to the loader after `loader_return_after`, not a Wi-Fi failure.
 
 A separate full-system `press_power=90` run blanked the display on the first
 short press and woke it on the second. Evidence: `logs/075530-run.log`,
