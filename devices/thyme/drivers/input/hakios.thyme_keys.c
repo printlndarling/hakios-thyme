@@ -10,6 +10,7 @@
 #include <kern/clock.h>
 #include <kern/sched_prim.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
@@ -49,6 +50,8 @@ static vm_offset_t arb_core, arb_cnfg, arb_observer;
 static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID;
 static bool keys_started;
 static int keys_sleep_chan;
+static uint32_t press_ms = 150, press_left;
+static thread_call_t press_call;
 
 static uint32_t
 keys_reg(vm_offset_t base, uint32_t offset)
@@ -174,6 +177,43 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 	}
 }
 
+static void
+press_step(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	static bool down;
+	uint64_t deadline;
+
+	down = !down;
+	hakios_tl("UMI keys: press_power: power %s (by the test)\n", down ? "pressed" : "released");
+	hakios_touch_post(down ? HAKIOS_BUTTON_DOWN : HAKIOS_BUTTON_UP, HAKIOS_BUTTON_LOCK, 0, 0);
+	if (down) {
+		clock_interval_to_deadline(press_ms, NSEC_PER_MSEC, &deadline);
+	} else if (--press_left > 0) {
+		clock_interval_to_deadline(10, NSEC_PER_SEC, &deadline);
+	} else {
+		return;
+	}
+	thread_call_enter_delayed(press_call, deadline);
+}
+
+static void
+press_power_init(void)
+{
+	uint32_t seconds = 0;
+	uint64_t deadline;
+
+	if (!PE_parse_boot_argn("press_power", &seconds, sizeof(seconds)) || seconds == 0) {
+		return;
+	}
+	PE_parse_boot_argn("press_power_ms", &press_ms, sizeof(press_ms));
+	press_left = 2;
+	press_call = thread_call_allocate(press_step, NULL);
+	clock_interval_to_deadline(seconds, NSEC_PER_SEC, &deadline);
+	thread_call_enter_delayed(press_call, deadline);
+	hakios_tl("UMI keys: press_power: power will be pressed for %u ms at %u s and %u s\n",
+	    press_ms, seconds, seconds + 10);
+}
+
 void
 umi_keys_init(void)
 {
@@ -182,6 +222,8 @@ umi_keys_init(void)
 	const void *board;
 	unsigned size;
 	thread_t thread;
+
+	press_power_init();
 
     if (!PE_parse_boot_argn("buttons", &enabled, sizeof(enabled))) {
         /* umi_keys=1: enable the PM8150 power and volume keys when the generic buttons arg is absent */
