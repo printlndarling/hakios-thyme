@@ -1,0 +1,3 @@
+# Isolate the first render submission that hangs the Metal backend. Run with
+# gpu=1 gpu_recover=1; the probe tries each render register group one at a time.
+/redwood/bin/hakios-metal-probe --bisect --recover

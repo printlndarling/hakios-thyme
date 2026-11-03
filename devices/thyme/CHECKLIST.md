@@ -263,7 +263,7 @@ No item moves to `PASS` from source inspection alone.
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`) |
 | UI smoothness | PARTIAL | Rendering is now definitely GPU-backed; residual stutter/refresh pacing remains and needs frame-time tuning. It is not evidence of CPU/softpipe rendering |
-| Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. Its first render pass does not finish and leaves the GPU unresponsive, so Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/031626-run.log`) |
+| Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
 

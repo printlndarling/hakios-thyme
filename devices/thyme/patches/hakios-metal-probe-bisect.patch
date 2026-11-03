@@ -1,0 +1,59 @@
+diff --git a/tools/probe.cpp b/tools/probe.cpp
+index 89cc762..ee28a3c 100644
+--- a/tools/probe.cpp
++++ b/tools/probe.cpp
+@@ -1898,6 +1898,54 @@ int main(int argc, char** argv) {
+ 
+         // 9a. one triangle
+         auto t = makeTarget(kTextureUsageRenderTarget | kTextureUsageRead, "9a");
++        if (bisect && t) {
++            struct Variant {
++                const char* name;
++                render::Options o;
++            };
++            std::vector<Variant> variants = {{"the whole stream", render::Options{}}};
++            auto without = [&](const char* name, void (*change)(render::Options&)) {
++                render::Options o;
++                change(o);
++                variants.push_back(Variant{name, o});
++            };
++            without("without the batch start (the static tables, the invalidates, the draw-state disable)", [](render::Options& o) { o.batchStart = false; });
++            without("without RB_CCU_CNTL", [](render::Options& o) { o.ccuCntl = false; });
++            without("with RB_CCU_CNTL 0x10000004 (the kernel's boot value, bit 2)", [](render::Options& o) { o.ccuConcurrentResolve = true; });
++            without("without the pass begin (window scissor, BIN_CONTROL, SKIP_IB2, VISIBILITY_OVERRIDE, SET_MODE)", [](render::Options& o) { o.passBegin = false; });
++            without("with turnip's LRZ feedback bits in BIN_CONTROL (0x03c00000)", [](render::Options& o) { o.binControlLrzFeedback = true; });
++            without("without the RM6_DIRECT_RENDER marker", [](render::Options& o) { o.marker = false; });
++            without("without the depth-less zs registers", [](render::Options& o) { o.zsNone = false; });
++            without("without the MRT registers", [](render::Options& o) { o.mrt = false; });
++            without("without the MSAA-off registers", [](render::Options& o) { o.msaaOff = false; });
++            without("without RB_RENDER_CNTL", [](render::Options& o) { o.renderCntl = false; });
++            without("with RB_RENDER_CNTL 0 (r3d's)", [](render::Options& o) { o.renderCntlZero = true; });
++            without("without the LRZ-off registers and the begin LRZ_FLUSH", [](render::Options& o) { o.lrzOff = false; });
++            without("without the program config (HLSQ_xS_CNTL, SP_xS_CONFIG)", [](render::Options& o) { o.programConfig = false; });
++            without("without the vertex program", [](render::Options& o) { o.programVs = false; });
++            without("without the fragment program", [](render::Options& o) { o.programFs = false; });
++            without("without the VFD registers", [](render::Options& o) { o.vfd = false; });
++            without("without the VPC link", [](render::Options& o) { o.vpc = false; });
++            without("without the FS input registers", [](render::Options& o) { o.fsInputs = false; });
++            without("without the FS output registers", [](render::Options& o) { o.fsOutputs = false; });
++            without("without the rasterizer registers", [](render::Options& o) { o.rast = false; });
++            without("without the viewport and scissors", [](render::Options& o) { o.viewportScissor = false; });
++            without("without the blend/depth/stencil zeros", [](render::Options& o) { o.blendZsa = false; });
++            without("with USE_VISIBILITY in the draw (the pipelines' 0x184)", [](render::Options& o) { o.visCullUse = true; });
++            without("without the CCU colour flush and its wait", [](render::Options& o) { o.tailCcuFlush = false; });
++            without("without the tail's LRZ_FLUSH", [](render::Options& o) { o.tailLrzFlush = false; });
++            without("without CACHE_FLUSH_TS and its wait", [](render::Options& o) { o.tailCacheFlush = false; });
++            without("with RB_DONE_TS and its wait (compute's tail)", [](render::Options& o) { o.tailRbDone = true; });
++            for (const Variant& v : variants) {
++                fillBo(*t, canary);
++                auto cb = drawInto(*t, flat, drawOf(0, 3), v.o);
++                TriReadback r = compareTriangle(*t, flatColour, canary, lowerLeft);
++                bool ok = completed(*cb) && r.interiorColour == r.interior;
++                report(ok, std::string("bisect: tri_flat ") + v.name + ": " + (completed(*cb) ? "COMPLETED" : "hung") + ", " + describeTriangle(r) + status(*cb, gpu));
++            }
++            std::printf("probe: %d failures\n", failures);
++            return failures ? 1 : 0;
++        }
+         if (t) {
+             fillBo(*t, canary);
+             auto cb = drawInto(*t, flat, drawOf(0, 3));

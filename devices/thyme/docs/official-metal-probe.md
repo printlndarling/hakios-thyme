@@ -13,6 +13,10 @@ to use the validated Mesa/FD650 OpenGL ES path.
   `devices/thyme/patches/hakios-metal-constexpr-clang.patch`.
   It replaces `__builtin_signbit` in the constant-expression `fui()` with
   Clang's `__builtin_bit_cast`, preserving the existing finite/NaN handling.
+- Probe bisect patch:
+  `devices/thyme/patches/hakios-metal-probe-bisect.patch`. It runs the render
+  option matrix before the normal render tests, so one cold GPU can at least
+  identify whether the first submission completes.
 - `libhakios-metal.a` and `hakios-metal-probe` were built with `MESA=1` and
   `HAKIOS=/home/darling/hakios-thyme`.
 - Probe image:
@@ -46,6 +50,24 @@ FAIL in the same run:
 The render timeout is the current blocker for the Metal path. It is not a
 CoreAnimation or plugin-only failure: the probe exercises the command stream
 directly through `hakios-metal`.
+
+## Cold-GPU bisect
+
+The probe was then rebuilt into a minimal launchd image without SpringBoard, so
+`hakios-metal` was the GPU's only client. It ran
+`hakios-metal-probe --bisect --recover` with `gpu=1 gpu_recover=1`.
+
+The whole default render stream timed out after painting only 6 of 2016
+interior pixels. All 30 one-group-removed variants then failed immediately
+because the GPU never answered again. `FAULTS` remained 0.
+
+`gpu_recover=1` is currently not implemented by the THYME GPU driver, so it
+does not reset the core after the first timeout. A valid bisect therefore needs
+one cold boot per render option, or a working GPU reset path. This is the next
+requirement for the Metal bring-up.
+
+Evidence: `logs/033837-run.log`, SHA-256
+`51692c55af66800272effbcc682214d421c5797a75594ce76ee2c0b8834a34b1`.
 
 ## Consequence
 
