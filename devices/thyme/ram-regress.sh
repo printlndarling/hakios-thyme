@@ -17,6 +17,7 @@ HERE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd)
 cd "$ROOT"
 
+export PATH=${PATH}:/tmp/hakios-phone-tools:/usr/local/bin:/usr/bin:/bin
 export XL_ADB_SERIAL=${XL_ADB_SERIAL-5290780a}
 export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
 export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
