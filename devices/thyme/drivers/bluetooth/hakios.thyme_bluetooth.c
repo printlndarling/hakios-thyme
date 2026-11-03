@@ -725,9 +725,11 @@ static void bt_control_worker(void *unused,wait_result_t result)
             if(event==0x05 && receive_length>=7)
                 hakios_tl("UMI BT: disconnection complete status=%#x handle=%#x reason=%#x\n",
                     receive[3],bt_le16(receive+4),receive[6]);
-            if(event==0x13 && receive_length>=7) {
+            if(event==0x13 && receive_length>=8) {
+                unsigned handles=receive[3];
                 bt_completed_events++;
-                bt_completed_packets+=bt_le16(receive+5);
+                for(unsigned handle=0;handle<handles && 8+handle*4<=receive_length;handle++)
+                    bt_completed_packets+=bt_le16(receive+6+handle*4);
             }
         }
         if(!error) error=bt_service_ibs(bt_control_uart);
