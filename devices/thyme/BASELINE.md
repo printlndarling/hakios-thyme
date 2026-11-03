@@ -181,6 +181,19 @@ The complete-scene mode regression is reproducible with
 `devices/thyme/camera-mode.sh` (`CAM_MODE=3` by default); the DMA test pattern
 uses `devices/thyme/camera-tpg.sh`.
 
+The `cam=4` clock/reset probe also passed from a fresh loader session:
+
+```text
+UMI camera: XO-clocked ISP IDs IFE=0x10000001 bus=0x20000000 CSID=0x20000001
+UMI camera: ISP inherited masks CSID top=0 RX=0 IFE=0x20000/0/0
+UMI camera: CSID480 and IFE-lite48x resets complete; DMA remains disabled
+UMI camera: sensor probe finished error=0; sensor stream was not started
+```
+
+This validates the THYME Titan-top clock/reset branch and ISP register access,
+but not sensor CSI streaming. Evidence: `logs/122824-run.log`, SHA-256
+`f5aa54ee6186f2420cb26fcaa7eea930add008daf994abf2a86de419d1784397`.
+
 ### Synthetic camera through the iOS stack
 
 The `cam=5 cam_fake=1` scene exercised the userspace path:

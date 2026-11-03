@@ -262,9 +262,9 @@ No item moves to `PASS` from source inspection alone.
 | Front camera capture | TODO | not exercised |
 | Rear camera sensor/power probe | PASS | `cam=2` reached the S5KHMX sensor: ID `0x1ad0`, revision `0xa000`, module selector `0x1301`; all three supplies released with error 0 (`logs/101242-run.log`) |
 | Camera sensor mode programming | PASS | `cam=3` applied 259 init and 179 mode writes; dimensions `3008x2256`, line/frame lengths `0x3ea0/0x0945`, stream register `0x0100=0`, then powered down cleanly (`logs/114440-run.log`) |
+| Camera ISP clock/reset probe | PASS | `cam=4` read IFE `0x10000001`, bus `0x20000000` and CSID `0x20000001`; completed CSID480 and IFE-lite48x resets with DMA disabled and all supplies released (`logs/122824-run.log`, SHA-256 `f5aa54ee6186f2420cb26fcaa7eea930add008daf994abf2a86de419d1784397`) |
 | Camera CSID/IFE test pattern | PASS | `cam=6` wrote a whole 320x240 RAW/Bayer frame through the THYME DMA path; `xl camera` exported `logs/cam-tpg-0.png` (`logs/104221-run.log`) |
 | Camera userspace / AVFoundation | PASS with synthetic frames | `cam=5 cam_fake=1` exposed Back/Front cameras, 16/18 formats, Camera.app preview and hundreds of 1280x720 frames; this validates the iOS capture stack and `/dev/hakios-camera`, not the physical S5KHMX stream (`logs/110735-run.log`) |
-| Camera userspace / AVFoundation | PASS with synthetic frames | `cam=5 cam_fake=1` exposed Back/Front cameras, 16/18 formats, Camera.app preview and hundreds of 1280x720 frames; this validates libhakios.media and the iOS capture graph, not the physical S5KHMX stream (`logs/110735-run.log`) |
 | Torch/flash | PASS | Hardware pulse: PM8150L channel 97 ramped up and cleaned up (`logs/081934-run.log`). End-to-end userspace and stock Control Center: AVFlashlight/mediaserverd requested 1000, 250 and 850 through `/dev/hakios-torch`; every request reached the kernel and the safety timer returned it to dark (`logs/090116-run.log`, `logs/091200-run.log`) |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
