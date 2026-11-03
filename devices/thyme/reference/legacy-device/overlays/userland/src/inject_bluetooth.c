@@ -84,7 +84,9 @@ static void (*scanner_set_handler)(id,SEL,id);
 static void hook_scanner_handler(id self,SEL command,id handler)
 {
     scanner_handler=(scanner_handler_t)handler;
-    fprintf(stderr,"UMI Bluetooth: BLE scanner handler set=%p\n",handler);
+    uintptr_t invoke=handler?*(uintptr_t *)((char *)handler+16):0;
+    fprintf(stderr,"UMI Bluetooth: BLE scanner handler set=%p invoke-offset=%#lx\n",
+        handler,invoke-daemon_base);
     scanner_set_handler(self,command,handler?(id)scanner_handler_wrapper:nil);
 }
 static const char *object_description(id object,char *buffer,size_t size)
@@ -156,7 +158,8 @@ static void install_scanner_probe(void)
         server_discovery_add=(void *)method_getImplementation(discovery_add);
         method_setImplementation(discovery_add,(IMP)log_server_discovery_add);
     }
-    fprintf(stderr,"UMI Bluetooth: BLE scanner probe installed\n");
+    fprintf(stderr,"UMI Bluetooth: scanner probe installed daemon-hooks=%u/%u/%u\n",
+        ble_found?1:0,classic_found?1:0,discovery_add?1:0);
 }
 static void initial_address_complete(unsigned status)
 {
