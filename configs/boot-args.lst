@@ -61,8 +61,11 @@ battmgr	k
 bootcpu	kl
 bt	k
 bt_again	k
+bt_baud	k
 buttons	k
 buttons_steps	k
+ca_metallib	u
+ca_prof	u
 ca_vbl	u
 caenv	u
 cam	kl
@@ -154,6 +157,15 @@ loader_return_after	kl
 machine_name	k
 membench	k
 metal	ku
+metal_all	u
+metal_dump	u
+metal_fps	u
+metal_gmem	u
+metal_gmem_draws	u
+metal_gmem_off	u
+metal_skip	u
+metal_trace	u
+metal_watch	u
 mic	k
 mic_adc	k
 mic_channels	k
@@ -214,6 +226,7 @@ modem_sim_switch_off	k
 modem_step	k
 modem_wait	k
 modem_wda_off	k
+net_dhcp	k
 net_names	k
 net_trace	k
 pmic	k

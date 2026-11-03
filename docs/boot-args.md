@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **354 arguments**: 302 read by the kernel, 14 by the loader, 48 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **367 arguments**: 304 read by the kernel, 14 by the loader, 59 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
@@ -84,7 +84,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `surf_wrap` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_WRAP` |  |
 | `surftrace` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE` |  |
 | `surftrace_of` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE_OF` |  |
-| `touch_lat` | KU | `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `hakios.thyme_gpu.cpp`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
+| `touch_lat` | KU | `HakiosMetalCA.m`, `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `hakios.thyme_gpu.cpp`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
 | `vblur` | U | `eagl.c` | `CONFIG_VBLUR` |  |
 
 ## Security stand-ins (1)
@@ -112,7 +112,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `wifi_join` | K | `lx_bus.c` | `CONFIG_WIFI_JOIN` |  |
 | `wifi_keep` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_KEEP` | implied by wifi=1 |
 | `wifi_listen` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_LISTEN` |  |
-| `wifi_loud` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_LOUD` |  |
+| `wifi_loud` | K | `hakios.thyme_lx.c`, `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_LOUD` |  |
 | `wifi_lx` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c`, `lx_bus.c` | `CONFIG_WIFI_LX` | implied by wifi=1 (as 2) |
 | `wifi_lx_step` | K | `lx_base.c` | `CONFIG_WIFI_LX_STEP` |  |
 | `wifi_mac` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_MAC` |  |
@@ -132,11 +132,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `wifi_watch` | K | `hakios.thyme_wifi.c`, `hakios.wifi.c` | `CONFIG_WIFI_WATCH` |  |
 | `wifi_wide` | K | `lx_80211.c` | `CONFIG_WIFI_WIDE` | implied by wifi=1 |
 
-## Bluetooth (3)
+## Bluetooth (4)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `bt` | K | `hakios.bt.c`, `hakios.thyme_bluetooth.c` | `CONFIG_BT` |  |
+| `bt_baud` | K | `hakios.thyme_bluetooth.c` | `CONFIG_BT_BAUD` |  |
 | `umi_bt` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT` |  |
 | `umi_bt_probe` | K | `hakios.thyme_bluetooth.c` | `CONFIG_UMI_BT_PROBE` |  |
 
@@ -254,19 +255,19 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `cam` | KL | `hakios.camera.c`, `loader.c` | `CONFIG_CAM` |  |
-| `cam_after` | K | `hakios.camera.c` | `CONFIG_CAM_AFTER` |  |
-| `cam_fake` | K | `hakios.camera.c` | `CONFIG_CAM_FAKE` |  |
-| `cam_fake_fps` | K | `hakios.camera.c` | `CONFIG_CAM_FAKE_FPS` |  |
-| `cam_frames` | K | `hakios.camera.c` | `CONFIG_CAM_FRAMES` |  |
-| `cam_gain` | K | `hakios.camera.c` | `CONFIG_CAM_GAIN` |  |
-| `cam_keep_mb` | K | `hakios.camera.c` | `CONFIG_CAM_KEEP_MB` |  |
-| `cam_mode` | K | `hakios.camera.c` | `CONFIG_CAM_MODE` |  |
-| `cam_pattern` | K | `hakios.camera.c` | `CONFIG_CAM_PATTERN` |  |
-| `cam_sensor` | K | `hakios.camera.c` | `CONFIG_CAM_SENSOR` |  |
-| `cam_settle` | K | `hakios.camera.c` | `CONFIG_CAM_SETTLE` |  |
-| `cam_shutter` | K | `hakios.camera.c` | `CONFIG_CAM_SHUTTER` |  |
-| `cam_vblank` | K | `hakios.camera.c` | `CONFIG_CAM_VBLANK` |  |
+| `cam` | KL | `hakios.camera.c`, `hakios.thyme_camera.c`, `loader.c` | `CONFIG_CAM` |  |
+| `cam_after` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_AFTER` |  |
+| `cam_fake` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FAKE` |  |
+| `cam_fake_fps` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FAKE_FPS` |  |
+| `cam_frames` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FRAMES` |  |
+| `cam_gain` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_GAIN` |  |
+| `cam_keep_mb` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_KEEP_MB` |  |
+| `cam_mode` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_MODE` |  |
+| `cam_pattern` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_PATTERN` |  |
+| `cam_sensor` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SENSOR` |  |
+| `cam_settle` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SETTLE` |  |
+| `cam_shutter` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SHUTTER` |  |
+| `cam_vblank` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_VBLANK` |  |
 
 ## Touch and buttons (13)
 
@@ -274,8 +275,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `buttons` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_BUTTONS` |  |
 | `buttons_steps` | K | `hakios.buttons.c` | `CONFIG_BUTTONS_STEPS` |  |
-| `press_power` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER` |  |
-| `press_power_ms` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER_MS` |  |
+| `press_power` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_PRESS_POWER` |  |
+| `press_power_ms` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_PRESS_POWER_MS` |  |
 | `touch_flip` | K | `hakios.goodix.c` | `CONFIG_TOUCH_FLIP` |  |
 | `touch_poll_us` | K | `hakios.goodix.c` | `CONFIG_TOUCH_POLL_US` |  |
 | `touch_rate` | K | `hakios.goodix.c` | `CONFIG_TOUCH_RATE` |  |
@@ -334,10 +335,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `var_save_ms` | K | `hakios.ufs.c` | `CONFIG_VAR_SAVE_MS` |  |
 | `virtio_blk` | K | `hakios.virtio_blk.c` | `CONFIG_VIRTIO_BLK` |  |
 
-## Network (3)
+## Network (4)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `net_dhcp` | K | `hakios.net.c` | `CONFIG_NET_DHCP` |  |
 | `net_names` | K | `hakios.net.c` | `CONFIG_NET_NAMES` |  |
 | `net_trace` | K | `hakios.net.c` | `CONFIG_NET_TRACE` |  |
 | `virtio_net` | K | `hakios.virtio_net.c` | `CONFIG_VIRTIO_NET` |  |
@@ -351,9 +353,9 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `haptic_f0_probe` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_F0_PROBE` |  |
 | `haptic_f0_trace` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_F0_TRACE` |  |
 | `haptic_gain` | K | `hakios.thyme_haptic.c` | `CONFIG_HAPTIC_GAIN` |  |
-| `torch` | KL | `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
-| `torch_max_s` | K | `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |
-| `torch_secs` | K | `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
+| `torch` | KL | `hakios.thyme_torch.c`, `hakios.torch.c`, `loader.c` | `CONFIG_TORCH` |  |
+| `torch_max_s` | K | `hakios.thyme_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_MAX_S` |  |
+| `torch_secs` | K | `hakios.thyme_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
 | `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 
 ## Chip, thermal and PMIC (16)
@@ -427,12 +429,14 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (15)
+## User space (26)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
 | `bt_again` | K | `hakios.bt.c` | `CONFIG_BT_AGAIN` |  |
+| `ca_metallib` | U | `inject.c` | `CONFIG_CA_METALLIB` |  |
+| `ca_prof` | U | `HakiosMetalCA.m` | `CONFIG_CA_PROF` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
@@ -441,6 +445,15 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `glno` | U | `inject.c` | `CONFIG_GLNO` |  |
 | `glsb3` | U | `inject.c` | `CONFIG_GLSB3` |  |
 | `glyes` | U | `inject.c` | `CONFIG_GLYES` |  |
+| `metal_all` | U | `HakiosMetalCA.m` | `CONFIG_METAL_ALL` |  |
+| `metal_dump` | U | `HakiosMetalCA.m` | `CONFIG_METAL_DUMP` |  |
+| `metal_fps` | U | `HakiosMetalCA.m` | `CONFIG_METAL_FPS` |  |
+| `metal_gmem` | U | `HakiosMetalCA.m` | `CONFIG_METAL_GMEM` |  |
+| `metal_gmem_draws` | U | `HakiosMetalCA.m` | `CONFIG_METAL_GMEM_DRAWS` |  |
+| `metal_gmem_off` | U | `HakiosMetalCA.m` | `CONFIG_METAL_GMEM_OFF` |  |
+| `metal_skip` | U | `HakiosMetalCA.m` | `CONFIG_METAL_SKIP` |  |
+| `metal_trace` | U | `HakiosMetalCA.m` | `CONFIG_METAL_TRACE` |  |
+| `metal_watch` | U | `inject.c` | `CONFIG_METAL_WATCH` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
