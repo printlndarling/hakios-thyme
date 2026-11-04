@@ -44,8 +44,32 @@ Bluetooth on, the footer `This iPhone is discoverable as "HakiOS Mi 10S"`, and
 | `logs/wirelessregress-bt.png` | `91a5fd8a34a8d59c9b698614a6b5ebefd6fcfae6a40703a7fab69f4258dacbfe` |
 
 This restores discovery and controller operation to PASS on the canonical
-image. HFP/SCO, AVRCP controls, microphone use and a deliberate Bluetooth
-off/on recovery remain separate checks.
+image. HFP/SCO, AVRCP controls and microphone use remain separate checks.
+
+### Bluetooth off/on recovery (2026-11-04)
+
+A focused `rc.jobs.bttoggle` run (`devices/thyme/bt-toggle.sh`) pressed the
+Settings switch, confirmed `Turn Off`, waited, and turned it back on. The
+kernel log records:
+
+```text
+UMI BT: H4 client connected uid=501 unit=1      (boot)
+UMI BT: H4 client disconnected unit=1           (off)
+UMI BT: H4 client connected uid=501 unit=1      (on)
+```
+
+Scan commands resume after the second connection and there are zero
+`H4 transport fault` lines. The final screenshot shows the switch on and the
+Settings footer again. This is PASS for controller and H4 transport recovery.
+Headset reconnection after the cycle is still a separate check: the headset
+was not present in this run, while `logs/214226-run.log` shows an OPPO Enco
+Free4 connected on a normal boot.
+
+| File | SHA-256 |
+|---|---|
+| `logs/221636-run.log` | `71eac224f5897ec3fd9c94cfc7e51a379cc5a1cea5d1308a639346afab83250a` |
+| `logs/bttoggle-on.png` | `51721d7c1989c1fd3e09d144850616722209709f0e48d1ac274313f419337569` |
+| `logs/bttoggle-final.png` | `ee87eb291182a1dcfb4e654aae8f3ac9422a4a0a789bc6f578fd01addfbf4631` |
 
 ## Current-build regression (2026-11-02)
 

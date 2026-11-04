@@ -1,0 +1,15 @@
+# Bluetooth power-cycle gate: open Settings, wait for the pane to populate,
+# turn Bluetooth off, wait for the controller to go down, turn it back on and
+# give discovery time to return. The toggle is the switch at the top right of
+# the Bluetooth page, at the same place as Wi-Fi's.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 30
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 3
+# iOS confirms turning Bluetooth off; the dialog's "Turn Off" button is at the
+# lower right of the alert, not under the switch.
+/redwood/bin/rwtouch tap 0.72 0.565
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.85 0.18
+/redwood/bin/rwtouch wait 60
