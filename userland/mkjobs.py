@@ -262,15 +262,25 @@ def present(program):
     return os.path.isfile(f'{src_root}{program}')
 
 
+def tune_job(label, job):
+    job["StandardErrorPath"] = "/dev/console"
+    job.pop("_LimitLoadToDeviceTree", None)
+    if label == "com.apple.bluetoothd":
+        speed = os.environ.get("BT_BAUDRATE", "3000000")
+        job.setdefault("EnvironmentVariables", {}).update(
+            BT_HCI_TRANSPORT=f"H4:POSIX:com.hakios.bluetooth,{speed}",
+            BT_BAUDRATE=speed,
+        )
+
+
 angels = f'{src_root}/System/Library/LaunchAngels'
 os.makedirs(dest, exist_ok=True)
 for label in labels:
     with open(f'{src}/{label}.plist', 'rb') as f:
         job = plistlib.load(f)
-    job['StandardErrorPath'] = '/dev/console'
     # a job that is named is wanted, whatever hardware it says it is for: wifid's asks for a node "wlan" in the
     # device tree, which the loader's tree does not have yet
-    job.pop('_LimitLoadToDeviceTree', None)
+    tune_job(label, job)
     if 'all' in oslog or label in oslog:
         job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
     with open(f'{dest}/{label}.plist', 'wb') as f:
@@ -294,10 +304,12 @@ if rest:
         program = job.get('Program') or (job.get('ProgramArguments') or [''])[0]
         if not job.get('MachServices') or not present(program):
             continue
-        for key in ('RunAtLoad', 'KeepAlive', 'StartInterval', 'StartCalendarInterval', 'WatchPaths',
-                    'QueueDirectories', 'StartOnMount', 'LaunchEvents'):
-            job.pop(key, None)
-        job['StandardErrorPath'] = '/dev/console'
+        bluetooth = label.startswith(('com.apple.bluetooth', 'com.apple.BTServer'))
+        if not bluetooth:
+            for key in ('RunAtLoad', 'KeepAlive', 'StartInterval', 'StartCalendarInterval', 'WatchPaths',
+                        'QueueDirectories', 'StartOnMount', 'LaunchEvents'):
+                job.pop(key, None)
+        tune_job(label, job)
         if label in oslog:
             job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
         with open(f'{dest}/{name}', 'wb') as f:

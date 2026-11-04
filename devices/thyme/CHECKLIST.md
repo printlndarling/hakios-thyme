@@ -197,42 +197,45 @@ Evidence:
 | `logs/jiggle-60.png` | `18221b7ce78edef5fd1b287f1ea3dd8e1933df5c65b30721d6cf74407fb0a0d3` |
 | `logs/jiggle-90.png` | `fb105681ee1d2d4dea55fca296189119579eb63fc903458eb0d6bf3a9206ffb8` |
 
-### CPU-monitor log flood and Bluetooth regression (2026-11-04)
+### CPU-monitor log flood and Bluetooth build repair (2026-11-04)
 
 The XNU CPU-monitor denial path logged every refused request. During a boot,
-lsd alone produced tens of thousands of identical lines and pushed useful
-user-space output out of the loader log. Candidate kernel
-`89382c29e3ee` capped the diagnostic at eight detailed lines plus one
-summary line. The same cap survived a second build from thyme_defconfig
-(`1d845b989735`).
+lsd alone produced tens of thousands of identical lines. The current kernel caps
+this at eight detailed lines plus one suppression notice; `logs/063408-run.log`
+shows exactly that pattern.
 
-Evidence from `logs/063408-run.log`:
+The Bluetooth Settings regression on freshly rebuilt images was a build and
+service-publication problem, not a failure of QCA firmware or HCI:
 
-- exactly eight `denied attempt to escape CPU monitor` lines, followed by
-  the suppression notice;
-- Wi-Fi associated on 5 GHz, installed CCMP keys and opened Sileo.
+- the published `compatible` value was the wrong placeholder;
+- the service was attached at the platform root instead of under the DTM
+  `qca6390` node;
+- the default userland omitted `libhakios.bluetooth.dylib` and the
+  `com.apple.bluetoothd` injection line;
+- `mkjobs.py` dropped the Bluetooth jobs and still described 115200 baud;
+- the build did not package `fw/qca6390-bt` patch/NVM files.
 
-A full default regression was then run with the candidate kernel and the
-restored, non-JB system image `4f0f3f8b1ba0`. Wi-Fi and Safari still worked,
-but Bluetooth Settings showed its master switch off. The failure repeated in a
-second default run. Low-level Bluetooth is not the failing layer:
-`logs/071505-run.log` shows `3 Mbaud`, firmware patch/NVM accepted,
-HCI reset and the persistent `com.hakios.bluetooth` H4 endpoint ready. The
-missing step is Bluetooth daemon/user-space startup, not the UART or firmware.
+Those are corrected. With explicit `ALLOW="bluetooth BTServer"` the jobs keep
+their `RunAtLoad`/`KeepAlive` behavior, the H4 transport advertises 3 Mbaud,
+and the firmware directory is included automatically. `logs/084844-run.log` proves
+the full cold path: QCA patch/NVM accepted, H4 endpoint ready, QCA compatibility
+injection enabled, `bluetoothd: Got local-mac-address` and no
+`No bluetooth on this device`. The same boot completed Wi-Fi association,
+CCMP keys and DHCP at 192.168.0.102.
 
-The candidate is not promoted to `ram-baseline.conf`. The committed baseline
-remains kernel `e73e82d4e5da`, system `4f0f3f8b1ba0` and scenario
-`6e04e0b91ced` until Bluetooth Settings starts cleanly with it.
+The RAM baseline now promotes kernel `407df1a44556` and scenario
+`d33d40e54b77`; the system image remains the known-good `4f0f3f8b1ba0`.
+A separate warm-reinitialization issue remains: after an earlier successful
+3 Mbaud session, a warm reset can leave QCA UART/firmware state such that the
+next run reports error 2 or 92 before daemon startup. Cold boot remains the
+reliable path; a reset/recovery protocol is the next Bluetooth stability task.
 
 Evidence:
 
 | File | SHA-256 |
 |---|---|
+| `logs/084844-run.log` | `f7de08e66f302af1d5b43fb639a6f97e5b136b57076bc4b5c6d5a8180c7edb19` |
 | `logs/063408-run.log` | `9c06818d7297109f9ecd714213a33b4042743168813970c424eef37e0a53dc1f` |
-| `logs/070235-run.log` (BT off) | `b3b4886184e2379d281f685cea609861d87c835f905394c04c9306d827fa2ae9` |
-| `logs/logfix2-wifi.png` | `3a4bd7b5592a99453c239cb30bba818c06c2c3cb9013376389a311ffe9250596` |
-| `logs/logfix2-bt.png` (BT off) | `5f16e4f57309b4eb8e5a175d0832052e9b6f45de478a83c8256586a83a6a638c` |
-
 ### Historical unnamed-accessory diagnosis
 
 The HCI trace now records the address in the LE white-list add/remove commands.

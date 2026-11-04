@@ -18,28 +18,72 @@ extern "C" int
 umi_bluetooth_publish(const uint8_t address[6],const uint8_t commands[64],
     uint32_t transport_speed)
 {
-    IOService *provider = IOService::getPlatform();
+    IOService *platform = IOService::getPlatform();
+    OSDictionary *match = IOService::nameMatching("qca6390");
+    IOService *node = match != NULL ? IOService::copyMatchingService(match) : NULL;
+    IOService *provider = node != NULL ? node : platform;
     IOService *service = new IOService;
-    if (!provider || !service) { if (service) service->release(); return ENOMEM; }
-    if (!service->init()) { service->release(); return ENOMEM; }
+    if (platform == NULL || service == NULL) {
+        if (service) service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
+    if (!service->init()) {
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
     OSData *mac = OSData::withBytes(address, 6);
-    if (!mac) { service->release(); return ENOMEM; }
-    service->setName("bluetooth");
+    if (!mac) {
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
     bool published = service->setProperty("local-mac-address", mac);
     mac->release();
-    if (!published) { service->release(); return ENOMEM; }
+    if (!published || !service->attach(provider)) {
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
     OSData *supported = OSData::withBytes(commands,64);
-    if (!supported) { service->release(); return ENOMEM; }
+    if (!supported) {
+        service->detach(provider);
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
     published = service->setProperty("HakiosBluetoothSupportedCommands",supported);
     supported->release();
-    if (!published) { service->release(); return ENOMEM; }
+    if (!published) {
+        service->detach(provider);
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return ENOMEM;
+    }
     service->setProperty("transport-speed", transport_speed, 32);
-    service->setProperty("compatible", "qcom,qca6390-bt");
+    service->setProperty("compatible", "qca,qca6390");
     service->setProperty("HakiosBluetoothReady", false);
-    if (!service->attach(provider)) { service->release(); return EIO; }
-    if (!service->start(provider)) { service->detach(provider); service->release(); return EIO; }
+    service->setName("bluetooth");
+    if (!service->start(provider)) {
+        service->detach(provider);
+        service->release();
+        OSSafeReleaseNULL(node);
+        OSSafeReleaseNULL(match);
+        return EIO;
+    }
     service->registerService();
+    IOLog("HakiosBluetooth: published %s under %s\n", "bluetooth",
+        node != NULL ? "qca6390" : "platform");
     bluetooth_service = service;
-    service->release(); /* Registry attachment owns the live service. */
+    service->release();
+    OSSafeReleaseNULL(node);
+    OSSafeReleaseNULL(match);
     return 0;
 }

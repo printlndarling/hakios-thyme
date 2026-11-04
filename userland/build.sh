@@ -79,6 +79,9 @@ set -e
 linkcopy() { if [ "$(uname)" = Darwin ]; then cp -cRp "$1" "$2"; else cp -al "$1" "$2"; fi; }
 cd "$(dirname "$(readlink -f "$0")")"
 source ../xnu-env.sh
+if [ -z "${LDID:-}" ] && [ -x "$THEOS/toolchain/linux/iphone/bin/ldid" ]; then
+	LDID=$THEOS/toolchain/linux/iphone/bin/ldid
+fi
 
 CC="xnu-clang -arch arm64 -Os -static -nostdlib -ffreestanding -fno-stack-protector -fno-builtin -Wall -Wextra"
 LD="-Wl,-e,_start -Wl,-pagezero_size,0x100000000"
@@ -131,7 +134,8 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 /redwood/lib/libhakios.sb.dylib SpringBoard
 /redwood/lib/libhakios.media.dylib mediaserverd
 /redwood/lib/libhakios.app.dylib Sileo
-/redwood/lib/libhakios.tweaks.dylib Preferences"}
+/redwood/lib/libhakios.tweaks.dylib Preferences
+/redwood/lib/libhakios.bluetooth.dylib bluetoothd"}
 mkdir -p obj
 
 if [ -z "$PREBUILT" ] && ! command -v ld64 >/dev/null; then PREBUILT=1; fi
@@ -233,6 +237,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -lobjc \
 			-o obj/libhakios.app.dylib src/inject_app.c
+		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetooth.dylib \
+			-framework CoreFoundation -framework IOKit -lobjc \
+			-o obj/libhakios.bluetooth.dylib src/inject_bluetooth.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libhakios.media.dylib -framework CoreFoundation -framework CoreMedia \
 			-framework CoreVideo -framework IOSurface -lobjc \
 			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_isp.c
@@ -334,6 +341,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	cp obj/libhakios.dylib obj/libhakios.sb.dylib root/lib/
 	[ -f obj/libhakios.media.dylib ] && cp obj/libhakios.media.dylib root/lib/     # (as with cpu_test)
 	[ -f obj/libhakios.app.dylib ] && cp obj/libhakios.app.dylib root/lib/
+	[ -f obj/libhakios.bluetooth.dylib ] && cp obj/libhakios.bluetooth.dylib root/lib/
 	[ -f obj/libhakios.tweaks.dylib ] && cp obj/libhakios.tweaks.dylib root/lib/
 	if [ -f obj/HakiosAudio ]; then
 		mkdir -p root/lib/HakiosAudio.driver
@@ -481,13 +489,22 @@ if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
 	mkdir -p root/fw
 	install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] root/fw/
 fi
+# QCA6390 Bluetooth patch and NVM, from the phone's own vendor partition into ../fw-bluetooth.
+# The runtime driver looks for these in fw/qca6390-bt.
+if [ -d ../fw-bluetooth ]; then
+	mkdir -p root/fw/qca6390-bt
+	for f in htbtfw10.tlv htbtfw20.tlv htnv10.bin htnv20.bin; do
+		[ -f "../fw-bluetooth/$f" ] || continue
+		install -m 0644 "../fw-bluetooth/$f" root/fw/qca6390-bt/
+	done
+fi
 # Firmware that is not there is otherwise silent at build time and speaks only much later, deep in a
 # device log -- "adreno: THE GPU IS NOT STARTED: the small image has no fw/a660_gmu.bin" cost a phone
 # slot on 19 October 2026. It is the vendor's and never in the repository, so a copy made with bare
 # git worktree add has none of it, and neither has one whose tools/new-workspace.sh predates the fw-*
 # loop there. Say what went in and what was not there to go in; what each one is for is above.
 fwhave= fwnone=
-for d in gpu wifi haptic camera audio; do
+for d in gpu wifi bluetooth haptic camera audio; do
 	if [ -d ../fw-$d ]; then fwhave="$fwhave $d"; else fwnone="$fwnone $d"; fi
 done
 echo "build.sh: fw/: $(ls -1 root/fw 2>/dev/null | wc -l) files from ../fw-*:${fwhave:- none present}${fwnone:+, absent:$fwnone}"
