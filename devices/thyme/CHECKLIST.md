@@ -252,6 +252,8 @@ Evidence for the promoted run:
 | `logs/200350-run.log` | `127a44a6333235700090af1e005c97741a70cae57ee4ffe0866c4b4fa23c7a72` |
 | `logs/reliable-wifi.png` | `e1df5d9a7536a3db990868d191e90242b810b5a8abd52a1becef914ed1410bf6` |
 | `logs/reliable-bt.png` | `cf95bbb8dcd00211010b7eacfcb3200c08c0ceddad2f22803f675c1966bc0fa3` |
+| `logs/202218-run.log` (canonical baseline repeat) | `88562406b9a14ab28e483a905786d70d1b409dc462f67457d16ebe7b87730b80` |
+| `logs/wirelessregress-bt.png` (Bluetooth pane initialising) | `71cb558ca126619993c36bf25deb0f2039d4869734be44a59afde135ee42c2c9` |
 
 ### CPU-monitor log flood and Bluetooth build repair (2026-11-04)
 
