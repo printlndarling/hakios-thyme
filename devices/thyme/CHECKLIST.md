@@ -4,6 +4,49 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## Bluetooth launch regression and fix (2026-11-04)
+
+The canonical `202218` baseline image did not contain `/redwood/bin/umi_bluetool`
+or `com.hakios.scname`. The official-main rebuild had regenerated stock
+`com.apple.BlueTool`; it printed `Device not open yet, use 'device' to open it.`
+and exited with status 1. `bluetoothd` started and read the local MAC, but it
+never opened the H4 transport: the log had zero `H4 client connected` and zero
+`iOS HCI opcode` lines, and Bluetooth Settings stayed on its spinner. The
+earlier `210532` discovery evidence came from the legacy image, not from the
+canonical bytes.
+
+`userland/build.sh` and `userland/mkjobs.py` now build and install both
+programs, point the BlueTool job at `umi_bluetool` when it is present, add the
+Bluetooth launch set to `BLUETOOTH=1` builds, and carry the ADSP, haptic and
+THYME camera-table rules the previous image relied on. The promoted scenario
+`out/thyme-boot/root-wirelessfull.apfs` is
+`bfb90a5811fc436f7d267b312445d9db2bdba8cceb94d19bd8ca39d22cca8e95`;
+the previous image is kept as `root-wirelessfull-pre-btfix.apfs`
+(`d33d40e5...`).
+
+The new cold RAM run `logs/214226-run.log` reports:
+
+```text
+UMI BlueTool: command=RunBuiltinScript script=boot result=0
+UMI BlueTool: command=RunBuiltinScript script=init result=0
+UMI BT: H4 client connected uid=501 unit=1
+UMI BT: transport status=0x41000 ... le-events=315 le-reports=315 ... le-named=66
+```
+
+There are zero `H4 transport fault` lines. The final Settings screenshot shows
+Bluetooth on, the footer `This iPhone is discoverable as "HakiOS Mi 10S"`, and
+`OPPO Enco Free4` connected in MY DEVICES; Wi-Fi remained joined to `1701`.
+
+| File | SHA-256 |
+|---|---|
+| `logs/214226-run.log` | `257d572577e85fafd10a9e09ea54d6aad387b4dce0a72ec83e8980b7465c5952` |
+| `logs/wirelessregress-wifi.png` | `25750480fb125d4c0ef27b0163d7ab7205b1c12cbd9c14b6a1eb19862666f200` |
+| `logs/wirelessregress-bt.png` | `91a5fd8a34a8d59c9b698614a6b5ebefd6fcfae6a40703a7fab69f4258dacbfe` |
+
+This restores discovery and controller operation to PASS on the canonical
+image. HFP/SCO, AVRCP controls, microphone use and a deliberate Bluetooth
+off/on recovery remain separate checks.
+
 ## Current-build regression (2026-11-02)
 
 The official-loader RAM run `logs/143146-run-cpoem.log` reached SpringBoard
@@ -372,7 +415,7 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PASS for discovery, pairing, connection, A2DP route and audible playback | Firmware, HCI, H4, LE scan, Settings discovery, headset connection and A2DP route PASS. Moving the UART from 115200 to 3 Mbaud removed the hoarse/crackling output; the user confirmed ringtone and ordinary audio were clean. HFP/SCO, AVRCP, microphone and automatic reconnect remain unverified |
+| Bluetooth | PASS for discovery and connection on the canonical image; A2DP verified earlier; HFP/reconnect open | The 2026-11-04 fix restored `umi_bluetool`, `scname` and the H4 transport; the canonical run reports 315 LE reports with zero H4 faults, shows the `HakiOS Mi 10S` footer and reconnects the OPPO Enco Free4 (`logs/214226-run.log`). The earlier 3 Mbaud A2DP result remains valid for the legacy image. HFP/SCO, AVRCP, microphone and automatic reconnect remain unverified |
 | Wi-Fi discovery/startup | PASS | The current run opened Wi-Fi and returned real 2.4 GHz and 5 GHz networks; the user also confirmed Wi-Fi remains usable on the current RAM boot (`logs/210532-run.log`) |
 | Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/210532-run.log`) |
 | Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/210532-run.log`) |

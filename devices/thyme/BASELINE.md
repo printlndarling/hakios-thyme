@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `620a046` (`display: promote the verified THYME 90 Hz timing sequence`) |
+| Verified functional source | `3d05f04` (`fix: restore THYME Bluetooth launch services`) |
 | Worktree | clean after this baseline update |
 
 The kernel now includes the promoted panel timing sequence (F0/B4 long writes
@@ -18,8 +18,11 @@ sequence is rejected), the opt-in-then-default QCA6390 3 Mbaud transport, the
 upstream Metal/CoreAnimation merge and THYME's existing board drivers. The
 user-space image keeps Simplified and Traditional Chinese resources, overlays
 the Apple Bluetooth HAL extracted locally from the matching IPSW, and rebuilds
-the UI from the IPSW sources. Vendor firmware and local Wi-Fi input remain
-Git-ignored.
+the UI from the IPSW sources. The user-space image again carries the THYME
+QCA bootstrap responder (`umi_bluetool`), the `com.hakios.scname` job, the
+Bluetooth launch set, and the ADSP/haptic/camera firmware rules; without them
+`bluetoothd` never opened the H4 transport. Vendor firmware and local Wi-Fi
+input remain Git-ignored.
 
 ## RAM artifacts
 
@@ -29,7 +32,7 @@ Git-ignored.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `d33d40e54b778a6b33cb6c0fb80c101970a093d5377d2dc4fcec914e0d784374` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `bfb90a5811fc436f7d267b312445d9db2bdba8cceb94d19bd8ca39d22cca8e95` |
 | `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
 | clean-main `hakios-kernel` | `93b5a4f969dac947b6300a79de9445cc5e3ceba5e9d3d908ef0d2ef851060118` |
 
@@ -64,6 +67,49 @@ devices/thyme/ram-regress.sh
 The script selects the THYME ADB serial, boots the pinned UEFI-capable image,
 uploads the system image, checks every input against `ram-baseline.conf`,
 uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
+
+## Bluetooth launch regression and fix (2026-11-04)
+
+The canonical `202218` image did not contain `/redwood/bin/umi_bluetool` or
+`com.hakios.scname`. The official-main rebuild regenerated stock
+`com.apple.BlueTool`, which printed `Device not open yet, use 'device' to open
+it.` and exited with status 1. `bluetoothd` started and read the local MAC, but
+it never opened the H4 transport: the log had zero `H4 client connected` and
+zero `iOS HCI opcode` lines, and Bluetooth Settings stayed on its spinner.
+The earlier `210532` run had used the legacy image with both services, which
+is why that evidence was not true of the canonical bytes.
+
+The fix (`3d05f04`) ports `umi_bluetool` and `scname` from the device overlay,
+points `com.apple.BlueTool` at the responder when the build put it in the
+root, adds the Bluetooth job set to `BLUETOOTH=1` builds, and restores the
+ADSP/haptic/camera firmware and THYME S5KHMX table rules that the previous
+image carried.
+
+The verified cold RAM run `logs/214226-run.log` used scenario `bfb90a58`:
+
+```text
+UMI BlueTool: listening for the QCA bootstrap contract
+UMI BlueTool: command=RunBuiltinScript script=boot result=0
+UMI BlueTool: command=RunBuiltinScript script=init result=0
+UMI BT: H4 client connected uid=501 unit=1
+UMI BT: transport status=0x41000 ... le-events=315 le-reports=315 ... le-named=66
+```
+
+There are zero `H4 transport fault` lines. The Bluetooth screenshot shows the
+switch on, the footer `This iPhone is discoverable as "HakiOS Mi 10S"` and
+`OPPO Enco Free4` connected in MY DEVICES. The Wi-Fi screenshot still shows
+the joined `1701` network and nearby access points, so the rebuilt image did
+not trade one radio for the other.
+
+| File | SHA-256 |
+|---|---|
+| `logs/214226-run.log` | `257d572577e85fafd10a9e09ea54d6aad387b4dce0a72ec83e8980b7465c5952` |
+| `logs/wirelessregress-wifi.png` | `25750480fb125d4c0ef27b0163d7ab7205b1c12cbd9c14b6a1eb19862666f200` |
+| `logs/wirelessregress-bt.png` | `91a5fd8a34a8d59c9b698614a6b5ebefd6fcfae6a40703a7fab69f4258dacbfe` |
+
+This makes discovery and controller operation PASS again on the canonical
+image. HFP/SCO, AVRCP controls and a deliberate Bluetooth off/on recovery
+remain separate checks.
 
 ## Current verified run
 

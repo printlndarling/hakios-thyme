@@ -64,7 +64,9 @@ Bluetooth is now live on official main: QCA6390 firmware
 and NVM download, HCI reset, the persistent H4 endpoint, MAC publication and
 iOS Bluetooth initialization all work. A physical LE scan found nine unique
 advertisers with valid RSSI and name decoding, and classic inquiry completed
-cleanly; pairing and reconnect remain pending. The device-owned QCA6390 Wi-Fi stack now
+cleanly; pairing, connection and A2DP were verified on the legacy image. The
+2026-11-04 build restores the same launch services on the canonical image
+(see `CHECKLIST.md`); automatic reconnect and HFP remain open. The device-owned QCA6390 Wi-Fi stack now
 scans, associates to a WPA2 access point, completes DHCP and carries DNS/TCP/TLS
 traffic through en0. On the current pinned baseline Safari rendered Apple's
 HTTPS success page in the phone's user space.
@@ -121,6 +123,21 @@ make thyme_defconfig
 make config
 make kernel -j8
 ```
+
+The userland root image for the wireless regression must carry the QCA6390
+launch services and the audio DSP firmware, or Bluetooth Settings stays on its
+spinner and audio has no DSP image:
+
+```sh
+cd userland
+REST=1 BLUETOOTH=1 ADSP=1 RC_JOBS=rc.jobs.wirelessfull ./build.sh
+cp root.apfs ../out/thyme-boot/root-wirelessfull.apfs
+```
+
+`BLUETOOTH=1` adds `com.apple.bluetoothd`, the BlueTool responder and the
+`BTServer.*` jobs; `ADSP=1` adds `fw/adsp.*` and the audio calibration files.
+A verified run must update `devices/thyme/ram-baseline.conf` with the new
+scenario hash.
 
 The device is registered in `devices/manifest.conf`. The official tools must
 accept it before any build:
