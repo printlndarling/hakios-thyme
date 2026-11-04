@@ -121,6 +121,11 @@ DARWIN_JOBS=${JOBS-"
 # (Count a QEMU run log with its duplicate lines removed: run-darwin.sh prints launchd's log twice.)
 # WIFID=0 leaves it out.
 [ "${WIFID-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.wifid"
+# The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
+# device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
+# in mkjobs.py when that program was put in this build's root: the kernel has already booted
+# the controller, and stock BlueTool's Broadcom script contract would only take it down.
+[ "${BLUETOOTH-0}" != 1 ] || DARWIN_JOBS="$DARWIN_JOBS com.apple.bluetoothd com.apple.BlueTool com.apple.BTServer.le com.apple.BTServer.avrcp com.apple.BTServer.map com.apple.BTServer.pbap com.apple.bluetoothuserd"
 # The programs (file names) started with a library of ours inside them: "LIBRARY NAME..." per line
 # (src/inject.c is libhakios.dylib, src/inject_sb.c is libhakios.sb.dylib, src/inject_media.c is
 # libhakios.media.dylib).
@@ -240,6 +245,12 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetooth.dylib \
 			-framework CoreFoundation -framework IOKit -lobjc \
 			-o obj/libhakios.bluetooth.dylib src/inject_bluetooth.c
+		# The QCA bootstrap responder, and the computer name Bluetooth Settings reads through
+		# SCDynamicStoreCopyComputerName (src/umi_bluetool.c, src/scname.c).
+		if [ "${BLUETOOTH-0}" = 1 ]; then
+			$DYN -fblocks -framework CoreFoundation -framework IOKit -o obj/umi_bluetool src/umi_bluetool.c
+		fi
+		$DYN -framework CoreFoundation -framework SystemConfiguration -o obj/scname src/scname.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libhakios.media.dylib -framework CoreFoundation -framework CoreMedia \
 			-framework CoreVideo -framework IOSurface -lobjc \
 			-o obj/libhakios.media.dylib src/inject_media.c src/camera_device.c src/camera_isp.c
@@ -333,6 +344,12 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/camera_test ] && cp obj/camera_test root/bin/
 	[ -f obj/camera_avtest ] && cp obj/camera_avtest root/bin/
 	[ -f obj/record_test ] && cp obj/record_test root/bin/
+	if [ "${BLUETOOTH-0}" = 1 ]; then
+		if [ ! -f obj/umi_bluetool ] && [ -f ../bin/umi_bluetool ]; then cp ../bin/umi_bluetool obj/; fi
+		if [ -f obj/umi_bluetool ]; then cp obj/umi_bluetool root/bin/; fi
+	fi
+	if [ ! -f obj/scname ] && [ -f ../bin/scname ]; then cp ../bin/scname obj/; fi
+	if [ -f obj/scname ]; then cp obj/scname root/bin/; fi
 	for f in $EXTRA; do cp "$f" root/bin/; done
 	# /dev and /private/var exist so that this image can also be the root on its own:
 	# devfs is mounted on /dev, and init puts a ramfs on /private/var
@@ -424,6 +441,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# and not by what select-system.py extracted here (--root-volume; seven jobs turn on the difference,
 	# fairplayd among them).
 	cp com.hakios.demo.plist com.hakios.wifi.plist root/LaunchDaemons/
+	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
 	VOLUME=""
 	[ -n "$FLASHBOOT" ] && [ -f $DARWIN/rootfs.slt ] && VOLUME="--root-volume $DARWIN/rootfs.slt"
 	[ -n "$DARWIN_JOBS" ] && OSLOG=${OSLOG-com.apple.backboardd} ./mkjobs.py ${REST:+--rest} $VOLUME $DARWIN/rootfs root/LaunchDaemons $DARWIN_JOBS
@@ -460,10 +478,11 @@ rm -f root/fw/network
 if [ -z "$SHARE" ] && [ -f ../fw-wifi/network ]; then install -m 0600 ../fw-wifi/network root/fw/network; fi
 # ... and the vibration motor's waveforms, the phone's /vendor/firmware/aw8697_haptic.bin, from ../fw-haptic
 # (drivers/haptic/hakios.haptic.c, haptic=3; 3.6 KB, the vendor's and not in the repository either)
-if [ -f ../fw-haptic/aw8697_haptic.bin ]; then
+for f in ../fw-haptic/aw8697_haptic.bin ../fw-haptic/aw8697_rtp_*.bin; do
+	[ -f "$f" ] || continue
 	mkdir -p root/fw
-	install -m 0644 ../fw-haptic/aw8697_haptic.bin root/fw/
-fi
+	install -m 0644 "$f" root/fw/
+done
 # ... and the cameras' register tables (drivers/camera/hakios.camera.c, cam=2 and up), made by tools/camsensor.py out of
 # the sensors' module files of Android's camera stack, the phone's /vendor/lib64/camera/com.qti.sensormodule.
 # hakios_<maker>_<sensor>_<camera>.bin, in ../fw-camera (the vendor's: neither they nor the tables are in the
@@ -482,12 +501,32 @@ for tuned in ../fw-camera/com.qti.tuned.hakios_*.bin; do
 	mkdir -p root/fw
 	../tools/camtuning.py "$tuned" "root/fw/camera-$sensor.isp" >/dev/null
 done
+# THYME's module files are named umi_*, which the hakios_* globs above do not
+# match. Export the S5KHMX Parameter Parser V2 tables the camera driver reads
+# (drivers/camera/hakios.thyme_umi_camera.c, camera-s5khmx-v3/v19.tab).
+if [ -f ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin ]; then
+	mkdir -p root/fw
+	python3 ../devices/thyme/tools/umi-camsensor-v2.py ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin \
+		--sensor-version 0x3 --output root/fw/camera-s5khmx-v3.tab >/dev/null
+	python3 ../devices/thyme/tools/umi-camsensor-v2.py ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin \
+		--sensor-version 0x13 --output root/fw/camera-s5khmx-v19.tab >/dev/null
+fi
 # ... and with ADSP=1 the image of the audio DSP, from the same place into ../fw-audio (drivers/audio/hakios.adsp.c):
-# adsp.mdt and adsp.b02 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
+# adsp.mdt and adsp.b00 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
 # the loader takes.
 if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
 	mkdir -p root/fw
-	install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] root/fw/
+	install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b[0-9][0-9] root/fw/
+	# The DSP's calibration and the speaker amplifiers' protection firmware: the
+	# audio stack reads them beside the DSP image in fw/.
+	if [ -d ../fw-audio/acdbdata ]; then
+		mkdir -p root/fw/acdbdata
+		cp -R ../fw-audio/acdbdata/. root/fw/acdbdata/
+	fi
+	if [ -d ../fw-audio/cs35l41 ]; then
+		mkdir -p root/fw/cs35l41
+		cp -R ../fw-audio/cs35l41/. root/fw/cs35l41/
+	fi
 fi
 # QCA6390 Bluetooth patch and NVM, from the phone's own vendor partition into ../fw-bluetooth.
 # The runtime driver looks for these in fw/qca6390-bt.

@@ -253,6 +253,8 @@ def volume_paths(listing, _cache={}):
 
 
 def present(program):
+    if program.startswith("/redwood/"):
+        return os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(dest)), program[len("/redwood/"):]))
     for prefix, unpacked in CRYPTEXES.items():
         if program.startswith(prefix):
             return os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(src_root)), unpacked,
@@ -273,6 +275,25 @@ def tune_job(label, job):
         )
 
 
+def tune_bluetool(job):
+    """Answer the QCA bootstrap contract with this build's responder, not stock BlueTool.
+
+    The kernel has already downloaded the QCA firmware before launchd starts. Stock BlueTool
+    expects to drive a Broadcom controller through its own scripts and exits when the device
+    is not open, which leaves bluetoothd without an H4 transport. When build.sh put
+    /redwood/bin/umi_bluetool in this root, point the job at it.
+    """
+    tool = os.path.join(os.path.dirname(os.path.abspath(dest)), "bin", "umi_bluetool")
+    if not os.path.isfile(tool):
+        return
+    job.pop("Program", None)
+    job["Label"] = "com.hakios.bluetool"
+    for key in ("POSIXSpawnType", "EnablePressuredExit", "ThrottleInterval"):
+        job.pop(key, None)
+    job["ProcessType"] = "Interactive"
+    job["ProgramArguments"] = ["/redwood/bin/umi_bluetool"]
+
+
 angels = f'{src_root}/System/Library/LaunchAngels'
 os.makedirs(dest, exist_ok=True)
 for label in labels:
@@ -281,6 +302,8 @@ for label in labels:
     # a job that is named is wanted, whatever hardware it says it is for: wifid's asks for a node "wlan" in the
     # device tree, which the loader's tree does not have yet
     tune_job(label, job)
+    if label == "com.apple.BlueTool":
+        tune_bluetool(job)
     if 'all' in oslog or label in oslog:
         job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
     with open(f'{dest}/{label}.plist', 'wb') as f:
@@ -310,6 +333,8 @@ if rest:
                         'QueueDirectories', 'StartOnMount', 'LaunchEvents'):
                 job.pop(key, None)
         tune_job(label, job)
+        if label == "com.apple.BlueTool":
+            tune_bluetool(job)
         if label in oslog:
             job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
         with open(f'{dest}/{name}', 'wb') as f:
