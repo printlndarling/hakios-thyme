@@ -9,10 +9,12 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `1166c6b` (`Restore local Wi-Fi inputs in userland images`) |
+| Verified functional source | `620a046` (`display: promote the verified THYME 90 Hz timing sequence`) |
 | Worktree | clean after this baseline update |
 
-The kernel now includes the opt-in-then-default QCA6390 3 Mbaud transport, the
+The kernel now includes the promoted panel timing sequence (F0/B4 long writes
+and 2f/26 short packets, with the framebuffer clamped back to 60 Hz if the
+sequence is rejected), the opt-in-then-default QCA6390 3 Mbaud transport, the
 upstream Metal/CoreAnimation merge and THYME's existing board drivers. The
 user-space image keeps Simplified and Traditional Chinese resources, overlays
 the Apple Bluetooth HAL extracted locally from the matching IPSW, and rebuilds
@@ -27,9 +29,9 @@ Git-ignored.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `6e04e0b91ced03822f5f4a90fb90edc082fddbf6f4aa1cdcde922db3aac68b6f` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `d33d40e54b778a6b33cb6c0fb80c101970a093d5377d2dc4fcec914e0d784374` |
 | `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
-| clean-main `hakios-kernel` | `e73e82d4e5da2409ae5e916d86d4a161ca94a5be737e9c3124eb7ef4740fad62` |
+| clean-main `hakios-kernel` | `93b5a4f969dac947b6300a79de9445cc5e3ceba5e9d3d908ef0d2ef851060118` |
 
 The kernel binary hash changes when build metadata changes. The scenario is a
 local, Git-ignored RAM test image; its hash pins the tested bytes without
@@ -49,7 +51,7 @@ cannot silently disable `wifi`, `bt` or another subsystem.
 ```text
 touchscreen=1 buttons=1 umi_touch=1 umi_keys=1 bootcpu=7 cpus=7
 cpufreq=1 thermal=1 thermal_stop=95 battery=1 adsp=1 sound=4 mic=4
-haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1 gpu=1
+haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1 gpu=1 fb_hz=90
 ```
 
 `system.apfs` is loaded once with `./xl ramdisk`; the scenario image is passed
@@ -65,7 +67,25 @@ uses the complete `ram.args`, and runs `root-wirelessfull.apfs`.
 
 ## Current verified run
 
-The GPU-enabled cold RAM run at `logs/024949-run.log` completed:
+The promoted 90 Hz run at `logs/200350-run.log` (kernel `93b5a4f9`, scenario
+`d33d40e5`, args as above) reports:
+
+```text
+display: THYME panel timing 90 Hz seq=0 (ok), framebuffer rate 90 Hz
+display: THYME brightness ready: DSI_CTRL=0x1f5, 600 permille -> level 2463 (ok)
+UMI BT: loading htbtfw20/htnv20 at 3000000 baud
+bluetooth: Got local-mac-address: ...
+```
+
+The user confirmed on the physical phone that the full-sequence UI is smooth
+with no dropped frames. If the panel sequence is rejected, the display driver
+keeps `hakios_panel_refresh_hz` at 60 and the framebuffer falls back to 60 Hz,
+which avoids the late-swap ghosting seen while the panel had not switched. The
+INTF TE/frame-counter block remains unsafe on THYME (`fb_measure=1` and
+`display_probe=1` must not be used); the panel's actual TE rate is inferred
+from the user-visible result rather than that block.
+
+The earlier GPU-enabled cold RAM run at `logs/024949-run.log` completed:
 
 - the `com.hakios.scname` boot job automatically published the local name;
 - `gpu=1` initialized the THYME Adreno 650/GMU path and kept `HakiosGPU`
