@@ -25,6 +25,7 @@
 #include <kern/thread.h>
 #include <kern/clock.h>
 #include <pexpert/pexpert.h>
+#include <pexpert/device_tree.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 
@@ -233,6 +234,27 @@ static TUNABLE(uint32_t, gMeasure, "fb_measure", 0);
 extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 static inline uint32_t refreshHz(void);
 
+/*
+ * The THYME panel is a command-mode DSI panel: its interface has no frame
+ * counter, and reading one while the display block is not clocked has
+ * panicked (measurePanel+0x40, logs/100621-run.log). Leave this diagnostic
+ * to the video-mode panels it was written for.
+ */
+static bool
+command_mode_board(void)
+{
+	DTEntry chosen;
+	const void *board;
+	unsigned size;
+
+	if (SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
+	    SecureDTGetProperty(chosen, "hakios-board", &board, &size) != kSuccess ||
+	    size != 6) {
+		return false;
+	}
+	return memcmp(board, "thyme", 5) == 0;
+}
+
 static void
 measurePanel(__unused void * arg, __unused wait_result_t wr)
 {
@@ -240,6 +262,10 @@ measurePanel(__unused void * arg, __unused wait_result_t wr)
 	uint32_t on, first, second;
 
 	IOSleep(60000);
+	if (command_mode_board()) {
+		IOLog("MiniIOMobileFramebuffer: the THYME panel is in command mode: no interface frame counter is read (fb_measure)\n");
+		return;
+	}
 	intf = ml_io_map(DPU_INTF1_PAGE, 0x4000) + DPU_INTF1_OFFSET;
 	on = *(volatile uint32_t *)(intf + INTF_TIMING_ENGINE_EN);
 	first = *(volatile uint32_t *)(intf + INTF_FRAME_COUNT);
@@ -249,10 +275,24 @@ measurePanel(__unused void * arg, __unused wait_result_t wr)
 	    "(frames are made at %u a second: fb_hz)\n", (on & 1) ? "on" : "OFF", second - first, refreshHz());
 }
 
+/*
+ * The device driver lowers this to 60 until it has actually switched the
+ * panel's timing. Pacing at 90 into a panel that stayed at 60 is what made
+ * the seq=1 runs ghost; the framebuffer must never advertise a rate the panel
+ * did not take. A phone without the driver leaves the weak symbol undefined.
+ */
+extern "C" int hakios_panel_refresh_hz __attribute__((weak));
+
 static inline uint32_t
 refreshHz(void)
 {
-	return gRefreshHz >= 1 && gRefreshHz <= 240 ? gRefreshHz : kFBRefreshHz;
+	uint32_t hz = gRefreshHz >= 1 && gRefreshHz <= 240 ? gRefreshHz : kFBRefreshHz;
+
+	if (&hakios_panel_refresh_hz != NULL && hakios_panel_refresh_hz > 0 &&
+	    (uint32_t)hakios_panel_refresh_hz < hz) {
+		hz = (uint32_t)hakios_panel_refresh_hz;
+	}
+	return hz;
 }
 static inline uint32_t
 recStep(void)

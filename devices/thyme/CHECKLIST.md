@@ -197,6 +197,62 @@ Evidence:
 | `logs/jiggle-60.png` | `18221b7ce78edef5fd1b287f1ea3dd8e1933df5c65b30721d6cf74407fb0a0d3` |
 | `logs/jiggle-90.png` | `fb105681ee1d2d4dea55fca296189119579eb63fc903458eb0d6bf3a9206ffb8` |
 
+### 90 Hz panel investigation (2026-11-04)
+
+The firmware leaves the panel in its 60 Hz mode. The ABL panel file
+`work/thyme-firmware/extracted/RawFiles/Panel_J2S_MP_42_02_0a_amoled_dsc_cmd.xml`
+sets `DSIRefreshRate` to `0x3C0000` (60<<16), and the live DTB's
+`qcom,mdss_dsi_j2s_mp_42_02_0a_dsc_cmd` node has timing@0 at `0x3c` (the `f0`
+vendor page, a `b4` timing table, then `2f 01` and `26 01`) and timing@1 at
+`0x5a` (a different `b4` table, then `2f 04` and `26 02`). A bare `fb_hz=90`
+therefore only makes the framebuffer produce more frames into a 60 Hz scan.
+
+Two diagnostics are unsafe on THYME and must not be used until fixed:
+
+- `fb_measure=1` panicked in `measurePanel` (SError) while reading the INTF1
+  frame counter; symbolization of `logs/100621-run.log` points at
+  `measurePanel+0x40`. The command-mode block needs the same clock/power check
+  the GPU `display_probe()` does, and the frame counter is not the TE counter.
+- `display_probe=1` also stopped before user space (`logs/102923-run.log` ends
+  at the loader banner). The same INTF access is the likely cause.
+
+A gated implementation is in `drivers/display/hakios.thyme_display.c`. The full
+DTB sequence is accepted at the DSI level when the 2f/26 commands are sent as
+short packets: `logs/192355-run.log` shows `F0 page`, `B4 table`, `2f 0x4`,
+`26 0x2`, `panel timing 90 Hz seq=0 (ok)` and `brightness ready (ok)`. The
+earlier hang was caused by sending 2f/26 as long packets, which wedged the
+command DMA and made every later brightness command `skipped`
+(`logs/190626-run.log`).
+
+The full sequence is now the RAM baseline: `fb_hz=90` is in
+`ram.args`, `CONFIG_FB_HZ=90` is in `thyme.config`, and the display driver
+retries the sequence. The framebuffer follows `hakios_panel_refresh_hz`: the
+display driver raises it to 90 only after all four packets are accepted, and
+the framebuffer clamps back to 60 when they are not, so a failed switch no
+longer produces the 90-into-60 ghosting that the seq=1 runs showed.
+
+`logs/200350-run.log` is the promoted full run: `panel timing 90 Hz seq=0
+(ok), framebuffer rate 90 Hz`, `brightness ready (ok)` and `bluetoothd: Got
+local-mac-address`; `logs/reliable-bt.png` shows the Bluetooth Settings page
+(the pane still initialising). The user confirmed on the physical phone that
+the full-sequence UI is smooth with no dropped frames. The panel's TE rate is
+inferred from this user-visible result; the INTF TE block is still unsafe
+(`display_probe=1` stops before user space, `logs/193357-run.log`), and
+`fb_measure=1`/`display_probe=1` must not be used on THYME.
+
+The Bluetooth observation in the short-packet test was an image issue: the old
+`root-jiggle-gpu.apfs` has no `fw/qca6390-bt`, so `bt_qca_firmware()` returns
+`ENOENT` (`probe result=2`). `root-wirelessfull.apfs` carries the firmware and
+starts `bluetoothd` with the local MAC (`logs/200350-run.log`).
+
+Evidence for the promoted run:
+
+| File | SHA-256 |
+|---|---|
+| `logs/200350-run.log` | `127a44a6333235700090af1e005c97741a70cae57ee4ffe0866c4b4fa23c7a72` |
+| `logs/reliable-wifi.png` | `e1df5d9a7536a3db990868d191e90242b810b5a8abd52a1becef914ed1410bf6` |
+| `logs/reliable-bt.png` | `cf95bbb8dcd00211010b7eacfcb3200c08c0ceddad2f22803f675c1966bc0fa3` |
+
 ### CPU-monitor log flood and Bluetooth build repair (2026-11-04)
 
 The XNU CPU-monitor denial path logged every refused request. During a boot,
@@ -323,7 +379,7 @@ No item moves to `PASS` from source inspection alone.
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`) |
 | UI animation frame pacing | PASS at 60 Hz | GPU-backed jiggle animation presented about 60 fps in four consecutive five-second windows (`302/301/301/301` frames), with software fallback absent during active use (`logs/041711-run.log`) |
-| 90 Hz panel refresh | TODO | The current panel mode still runs at about 60 Hz. 90 Hz switching and its DSI command-DMA path remain unimplemented |
+| 90 Hz panel refresh | PASS (user-confirmed) | The full DTB sequence is accepted and promoted (`logs/200350-run.log`: `seq=0 (ok), framebuffer rate 90 Hz`); the user confirmed smoothness with no dropped frames. If the sequence is rejected, the framebuffer falls back to 60 Hz |
 | Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |

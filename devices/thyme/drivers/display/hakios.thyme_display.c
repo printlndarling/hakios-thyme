@@ -15,6 +15,7 @@
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/device_tree.h>
+#include <pexpert/pexpert.h>
 #include <sys/hakios.board.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
@@ -60,6 +61,13 @@ static bool brightness_ready;
 static int brightness_permille = THYME_BL_DEFAULT_PERMILLE;
 static uint32_t brightness_last_level;
 static unsigned brightness_logs;
+
+/*
+ * The rate the framebuffer may use. It stays 60 until the full panel timing
+ * sequence has actually been accepted: pacing at 90 into a panel that did not
+ * switch produces the late-swap ghosting seen in the seq=1 runs.
+ */
+int hakios_panel_refresh_hz = 60;
 
 static LCK_GRP_DECLARE(brightness_lck_grp, "hakios-brightness");
 static LCK_MTX_DECLARE(brightness_mtx, &brightness_lck_grp);
@@ -153,22 +161,22 @@ permille_to_level(int permille)
 	    ((THYME_BL_MAX_LEVEL - THYME_BL_MIN_LEVEL) * (uint32_t)permille + 500u) / 1000u;
 }
 
-static void
-backlight_packet(uint32_t level, uint32_t *word0, uint32_t *word1)
-{
-	if (level > THYME_BL_MAX_LEVEL) {
-		level = THYME_BL_MAX_LEVEL;
-	}
-	*word0 = 0xc0390003u;
-	*word1 = 0xff000051u | (((level >> 8) & 0xffu) << 8) | ((level & 0xffu) << 16);
-}
-
+/*
+ * Send a run of 32-bit words through the DSI command DMA path the firmware
+ * left enabled. The first word is the packet header (0xc0, the 0x39
+ * long-write data type and the payload length); the words after it are the
+ * payload four bytes each, least significant byte first. The controller's DMA
+ * and trigger state is restored whether the transfer finishes or not.
+ */
 static bool
-send_backlight(uint32_t level)
+dsi_send_words(const uint32_t *words, unsigned count)
 {
-	uint32_t word0, word1, old_dma_ctrl, old_trig;
+	uint32_t old_dma_ctrl, old_trig;
 	bool done = false;
 
+	if (count == 0 || count > 9) {
+		return false;
+	}
 	if (!brightness_ready || dsi0 == 0 || !display_regs_alive()) {
 		return false;
 	}
@@ -189,7 +197,6 @@ send_backlight(uint32_t level)
 		delay_for_interval(50, NSEC_PER_USEC);
 	}
 
-	backlight_packet(level, &word0, &word1);
 	old_dma_ctrl = rd(dsi0, DSI_COMMAND_MODE_DMA_CTRL);
 	old_trig = rd(dsi0, DSI_TRIG_CTRL);
 	wr(dsi0, DSI_INT_CTRL,
@@ -198,10 +205,11 @@ send_backlight(uint32_t level)
 		wr(dsi0, DSI_TRIG_CTRL, (old_trig & ~0xfu) | 0x4u);
 	}
 	wr(dsi0, DSI_TEST_PATTERN_GEN_CTRL, 0x00030006u);
-	wr(dsi0, DSI_TEST_PATTERN_GEN_CMD_DMA_INIT_VAL, word0);
-	wr(dsi0, DSI_TEST_PATTERN_GEN_CMD_DMA_INIT_VAL, word1);
+	for (unsigned i = 0; i < count; i++) {
+		wr(dsi0, DSI_TEST_PATTERN_GEN_CMD_DMA_INIT_VAL, words[i]);
+	}
 	wr(dsi0, DSI_COMMAND_MODE_DMA_CTRL, (old_dma_ctrl & ~0xc0000000u) | 0x14000000u);
-	wr(dsi0, DSI_DMA_CMD_LENGTH, 8u);
+	wr(dsi0, DSI_DMA_CMD_LENGTH, count * 4u);
 	wr(dsi0, DSI_CMD_MODE_DMA_SW_TRIGGER, 1u);
 	for (unsigned i = 0; i < 100; i++) {
 		if (rd(dsi0, DSI_INT_CTRL) & DSI_INT_CMD_DMA_DONE) {
@@ -223,7 +231,156 @@ send_backlight(uint32_t level)
 	return done;
 }
 
+/* One DCS long write: the command byte and its parameters, up to 32 bytes. */
+static bool
+dsi_send_long(const uint8_t *payload, unsigned length)
+{
+	uint32_t words[1 + 8];
+	unsigned count = 1 + (length + 3) / 4;
+
+	if (length == 0 || length > 32) {
+		return false;
+	}
+	words[0] = 0xc0390000u | length;
+	for (unsigned i = 1; i < count; i++) {
+		words[i] = 0;
+	}
+	for (unsigned i = 0; i < length; i++) {
+		words[1 + i / 4] |= (uint32_t)payload[i] << (8 * (i % 4));
+	}
+	return dsi_send_words(words, count);
+}
+
+/*
+ * One DCS short write: data type 0x15 and one or two parameters. The panel's
+ * timing-switch commands (0x2f and 0x26) use this form in the device tree;
+ * sending them as long writes wedges the command DMA and every later
+ * brightness command is skipped (logs/190626-run.log).
+ */
+static bool
+dsi_send_short(const uint8_t *payload, unsigned length)
+{
+	uint32_t words[2];
+
+	if (length == 0 || length > 2) {
+		return false;
+	}
+	words[0] = 0xc0150000u | length;
+	words[1] = payload[0] | (length > 1 ? (uint32_t)payload[1] << 8 : 0);
+	return dsi_send_words(words, 2);
+}
+
+static bool
+send_backlight(uint32_t level)
+{
+	uint8_t payload[3];
+
+	if (level > THYME_BL_MAX_LEVEL) {
+		level = THYME_BL_MAX_LEVEL;
+	}
+	payload[0] = 0x51;
+	payload[1] = (level >> 8) & 0xff;
+	payload[2] = level & 0xff;
+	return dsi_send_long(payload, sizeof(payload));
+}
+
+/*
+ * The panel's own timing switch, from the live device tree's
+ * qcom,mdss_dsi_j2s_mp_42_02_0a_dsc_cmd node: the vendor page F0, the B4
+ * timing table for the mode, then DCS 0x2f (the rate) and 0x26. The
+ * framebuffer must make frames at the same rate (fb_hz=90); switching only
+ * the panel would leave a 90 Hz scan behind 60 Hz content.
+ */
+static const uint8_t panel_page_f0[] = {
+	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00,
+};
+static const uint8_t panel_b4_60[] = {
+	0xb4, 0xcb, 0xbb, 0xbb, 0xaa, 0x99, 0x77, 0x66, 0x00, 0x00,
+	0x00, 0xb4, 0xd0, 0xd0, 0xd0, 0xd0, 0xd0, 0x86, 0x86, 0x3c,
+	0x3c, 0xf2, 0xf2, 0xa8, 0xa8, 0x36, 0x36, 0x36, 0x36, 0x0a,
+};
+static const uint8_t panel_b4_90[] = {
+	0xb4, 0x98, 0x88, 0x88, 0x77, 0x66, 0x55, 0x44, 0x00, 0x00,
+	0x00, 0x60, 0xb8, 0xb8, 0xb8, 0xb8, 0xb8, 0xc8, 0xc8, 0xd8,
+	0xd8, 0xe8, 0xe8, 0xf8, 0xf8, 0x48, 0x48, 0x48, 0x48, 0x0a,
+};
+
+static bool
+send_panel_timing(uint32_t hz, uint32_t sequence)
+{
+	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
+	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
+	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
+
+	if (sequence >= 2) {
+		return true;
+	}
+	if (sequence == 0) {
+		tell("display: THYME panel timing: F0 page\n");
+		if (!dsi_send_long(panel_page_f0, sizeof(panel_page_f0))) {
+			return false;
+		}
+		tell("display: THYME panel timing: B4 table\n");
+		if (!dsi_send_long(b4, 30)) {
+			return false;
+		}
+	}
+	tell("display: THYME panel timing: 2f %#x\n", rate[1]);
+	if (!dsi_send_short(rate, sizeof(rate))) {
+		return false;
+	}
+	tell("display: THYME panel timing: 26 %#x\n", mode[1]);
+	return dsi_send_short(mode, sizeof(mode));
+}
+
 SYSCTL_DECL(_kern_hakios);
+
+/*
+ * panel_dsi_probe=1: sample the DSI controller's status and TE registers after
+ * the panel timing sequence. The INTF block is not readable on THYME
+ * (display_probe hangs before user space), so the DSI controller is the only
+ * live display block that can tell us where the panel's TE is.
+ */
+static void
+dsi_probe(void)
+{
+	uint32_t transitions[32] = { 0 };
+	uint32_t previous, te_ctl, te_start, te_end, te_cnt, trig, dma, int0, int1;
+
+	if (!brightness_ready || dsi0 == 0 || !display_regs_alive()) {
+		return;
+	}
+	delay_for_interval(200, NSEC_PER_MSEC);
+	te_ctl = rd(dsi0, 0x00ac);
+	te_start = rd(dsi0, 0x00b0);
+	te_end = rd(dsi0, 0x00b4);
+	te_cnt = rd(dsi0, 0x00b8);
+	trig = rd(dsi0, DSI_TRIG_CTRL);
+	dma = rd(dsi0, DSI_COMMAND_MODE_DMA_CTRL);
+	int0 = rd(dsi0, DSI_INT_CTRL);
+	previous = rd(dsi0, DSI_STATUS);
+	for (unsigned n = 0; n < 1000; n++) {
+		uint32_t status, changed;
+
+		delay_for_interval(100, NSEC_PER_USEC);
+		status = rd(dsi0, DSI_STATUS);
+		changed = status ^ previous;
+		for (unsigned bit = 0; bit < 32; bit++) {
+			if (changed & (1u << bit)) {
+				transitions[bit]++;
+			}
+		}
+		previous = status;
+	}
+	int1 = rd(dsi0, DSI_INT_CTRL);
+	tell("display: DSI probe: te_ctl=%#x start=%#x end=%#x cnt=%#x trig=%#x dma=%#x int0=%#x int1=%#x status=%#x\n",
+	    te_ctl, te_start, te_end, te_cnt, trig, dma, int0, int1, previous);
+	for (unsigned bit = 0; bit < 32; bit++) {
+		if (transitions[bit] >= 3) {
+			tell("display: DSI probe: status bit %u changed %u times in 100 ms\n", bit, transitions[bit]);
+		}
+	}
+}
 
 static int
 sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2,
@@ -308,11 +465,43 @@ hakios_brightness_init(void)
 	}
 
 	brightness_ready = true;
+	uint32_t fb_hz = 0;
+	if (PE_parse_boot_argn("fb_hz", &fb_hz, sizeof(fb_hz)) && (fb_hz == 60 || fb_hz == 90)) {
+		uint32_t sequence = 0;
+		(void)PE_parse_boot_argn("panel_seq", &sequence, sizeof(sequence));
+		if (sequence > 2) {
+			sequence = 0;
+		}
+		bool switched = false;
+
+		for (unsigned attempt = 0; attempt < 5 && !switched; attempt++) {
+			if (attempt != 0) {
+				delay_for_interval(20, NSEC_PER_MSEC);
+			}
+			switched = send_panel_timing(fb_hz, sequence);
+		}
+		if (switched && fb_hz == 90) {
+			hakios_panel_refresh_hz = 90;
+		}
+		tell("display: THYME panel timing %u Hz seq=%u (%s), framebuffer rate %d Hz\n", fb_hz, sequence,
+		    switched ? "ok" : "skipped", hakios_panel_refresh_hz);
+	}
 	uint32_t level = permille_to_level(brightness_permille);
-	bool ok = send_backlight(level);
+	bool ok = false;
+	for (unsigned attempt = 0; attempt < 5 && !ok; attempt++) {
+		if (attempt != 0) {
+			delay_for_interval(10, NSEC_PER_MSEC);
+		}
+		ok = send_backlight(level);
+	}
 	if (ok) {
 		brightness_last_level = level;
 	}
 	tell("display: THYME brightness ready: DSI_CTRL=%#x, %d permille -> level %u (%s)\n",
 	    control, brightness_permille, level, ok ? "ok" : "skipped");
+	uint32_t dsi_probe_enabled = 0;
+	if (PE_parse_boot_argn("panel_dsi_probe", &dsi_probe_enabled, sizeof(dsi_probe_enabled)) &&
+	    dsi_probe_enabled) {
+		dsi_probe();
+	}
 }

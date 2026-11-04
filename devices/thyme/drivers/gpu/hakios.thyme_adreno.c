@@ -3871,7 +3871,7 @@ static struct block disp_intf = { "intf1", 0x0ae36000, 0x300 };         /* dt: m
 static void
 display_probe(void)
 {
-	uint32_t saved_fine = fine, line, frame, shown, counting, frames[2], lines[2], bus;
+	uint32_t saved_fine = fine, line, frame, shown, counting, frames[2], lines[2], bus, engine;
 	uint64_t times[2];
 
 	step = newest_step = 0;
@@ -3914,7 +3914,12 @@ display_probe(void)
 		goto out;
 	}
 	announce("the timing of the interface the panel hangs on (0xae36000: NOT READ BEFORE)");
-	get(&disp_intf, "timing_engine_en", INTF_TIMING_ENGINE_EN);
+	engine = get(&disp_intf, "timing_engine_en", INTF_TIMING_ENGINE_EN);
+	if (!(engine & 1)) {
+		printf("adreno: 0: the interface is in command mode (timing engine %#x): its frame and line counters are not read\n",
+		    engine);
+		goto out;
+	}
 	line = get(&disp_intf, "hsync_ctl", INTF_HSYNC_CTL) >> 16;
 	frame = get(&disp_intf, "vsync_period", INTF_VSYNC_PERIOD);
 	shown = get(&disp_intf, "display_v_end", INTF_DISPLAY_V_END) - get(&disp_intf, "display_v_start", INTF_DISPLAY_V_START);

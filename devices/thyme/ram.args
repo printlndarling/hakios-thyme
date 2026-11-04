@@ -1,1 +1,1 @@
-touchscreen=1 buttons=1 umi_touch=1 umi_keys=1 bootcpu=7 cpus=7 cpufreq=1 thermal=1 thermal_stop=95 battery=1 adsp=1 sound=4 mic=4 haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1 gpu=1
+touchscreen=1 buttons=1 umi_touch=1 umi_keys=1 bootcpu=7 cpus=7 cpufreq=1 thermal=1 thermal_stop=95 battery=1 adsp=1 sound=4 mic=4 haptic=5 umi_haptic=5 wifi=1 bt=1 touch_lat=1 gpu=1 fb_hz=90
