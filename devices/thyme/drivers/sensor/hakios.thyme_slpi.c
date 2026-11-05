@@ -4156,6 +4156,22 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 /* The reverse tunnel kept open: each nested call the DSP makes is served from fw/sensors. */
 static volatile bool fastrpc_listener_wanted;
 
+/* What the DSP last said before it died (item 424): the string names the failing process. */
+static void
+fastrpc_last_words(void)
+{
+	char text[81];
+	uint32_t size = 0, at = smem_item(ITEM_CRASH_REASON, &size);
+
+	if (at == 0 || size == 0) {
+		printf("slpi: fastrpc: the DSP's last words: not there\n");
+		return;
+	}
+	bzero(text, sizeof(text));
+	smem_peek(at, text, size < sizeof(text) - 1 ? size : sizeof(text) - 1);
+	printf("slpi: fastrpc: the DSP's last words: \"%s\"\n", text);
+}
+
 struct fastrpc_listener_args {
 	uint32_t client, pd, tid, item;
 };
@@ -4218,6 +4234,8 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			if (!fastrpc_listener_wanted) {
 				break;
 			}
+			/* nothing was handed over in two minutes: say what the DSP last died of, if it did */
+			fastrpc_last_words();
 			sleep_ms(5000);
 			continue;
 		}
