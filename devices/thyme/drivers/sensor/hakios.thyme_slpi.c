@@ -65,6 +65,7 @@ extern int mdevgetkernelrange(dev_t dev, vm_offset_t *base, uint64_t *size);
 extern lck_mtx_t hakios_aop_mailbox_lock;
 extern lck_mtx_t hakios_smem_alloc_lock;
 extern lck_mtx_t hakios_rsc_lock;            /* RPMh's sequencer, shared with the other DSP's driver */
+extern lck_mtx_t hakios_smmu_lock;           /* the apps SMMU's match registers (hakios.wifi.c) */
 
 static LCK_GRP_DECLARE(slpi_lock_group, "hakios-slpi");
 
@@ -1390,6 +1391,7 @@ dsp_ask_to_stop(uint32_t bound_ms)
 }
 
 static void link_stop(void);
+static void fastrpc_smmu_restore(void);
 
 /* Asked to stop, then shut down by TrustZone, then the always-on processor told that the image is gone. */
 static bool
@@ -1419,6 +1421,7 @@ dsp_shutdown(const char *why)
 		rails(0);
 		rails_asked = false;
 	}
+	fastrpc_smmu_restore();
 	return true;
 }
 
@@ -3251,6 +3254,82 @@ fastrpc_smmu_look(void)
 	    covering ? "" : " (the boot chain set nothing up for it)");
 }
 
+static vm_offset_t fastrpc_smmu_base;
+static uint32_t fastrpc_smmu_index, fastrpc_smmu_old_smr, fastrpc_smmu_old_s2cr;
+static bool fastrpc_smmu_programmed;
+
+/*
+ * Give the SLPI's FastRPC stream a context of its own, bypassing translation: the DSP is trusted
+ * firmware, and a first bring-up only needs it to reach a buffer whose physical address the AP
+ * puts in fastrpc_msg.addr. The old match register is saved and put back when the DSP stops.
+ */
+static bool
+fastrpc_smmu_bypass(void)
+{
+	vm_offset_t smmu = ml_io_map(0x15000000, 0x100000);
+	uint32_t scr0, idr0, idr1, matches, wide, n = 0, smr = 0, s2cr = 0;
+	bool used = true;
+
+	if (smmu == 0) {
+		printf("slpi: fastrpc: the apps SMMU cannot be mapped for the bypass\n");
+		return false;
+	}
+	scr0 = rd(smmu + 0x000);
+	idr0 = rd(smmu + 0x020);
+	idr1 = rd(smmu + 0x024);
+	matches = idr0 & 0xff;
+	wide = (scr0 & 1u << 3) != 0;
+	lck_mtx_lock(&hakios_smmu_lock);
+	for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+		smr = rd(smmu + 0x800 + 4 * n);
+		s2cr = rd(smmu + 0xc00 + 4 * n);
+		used = wide ? (s2cr & 1u << 10) != 0 : (smr >> 31) != 0;
+		if (!used) {
+			break;
+		}
+	}
+	if (!(!used && n < matches && 0x800 + 4 * n < 0xc00)) {
+		lck_mtx_unlock(&hakios_smmu_lock);
+		printf("slpi: fastrpc: no free match register for the SLPI's 0x541\n");
+		return false;
+	}
+	fastrpc_smmu_old_smr = smr;
+	fastrpc_smmu_old_s2cr = s2cr;
+	if (wide) {
+		wr(smmu + 0x800 + 4 * n, 0x541);
+		wr(smmu + 0xc00 + 4 * n, (1u << 10) | (1u << 16));
+	} else {
+		wr(smmu + 0x800 + 4 * n, (1u << 31) | 0x541);
+		wr(smmu + 0xc00 + 4 * n, 1u << 16);
+	}
+	settle();
+	smr = rd(smmu + 0x800 + 4 * n);
+	s2cr = rd(smmu + 0xc00 + 4 * n);
+	printf("slpi: fastrpc: SMR %u for 0x541: smr %#x s2cr %#x (bypass); old %#x/%#x\n", n, smr, s2cr,
+	    fastrpc_smmu_old_smr, fastrpc_smmu_old_s2cr);
+	fastrpc_smmu_base = smmu;
+	fastrpc_smmu_index = n;
+	fastrpc_smmu_programmed = ((s2cr >> 16 & 3) == 1) && (wide ? (s2cr & 1u << 10) != 0 : (smr >> 31) != 0);
+	lck_mtx_unlock(&hakios_smmu_lock);
+	return fastrpc_smmu_programmed;
+}
+
+static void
+fastrpc_smmu_restore(void)
+{
+	if (!fastrpc_smmu_programmed) {
+		return;
+	}
+	lck_mtx_lock(&hakios_smmu_lock);
+	wr(fastrpc_smmu_base + 0x800 + 4 * fastrpc_smmu_index, fastrpc_smmu_old_smr);
+	wr(fastrpc_smmu_base + 0xc00 + 4 * fastrpc_smmu_index, fastrpc_smmu_old_s2cr);
+	settle();
+	lck_mtx_unlock(&hakios_smmu_lock);
+	printf("slpi: fastrpc: SMR %u put back to %#x/%#x\n", fastrpc_smmu_index, fastrpc_smmu_old_smr,
+	    fastrpc_smmu_old_s2cr);
+	fastrpc_smmu_programmed = false;
+}
+
 /* ---- APR: the sensor services' protocol, on the channel apr_audio_svc ------------------------------------- */
 
 /*
@@ -3901,6 +3980,9 @@ step_qrtr(void)
 	    services, qrtr_lookups, qrtr_in, qrtr_out);
 	if (fastrpc_smmu) {
 		fastrpc_smmu_look();
+	}
+	if (fastrpc_smmu >= 2) {
+		fastrpc_smmu_bypass();
 	}
 	if (sns_on) {
 		sns_start();

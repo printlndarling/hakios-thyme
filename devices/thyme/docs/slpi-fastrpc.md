@@ -27,6 +27,11 @@ claim that any of it is done.
   (`logs/160408-run.log`). The AP has to add an SMR/S2CR for it: bypass for a
   first bring-up, or a translated context built with the Wi-Fi page-table
   code.
+- The bypass is programmed and verified: match register 6 gets
+  `smr 0x80000541`, `s2cr 0x20000` (bypass), old `0/0` saved and restored when
+  the DSP stops (`logs/163238-run.log`). A physically contiguous argument
+  buffer helper (`hakios.thyme_slpi_dma.cpp`) is in the driver; the next step
+  is the first `remotectl_open` call on the FastRPC channel.
 
 ## The AP-side FastRPC contract
 
