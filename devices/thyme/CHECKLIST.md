@@ -872,6 +872,21 @@ mainline close. The phone's kernel is a custom 4.19 with the downstream
 `/dev/sdsprpc-smd` UAPI and the fastrpc tracepoints, but tracefs is not
 writable from the shell domain.
 
+The last probes of 2026-11-06 settle what the DSP does and does not do. With
+the listener registered before the attach (`fastrpc_phone=2`: attach, init2,
+open, register, then next2) everything answers 0 and next2 waits — and no
+request ever comes (`logs/004550-run.log`). Running a listener in the root PD
+and the sensors PD at once (`fastrpc_phone=4`) also gets nothing on either
+(`logs/010653-run.log`). The sensor process itself starts at the attach and
+meets its user-PD watchdog about 31 s later: item 424 then reads
+`err_qdi.c:1038:EF:sensor_process:0x1:TMR_CLNT_1:0x88:dog_virtual_user.c:240:USER`
+— a QDI timer-client failure, not a file error (`logs/005342-run.log`). After
+that watchdog the DSP's
+FastRPC channel stops serving: a re-attach gets no answer and next2 reports
+"the channel did not take the call". So the reverse tunnel works up to the
+DSP and the missing piece is on the DSP's side of the sensor process's own
+start-up, not in the AP file service.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
