@@ -3368,9 +3368,10 @@ fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count,
 #define ITEM_FASTRPC_OPEN        622
 #define ITEM_FASTRPC_LISTENER    623       /* the listener thread's packet: it can be outstanding while a control call runs */
 #define ITEM_FASTRPC_LISTENER2   626       /* the second listener (phone=4 runs one in the root PD and one in the sensors PD) */
+#define ITEM_FASTRPC_GROW        627       /* the remote heap offered to the DSP with remotectl_grow_heap */
 
 static uint8_t *
-fastrpc_smem_item(uint32_t item, uint32_t *offset)
+fastrpc_smem_item_size(uint32_t item, uint32_t size, uint32_t *offset)
 {
 	uint32_t cacheline = 0, partition_size = 0, bytes = 0, at;
 	uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
@@ -3379,17 +3380,27 @@ fastrpc_smem_item(uint32_t item, uint32_t *offset)
 		printf("slpi: fastrpc: no partition with the sensor DSP for the argument packet\n");
 		return NULL;
 	}
+	if (size < 4096) {
+		size = 4096;
+	}
+	size = (size + 4095) & ~4095u;
 	at = smem_item(item, &bytes);
-	if (at == 0 || bytes < 4096) {
-		smem_private_item_make(partition, item, 4096);
+	if (at == 0 || bytes < size) {
+		smem_private_item_make(partition, item, size);
 		at = smem_item(item, &bytes);
-		if (at == 0 || bytes < 4096) {
-			printf("slpi: fastrpc: the shared 4 KB buffer could not be made (%u bytes)\n", bytes);
+		if (at == 0 || bytes < size) {
+			printf("slpi: fastrpc: the shared %u-byte buffer could not be made (%u bytes)\n", size, bytes);
 			return NULL;
 		}
 	}
 	*offset = at;
 	return (uint8_t *)(uintptr_t)(smem + at);
+}
+
+static uint8_t *
+fastrpc_smem_item(uint32_t item, uint32_t *offset)
+{
+	return fastrpc_smem_item_size(item, 4096, offset);
 }
 
 static uint8_t *
@@ -3519,6 +3530,8 @@ static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone da
 static uint32_t fastrpc_client = 1;      /* boot-arg fastrpc_client: the session's client id; the DSP names its kthreads by it */
 static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the thread id the next2 loop runs on */
 static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: seconds before phone=3 re-attaches the sensors PD */
+static uint32_t fastrpc_grow_kb;         /* boot-arg fastrpc_grow_kb: offer the DSP that much remote heap before the attach */
+static uint32_t fastrpc_grow_after;      /* boot-arg fastrpc_grow_after: offer it after the attach instead */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -4399,6 +4412,58 @@ fastrpc_pd_call(uint32_t msg_client, uint32_t sc, uint32_t context, uint64_t phy
 	}
 }
 
+/*
+ * remotectl_grow_heap(phyAddr, nSize): the vendor's remotectl method 2, one 8-byte input buffer and
+ * no output (sc = method 2, 1 in, 0 out). A DSP-side static PD -- the sensor process is one -- has
+ * its remote heap handed to it this way; without it the process starts short of memory.
+ */
+static bool
+fastrpc_grow_heap(uint64_t heap_physical, uint32_t heap_size, uint64_t physical, uint32_t shared_offset, bool shared,
+    uint8_t *packet)
+{
+	uint32_t words[2] = { (uint32_t)heap_physical, heap_size }, lengths[1] = { sizeof(words) }, size;
+	const void *sources[1] = { words };
+
+	memset(packet, 0, 4096);
+	size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	return fastrpc_call(fastrpc_client, 0, 0x02010000, 0x200 | fastrpc_pd, physical, size, 5000, "remotectl_grow_heap");
+}
+
+/* The heap itself: as much shared memory as fits, page-aligned, offered to the DSP. */
+static void
+fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet)
+{
+	uint32_t kb = fastrpc_grow_kb, grow_offset = 0, heap_size, skip;
+	uint64_t heap_physical;
+	uint8_t *heap = NULL;
+
+	if (fastrpc_grow_kb == 0) {
+		return;
+	}
+	while (kb >= 16 && (heap = fastrpc_smem_item_size(ITEM_FASTRPC_GROW, kb << 10, &grow_offset)) == NULL) {
+		kb >>= 1;
+	}
+	if (heap == NULL) {
+		printf("slpi: fastrpc: no shared memory for the %u KB remote heap\n", fastrpc_grow_kb);
+		return;
+	}
+	heap_physical = SMEM_PHYS + grow_offset;
+	heap_size = kb << 10;
+	skip = (uint32_t)(heap_physical & 0xfff);
+	if (skip != 0) {
+		skip = 0x1000 - skip;
+		if (heap_size > skip) {
+			heap_size -= skip;
+			heap_physical += skip;
+		}
+	}
+	printf("slpi: fastrpc: offering the DSP a %u KB remote heap at %#llx\n", heap_size >> 10, heap_physical);
+	fastrpc_grow_heap(heap_physical, heap_size, physical, shared_offset, shared, packet);
+}
+
 /* Send the module open without waiting: its file requests are for the listener to serve meanwhile. */
 static bool
 fastrpc_module_open_send(uint32_t pd)
@@ -4532,6 +4597,9 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	uint32_t lengths[4], size, handle;
 	const void *sources[4];
 
+	if (!fastrpc_grow_after) {
+		fastrpc_offer_heap(physical, shared_offset, shared, packet);
+	}
 	if (fastrpc_pd == 0) {
 		/* the plain sscrpcd instance: attachguestos, i.e. the root PD (the phone runs one of each) */
 		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
@@ -4539,6 +4607,10 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	} else {
 		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client,
 		    "INIT_ATTACH_SNS (phone)");
+	}
+	if (fastrpc_grow_after) {
+		/* the PD exists now: the DSP may take a heap that it refused before the attach */
+		fastrpc_offer_heap(physical, shared_offset, shared, packet);
 	}
 	memset(packet, 0, 4096);
 	lengths[0] = 0;
@@ -5783,6 +5855,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_listener_tid", &fastrpc_listener_tid, sizeof(fastrpc_listener_tid));
 	PE_parse_boot_argn("fastrpc_tid", &fastrpc_call_tid, sizeof(fastrpc_call_tid));
 	PE_parse_boot_argn("fastrpc_attach_delay", &fastrpc_attach_delay, sizeof(fastrpc_attach_delay));
+	PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
+	PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
