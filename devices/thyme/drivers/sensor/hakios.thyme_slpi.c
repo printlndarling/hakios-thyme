@@ -3359,7 +3359,7 @@ fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context,
  * previous call's encoded output buffers; its outputs are the next call's context, handle, scalars
  * and input buffers. Nothing is served yet: this stage only shows what the sensor process asks for.
  */
-static uint32_t fastrpc_pd;              /* the PD the listener's calls are addressed to (boot-arg fastrpc_pd, default the root) */
+static uint32_t fastrpc_pd = 2;          /* the PD the listener's calls are addressed to (boot-arg fastrpc_pd; the sensors PD) */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -3745,7 +3745,9 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			for (uint32_t n = 0; n < i; n++) {
 				kfree_data(out[n].data, out[n].size ? out[n].size : 1);
 				out[n].data = NULL;
+				out[n].size = 0;
 			}
+			*out_count = 0;
 			return (int32_t)AEE_ENOMEMORY;
 		}
 		*out_count = i + 1;
@@ -4012,6 +4014,10 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		goto out;
 	}
 	physical = SMEM_PHYS + offset;
+	/* The registry files are in the root image, which is mounted after this step: wait for it. */
+	for (unsigned ms = 0; ms < 30000 && rootvnode == NULLVP; ms++) {
+		sleep_ms(1);
+	}
 	while (fastrpc_listener_wanted) {
 		sizes[0] = rctx;
 		sizes[1] = result_code;
@@ -4219,9 +4225,25 @@ fastrpc_first_calls(uint32_t stage)
 		if (shared) {
 			fastrpc_smem_put(shared_offset, packet, size);
 		}
-		if (fastrpc_call(1, fastrpc_listener, 0x100000, 0x300 | fastrpc_pd, physical, size, 2000,
+		if (fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 2000,
 		    "adsp_default_listener_register") &&
 		    stage >= 7) {
+			/* the reference closes the control handle after registering */
+			memset(packet, 0, 4096);
+			memset(error, 0, sizeof(error));
+			scalar[0] = fastrpc_listener;
+			scalar[1] = (uint32_t)sizeof(error);
+			lengths[0] = 8;
+			sources[0] = scalar;
+			lengths[1] = 4;
+			sources[1] = handles;
+			lengths[2] = (uint32_t)sizeof(error);
+			sources[2] = error;
+			size = fastrpc_build(packet, physical, physical, 3, lengths, sources);
+			if (shared) {
+				fastrpc_smem_put(shared_offset, packet, size);
+			}
+			fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
 			/* the fixed listener handle 3, method 3: the reverse tunnel's first call */
 			memset(packet, 0, 4096);
 			size = fastrpc_build(packet, physical, physical, 0, lengths, sources);

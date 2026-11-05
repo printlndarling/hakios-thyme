@@ -783,18 +783,28 @@ exposed yet.
 The AP-side legacy Sensor Registry service (0x10f, the mainline `sns-reg`
 protocol) was advertised to the DSP; the sensor manager requested no group,
 so this firmware does not use that bootstrap (`logs/141201-run.log`). The
-modern registry path (the phone's JSON/config written to the SLPI registry
-sensor) and FastRPC/HexagonFS are the next layer to instrument. The fast
-diagnostic loop is `devices/thyme/slpi-run.sh`.
+modern path is FastRPC (`direct_channel::init_fastRPC_symbols`,
+`libsns_fastRPC_util.so` in the HAL); the SNS QMI lookups alone never load
+the registry. The fast diagnostic loop is `devices/thyme/slpi-run.sh`.
 
-The Android sensor HAL (`sensors.ssc.so`, pulled read-only) explains why:
-the registry is a direct-channel sensor and its discovery waits on FastRPC
-(`direct_channel::init_fastRPC_symbols`, `sensor_factory::is_registry_up`,
-`libsns_fastRPC_util.so`). The SLPI opens the `fastrpcglink-apps-dsp` GLINK
-channel; this kernel leaves it unanswered. The next layer is an AP-side
-FastRPC transport and the HexagonFS file service (the open `fastrpc/`
-implementation in the sensh project is a reference), not another SNS QMI
-message. The working design and the implementation plan are in
+The FastRPC reverse tunnel is now up as far as the DSP. The argument packet
+lives in shared memory (item 621): an ordinary kernel page is not reachable
+by the DSP and wedges the phone at step 10. `INIT_ATTACH_SNS` (client 0),
+`remotectl_open("adsp_default_listener")`, the listener's register and
+`adsp_listener_init2` all answer 0; `adsp_listener_next2` (handle 3,
+`0x040202`) is polled with one call outstanding because the DSP holds the
+GLINK intent while it waits. `remotectl_open` is rejected in PD 0
+(`0x80000434`), so the chain stays in PD 2 (`fastrpc_pd` selects it).
+`logs/185355-run.log`, `logs/190234-run.log`, `logs/191700-run.log`.
+
+The AP side of the tunnel serves `apps_std` methods 1, 2, 3, 4, 9, 19, 26,
+27, 28 and 31 from `fw/sensors/`: the phone's `sns_reg_config`, its 49
+`config/*.json`, and the six `/sys/devices/soc0` values (`sensor-files.sh`
+pulls them; `SLPI=1 devices/thyme/build-root.sh` packs them). What is still
+missing: the DSP's sensor process has not made a nested call. Without a
+listener it watchdogged at +37 s (`dog_virtual_user`); with one it waits
+silently, so the tunnel's delivery, not the process, is the remaining
+question. The working notes are in
 [`docs/slpi-fastrpc.md`](docs/slpi-fastrpc.md).
 
 ## Later product work

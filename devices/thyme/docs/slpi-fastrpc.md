@@ -1,8 +1,64 @@
 # SLPI sensors: the FastRPC/registry layer
 
-Status: 2026-11-05. This note records why the SLPI sensor process stalls and
-what the next implementation has to provide. It is a working design, not a
-claim that any of it is done.
+Status: 2026-11-05. The reverse tunnel now works end to end as far as the DSP:
+the AP sends calls, the DSP answers, the listener is registered and served,
+and the DSP's own `apps_std` file requests are waited for. What is not yet
+verified is the DSP's sensor process asking for a file; that is what the
+`next2` loop below is watching for.
+
+## What the AP sends now, and what the DSP answers
+
+The argument packet is a 4 KB item of **shared memory** (item 621, in the
+partition for processor 0 and the sensor DSP), not an ordinary page: the
+DSP's FastRPC stream cannot read the kernel's pages through the apps SMMU,
+and a packet there wedges the phone at step 10. SMEM it reads anyway (GLINK
+lives in it). `hakios.thyme_slpi.c` lays the packet out exactly as Linux's
+`fastrpc_get_args` does and copies it in from a staging buffer.
+
+Verified on the phone (`logs/185355-run.log`, `logs/190234-run.log`):
+
+| Call | Client | Handle | `sc` | Answer |
+|---|---|---|---|---|
+| `INIT_ATTACH_SNS` | 0 (kernel) | 1 | `0x10000` | ctx `0x102`, retval 0 |
+| `remotectl_open("adsp_default_listener")` | 1 | 0 | `0x20200` | handle 837051488, dlret 0 |
+| `adsp_default_listener_register` | 1 | that handle | `0x100000` | retval 0 |
+| `adsp_listener_init2` | 1 | 3 | `0x03000000` | retval 0 |
+| `adsp_listener_next2` | 1 | 3 | `0x040202` | blocks, or "nothing" (`0x80000434`) |
+
+The session `client_id` is 1 for every call after the attach; with 0 the DSP
+accepts the call but never delivers the listener's requests. The context is
+`ctxid << 8 | pd`; `ctxid` numbers the call and `pd` selects the processor
+domain, so the next2 loop must not vary the low byte (an earlier version did,
+and rotated its calls through PD 0, 1 and 2). The boot argument `fastrpc_pd`
+sets the PD for the whole listener chain (default 0, the root PD; 2 is the
+sensors PD the attach names).
+
+`next2` must have exactly one call outstanding: when it is waiting for a
+request the DSP holds the GLINK intent, and a short timeout sent call after
+call until the channel had no intents left ("the channel did not take the
+call").
+
+## The file service behind the tunnel
+
+`apps_std` methods 1, 2, 3, 4, 9, 19, 26, 27, 28 and 31 are decoded and
+served in the kernel from `fw/sensors/` in the root image. The input and
+output blobs are `[u32 size][padding][data]` sequences with 8-byte alignment,
+as sensh's `iobuffer.c` encodes them. The paths the DSP asks for map to:
+
+| DSP | root image |
+|---|---|
+| `/vendor/etc/sensors/sns_reg_config` | `/fw/sensors/sns_reg_config` |
+| `/vendor/etc/sensors/config/...` | `/fw/sensors/config/...` |
+| `/sys/devices/soc0/...` | `/fw/sensors/soc0/...` |
+| `/mnt/vendor/persist/sensors/...` | `/fw/sensors/persist/...` |
+| `/usr/lib/qcom/adsp/...` | `/fw/sensors/adsp/...` |
+
+`fw-sensors/` comes from the phone's Android: `sns_reg_config` (553 bytes),
+the 49 `config/*.json` files, and the six `/sys/devices/soc0` values
+(`THYME`, subtype `Unknown`, soc_id 356, revision 2.1) that the registry
+parser reads to choose the platform files. `userland/build.sh` copies them
+into the scene image; the files are vendor data and stay out of git like the
+other `fw-*` trees.
 
 ## What is already verified
 
@@ -71,10 +127,11 @@ The pieces that matter here:
 ## The first two calls, exactly
 
 The reference is `libhexagonrpc`'s `vfastrpc2` and Linux's `fastrpc_get_args`.
-For both calls `fastrpc_msg.client_id` is 0 (a kernel call); `tid` is ours;
-`ctx` is `ctxid | pd` (`pd = 2` for the sensors PD, so `0x102` for
-`ctxid = 1 << 8`); `addr` is the buffer's physical address; `size` is the
-payload rounded to a page.
+`fastrpc_msg.client_id` is 0 for the kernel-level attach and 1 (the session)
+for every user invoke after it; `tid` is ours; `ctx` is `ctxid << 8 | pd`
+(the listener chain's `pd` is the `fastrpc_pd` boot argument, default 0);
+`addr` is the shared-memory packet's physical address; `size` is the payload
+rounded to a page.
 
 1. **Sensors PD attach** (`FASTRPC_IOCTL_INIT_ATTACH_SNS`): handle
    `FASTRPC_INIT_HANDLE = 1`, `sc = 0x10000` (one input buffer). The single
@@ -102,34 +159,32 @@ The next call after a successful open is
 `in_nums=0, in_bufs=0, out_nums=0, out_bufs=0`), then the reverse `apps_std`
 calls arrive from the DSP.
 
-## Implementation plan
+## Where it stands
 
-1. **Channel and message probe** — add `fastrpcglink-apps-dsp` to the SLPI
-   GLINK channel table, open it both ways, and log every FastRPC header and
-   payload. This proves the channel and shows what the DSP sends before the
-   AP registers a listener.
-2. **AP buffer + SMMU** — allocate a small contiguous argument buffer, map it
-   in the `adsprpc-smd` context bank, and place its IOVA in `fastrpc_msg.addr`.
-   Reuse the apps-SMMU code from the Wi-Fi path where possible; the FastRPC
-   context bank is a different SID and needs its own mapping.
-3. **Remote control** — send `remote_handle_open("remotectl")`, then
-   `adsp_default_listener_register`, and keep the listener context. The AP
-   side of the listener is the `apps_std` method table.
-4. **File service** — implement the small subset of `apps_std` the sensor
-   registry uses (`open`, `read`, `close`, `stat`, maybe `opendir/readdir` for
-   `sensors.d`) over the reverse calls, serving the phone's registry files
-   from `fw-sensors/` or the root image.
+1. **Channel and message probe** — done; the channel opens both ways and the
+   DSP answers the AP's calls.
+2. **AP buffer + SMMU** — done with shared memory instead of an SMMU mapping:
+   an ordinary page cannot be read by the DSP and wedges the phone, an SMEM
+   item works. The SMMU bypass (SMR 6, stream 0x541) stays harmless for now;
+   a translated context would let ordinary pages be used later.
+3. **Remote control** — done: open, register and the listener's init2 all
+   answer 0; `next2` is polled with one call outstanding.
+4. **File service** — implemented in `hakios.thyme_slpi.c`; waiting for the
+   DSP's first nested call to exercise it. If the registry parser asks to
+   write its merged output (`/mnt/vendor/persist/sensors/registry/registry`),
+   `apps_std` method 5 (`fwrite`) and the write mode of `fopen` still have to
+   be added.
 5. **Registry** — once the sensor process reads the registry, repeat the
    `accel`/`registry` SUID lookup, configure the accelerometer, and expose the
    samples to `backboardd` through a HID sensor service.
 
 ## Risks and open questions
 
-- The remote heap region is not named in the decompiled `qcom,msm_fastrpc`
-  node; the vendor driver may allocate it from the SLPI/ADSP reserved memory.
-  This has to be resolved before the DSP will trust AP buffers.
-- The SMMU context programming is security-sensitive; a wrong mapping can
-  stall or crash the SLPI or the AP.
+- The DSP's sensor process has not started a nested call in 150 s of a boot
+  with the listener registered and `next2` outstanding; it neither watchdogged
+  (which it did without a listener) nor asked. The listener may be registered
+  in the wrong PD for the DSP's file daemon — `fastrpc_pd` now selects it —
+  or the process may be blocked in a request made before registration.
 - The `apps_std` wire method IDs and argument layouts come from the DSP-side
   `libapps_std_skel.so`; they may differ from the ADSP reference on this
   firmware. The open `hexagonrpcd` definitions are the starting point.
