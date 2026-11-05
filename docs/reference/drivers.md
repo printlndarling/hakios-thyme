@@ -53,7 +53,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_ADRENO`**<br>the Adreno 642L of the SC7280 woken step by step (adreno=N), and HakiosGPU, the IOKit service Mesa and the window server draw through (gpu=1, adreno_keep=1). Needs the GPU's firmware from the phone (fw-gpu/) | `hakios.adreno.c`<br>`hakios.gpu.cpp` |  | `adreno=`, `adreno_blind=`, `adreno_dirty=`, `adreno_fine=`, `adreno_keep=`, `adreno_only=`, `adreno_pause=`, `adreno_return=` and 10 more |  | built |  | |
+| **`HAKIOS_ADRENO`**<br>the Adreno 642L of the SC7280 woken step by step (adreno=N), and HakiosGPU, the IOKit service Mesa, Metal and the window server draw through (gpu=1, adreno_keep=1; docs/reference/metal.md). Needs the GPU's firmware from the phone (fw-gpu/) | `hakios.adreno.c`<br>`hakios.gpu.cpp` |  | `adreno=`, `adreno_blind=`, `adreno_dirty=`, `adreno_fine=`, `adreno_keep=`, `adreno_only=`, `adreno_pause=`, `adreno_return=` and 10 more |  | built |  | |
 
 ## haptic
 
@@ -115,13 +115,20 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_THYME_BT`**<br>QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth IOService (bt=1). Needs htbtfw20.tlv and htnv20.bin under fw/qca6390-bt/. | `hakios.thyme_bluetooth.c`<br>`hakios.thyme_bluetooth.cpp` |  | `bt=`, `umi_bt=`, `umi_bt_probe=` | built | built | built | |
+| **`HAKIOS_THYME_BT`**<br>QCA6390 over QUP6 UART, volatile HCI firmware/NVM bootstrap, the H4 kernel-control transport and its Bluetooth IOService (bt=1). Needs htbtfw20.tlv and htnv20.bin under fw/qca6390-bt/. | `hakios.thyme_bluetooth.c`<br>`hakios.thyme_bluetooth.cpp` |  | `bt=`, `bt_baud=`, `umi_bt=`, `umi_bt_probe=` | built | built | built | |
+
+## camera (devices/thyme)
+
+| Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
+|---|---|---|---|---|---|---|
+| **`HAKIOS_THYME_CAMERA`**<br>the Xiaomi Mi 10S S5KHMX sensor, PM8150L rails, CCI/MCLK, Kona CamCC and IFE-lite/CSID-lite diagnostics (cam=1..4,6). | `hakios.thyme_camera.c`<br>`hakios.thyme_umi_camera.c`<br>`hakios.thyme_camera_dma.c` |  | `cam_after=`, `cam_fake=`, `cam_fake_fps=`, `cam_frames=`, `cam_gain=`, `cam_keep_mb=`, `cam_mode=`, `cam_pattern=` and 4 more | built | built | built | |
+| **`HAKIOS_THYME_TORCH`**<br>the Xiaomi Mi 10S PM8150L flash LED module, channel 0 only (torch=1 read, torch=2 bounded pulse, torch=3 /dev/hakios-torch). | `hakios.thyme_torch.c` |  | `torch_max_s=`, `torch_secs=` | built | built | built | |
 
 ## display (devices/thyme)
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_THYME_DISPLAY`**<br>the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight and the kern.hakios.brightness sysctl used by backboardd. | `hakios.thyme_display.c` |  |  | built | built | built | |
+| **`HAKIOS_THYME_DISPLAY`**<br>the Xiaomi Mi 10S command-mode DSI panel's DCS 0x51 backlight and the kern.hakios.brightness sysctl used by backboardd. | `hakios.thyme_display.c` |  | `fb_hz=`, `panel_dsi_probe=`, `panel_seq=` | built | built | built | |
 
 ## gpu (devices/thyme)
 
@@ -139,7 +146,7 @@ Every driver the kernel can be built with. `CONFIG_HAKIOS_<NAME>=y` in a defconf
 
 | Driver | Files | Requires | Boot arguments | qemu | redwood | thyme | |
 |---|---|---|---|---|---|---|
-| **`HAKIOS_THYME_INPUT`**<br>ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and BUTTONS on THYME. | `hakios.thyme_touch.c`<br>`hakios.thyme_touch_boost.c`<br>`hakios.thyme_rpmh.c`<br>`hakios.thyme_keys.c` |  | `buttons=`, `touchscreen=`, `umi_keys=`, `umi_touch=`, `umifts_scan=` | built | built | built | |
+| **`HAKIOS_THYME_INPUT`**<br>ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and BUTTONS on THYME. | `hakios.thyme_touch.c`<br>`hakios.thyme_touch_boost.c`<br>`hakios.thyme_rpmh.c`<br>`hakios.thyme_keys.c` |  | `buttons=`, `press_power=`, `press_power_ms=`, `touchscreen=`, `umi_keys=`, `umi_touch=`, `umifts_scan=` | built | built | built | |
 
 ## power (devices/thyme)
 

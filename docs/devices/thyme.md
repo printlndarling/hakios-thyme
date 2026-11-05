@@ -21,15 +21,15 @@
 | cpu | works | 7 CPUs; three EPSS domains raised to 1804/2419/3187 MHz on official main |
 | gpu | works | Adreno 650 / zap 0x8c41a000, hardware-rendered SpringBoard |
 | battery | partly | kernel telemetry and charging work; SpringBoard battery/charging refresh is implemented but awaits hardware validation |
-| storage | no | read-only UFS survey not run in the official-main port |
+| storage | partly | read-only UFS/GPT survey passed on the rebuilt THYME UEFI; persistent writes and installer design pending |
 | audio | partly | DSP/MI2S/CS35L41 and WCD938x dual-mic capture work; speaker-to-mic acoustic loopback verified, stereo balance pending |
 | haptic | partly | 1700 Hz AW8697 playback and repeatable BEMF response verified; F0 advisory unstable, physical feel pending |
-| camera | no | sensor tables collected; no working capture yet |
-| torch | no | not yet tested on THYME |
-| wifi | partly | QCA6390 scan, WPA2 association, DHCP and TCP through en0 verified historically; current RAM regression fix awaits retest |
-| bluetooth | partly | firmware, iOS H4 and physical LE scan work; pairing and reconnect pending |
+| camera | partly | S5KHMX ID/power, CSID/IFE DMA and AVFoundation/Camera.app synthetic preview verified; physical sensor streaming still pending |
+| torch | works | PM8150L channel 0: bounded pulse and AVFlashlight/mediaserverd on/off verified |
+| wifi | works | QCA6390 startup, 2.4/5 GHz scan, off/on recovery, WPA2 association, DHCP, TLS and Safari page loading verified on the pinned baseline |
+| bluetooth | partly | firmware, iOS H4, LE reception and Settings discovery verified; LE connection establishment, pairing and reconnect pending |
 | cellular | no | modem and telephony path not implemented |
-| network | partly | en0 DHCP and TCP traffic verified historically; current RAM regression fix awaits retest |
+| network | partly | en0 DHCP, DNS, TCP/TLS and Safari verified; Wi-Fi power-cycle/rejoin and concurrent Bluetooth discovery verified; sustained transfer and sleep/wake pending |
 | thermal | works | 27 TSENS inputs, live throttling, and orderly thermal_stop hand-back verified; soak pending |
 | usb | partly | xnuloader fastboot endpoint works; one endpoint loss observed |
 | sensors | no | ALS, accelerometer and proximity are not usable |
