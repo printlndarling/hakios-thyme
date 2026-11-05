@@ -818,6 +818,23 @@ silently, so the tunnel's delivery, not the process, is the remaining
 question. The working notes are in
 [`docs/slpi-fastrpc.md`](docs/slpi-fastrpc.md).
 
+The phone's own daemon (`sscrpcd`, pulled read-only and disassembled) settles
+the sequence. It runs twice: `sscrpcd sensorspd` (init service
+`vendor.sensors`) and plain `sscrpcd` (the root PD). It dlopens
+`libssc_default_listener.so` and calls `adsp_default_listener_start` with a
+URI: `'":;./\createstaticpd:sensorspd` only selects the **attach mode**
+(`FASTRPC_INIT_ATTACH_SENSORS`, i.e. `INIT_ATTACH_SNS`), and `attachguestos`
+selects the root PD; `geteventfd` returns the listener thread's eventfd.
+`INIT_CREATE_STATIC` exists only for the audio (3 MB heap) and OIS static PDs,
+so the `adsp_listener` create attempt was the wrong mechanism. The order is:
+open `adsp_default_listener` (which attaches the sensors PD, calls `init2` on
+the fixed handle 3 and starts the `next2` thread on thread ids of its own),
+then register, then take the eventfd; the control handle is never closed.
+`fastrpc_phone=1` reproduces that order, `fastrpc_close=1` restores the
+mainline close. The phone's kernel is a custom 4.19 with the downstream
+`/dev/sdsprpc-smd` UAPI and the fastrpc tracepoints, but tracefs is not
+writable from the shell domain.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the

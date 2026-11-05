@@ -3232,9 +3232,62 @@ struct fastrpc_msg {
 	uint64_t size;
 };
 
-static volatile bool fastrpc_rsp_seen;
-static uint64_t fastrpc_rsp_ctx;
-static int32_t fastrpc_rsp_retval;
+/*
+ * Responses can arrive for a call other than the one a thread waits for: the listener thread's
+ * next2 stays outstanding while the control thread opens and registers the default listener, which
+ * is the order the phone's own daemon uses. Each call claims a slot and waits for its own context.
+ */
+#define FASTRPC_RESPONSES 8
+static struct {
+	volatile uint64_t ctx;
+	volatile int32_t retval;
+	volatile bool seen;
+	volatile bool claimed;
+} fastrpc_responses[FASTRPC_RESPONSES];
+static volatile int fastrpc_response_lock;
+static int32_t fastrpc_call_retval;      /* the return value of this thread's last fastrpc_call */
+
+static int
+fastrpc_response_claim(uint64_t context)
+{
+	int slot = -1;
+
+	while (__atomic_test_and_set(&fastrpc_response_lock, __ATOMIC_ACQUIRE)) {
+	}
+	for (int i = 0; i < FASTRPC_RESPONSES; i++) {
+		if (fastrpc_responses[i].claimed && fastrpc_responses[i].ctx == context) {
+			fastrpc_responses[i].seen = false;
+		}
+	}
+	for (int i = 0; i < FASTRPC_RESPONSES; i++) {
+		if (!fastrpc_responses[i].claimed) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0) {
+		slot = 0;
+	}
+	fastrpc_responses[slot].ctx = context;
+	fastrpc_responses[slot].retval = 0;
+	fastrpc_responses[slot].seen = false;
+	fastrpc_responses[slot].claimed = true;
+	__atomic_clear(&fastrpc_response_lock, __ATOMIC_RELEASE);
+	return slot;
+}
+
+static void
+fastrpc_response_deliver(uint64_t ctx, int32_t retval)
+{
+	for (int i = 0; i < FASTRPC_RESPONSES; i++) {
+		if (fastrpc_responses[i].claimed && fastrpc_responses[i].ctx == ctx && !fastrpc_responses[i].seen) {
+			fastrpc_responses[i].retval = retval;
+			__atomic_store_n(&fastrpc_responses[i].seen, true, __ATOMIC_RELEASE);
+			return;
+		}
+	}
+	printf("slpi: fastrpc: a response for ctx %#llx matches no outstanding call\n", ctx);
+}
 
 static void
 fastrpc_input(const uint8_t *data, uint32_t length)
@@ -3251,9 +3304,7 @@ fastrpc_input(const uint8_t *data, uint32_t length)
 
 		memcpy(&ctx, data, 8);
 		memcpy(&retval, data + 8, 4);
-		fastrpc_rsp_ctx = ctx;
-		fastrpc_rsp_retval = retval;
-		fastrpc_rsp_seen = true;
+		fastrpc_response_deliver(ctx, retval);
 		printf("slpi: fastrpc: < response ctx %#llx retval %d\n", ctx, retval);
 	} else if (length >= sizeof(struct fastrpc_msg)) {
 		struct fastrpc_msg msg;
@@ -3315,6 +3366,7 @@ fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count,
  */
 #define ITEM_FASTRPC_ARGS        621
 #define ITEM_FASTRPC_OPEN        622
+#define ITEM_FASTRPC_LISTENER    623       /* the listener thread's packet: it can be outstanding while a control call runs */
 
 static uint8_t *
 fastrpc_smem_item(uint32_t item, uint32_t *offset)
@@ -3381,21 +3433,20 @@ fastrpc_send_async(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t co
 }
 
 static bool
-fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size,
-    uint32_t wait_ms, const char *what)
+fastrpc_call_as(uint32_t client_id, uint32_t tid, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical,
+    uint32_t size, uint32_t wait_ms, const char *what)
 {
 	struct fastrpc_msg msg;
+	int slot;
 
 	if (!glink.channel[CHANNEL_FASTRPC].open) {
 		printf("slpi: fastrpc: the channel is not open\n");
 		return false;
 	}
-	fastrpc_rsp_seen = false;
-	fastrpc_rsp_ctx = 0;
-	fastrpc_rsp_retval = 0;
+	slot = fastrpc_response_claim(context);
 	bzero(&msg, sizeof(msg));
 	msg.client_id = (int32_t)client_id;
-	msg.tid = (int32_t)fastrpc_call_tid;
+	msg.tid = (int32_t)tid;
 	msg.ctx = context;
 	msg.handle = handle;
 	msg.sc = sc;
@@ -3403,20 +3454,33 @@ fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context,
 	msg.size = (size + 0xfff) & ~0xfffu;
 	if (glink_send(&glink.channel[CHANNEL_FASTRPC], &msg, (uint32_t)sizeof(msg)) != 0) {
 		printf("slpi: fastrpc: %s: the channel did not take the call\n", what);
+		fastrpc_responses[slot].claimed = false;
 		return false;
 	}
-	printf("slpi: fastrpc: > %s client %u handle %u sc %#x ctx %#x addr %#llx size %u\n", what, client_id, handle, sc, context,
-	    physical, size);
-	for (unsigned ms = 0; ms < wait_ms && !(fastrpc_rsp_seen && fastrpc_rsp_ctx == context); ms++) {
+	printf("slpi: fastrpc: > %s client %u tid %u handle %u sc %#x ctx %#x addr %#llx size %u\n", what, client_id, tid, handle, sc,
+	    context, physical, size);
+	for (unsigned ms = 0; ms < wait_ms; ms++) {
+		if (fastrpc_responses[slot].seen && fastrpc_responses[slot].ctx == context) {
+			break;
+		}
 		sleep_ms(1);
 	}
-	if (!(fastrpc_rsp_seen && fastrpc_rsp_ctx == context)) {
-		printf("slpi: fastrpc: %s: no response in %u ms%s\n", what, wait_ms,
-		    fastrpc_rsp_seen ? " (a response for another call came instead)" : "");
+	if (!(fastrpc_responses[slot].seen && fastrpc_responses[slot].ctx == context)) {
+		printf("slpi: fastrpc: %s: no response in %u ms\n", what, wait_ms);
+		fastrpc_responses[slot].claimed = false;
 		return false;
 	}
-	printf("slpi: fastrpc: %s: ctx %#llx retval %d\n", what, fastrpc_rsp_ctx, fastrpc_rsp_retval);
+	fastrpc_call_retval = fastrpc_responses[slot].retval;
+	printf("slpi: fastrpc: %s: ctx %#llx retval %d\n", what, fastrpc_responses[slot].ctx, fastrpc_responses[slot].retval);
+	fastrpc_responses[slot].claimed = false;
 	return true;
+}
+
+static bool
+fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size,
+    uint32_t wait_ms, const char *what)
+{
+	return fastrpc_call_as(client_id, fastrpc_call_tid, handle, sc, context, physical, size, wait_ms, what);
 }
 
 /*
@@ -3449,6 +3513,8 @@ static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the P
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
+static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the default listener's control handle after registering */
+static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -4100,7 +4166,7 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		printf("slpi: fastrpc: the listener has no buffers\n");
 		goto out;
 	}
-	if (fastrpc_smem_buffer(&offset) == NULL) {
+	if (fastrpc_smem_item(ITEM_FASTRPC_LISTENER, &offset) == NULL) {
 		goto out;
 	}
 	physical = SMEM_PHYS + offset;
@@ -4126,7 +4192,12 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			break;
 		}
 		fastrpc_smem_put(offset, packet, size);
-		if (!fastrpc_call(1, fastrpc_service, fastrpc_next2_sc, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical,
+		/*
+		 * A thread id of its own: an outstanding next2 holds the DSP's thread queue for its tid,
+		 * and the control thread still has to open and register the default listener (the phone's
+		 * daemon starts its listener before it registers).
+		 */
+		if (!fastrpc_call_as(1, 2, fastrpc_service, fastrpc_next2_sc, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical,
 		    size, 120000, "adsp_listener_next2")) {
 			if (!fastrpc_listener_wanted) {
 				break;
@@ -4134,9 +4205,9 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			sleep_ms(5000);
 			continue;
 		}
-		if (fastrpc_rsp_retval != 0) {
+		if (fastrpc_call_retval != 0) {
 			/* nothing is waiting in the DSP's listener yet */
-			printf("slpi: fastrpc: the listener has nothing waiting (%d)\n", fastrpc_rsp_retval);
+			printf("slpi: fastrpc: the listener has nothing waiting (%d)\n", fastrpc_call_retval);
 			sleep_ms(100);
 			continue;
 		}
@@ -4398,6 +4469,44 @@ fastrpc_smem_heap(uint32_t *offset, uint32_t *size)
 	return (uint8_t *)(uintptr_t)(smem + at);
 }
 
+/*
+ * The order the phone's own daemon uses (libssc_default_listener over libsdsprpc): the sensors PD
+ * is attached first, the static listener's init2 runs, its next2 loop waits on a thread id of its
+ * own, and only then are "adsp_default_listener" opened and registered. The control handle stays
+ * open afterwards (the daemon never closes it).
+ */
+static void
+fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
+{
+	uint32_t lengths[4], size, handle;
+	const void *sources[4];
+
+	fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 1, "INIT_ATTACH_SNS (phone)");
+	memset(packet, 0, 4096);
+	lengths[0] = 0;
+	sources[0] = NULL;
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(1, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 10000, "adsp_listener_init2 (phone)")) {
+		return;
+	}
+	fastrpc_listener_start();
+	sleep_ms(200);
+	handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+	if (handle == 0) {
+		printf("slpi: fastrpc: the phone order: the default listener did not open\n");
+		return;
+	}
+	memset(packet, 0, 4096);
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	fastrpc_call(1, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
@@ -4448,6 +4557,10 @@ fastrpc_first_calls(uint32_t stage)
 	size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (fastrpc_phone) {
+		fastrpc_phone_chain(physical, shared_offset, shared, packet, reply);
+		goto done;
 	}
 	bool attached = fastrpc_attach_late || fastrpc_bare ||
 	    fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS");
@@ -4638,8 +4751,12 @@ fastrpc_first_calls(uint32_t stage)
 			}
 			ready = fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
 			    "adsp_default_listener_register");
-			if (ready) {
-				/* the reference closes the control handle after registering */
+			if (ready && fastrpc_close) {
+				/*
+				 * mainline's reference closes the control handle after registering; the phone's
+				 * daemon (libssc_default_listener) keeps it open, and the DSP may treat the close
+				 * as the end of the registration.
+				 */
 				memset(packet, 0, 4096);
 				memset(error, 0, sizeof(error));
 				scalar[0] = fastrpc_listener;
@@ -4737,6 +4854,7 @@ fastrpc_first_calls(uint32_t stage)
 		}
 	}
 	}
+done:
 	if (shared) {
 		kfree_data(packet, 4096);
 	} else {
@@ -5523,6 +5641,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_open_pd", &fastrpc_open_pd, sizeof(fastrpc_open_pd));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
+	PE_parse_boot_argn("fastrpc_close", &fastrpc_close, sizeof(fastrpc_close));
+	PE_parse_boot_argn("fastrpc_phone", &fastrpc_phone, sizeof(fastrpc_phone));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {

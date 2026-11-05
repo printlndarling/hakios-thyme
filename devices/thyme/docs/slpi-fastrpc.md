@@ -66,6 +66,8 @@ The bring-up's boot arguments:
 | `fastrpc_open_after=1` | send it after the listener is waiting |
 | `fastrpc_open_pd=N` | the PD of that open (unset: `fastrpc_pd`) |
 | `fastrpc_attach_mid=1` | guest attach, register, sensors attach, then the listener thread (the daemon order) |
+| `fastrpc_phone=1` | the phone daemon's order: sensors attach, `init2`, `next2` waiting on a thread id of its own, then open and register the default listener |
+| `fastrpc_close=1` | close the default listener's control handle after registering (mainline does; the phone's daemon does not) |
 
 The handle `remotectl_open` returns is not the listener's own handle:
 `adsp_listener_init2` on it answers -1, on the fixed 3 it answers 0
@@ -123,6 +125,49 @@ the process with the listener already waiting.
 request the DSP holds the GLINK intent, and a short timeout sent call after
 call until the channel had no intents left ("the channel did not take the
 call").
+
+## What the phone's own daemon does
+
+The phone's listener is `sscrpcd`, started twice by init:
+
+| init service | argv | domain |
+|---|---|---|
+| `vendor.sensors` (`/vendor/etc/init/vendor.sensors.sscrpcd.rc`) | `sscrpcd sensorspd` | the sensors PD (2) |
+| `vendor.lowi` (`/init.target.rc`) | `sscrpcd` | the root PD (0) |
+
+It dlopens `libssc_default_listener.so` (or `libadsp_default_listener.so` when `/sys/kernel/slpi`
+does not exist) and calls `adsp_default_listener_start(argc, argv)`. That wrapper builds a URI
+from `argv[1]`, and `remote_handle_open_domain()` in the FastRPC userspace
+(`fastrpc_apps_user.c`) reads it:
+
+| URI token | Meaning |
+|---|---|
+| `createstaticpd:sensorspd` | select the sensors static PD (2) as this session's attach mode |
+| `attachguestos` | select the root PD (0) |
+| `geteventfd` | return the listener thread's exit eventfd |
+
+`createstaticpd:<name>` only *sets the attach mode* (`dsppd`); it creates nothing. `sensorspd`
+maps to `FASTRPC_INIT_ATTACH_SENSORS`, which is the `FASTRPC_IOCTL_INIT_ATTACH_SNS` ioctl. The
+`sensorspd` name is an AP-side domain name only — the SLPI firmware contains no such string.
+`INIT_CREATE_STATIC` is used only for the audio (3 MB remote heap) and OIS static PDs, so loading
+`adsp_listener` that way was the wrong mechanism.
+
+The wrapper then, in order:
+
+1. `remote_handle_open("adsp_default_listener")` — the first open of the domain attaches the
+   sensors PD *and starts the listener*: `listener_android_domain_init()` calls
+   `adsp_listener_init2()` on the fixed handle 3 (`sc 0x03000000`) and starts the `next2` thread;
+2. `remote_handle_invoke(default_listener_handle, 0, NULL)` — register;
+3. `remote_handle_open("...geteventfd")` — take the listener thread's eventfd and poll it.
+
+The control handle is never closed, and the listener thread uses thread ids of its own while the
+daemon's main thread opens and registers — the two must not share one DSP thread id. The
+`next2` loop starts with a 0-byte input buffer and grows it from `inBufsLenReq`.
+
+The phone's kernel is a custom 4.19 with the downstream adsprpc UAPI (`/dev/sdsprpc-smd`). Its
+`fastrpc_rpmsg_send`/`_response` tracepoints exist under `/sys/kernel/tracing/events/fastrpc` and
+would show `cid`, `ctx`, `handle` and `sc`, but tracefs is not writable from the shell domain, so
+they cannot be captured without turning SELinux permissive.
 
 ## The file service behind the tunnel
 
