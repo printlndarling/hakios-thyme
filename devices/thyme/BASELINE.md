@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `3d05f04` (`fix: restore THYME Bluetooth launch services`) |
+| Verified functional source | `8164cda` (`display: re-announce the panel rate after the timing switch`) |
 | Worktree | clean after this baseline update |
 
 The kernel now includes the promoted panel timing sequence (F0/B4 long writes
@@ -21,7 +21,10 @@ the Apple Bluetooth HAL extracted locally from the matching IPSW, and rebuilds
 the UI from the IPSW sources. The user-space image again carries the THYME
 QCA bootstrap responder (`umi_bluetool`), the `com.hakios.scname` job, the
 Bluetooth launch set, and the ADSP/haptic/camera firmware rules; without them
-`bluetoothd` never opened the H4 transport. Vendor firmware and local Wi-Fi
+`bluetoothd` never opened the H4 transport. The QCA responder now starts at
+boot before `bluetoothd` (`mkjobs.py` RunAtLoad). The framebuffer re-announces
+the panel rate after the THYME timing switch, so CoreAnimation follows the
+90 Hz panel without the `fb_ca_hz` override. Vendor firmware and local Wi-Fi
 input remain Git-ignored.
 
 ## RAM artifacts
@@ -32,9 +35,9 @@ input remain Git-ignored.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `bfb90a5811fc436f7d267b312445d9db2bdba8cceb94d19bd8ca39d22cca8e95` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `1a8a9cf4cf768ae93f0fdda4f70d60deb7edb0053ff924f92bb2d0cf458de92e` |
 | `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
-| clean-main `hakios-kernel` | `93b5a4f969dac947b6300a79de9445cc5e3ceba5e9d3d908ef0d2ef851060118` |
+| clean-main `hakios-kernel` | `3746671bdf0d16350811d661af6df734870f7aa6d94b28b9e74fcba80200a0bc` |
 
 The kernel binary hash changes when build metadata changes. The scenario is a
 local, Git-ignored RAM test image; its hash pins the tested bytes without
@@ -110,6 +113,37 @@ not trade one radio for the other.
 This makes discovery and controller operation PASS again on the canonical
 image. HFP/SCO, AVRCP controls and a deliberate Bluetooth off/on recovery
 remain separate checks.
+
+## 90 Hz UI and Bluetooth launch order (2026-11-05)
+
+The framebuffer now re-announces the panel rate after the THYME timing
+sequence is accepted. CoreAnimation follows the 90 Hz panel without the
+`fb_ca_hz` override: the jiggle animation presented 452 frames in 5.008 s
+(11.1 ms median between shown frames), where the same animation before the
+fix presented 300 frames per 5 s. The `mkjobs.py` BlueTool job starts the QCA
+responder with RunAtLoad before `bluetoothd`; the temporary btstart restart
+helper was withdrawn.
+
+The canonical cold RAM run `logs/111252-run.log` (kernel `3746671b`, image
+`1a8a9cf4`, args as above) reports:
+
+```text
+UMI BT: transport status=0x41000 ... le-events=... le-reports=83 ... le-named=12
+lx: station driver join returned 0        (twice)
+192.168.0.102 ... tcp connected ... interface: en0
+hakios-gl: 733 frames
+```
+
+There are zero `H4 transport fault` lines and no kernel panic. The Wi-Fi
+screenshot shows the join and nearby networks; the Bluetooth screenshot shows
+the switch on and the discoverable footer, with no known device present in
+this run. HFP/SCO, AVRCP, the microphone and automatic reconnect remain open.
+
+| File | SHA-256 |
+|---|---|
+| `logs/111252-run.log` | `d1f9bb3df5d75247dd18dff136c03a3f175d80d7ac6a5ede3baa19c2bd9c58c2` |
+| `logs/wirelessregress-wifi.png` | `036d08e5f72f026c88402cf9be4a8e46580d338c28588cb91332c1537a689381` |
+| `logs/wirelessregress-bt.png` | `f51da0f1679d484ca3bf10cb049048a87a87de9c7f64c5a8caaf7cf0106a6387` |
 
 ## Current verified run
 

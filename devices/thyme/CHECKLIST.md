@@ -4,6 +4,77 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## 90 Hz UI pacing and the panel-rate announcement (2026-11-05)
+
+The panel timing sequence and the framebuffer both ran at 90 Hz, but
+CoreAnimation kept drawing at 60. The framebuffer starts before the THYME
+display driver switches the panel and publishes `IOMFBDisplayRefresh` once,
+at the 60 Hz it sees then; it never announced the new rate.
+
+Two jiggle runs on the same kernel differ only in the `fb_ca_hz` boot
+argument. Without it, `logs/224744-run.log` presented `300 299 300 300 300`
+frames in five consecutive five-second windows (60 fps; 17.1 ms median
+between shown frames). With `fb_ca_hz=90`, `logs/105924-run.log` presented 451
+frames in 5.000 s and again in 5.001 s (90 fps; 11.0 ms median). A Wi-Fi-list
+scroll with the same override (`logs/232933-run.log`, image `5ff68b60`) held
+11.1 ms medians over 400-frame windows. The rate told to CoreAnimation, not
+the panel, was the limit.
+
+The THYME display driver now calls `hakios_fb_publish_refresh()` after the
+sequence is accepted. The framebuffer announces `refreshHz()` again, which is
+`min(fb_hz, hakios_panel_refresh_hz)`; a rejected sequence leaves the panel
+rate at 60 and the second announcement is 60, so 90-into-60 ghosting cannot
+come back. `fb_ca_hz` is no longer needed.
+
+The verified run `logs/110745-run.log` (kernel `3746671b`, no `fb_ca_hz`)
+presented 452 frames in 5.008 s (90 fps) and an 11.1 ms median; the GPU log
+carried 897 `hakios-gl` frames. The panel stays at 90 Hz.
+
+| File | SHA-256 |
+|---|---|
+| `logs/224744-run.log` | `9558170d155e2f5f207170d43d2e4754325bdd7fed0584b67822d59c204f7edb` |
+| `logs/105924-run.log` | `648c92cbdcf1caa761f756ad529e157d0472ed4d3391b83b0cd85acbb71c0019` |
+| `logs/110745-run.log` | `b28ce566d291a7aac9bb57e2ac31322235f5b7978b7178784cb3a26258a30164` |
+| `logs/232933-run.log` | `8f616d014b60a5a2cdee485c4835297427b79cbe6c0d9678793e0c6e3f51d492` |
+| `logs/jiggle-gl.png` | `92b697d37101b6af39c96950c699f7c2e4725c4d4d37eba339210e8d0d6e4283` |
+
+## Bluetooth launch order and the withdrawn restart (2026-11-05)
+
+The 233519 boot started `bluetoothd` before the on-demand BlueTool responder;
+the daemon read the local MAC but never opened the H4 transport. `mkjobs.py`
+now starts `com.apple.BlueTool` (`/redwood/bin/umi_bluetool`) with `RunAtLoad`
+and keeps it alive, so the responder is listening first. The clean cold run
+`logs/104749-run.log` (source `8c39b6b`, image `1a8a9cf4`) spawned
+`umi_bluetool` before `bluetoothd`; the H4 counters reached 70 LE reports
+(12 named) with zero `H4 transport fault` lines, Wi-Fi joined twice, DHCP
+issued 192.168.0.102, and the run submitted 730 `hakios-gl` frames.
+
+A temporary `com.hakios.btstart` job killed `bluetoothd` 20 seconds after boot
+to recover that race. It was withdrawn before promotion: the helper produced
+no `restarting bluetoothd` line in `logs/091256-run.log`, and the image is
+better without a deliberate daemon kill on every boot. `check-root.py` no
+longer expects it, and the canonical image `1a8a9cf4` does not contain it.
+
+The Bluetooth Settings page in the clean run shows the switch on and the
+`HakiOS Mi 10S` discoverable footer; its DEVICES list stays on the spinner
+because no known/connectable device was present (the paired OPPO headset was
+off). Discovery and connection of a known headset remain covered by
+`logs/214226-run.log`.
+
+The canonical cold run `logs/111252-run.log` (kernel `3746671b`, image
+`1a8a9cf4`) repeated the launch order and the full wireless gate: 83 LE
+reports (12 named), zero `H4 transport fault` lines, two Wi-Fi joins with
+DHCP `192.168.0.102`, Safari TLS traffic and 733 `hakios-gl` frames. Its
+Bluetooth Settings screenshot again shows the switch on and the discoverable
+footer, with no known device present to list.
+
+| File | SHA-256 |
+|---|---|
+| `logs/104749-run.log` | `e0a45b4e46c3e12db60d20df8fa21e303ec658dad35b1c929d5d0f54364eb8f0` |
+| `logs/111252-run.log` | `d1f9bb3df5d75247dd18dff136c03a3f175d80d7ac6a5ede3baa19c2bd9c58c2` |
+| `logs/wirelessregress-bt.png` | `f51da0f1679d484ca3bf10cb049048a87a87de9c7f64c5a8caaf7cf0106a6387` |
+| `logs/wirelessregress-wifi.png` | `036d08e5f72f026c88402cf9be4a8e46580d338c28588cb91332c1537a689381` |
+
 ## Bluetooth launch regression and fix (2026-11-04)
 
 The canonical `202218` baseline image did not contain `/redwood/bin/umi_bluetool`
@@ -465,16 +536,16 @@ No item moves to `PASS` from source inspection alone.
 | Speaker acoustic output | PASS | Known 1 kHz tone is present in microphone captures only while `UMI SPEAKER TONE NOW` runs; median 1 kHz level rises by 25.78 dB (`docs/official-speaker-mic-loopback.md`) |
 | Dual-speaker stereo balance | PARTIAL | Both CS35L41 amplifiers and the protection DSP initialize; independent left/right output and balance are still unverified |
 | Vibration | PARTIAL | AW8697 stock RAM playback is clean. The continuous-mode probe repeatedly measured BEMF peaks `+47/-200` and `+48/-200`, matching Android's stock `+45/-202`, so the coil drive/BEMF path is hardware-verified. F0 is advisory because it is unstable on both HakiOS and stock Android. Physical feel and the iOS actuator service remain unverified |
-| Bluetooth | PASS for discovery and connection on the canonical image; A2DP verified earlier; HFP/reconnect open | The 2026-11-04 fix restored `umi_bluetool`, `scname` and the H4 transport; the canonical run reports 315 LE reports with zero H4 faults, shows the `HakiOS Mi 10S` footer and reconnects the OPPO Enco Free4 (`logs/214226-run.log`). The earlier 3 Mbaud A2DP result remains valid for the legacy image. HFP/SCO, AVRCP, microphone and automatic reconnect remain unverified |
+| Bluetooth | PASS for discovery and connection on the canonical image; A2DP verified earlier; HFP/reconnect open | The 2026-11-04 fix restored `umi_bluetool`, `scname` and the H4 transport; the canonical run reports 315 LE reports with zero H4 faults, shows the `HakiOS Mi 10S` footer and reconnects the OPPO Enco Free4 (`logs/214226-run.log`). The QCA responder now starts at boot before `bluetoothd` (`mkjobs.py` RunAtLoad; `logs/104749-run.log`). The earlier 3 Mbaud A2DP result remains valid for the legacy image. HFP/SCO, AVRCP, microphone and automatic reconnect remain unverified |
 | Wi-Fi discovery/startup | PASS | The current run opened Wi-Fi and returned real 2.4 GHz and 5 GHz networks; the user also confirmed Wi-Fi remains usable on the current RAM boot (`logs/210532-run.log`) |
 | Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/210532-run.log`) |
 | Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/210532-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/210532-run.log`) |
-| Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`) |
+| Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`). The 2026-11-05 canonical run repeated this: two joins, DHCP `192.168.0.102`, Safari TLS, 83 LE reports and 733 GL frames with zero H4 faults (`logs/111252-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`). The 2026-11-04 first rebuild omitted `GL=1` and submitted zero `hakios-gl` frames; `devices/thyme/build-root.sh` and `check-root.py` now refuse that image (the GL jiggle run presents 300 frames per 5 s, `logs/224744-run.log`) |
-| UI animation frame pacing | PASS at 60 Hz | GPU-backed jiggle animation presented about 60 fps in four consecutive five-second windows (`302/301/301/301` frames), with software fallback absent during active use (`logs/041711-run.log`) |
-| 90 Hz panel refresh | PASS (user-confirmed) | The full DTB sequence is accepted and promoted (`logs/200350-run.log`: `seq=0 (ok), framebuffer rate 90 Hz`); the user confirmed smoothness with no dropped frames. If the sequence is rejected, the framebuffer falls back to 60 Hz |
+| UI animation frame pacing | PASS at 90 Hz | The re-announced panel rate drives the GPU-backed jiggle at about 90 fps: 452 frames in 5.008 s and an 11.1 ms median between shown frames (`logs/110745-run.log`); the same animation was 60 fps before the fix (300 frames per 5 s, `logs/224744-run.log`) |
+| 90 Hz panel refresh | PASS (user-confirmed) | The full DTB sequence is accepted and promoted (`logs/200350-run.log`: `seq=0 (ok), framebuffer rate 90 Hz`); the user confirmed smoothness with no dropped frames. CoreAnimation now follows the panel after the display driver re-announces the rate (`logs/110745-run.log`). If the sequence is rejected, the framebuffer falls back to 60 Hz |
 | Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
