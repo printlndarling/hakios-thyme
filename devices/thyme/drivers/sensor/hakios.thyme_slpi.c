@@ -3276,9 +3276,10 @@ fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count,
  * read the packet before it can answer, and this memory is proven reachable by the link itself.
  */
 #define ITEM_FASTRPC_ARGS        621
+#define ITEM_FASTRPC_OPEN        622
 
 static uint8_t *
-fastrpc_smem_buffer(uint32_t *offset)
+fastrpc_smem_item(uint32_t item, uint32_t *offset)
 {
 	uint32_t cacheline = 0, partition_size = 0, bytes = 0, at;
 	uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
@@ -3287,10 +3288,10 @@ fastrpc_smem_buffer(uint32_t *offset)
 		printf("slpi: fastrpc: no partition with the sensor DSP for the argument packet\n");
 		return NULL;
 	}
-	at = smem_item(ITEM_FASTRPC_ARGS, &bytes);
+	at = smem_item(item, &bytes);
 	if (at == 0 || bytes < 4096) {
-		smem_private_item_make(partition, ITEM_FASTRPC_ARGS, 4096);
-		at = smem_item(ITEM_FASTRPC_ARGS, &bytes);
+		smem_private_item_make(partition, item, 4096);
+		at = smem_item(item, &bytes);
 		if (at == 0 || bytes < 4096) {
 			printf("slpi: fastrpc: the shared 4 KB buffer could not be made (%u bytes)\n", bytes);
 			return NULL;
@@ -3298,6 +3299,12 @@ fastrpc_smem_buffer(uint32_t *offset)
 	}
 	*offset = at;
 	return (uint8_t *)(uintptr_t)(smem + at);
+}
+
+static uint8_t *
+fastrpc_smem_buffer(uint32_t *offset)
+{
+	return fastrpc_smem_item(ITEM_FASTRPC_ARGS, offset);
 }
 
 static void
@@ -3315,6 +3322,25 @@ fastrpc_smem_get(uint32_t offset, uint8_t *to, uint32_t size)
 }
 
 static uint32_t fastrpc_call_tid = 1;    /* the tid of the call being sent */
+
+static bool
+fastrpc_send_async(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size)
+{
+	struct fastrpc_msg msg;
+
+	if (!glink.channel[CHANNEL_FASTRPC].open) {
+		return false;
+	}
+	bzero(&msg, sizeof(msg));
+	msg.client_id = (int32_t)client_id;
+	msg.tid = (int32_t)fastrpc_call_tid;
+	msg.ctx = context;
+	msg.handle = handle;
+	msg.sc = sc;
+	msg.addr = physical;
+	msg.size = (size + 0xfff) & ~0xfffu;
+	return glink_send(&glink.channel[CHANNEL_FASTRPC], &msg, (uint32_t)sizeof(msg)) == 0;
+}
 
 static bool
 fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size,
@@ -3372,6 +3398,8 @@ static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release th
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
 static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static listener first, the sensors PD after it */
 static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
+static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to wait for that module load */
+static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
@@ -4323,7 +4351,7 @@ fastrpc_first_calls(uint32_t stage)
 			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, client, "INIT_ATTACH (guest OS)");
 		}
 		if (fastrpc_static_open) {
-			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, 20000);
+			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
 
 			if (opened != 0) {
 				fastrpc_service = opened;
@@ -4398,9 +4426,40 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
 			}
 		}
-		if (ready && fastrpc_static_open) {
+		if (ready && fastrpc_static_open && fastrpc_open_async) {
+			/*
+			 * The module load can ask the AP for the library through apps_std. Send the open and
+			 * go on to init2/next2, so the listener is waiting to serve that request while the
+			 * open is in flight; its answer arrives later and is logged as a late response.
+			 */
+			uint32_t offset = 0, lengths[4], size2, scalar[2], handles[2] = { 0, 0 };
+			uint8_t error[256] = { 0 }, *staging = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+			uint8_t *slot = fastrpc_smem_item(ITEM_FASTRPC_OPEN, &offset);
+			const void *sources[4];
+			uint64_t open_physical = SMEM_PHYS + offset;
+
+			if (staging != NULL && slot != NULL) {
+				scalar[0] = (uint32_t)strlen("adsp_listener") + 1;
+				scalar[1] = (uint32_t)sizeof(error);
+				lengths[0] = 8;
+				sources[0] = scalar;
+				lengths[1] = scalar[0];
+				sources[1] = "adsp_listener";
+				lengths[2] = 8;
+				sources[2] = handles;
+				lengths[3] = (uint32_t)sizeof(error);
+				sources[3] = error;
+				size2 = fastrpc_build(staging, open_physical, open_physical, 4, lengths, sources);
+				fastrpc_smem_put(offset, staging, size2);
+				fastrpc_send_async(1, 0, 0x20200, 0x250 | fastrpc_pd, open_physical, size2);
+				printf("slpi: fastrpc: the adsp_listener open is sent; the listener can serve it while it waits\n");
+			}
+			if (staging != NULL) {
+				kfree_data(staging, 4096);
+			}
+		} else if (ready && fastrpc_static_open) {
 			/* the static interface's handle is the module opened by name, not a fixed number */
-			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, 20000);
+			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
 
 			if (opened != 0) {
 				fastrpc_service = opened;
@@ -5245,6 +5304,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_bare", &fastrpc_bare, sizeof(fastrpc_bare));
 	PE_parse_boot_argn("fastrpc_attach0", &fastrpc_attach0, sizeof(fastrpc_attach0));
 	PE_parse_boot_argn("fastrpc_static_open", &fastrpc_static_open, sizeof(fastrpc_static_open));
+	PE_parse_boot_argn("fastrpc_open_wait", &fastrpc_open_wait, sizeof(fastrpc_open_wait));
+	PE_parse_boot_argn("fastrpc_open_async", &fastrpc_open_async, sizeof(fastrpc_open_async));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
@@ -5264,6 +5325,12 @@ step_qrtr(void)
 	printf("slpi: %u: after %u s: %s; the DSP is node %u and has told of %u services; it looked for %u of ours; QRTR received %u "
 	    "and sent %u datagrams\n", step, listen_seconds, qrtr_hellos ? "HELLO BOTH WAYS" : "NO HELLO FROM THE DSP", qrtr_peer,
 	    services, qrtr_lookups, qrtr_in, qrtr_out);
+	for (unsigned i = 0; i < sizeof(qrtr_servers) / sizeof(qrtr_servers[0]); i++) {
+		if (qrtr_servers[i].there) {
+			printf("slpi: %u: service %u (instance %u) at node %u port %u\n", step, qrtr_servers[i].service,
+			    qrtr_servers[i].instance, qrtr_servers[i].node, qrtr_servers[i].port);
+		}
+	}
 	if (fastrpc_smmu) {
 		fastrpc_smmu_look();
 	}

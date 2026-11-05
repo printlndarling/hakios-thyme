@@ -59,6 +59,10 @@ The bring-up's boot arguments:
 | `fastrpc_restart=1` | release the sensors PD after registering, attach it again, then start `next2` |
 | `fastrpc_restart=2` | release the PD right after the first attach, register, and attach once more |
 | `fastrpc_delay=N` | wait N seconds between the first attach and the listener (let the first registry read fail and the process be restarted) |
+| `fastrpc_attach0=1` | the guest-OS attach (PD 0) before the listener, as `attachguestos` does |
+| `fastrpc_static_open=1` | open the `adsp_listener` module for `init2`/`next2` (after the register) |
+| `fastrpc_open_wait=N` | how long that module open waits, in ms (default 20000) |
+| `fastrpc_open_async=1` | send that open without waiting, so the listener can serve its file request |
 
 The handle `remotectl_open` returns is not the listener's own handle:
 `adsp_listener_init2` on it answers -1, on the fixed 3 it answers 0
@@ -221,10 +225,16 @@ calls arrive from the DSP.
 3. **Remote control** — done: open, register and the listener's init2 all
    answer 0; `next2` is polled with one call outstanding.
 4. **File service** — implemented in `hakios.thyme_slpi.c`; waiting for the
-   DSP's first nested call to exercise it. If the registry parser asks to
-   write its merged output (`/mnt/vendor/persist/sensors/registry/registry`),
-   `apps_std` method 5 (`fwrite`) and the write mode of `fopen` still have to
-   be added.
+   DSP's first nested call to exercise it. The `adsp_listener` module open
+   hangs (20 s and 60 s waits), which is consistent with the DSP's mod_table
+   asking the AP for the module through apps_std while no listener is
+   serving yet; `fastrpc_open_async` sends that open and then starts the
+   listener, so the request can be served while the open is in flight. The
+   library has to be in `fw/sensors/adsp/` (the phone's
+   `/vendor/dsp/adsp/libadsp_listener_skel.so` and its siblings).
+   If the registry parser asks to write its merged output
+   (`/mnt/vendor/persist/sensors/registry/registry`), `apps_std` method 5
+   (`fwrite`) and the write mode of `fopen` still have to be added.
 5. **Registry** — once the sensor process reads the registry, repeat the
    `accel`/`registry` SUID lookup, configure the accelerometer, and expose the
    samples to `backboardd` through a HID sensor service.
