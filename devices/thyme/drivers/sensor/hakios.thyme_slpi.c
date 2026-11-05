@@ -2585,8 +2585,10 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 }
 
 #define SNS_OUR_PORT            0x100u
+#define SNS_REG_PORT            0x10fu          /* the AP's Sensor Registry service, as the mainline sns-reg serves it */
 
 static void sns_input(const uint8_t *data, uint32_t length);
+static void sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
 
 static void
 qrtr_input(const uint8_t *data, uint32_t length)
@@ -2644,6 +2646,10 @@ qrtr_input(const uint8_t *data, uint32_t length)
 	}
 	if (header.type == QRTR_DATA && header.to_port == SNS_OUR_PORT) {
 		sns_input(data + at, header.size);
+		return;
+	}
+	if (header.type == QRTR_DATA && header.to_port == SNS_REG_PORT) {
+		sns_reg_input(header.from_node, header.from_port, data + at, header.size);
 		return;
 	}
 	printf("slpi: qrtr: a datagram of %u bytes from node %u port %u to our port %u: nobody here listens there\n", header.size,
@@ -3096,6 +3102,74 @@ sns_start(void)
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
+}
+
+/* ---- the AP's Sensor Registry service (0x10f), as mainline's sns-reg serves it ----------------------- */
+
+static void
+sns_reg_advertise(void)
+{
+	struct qrtr_control server = { .command = QRTR_NEW_SERVER, .words = { 0x10f, 2, 1, SNS_REG_PORT } };
+
+	if (qrtr_peer == 0) {
+		return;
+	}
+	qrtr_out_packet(QRTR_NEW_SERVER, QRTR_CONTROL, qrtr_peer, QRTR_CONTROL, &server, sizeof(server));
+	printf("slpi: qrtr: advertised the sensor registry service %#x at node 1 port %#x\n", 0x10f, SNS_REG_PORT);
+}
+
+static void
+sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length)
+{
+	uint8_t out[32];
+	uint8_t *p = out;
+	uint16_t txn, msg, id = 0xffff;
+	uint32_t at;
+
+	if (length < 7) {
+		return;
+	}
+	txn = (uint16_t)(data[1] | data[2] << 8);
+	msg = (uint16_t)(data[3] | data[4] << 8);
+	for (at = 7; at + 3 <= length;) {
+		uint8_t type = data[at];
+		uint16_t l = (uint16_t)(data[at + 1] | data[at + 2] << 8);
+
+		at += 3;
+		if (at + l > length) {
+			break;
+		}
+		if (type == 0x01 && l >= 2) {
+			id = (uint16_t)(data[at] | data[at + 1] << 8);
+		}
+		at += l;
+	}
+	printf("slpi: sns-reg: group %u requested by node %u port %u (QMI %u, %u bytes)\n", id, node, port, msg, length);
+	p = out;
+	*p++ = 2;                       /* response */
+	*p++ = (uint8_t)(txn & 0xff);
+	*p++ = (uint8_t)(txn >> 8);
+	*p++ = 0x04;                    /* SNS_REG_GROUP_MSG_ID */
+	*p++ = 0;
+	*p++ = 0;                       /* length, below */
+	*p++ = 0;
+	*p++ = 0x02;                    /* result: failure (no registry map yet) */
+	*p++ = 2;
+	*p++ = 0;
+	*p++ = 1;
+	*p++ = 0;
+	*p++ = 0x03;                    /* the group asked for */
+	*p++ = 2;
+	*p++ = 0;
+	*p++ = (uint8_t)(id & 0xff);
+	*p++ = (uint8_t)(id >> 8);
+	{
+		uint32_t l = (uint32_t)(p - out);
+
+		out[5] = (uint8_t)((l - 7) & 0xff);
+		out[6] = (uint8_t)((l - 7) >> 8);
+	}
+	qrtr_out_packet(QRTR_DATA, SNS_REG_PORT, node, port, out, (uint32_t)(p - out));
 }
 
 /* ---- APR: the sensor services' protocol, on the channel apr_audio_svc ------------------------------------- */
@@ -3723,10 +3797,19 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
+	uint32_t sns_on = 0;
+
+	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
+	if (sns_on) {
+		sns_reg_advertise();
+	}
 	for (unsigned ms = 0; ms < listen_seconds * 1000; ms++) {
 		sleep_ms(1);
+	}
+	if (sns_on) {
+		sns_reg_advertise();
 	}
 	for (unsigned i = 0; i < sizeof(qrtr_servers) / sizeof(qrtr_servers[0]); i++) {
 		services += qrtr_servers[i].there;
@@ -3734,8 +3817,7 @@ step_qrtr(void)
 	printf("slpi: %u: after %u s: %s; the DSP is node %u and has told of %u services; it looked for %u of ours; QRTR received %u "
 	    "and sent %u datagrams\n", step, listen_seconds, qrtr_hellos ? "HELLO BOTH WAYS" : "NO HELLO FROM THE DSP", qrtr_peer,
 	    services, qrtr_lookups, qrtr_in, qrtr_out);
-	uint32_t sns_on = 0;
-	if (PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on)) && sns_on != 0) {
+	if (sns_on) {
 		sns_start();
 	}
 	return qrtr_hellos != 0;

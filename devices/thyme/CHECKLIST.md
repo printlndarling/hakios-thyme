@@ -780,6 +780,13 @@ Android HAL path), or served by an AP-side SNS_REG service; FastRPC/HexagonFS
 may also be required. No sensor data reaches iOS and no HID sensor service is
 exposed yet.
 
+The AP-side legacy Sensor Registry service (0x10f, the mainline `sns-reg`
+protocol) was advertised to the DSP; the sensor manager requested no group,
+so this firmware does not use that bootstrap (`logs/141201-run.log`). The
+modern registry path (the phone's JSON/config written to the SLPI registry
+sensor) and FastRPC/HexagonFS are the next layer to instrument. The fast
+diagnostic loop is `devices/thyme/slpi-run.sh`.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
