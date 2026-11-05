@@ -11,8 +11,10 @@
  * and keeps the programmed brightness in kern.hakios.brightness. The userspace
  * CoreBrightness hooks translate iOS slider changes into writes to that sysctl.
  */
+#include <kern/clock.h>
 #include <kern/locks.h>
 #include <libkern/libkern.h>
+#include <mach/mach_time.h>
 #include <mach/mach_types.h>
 #include <pexpert/device_tree.h>
 #include <pexpert/pexpert.h>
@@ -360,26 +362,41 @@ panel_te_rate(void)
 {
 	vm_offset_t tlmm = ml_io_map(0x0f100000, 0x100000);
 	const uint32_t pin = 66;
-	uint32_t edges = 0, last;
+	uint32_t previous, bit0 = 0, bit2 = 0;
+	uint64_t began = 0, now = 0, ns;
 
-	if (tlmm == 0) {
-		tell("display: TE rate: the TLMM cannot be mapped\n");
+	if (tlmm != 0) {
+		tell("display: TE pin %u: config %#x, level %u\n", pin, rd(tlmm, 0x1000 * pin),
+		    rd(tlmm, 0x1000 * pin + 4) & 1);
+	}
+	if (!brightness_ready || dsi0 == 0 || !display_regs_alive()) {
+		tell("display: TE rate: the DSI controller is not ready\n");
 		return;
 	}
-	last = rd(tlmm, 0x1000 * pin + 4) & 1;
-	tell("display: TE rate: pin %u, config %#x, level %u\n", pin, rd(tlmm, 0x1000 * pin), last);
-	for (unsigned round = 0; round < 100; round++) {
-		for (unsigned n = 0; n < 4000; n++) {
-			uint32_t level = rd(tlmm, 0x1000 * pin + 4) & 1;
+	/*
+	 * The DSI status bits 0 and 2 move with the command DMA. Their rate over a second, measured
+	 * with the kernel's clock and no sleeps in the loop, says how often the panel's memory is
+	 * pushed: the rate the panel really scans at.
+	 */
+	previous = rd(dsi0, DSI_STATUS);
+	absolutetime_to_nanoseconds(mach_absolute_time(), &began);
+	do {
+		for (unsigned n = 0; n < 1000; n++) {
+			uint32_t status = rd(dsi0, DSI_STATUS);
+			uint32_t changed = status ^ previous;
 
-			if (level != last) {
-				edges++;
-				last = level;
+			if (changed & 1u) {
+				bit0++;
 			}
+			if (changed & 4u) {
+				bit2++;
+			}
+			previous = status;
 		}
-		delay_for_interval(10, NSEC_PER_MSEC);
-	}
-	tell("display: TE rate: %u edges in about a second\n", edges);
+		absolutetime_to_nanoseconds(mach_absolute_time(), &now);
+	} while (now - began < NSEC_PER_SEC);
+	ns = now - began;
+	tell("display: DSI status over %llu ms: bit 0 changed %u times, bit 2 %u\n", ns / NSEC_PER_MSEC, bit0, bit2);
 }
 
 static void

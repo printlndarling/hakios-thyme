@@ -437,6 +437,20 @@ longer produces the 90-into-60 ghosting that the seq=1 runs showed.
 `logs/200350-run.log` is the promoted full run: `panel timing 90 Hz seq=0
 (ok), framebuffer rate 90 Hz`, `brightness ready (ok)` and `bluetoothd: Got
 local-mac-address`; `logs/reliable-bt.png` shows the Bluetooth Settings page
+
+**The panel is still sent 60 frames a second** (2026-11-06). The DSI
+controller's status bits move with each command-DMA frame push; counted over
+a measured second (`panel_te_rate=1`, kernel clock, no sleeps) they change
+118 times, i.e. 59 pushes: the display controller the firmware left behind
+refreshes the panel at 60 Hz whatever the framebuffer does and whatever the
+panel's own scan runs at. Pacing the framebuffer at 90 into that is a 60 Hz
+push behind 90 Hz content — 3:2 judder and torn frames, which is the
+"stutter and ghosting while scrolling" the user reported. TE itself is not
+routed (pin 66 reads 0), so the panel's own scan cannot be measured this
+way; the frame *push* is the rate the content reaches it at. A true 90 Hz
+needs the DSI/DPU frame timing reprogrammed — not just the DCS 2f/26
+switch — and the INTF block that would say how is unsafe to read on THYME.
+A self-consistent 60 (`fb_hz=60`, no panel switch) is the clean fallback.
 (the pane still initialising). The user confirmed on the physical phone that
 the full-sequence UI is smooth with no dropped frames. The panel's TE rate is
 inferred from this user-visible result; the INTF TE block is still unsafe
