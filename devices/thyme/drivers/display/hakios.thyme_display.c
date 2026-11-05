@@ -349,6 +349,39 @@ SYSCTL_DECL(_kern_hakios);
  * (display_probe hangs before user space), so the DSI controller is the only
  * live display block that can tell us where the panel's TE is.
  */
+/*
+ * panel_te_rate=1: count the edges of the panel's TE line (the device tree's platform-te-gpio,
+ * pin 66) for about a second. A TE pulse starts every scan, so the count is the panel's real
+ * refresh rate: neither the DSI status bits nor the INTF frame counter (not readable on THYME)
+ * show it. A pin that never moves reads 0 edges.
+ */
+static void
+panel_te_rate(void)
+{
+	vm_offset_t tlmm = ml_io_map(0x0f100000, 0x100000);
+	const uint32_t pin = 66;
+	uint32_t edges = 0, last;
+
+	if (tlmm == 0) {
+		tell("display: TE rate: the TLMM cannot be mapped\n");
+		return;
+	}
+	last = rd(tlmm, 0x1000 * pin + 4) & 1;
+	tell("display: TE rate: pin %u, config %#x, level %u\n", pin, rd(tlmm, 0x1000 * pin), last);
+	for (unsigned round = 0; round < 100; round++) {
+		for (unsigned n = 0; n < 4000; n++) {
+			uint32_t level = rd(tlmm, 0x1000 * pin + 4) & 1;
+
+			if (level != last) {
+				edges++;
+				last = level;
+			}
+		}
+		delay_for_interval(10, NSEC_PER_MSEC);
+	}
+	tell("display: TE rate: %u edges in about a second\n", edges);
+}
+
 static void
 dsi_probe(void)
 {
@@ -514,5 +547,9 @@ hakios_brightness_init(void)
 	if (PE_parse_boot_argn("panel_dsi_probe", &dsi_probe_enabled, sizeof(dsi_probe_enabled)) &&
 	    dsi_probe_enabled) {
 		dsi_probe();
+	}
+	uint32_t te_rate_enabled = 0;
+	if (PE_parse_boot_argn("panel_te_rate", &te_rate_enabled, sizeof(te_rate_enabled)) && te_rate_enabled) {
+		panel_te_rate();
 	}
 }
