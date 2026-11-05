@@ -4,6 +4,42 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## Upstream main 87bf485 merged (2026-11-05)
+
+Upstream main was merged at `87bf485`. It brings the Metal-on-Vulkan/Turnip
+path, the 120 Hz and wallpaper-freeze options, the screen-class and `fb_beam`
+knobs, the Metal tools, and the documentation around them. The THYME device
+layer, the QCA responder order, the 90 Hz re-announcement and the daily-driver
+image stay in place. The new Metal path is opt-in (`TURNIP=1 M2V=1`,
+`metal_m2v=1`) and is not enabled or tested on THYME yet.
+
+Merge resolutions:
+
+- `configs/boot-args.lst`, `configs/symbols.tsv`, `docs/boot-args.md` and
+  `configs/common_defconfig` were regenerated from the merged sources, so
+  both the THYME `umi_*` arguments and the new upstream arguments are present.
+- `userland/build.sh` keeps the THYME Bluetooth audio HAL overlay. The move of
+  files larger than 4 MB into the system image runs only for `TURNIP`/`M2V`
+  builds, so the GL-only daily-driver image keeps `libOSMesa` and the pinned
+  system image. HakiosMetal is built with the Mesa AIR archives, built here
+  with ninja in `xnu-deps/build/mesa/build-softpipe-freedreno`.
+- `MiniIOMobileFramebuffer.cpp` keeps `hakios_fb_publish_refresh()`. Upstream's
+  `fb_beam` probe returns on the command-mode THYME panel before it reads the
+  DSI interface, the access that panicked `measurePanel`.
+
+The merged kernel `97fcecd0` and image `b7e0f382` pass the canonical cold RAM
+run `logs/114117-run.log`: two Wi-Fi joins, DHCP `192.168.0.102`, Safari TLS,
+85 LE reports (15 named), 735 `hakios-gl` frames, zero H4 faults and no panic.
+The merged jiggle run `logs/115200-run.log` keeps the 90 Hz pacing: 452, 451,
+451 and 451 frames in four consecutive five-second windows, an 11.1 ms median,
+1022 `hakios-gl` frames, and `fb_beam stays off` at 173.9 s.
+
+| File | SHA-256 |
+|---|---|
+| `logs/114117-run.log` | `2f95c123e6add2e6cc8babe96bb68f0ad17784a3eef6a0309f8bc6e78e3cb4dc` |
+| `logs/115200-run.log` | `b3e9e2bd773e8084a192b0d8e4312ca9139607f07b878639538a9647d56dc573` |
+| `logs/jiggle-gl.png` | `cb4fccec06dee608a189a2cc3d5b925f631ced498dadf5b53353098b73b4a4a3` |
+
 ## 90 Hz UI pacing and the panel-rate announcement (2026-11-05)
 
 The panel timing sequence and the framebuffer both ran at 90 Hz, but
@@ -26,15 +62,18 @@ sequence is accepted. The framebuffer announces `refreshHz()` again, which is
 rate at 60 and the second announcement is 60, so 90-into-60 ghosting cannot
 come back. `fb_ca_hz` is no longer needed.
 
-The verified run `logs/110745-run.log` (kernel `3746671b`, no `fb_ca_hz`)
-presented 452 frames in 5.008 s (90 fps) and an 11.1 ms median; the GPU log
-carried 897 `hakios-gl` frames. The panel stays at 90 Hz.
+The pre-merge run `logs/110745-run.log` (kernel `3746671b`, no `fb_ca_hz`)
+presented 452 frames in 5.008 s (90 fps) and an 11.1 ms median; the merged
+kernel repeats it in `logs/115200-run.log` (452, 451, 451 and 451 frames in
+four consecutive five-second windows, 11.1 ms median), so the upstream merge
+did not change the pacing. The panel stays at 90 Hz.
 
 | File | SHA-256 |
 |---|---|
 | `logs/224744-run.log` | `9558170d155e2f5f207170d43d2e4754325bdd7fed0584b67822d59c204f7edb` |
 | `logs/105924-run.log` | `648c92cbdcf1caa761f756ad529e157d0472ed4d3391b83b0cd85acbb71c0019` |
 | `logs/110745-run.log` | `b28ce566d291a7aac9bb57e2ac31322235f5b7978b7178784cb3a26258a30164` |
+| `logs/115200-run.log` | `b3e9e2bd773e8084a192b0d8e4312ca9139607f07b878639538a9647d56dc573` |
 | `logs/232933-run.log` | `8f616d014b60a5a2cdee485c4835297427b79cbe6c0d9678793e0c6e3f51d492` |
 | `logs/jiggle-gl.png` | `92b697d37101b6af39c96950c699f7c2e4725c4d4d37eba339210e8d0d6e4283` |
 
@@ -541,12 +580,12 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi power off/on recovery | PASS | The current run switched Wi-Fi off (`set 19`, interface removed), then on again (`set 19`, radio restarted), scanned, associated and retained real network traffic (`logs/210532-run.log`) |
 | Wi-Fi association/DHCP | PASS | Both current-run associations completed the four-way handshake and installed pairwise/group keys; DHCP assigned `192.168.0.103`, and en0 traffic remained usable after the power cycle (`logs/210532-run.log`) |
 | Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/210532-run.log`) |
-| Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`). The 2026-11-05 canonical run repeated this: two joins, DHCP `192.168.0.102`, Safari TLS, 83 LE reports and 733 GL frames with zero H4 faults (`logs/111252-run.log`) |
+| Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`). The 2026-11-05 canonical run repeated this: two joins, DHCP `192.168.0.102`, Safari TLS, 83 LE reports and 733 GL frames with zero H4 faults (`logs/111252-run.log`). The merged kernel repeated it with 85 LE reports and 735 GL frames (`logs/114117-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
 | GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`). The 2026-11-04 first rebuild omitted `GL=1` and submitted zero `hakios-gl` frames; `devices/thyme/build-root.sh` and `check-root.py` now refuse that image (the GL jiggle run presents 300 frames per 5 s, `logs/224744-run.log`) |
-| UI animation frame pacing | PASS at 90 Hz | The re-announced panel rate drives the GPU-backed jiggle at about 90 fps: 452 frames in 5.008 s and an 11.1 ms median between shown frames (`logs/110745-run.log`); the same animation was 60 fps before the fix (300 frames per 5 s, `logs/224744-run.log`) |
+| UI animation frame pacing | PASS at 90 Hz | The re-announced panel rate drives the GPU-backed jiggle at about 90 fps: 452, 451, 451 and 451 frames in four consecutive five-second windows and an 11.1 ms median after the upstream merge (`logs/115200-run.log`); the same animation was 60 fps before the fix (300 frames per 5 s, `logs/224744-run.log`) |
 | 90 Hz panel refresh | PASS (user-confirmed) | The full DTB sequence is accepted and promoted (`logs/200350-run.log`: `seq=0 (ok), framebuffer rate 90 Hz`); the user confirmed smoothness with no dropped frames. CoreAnimation now follows the panel after the display driver re-announces the rate (`logs/110745-run.log`). If the sequence is rejected, the framebuffer falls back to 60 Hz |
-| Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |
+| Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`). Upstream's Metal-on-Vulkan/Turnip path (`87bf485`) is merged but opt-in (`TURNIP=1 M2V=1`, `metal_m2v=1`) and untested on THYME |
 | Touch | PASS | User confirmed touchscreen input on the current RAM boot after `/chosen/hakios-board` was restored; FTS521 polling also reports `errors=0` |
 | Brightness adjustment | PARTIAL | DSI `0x51` level 2056 was acknowledged after iOS requested 500 permille; human-visible low/mid/high comparison remains |
 

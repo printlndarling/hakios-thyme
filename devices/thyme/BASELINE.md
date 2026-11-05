@@ -9,7 +9,7 @@ experimental kernel or with an older resident system image.
 | Item | Value |
 |---|---|
 | Branch | `main` |
-| Verified functional source | `8164cda` (`display: re-announce the panel rate after the timing switch`) |
+| Verified functional source | `b3c0cae` (`Merge upstream main (87bf485)`) |
 | Worktree | clean after this baseline update |
 
 The kernel now includes the promoted panel timing sequence (F0/B4 long writes
@@ -24,8 +24,10 @@ Bluetooth launch set, and the ADSP/haptic/camera firmware rules; without them
 `bluetoothd` never opened the H4 transport. The QCA responder now starts at
 boot before `bluetoothd` (`mkjobs.py` RunAtLoad). The framebuffer re-announces
 the panel rate after the THYME timing switch, so CoreAnimation follows the
-90 Hz panel without the `fb_ca_hz` override. Vendor firmware and local Wi-Fi
-input remain Git-ignored.
+90 Hz panel without the `fb_ca_hz` override. Upstream main `87bf485` is merged
+with the Metal-on-Vulkan/Turnip path opt-in; the THYME device layer and the
+daily-driver path are unchanged. Vendor firmware and local Wi-Fi input remain
+Git-ignored.
 
 ## RAM artifacts
 
@@ -35,9 +37,9 @@ input remain Git-ignored.
 | `devices/thyme/prebuilt/SILICIUM_UEFI.fd` | `3837561780bf4edd37a7818ba737cd0b91c9a1804d7442eeeff6a2304f8af55d` |
 | `xnuloader/loader-thyme.efi` | `7bc139e4b1e4d8fc185a909ff516a5c6a5b737558ece862b30b88bf5891d46cb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `1a8a9cf4cf768ae93f0fdda4f70d60deb7edb0053ff924f92bb2d0cf458de92e` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `b7e0f382b240add0356c954259a28a7383ca653f58e5b471f6f331f3cfba2cf4` |
 | `out/thyme-boot/root-language.apfs` | `b704a687d8c6edd7d4a257a003c379222cc93648d0d55a20e1b8c01abde05b0a` |
-| clean-main `hakios-kernel` | `3746671bdf0d16350811d661af6df734870f7aa6d94b28b9e74fcba80200a0bc` |
+| clean-main `hakios-kernel` | `97fcecd0be88ffae68ae52faeee51969cb289d9da58357e4c019992be4214610` |
 
 The kernel binary hash changes when build metadata changes. The scenario is a
 local, Git-ignored RAM test image; its hash pins the tested bytes without
@@ -144,6 +146,31 @@ this run. HFP/SCO, AVRCP, the microphone and automatic reconnect remain open.
 | `logs/111252-run.log` | `d1f9bb3df5d75247dd18dff136c03a3f175d80d7ac6a5ede3baa19c2bd9c58c2` |
 | `logs/wirelessregress-wifi.png` | `036d08e5f72f026c88402cf9be4a8e46580d338c28588cb91332c1537a689381` |
 | `logs/wirelessregress-bt.png` | `f51da0f1679d484ca3bf10cb049048a87a87de9c7f64c5a8caaf7cf0106a6387` |
+
+## Upstream main merged (2026-11-05)
+
+Upstream main `87bf485` is merged: Metal on Vulkan/Turnip, 120 Hz and
+wallpaper-freeze options, the screen-class and `fb_beam` knobs, and their
+tools and documentation. The Metal path stays opt-in (`TURNIP=1 M2V=1`,
+`metal_m2v=1`). The merge keeps the THYME 90 Hz re-announcement and guards
+upstream's `fb_beam` probe so it returns before reading the DSI interface on
+the command-mode THYME panel. The GL-only build keeps `libOSMesa` in the
+small image; the large-file move runs only for TURNIP/M2V builds. HakiosMetal
+is linked with the Mesa AIR archives, built here with ninja in
+`xnu-deps/build/mesa/build-softpipe-freedreno`.
+
+The canonical cold RAM run `logs/114117-run.log` (kernel `97fcecd0`, image
+`b7e0f382`) completed two Wi-Fi joins with DHCP `192.168.0.102`, Safari TLS,
+85 LE reports (15 named), 735 `hakios-gl` frames, zero H4 faults and no panic.
+The jiggle run `logs/115200-run.log` presented 452, 451, 451 and 451 frames
+in four consecutive five-second windows (90 fps, 11.1 ms median), 1022
+`hakios-gl` frames, and printed `fb_beam stays off` at 173.9 s.
+
+| File | SHA-256 |
+|---|---|
+| `logs/114117-run.log` | `2f95c123e6add2e6cc8babe96bb68f0ad17784a3eef6a0309f8bc6e78e3cb4dc` |
+| `logs/115200-run.log` | `b3e9e2bd773e8084a192b0d8e4312ca9139607f07b878639538a9647d56dc573` |
+| `logs/jiggle-gl.png` | `cb4fccec06dee608a189a2cc3d5b925f631ced498dadf5b53353098b73b4a4a3` |
 
 ## Current verified run
 
