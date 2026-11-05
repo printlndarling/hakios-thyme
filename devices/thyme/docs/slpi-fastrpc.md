@@ -25,13 +25,49 @@ Verified on the phone (`logs/185355-run.log`, `logs/190234-run.log`):
 | `adsp_listener_init2` | 1 | 3 | `0x03000000` | retval 0 |
 | `adsp_listener_next2` | 1 | 3 | `0x040202` | blocks, or "nothing" (`0x80000434`) |
 
+There are two listener interfaces in the firmware, and Qualcomm's
+`listener_android.c` uses the modern one first:
+
+| Interface | Opened by | `init2` | `next2` |
+|---|---|---|---|
+| `adsp_listener` (static) | the fixed handle 3 | method 3, `0x03000000` | method 4, `0x040202` |
+| `adsp_listener1` (modern) | `remotectl_open("adsp_listener1")` | method 5, `0x05000000` | method 6, `0x060202` |
+
+The argument layout of `next2` is the same in both (`prevCtx`, `prevResult`,
+`prevbufs`/`prevbufsLen` in; `ctx`, `handle`, `sc`, `bufsLenReq`, `bufs` out),
+and `get_in_bufs2` (method 5 static, 7 modern) fetches input buffers larger
+than the one passed to `next2`. The boot argument `fastrpc_listener1=1`
+selects the modern interface.
+
 The session `client_id` is 1 for every call after the attach; with 0 the DSP
 accepts the call but never delivers the listener's requests. The context is
 `ctxid << 8 | pd`; `ctxid` numbers the call and `pd` selects the processor
 domain, so the next2 loop must not vary the low byte (an earlier version did,
 and rotated its calls through PD 0, 1 and 2). The boot argument `fastrpc_pd`
-sets the PD for the whole listener chain (default 0, the root PD; 2 is the
-sensors PD the attach names).
+sets the PD for the whole listener chain (2, the sensors PD: `remotectl_open`
+is rejected with `0x80000434` in PD 0, and the fixed listener handle only
+answers in PD 2).
+
+The bring-up's boot arguments:
+
+| Argument | Meaning |
+|---|---|
+| `fastrpc_call=N` | run the chain; 9 starts the listener thread, 11 adds the name probe |
+| `fastrpc_pd=2` | the processor domain for the listener's calls (2, the sensors PD) |
+| `fastrpc_lhandle=1` | use the handle `remotectl_open` returned for `init2`/`next2` (default: the fixed 3) |
+| `fastrpc_attach_late=1` | open and register before the sensors PD's first attach |
+| `fastrpc_restart=1` | release the sensors PD after registering, attach it again, then start `next2` |
+| `fastrpc_restart=2` | release the PD right after the first attach, register, and attach once more |
+| `fastrpc_delay=N` | wait N seconds between the first attach and the listener (let the first registry read fail and the process be restarted) |
+
+The handle `remotectl_open` returns is not the listener's own handle:
+`adsp_listener_init2` on it answers -1, on the fixed 3 it answers 0
+(`fastrpc_lhandle=1` tests the other; the default uses 3). The sensor process
+reads its registry once, when its PD starts, so two orderings are available
+as boot arguments: `fastrpc_attach_late=1` registers the listener and starts
+`next2` before the first attach, and `fastrpc_restart=1` releases the sensors
+PD (`INIT_RELEASE`, method 1 on handle 1) and attaches it again, which starts
+the process with the listener already waiting.
 
 `next2` must have exactly one call outstanding: when it is waiting for a
 request the DSP holds the GLINK intent, and a short timeout sent call after

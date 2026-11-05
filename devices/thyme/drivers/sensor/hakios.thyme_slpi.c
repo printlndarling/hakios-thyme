@@ -3314,6 +3314,8 @@ fastrpc_smem_get(uint32_t offset, uint8_t *to, uint32_t size)
 	settle();
 }
 
+static uint32_t fastrpc_call_tid = 1;    /* the tid of the call being sent */
+
 static bool
 fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size,
     uint32_t wait_ms, const char *what)
@@ -3329,7 +3331,7 @@ fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context,
 	fastrpc_rsp_retval = 0;
 	bzero(&msg, sizeof(msg));
 	msg.client_id = (int32_t)client_id;
-	msg.tid = 1;
+	msg.tid = (int32_t)fastrpc_call_tid;
 	msg.ctx = context;
 	msg.handle = handle;
 	msg.sc = sc;
@@ -3360,6 +3362,18 @@ fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context,
  * and input buffers. Nothing is served yet: this stage only shows what the sensor process asks for.
  */
 static uint32_t fastrpc_pd = 2;          /* the PD the listener's calls are addressed to (boot-arg fastrpc_pd; the sensors PD) */
+static uint32_t fastrpc_service = 3;     /* the listener's handle: the fixed one, or the open's (boot-arg fastrpc_lhandle) */
+static uint32_t fastrpc_lhandle;         /* 0: the fixed 3; 1: the handle remotectl_open returned; else that value */
+static uint32_t fastrpc_listener1;       /* boot-arg fastrpc_listener1: the modern adsp_listener1 interface (methods 5 and 6) */
+static uint32_t fastrpc_init2_sc = 0x03000000;
+static uint32_t fastrpc_next2_sc = 0x040202;
+static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
+static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
+static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
+static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static listener first, the sensors PD after it */
+static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
+static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
+static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -3381,7 +3395,8 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, 3, 0x040202, 0x500 | fastrpc_pd, physical, size, 10000, "adsp_listener_next2")) {
+	if (!fastrpc_call(1, fastrpc_service, fastrpc_next2_sc, 0x500 | fastrpc_pd, physical, size, 10000,
+	    "adsp_listener_next2")) {
 		return;
 	}
 	if (shared) {
@@ -4014,10 +4029,6 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		goto out;
 	}
 	physical = SMEM_PHYS + offset;
-	/* The registry files are in the root image, which is mounted after this step: wait for it. */
-	for (unsigned ms = 0; ms < 30000 && rootvnode == NULLVP; ms++) {
-		sleep_ms(1);
-	}
 	while (fastrpc_listener_wanted) {
 		sizes[0] = rctx;
 		sizes[1] = result_code;
@@ -4040,8 +4051,8 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			break;
 		}
 		fastrpc_smem_put(offset, packet, size);
-		if (!fastrpc_call(1, 3, 0x040202, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical, size, 120000,
-		    "adsp_listener_next2")) {
+		if (!fastrpc_call(1, fastrpc_service, fastrpc_next2_sc, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical,
+		    size, 120000, "adsp_listener_next2")) {
 			if (!fastrpc_listener_wanted) {
 				break;
 			}
@@ -4075,6 +4086,10 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			uint32_t out_count = 0;
 			int32_t served;
 
+			/* the registry files are in the root image, which may be mounted a moment after this step */
+			for (unsigned ms = 0; ms < 30000 && rootvnode == NULLVP; ms++) {
+				sleep_ms(1);
+			}
 			memset(out, 0, sizeof(out));
 			served = fastrpc_serve(numbers[1], numbers[2], nested,
 			    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count);
@@ -4122,13 +4137,79 @@ fastrpc_listener_start(void)
 	printf("slpi: fastrpc: the listener's thread runs\n");
 }
 
+/* Which names the DSP's remotectl will open on this firmware, and with which handle and error. */
+static uint32_t
+fastrpc_open_name(const char *name, uint64_t physical, uint32_t shared_offset, uint8_t *packet, uint8_t *reply)
+{
+	uint32_t lengths[4], size, handle = 0, handles[2] = { 0, 0 }, scalar[2];
+	uint8_t error[256];
+	const void *sources[4];
+
+	memset(packet, 0, 4096);
+	memset(error, 0, sizeof(error));
+	scalar[0] = (uint32_t)strlen(name) + 1;
+	scalar[1] = (uint32_t)sizeof(error);
+	lengths[0] = 8;
+	sources[0] = scalar;
+	lengths[1] = scalar[0];
+	sources[1] = name;
+	lengths[2] = 8;
+	sources[2] = handles;
+	lengths[3] = (uint32_t)sizeof(error);
+	sources[3] = error;
+	size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
+	fastrpc_smem_put(shared_offset, packet, size);
+	if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, 2000, name)) {
+		struct fastrpc_remote_buf *rpra;
+
+		fastrpc_smem_get(shared_offset, reply, 4096);
+		rpra = (struct fastrpc_remote_buf *)reply;
+		fastrpc_smem_get(shared_offset + (uint32_t)(rpra[2].pv - physical), (uint8_t *)handles, sizeof(handles));
+		fastrpc_smem_get(shared_offset + (uint32_t)(rpra[3].pv - physical), error, sizeof(error) - 1);
+		handle = handles[0];
+		printf("slpi: fastrpc: opened \"%s\": handle %u dlret %d error \"%s\"\n", name, handles[0], (int32_t)handles[1], error);
+	}
+	return handle;
+}
+
+/* INIT_ATTACH, INIT_RELEASE: one buffer with the client id, on the fixed handle 1. */
+static bool
+fastrpc_pd_call(uint32_t msg_client, uint32_t sc, uint32_t context, uint64_t physical, uint32_t shared_offset,
+    bool shared, uint8_t *packet, uint32_t client_id, const char *what)
+{
+	const void *sources[1];
+	uint32_t lengths[1], size;
+
+	uint32_t saved = fastrpc_call_tid;
+
+	memset(packet, 0, 4096);
+	lengths[0] = 4;
+	sources[0] = &client_id;
+	size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (fastrpc_attach_tid != 0 && sc == 0x10000) {
+		/* the sensors attach must not wait behind the listener's next2 on another thread */
+		fastrpc_call_tid = fastrpc_attach_tid;
+	}
+	{
+		bool sent = fastrpc_call(msg_client, 1, sc, context, physical, size, 2000, what);
+
+		fastrpc_call_tid = saved;
+		return sent;
+	}
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
 	static const char listener[] = "adsp_default_listener";
+	static const char listener_modern[] = "adsp_listener1";
+	const char *open_name = fastrpc_listener1 ? listener_modern : listener;
 	uint8_t *buf = NULL, *packet = NULL, *parsed, reply[4096];
 	uint64_t physical = 0;
-	uint32_t client = 1, lengths[4], name_length = (uint32_t)strlen(listener) + 1;
+	uint32_t client = 1, lengths[4], name_length = (uint32_t)strlen(open_name) + 1;
 	uint32_t shared_offset = 0, size, fastrpc_listener = 0;
 	bool shared = stage >= 4;
 	const void *sources[4];
@@ -4171,14 +4252,26 @@ fastrpc_first_calls(uint32_t stage)
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS") && (shared ? stage >= 5 : stage >= 3)) {
+	bool attached = fastrpc_attach_late || fastrpc_bare ||
+	    fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS");
+	if (attached && fastrpc_delay != 0) {
+		/* the first registry read has no listener and fails: wait for the process to be restarted */
+		printf("slpi: fastrpc: waiting %u s before the listener exists\n", fastrpc_delay);
+		sleep_ms(fastrpc_delay * 1000);
+	}
+	if (fastrpc_restart == 2 && attached) {
+		/* stop the sensor process the first attach started, so a fresh one can start later */
+		fastrpc_pd_call(0, 0x01010000, 0x500 | fastrpc_pd, physical, shared_offset, shared, packet, client, "INIT_RELEASE");
+		sleep_ms(500);
+	}
+	if (!fastrpc_bare && attached && (shared ? stage >= 5 : stage >= 3)) {
 		memset(packet, 0, 4096);
 		memset(error, 0, sizeof(error));
 		scalar[0] = name_length;
 		lengths[0] = 8;
 		sources[0] = scalar;
 		lengths[1] = name_length;
-		sources[1] = listener;
+		sources[1] = open_name;
 		lengths[2] = 8;
 		sources[2] = handles;
 		lengths[3] = (uint32_t)sizeof(error);
@@ -4218,47 +4311,144 @@ fastrpc_first_calls(uint32_t stage)
 			}
 		}
 	}
-	if (fastrpc_listener != 0 && stage >= 6) {
-		/* the handle the open gave, no buffers: the DSP now knows this AP serves its default listener */
+	if (fastrpc_bare && stage >= 6) {
+		/*
+		 * The way the phone's sscrpcd starts: the static listener is initialized and next2 waits
+		 * before any sensors PD exists, and only then does the attach start the sensor process,
+		 * whose one registry read finds the listener ready.
+		 */
+		if (fastrpc_attach0) {
+			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, client, "INIT_ATTACH (guest OS)");
+		}
 		memset(packet, 0, 4096);
 		size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
 		if (shared) {
 			fastrpc_smem_put(shared_offset, packet, size);
 		}
-		if (fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 2000,
-		    "adsp_default_listener_register") &&
-		    stage >= 7) {
-			/* the reference closes the control handle after registering */
-			memset(packet, 0, 4096);
-			memset(error, 0, sizeof(error));
-			scalar[0] = fastrpc_listener;
-			scalar[1] = (uint32_t)sizeof(error);
-			lengths[0] = 8;
-			sources[0] = scalar;
-			lengths[1] = 4;
-			sources[1] = handles;
-			lengths[2] = (uint32_t)sizeof(error);
-			sources[2] = error;
-			size = fastrpc_build(packet, physical, physical, 3, lengths, sources);
-			if (shared) {
-				fastrpc_smem_put(shared_offset, packet, size);
+		if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 2000,
+		    "adsp_listener_init2") && stage >= 8) {
+			if (stage >= 9) {
+				fastrpc_listener_start();
+			} else {
+				fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
 			}
-			fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
-			/* the fixed listener handle 3, method 3: the reverse tunnel's first call */
+			sleep_ms(200);
+			{
+				/* a session of its own, so the DSP processes it while the listener's next2 waits */
+				uint32_t ac = fastrpc_attach_client;
+				uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
+
+				fastrpc_pd_call(ac, 0x10000, 0x102, physical, shared_offset, shared, packet, abuf,
+				    "INIT_ATTACH_SNS (after the listener)");
+			}
+		}
+	}
+	if (!fastrpc_bare && fastrpc_listener != 0) {
+		if (fastrpc_listener1) {
+			/* the modern interface is opened by name and answered on its own handle */
+			fastrpc_service = fastrpc_listener;
+			fastrpc_init2_sc = 0x05000000;
+			fastrpc_next2_sc = 0x060202;
+		} else if (fastrpc_lhandle == 1) {
+			fastrpc_service = fastrpc_listener;
+		} else if (fastrpc_lhandle > 1) {
+			fastrpc_service = fastrpc_lhandle;
+		}
+		printf("slpi: fastrpc: the listener's service handle is %u (%s)\n", fastrpc_service,
+		    fastrpc_listener1 ? "adsp_listener1" : "the static adsp_listener");
+	}
+	if (fastrpc_listener != 0 && stage >= 6) {
+		bool ready = true;
+
+		if (!fastrpc_listener1) {
+			/* the handle the open gave, no buffers: the DSP now knows this AP serves its default listener */
 			memset(packet, 0, 4096);
 			size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			if (fastrpc_call(1, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 2000, "adsp_listener_init2") &&
-			    stage >= 8) {
-				if (stage >= 9) {
+			ready = fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 2000,
+			    "adsp_default_listener_register");
+			if (ready) {
+				/* the reference closes the control handle after registering */
+				memset(packet, 0, 4096);
+				memset(error, 0, sizeof(error));
+				scalar[0] = fastrpc_listener;
+				scalar[1] = (uint32_t)sizeof(error);
+				lengths[0] = 8;
+				sources[0] = scalar;
+				lengths[1] = 4;
+				sources[1] = handles;
+				lengths[2] = (uint32_t)sizeof(error);
+				sources[2] = error;
+				size = fastrpc_build(packet, physical, physical, 3, lengths, sources);
+				if (shared) {
+					fastrpc_smem_put(shared_offset, packet, size);
+				}
+				fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
+			}
+		}
+		if (ready && stage >= 7) {
+			/* method 3 on the static interface, method 5 on adsp_listener1: the reverse tunnel's first call */
+			memset(packet, 0, 4096);
+			size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+			if (shared) {
+				fastrpc_smem_put(shared_offset, packet, size);
+			}
+			if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 2000,
+			    "adsp_listener_init2") && stage >= 8) {
+				if (fastrpc_restart == 1) {
+					/*
+					 * The sensor process reads the registry when its PD starts, and this
+					 * first attach started it before the listener existed. Release it and
+					 * attach again now, before next2 waits: an outstanding next2 blocks the
+					 * DSP's FastRPC thread, and the release would never be processed.
+					 */
+					fastrpc_pd_call(0, 0x01010000, 0x500 | fastrpc_pd, physical, shared_offset, shared, packet, client,
+					    "INIT_RELEASE");
+					sleep_ms(500);
+					fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, client,
+					    "INIT_ATTACH_SNS (again)");
+				} else if (fastrpc_restart == 2) {
+					/* the release after the first attach stopped the process; start a fresh one now */
+					fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, client,
+					    "INIT_ATTACH_SNS (again)");
+				}
+				if (fastrpc_attach_late) {
+					/*
+					 * The sensor process reads the registry once, when its PD starts: give it a
+					 * listener with a next2 already waiting, and only then start the PD.
+					 */
+					if (stage >= 9) {
+						fastrpc_listener_start();
+					} else {
+						fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
+					}
+					sleep_ms(200);
+					memset(packet, 0, 4096);
+					lengths[0] = 4;
+					sources[0] = &client;
+					size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
+					if (shared) {
+						fastrpc_smem_put(shared_offset, packet, size);
+					}
+					fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS (late)");
+				} else if (stage >= 9) {
 					fastrpc_listener_start();
 				} else {
 					fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
 				}
 			}
 		}
+	if (stage >= 11 && shared) {
+		static const char *const names[] = {
+			"adsp_default_listener", "apps_std", "listener", "apps_remotectl", "sns_default_listener", "nonexistent",
+		};
+
+		for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+			fastrpc_open_name(names[i], physical, shared_offset, packet, reply);
+		}
+	}
 	}
 	if (shared) {
 		kfree_data(packet, 4096);
@@ -5026,6 +5216,15 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
 	PE_parse_boot_argn("fastrpc_call", &fastrpc_call, sizeof(fastrpc_call));
 	PE_parse_boot_argn("fastrpc_pd", &fastrpc_pd, sizeof(fastrpc_pd));
+	PE_parse_boot_argn("fastrpc_lhandle", &fastrpc_lhandle, sizeof(fastrpc_lhandle));
+	PE_parse_boot_argn("fastrpc_attach_late", &fastrpc_attach_late, sizeof(fastrpc_attach_late));
+	PE_parse_boot_argn("fastrpc_restart", &fastrpc_restart, sizeof(fastrpc_restart));
+	PE_parse_boot_argn("fastrpc_delay", &fastrpc_delay, sizeof(fastrpc_delay));
+	PE_parse_boot_argn("fastrpc_listener1", &fastrpc_listener1, sizeof(fastrpc_listener1));
+	PE_parse_boot_argn("fastrpc_bare", &fastrpc_bare, sizeof(fastrpc_bare));
+	PE_parse_boot_argn("fastrpc_attach0", &fastrpc_attach0, sizeof(fastrpc_attach0));
+	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
+	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {

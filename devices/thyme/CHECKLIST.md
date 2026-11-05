@@ -797,6 +797,12 @@ GLINK intent while it waits. `remotectl_open` is rejected in PD 0
 (`0x80000434`), so the chain stays in PD 2 (`fastrpc_pd` selects it).
 `logs/185355-run.log`, `logs/190234-run.log`, `logs/191700-run.log`.
 
+The register goes on the handle `remotectl_open` returns (method 0; on the
+fixed handle 3 the DSP answers `0x8000040e`), while `init2` and `next2` go on
+the fixed handle 3 (on the opened handle `init2` answers -1). An outstanding
+`next2` blocks the DSP's FastRPC thread, so the release and re-attach that
+restart the sensor process must be sent before the listener starts waiting.
+
 The AP side of the tunnel serves `apps_std` methods 1, 2, 3, 4, 9, 19, 26,
 27, 28 and 31 from `fw/sensors/`: the phone's `sns_reg_config`, its 49
 `config/*.json`, and the six `/sys/devices/soc0` values (`sensor-files.sh`
