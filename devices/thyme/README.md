@@ -14,7 +14,7 @@ under `reference/legacy-device/`.
 | SoC | Qualcomm SM8250-AC / Snapdragon 870 |
 | CPU | 8 cores; RAM boot currently starts on core 7 |
 | GPU | Adreno 650 |
-| Display | 1080 x 2340, panel selection `42 02 0a`, 90 Hz mode |
+| Display | 1080 x 2340, panel selection `42 02 0a`; the 90 Hz timing is accepted by the panel, but the controller the firmware leaves refreshes it about 60 times a second, so the daily default is a self-consistent 60 Hz |
 | Touch | ST FTS521, I2C `0x49`, IRQ GPIO 39, reset GPIO 38 |
 | Buttons | PM8150 PON and PM8150 GPIO6 |
 | Wi-Fi | QCA6390, PCIe 0 / MHI |
