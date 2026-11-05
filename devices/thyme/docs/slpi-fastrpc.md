@@ -307,8 +307,15 @@ directly traps in TrustZone and the core never comes back.
 The create path therefore also falls back to a 64 KB item in the shared
 memory (item 625), which both sides already read and write for GLINK, and
 skips the SCM assignment for it (`fastrpc_heap_smem`, `fastrpc_assign=0`).
-Whether the DSP accepts a heap that small, or needs the assignment first,
-is the open question.
+
+On the phone, `INIT_CREATE_STATIC` with the name `adsp_listener` and the
+64 KB shared-memory heap answers **`0x80000416`** (an AEE "unsupported"
+code): this DSP firmware does not load the listener that way, and the
+`adsp_listener` open still hangs afterwards. The remaining routes are the
+module file the DSP's own `mod_table` asks the AP for — the AP-side
+`apps_std_imp.c` looks in `/vendor/lib/rfsa/adsp` and `/vendor/dsp/adsp` —
+and `FASTRPC_RMID_INIT_CREATE` (method 6) with the `fastrpc_shell_2` that
+the hexagon-dsp-binaries tree carries for SM8250.
 
 ## Risks and open questions
 
