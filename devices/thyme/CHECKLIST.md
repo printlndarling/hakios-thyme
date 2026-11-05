@@ -887,6 +887,15 @@ FastRPC channel stops serving: a re-attach gets no answer and next2 reports
 DSP and the missing piece is on the DSP's side of the sensor process's own
 start-up, not in the AP file service.
 
+The remote heap was the next suspect and it is not it either: the vendor's
+`remotectl_grow_heap` (method 2, one physical address and a size) is refused
+before any attach with `0x80000474`, but accepted after one (retval 0) — a
+124 KB heap from shared memory, page-aligned, is the most the partition holds
+(`logs/071411-run.log`). Offering it in the root PD's session before the
+sensors PD is attached and bringing the sensors PD up as a second client
+answers 0 at every step and next2 still times out; the sensor process never
+asks for a file (`logs/072345-run.log`).
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
