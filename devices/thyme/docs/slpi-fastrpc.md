@@ -292,6 +292,15 @@ buffer, so the next implementation is:
 The 60 s hang of the module open and the assertion are consistent: the
 module PD cannot be created without a heap.
 
+The first implementation shows that the kernel's physically-contiguous
+allocator cannot produce such a buffer at the point step 10 runs: 8 MB,
+4 MB, 2 MB and 1 MB all fail (the 4 KB call packet works because a
+page-sized request takes the ordinary page path, not `kmem_alloc_contig`).
+The create path therefore also falls back to a 64 KB item in the shared
+memory (item 625), which both sides already read and write for GLINK, and
+skips the SCM assignment for it. Whether the DSP accepts a heap that small
+is the open question.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
