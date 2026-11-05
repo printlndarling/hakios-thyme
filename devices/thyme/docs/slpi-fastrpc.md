@@ -293,12 +293,21 @@ The 60 s hang of the module open and the assertion are consistent: the
 module PD cannot be created without a heap.
 
 The first implementation shows that the kernel's physically-contiguous
-allocator cannot produce such a buffer at the point step 10 runs: 8 MB,
-4 MB, 2 MB and 1 MB all fail (the 4 KB call packet works because a
-page-sized request takes the ordinary page path, not `kmem_alloc_contig`).
+allocator cannot produce a large buffer at the point step 10 runs: 8 MB
+down to 32 KB all fail, and only **16 KB** succeeds (the 4 KB call packet
+works because a page-sized request takes the ordinary page path, not
+`kmem_alloc_contig`).
+
+The SCM memory-protect assignment (service `0x0c`, command `0x16`) **hung
+the kernel**: the qcom SMC64 ABI carries at most six arguments in registers
+(`SCM_SMC_N_REG_ARGS` is 4 in the downstream driver), and a seven-argument
+call has to be packed into a buffer and passed by address; sending it
+directly traps in TrustZone and the core never comes back.
+
 The create path therefore also falls back to a 64 KB item in the shared
 memory (item 625), which both sides already read and write for GLINK, and
-skips the SCM assignment for it. Whether the DSP accepts a heap that small
+skips the SCM assignment for it (`fastrpc_heap_smem`, `fastrpc_assign=0`).
+Whether the DSP accepts a heap that small, or needs the assignment first,
 is the open question.
 
 ## Risks and open questions
