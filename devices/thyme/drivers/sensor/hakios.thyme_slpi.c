@@ -71,6 +71,8 @@ extern lck_mtx_t hakios_rsc_lock;            /* RPMh's sequencer, shared with th
 extern lck_mtx_t hakios_smmu_lock;           /* the apps SMMU's match registers (hakios.wifi.c) */
 extern void *hakios_slpi_dma_alloc(size_t size, uint64_t *physical);
 extern void hakios_slpi_dma_free(void *address, size_t size);
+extern void *hakios_slpi_heap_alloc(size_t size, uint64_t *physical);
+extern void hakios_slpi_heap_free(void *address, size_t size);
 
 static LCK_GRP_DECLARE(slpi_lock_group, "hakios-slpi");
 
@@ -1261,6 +1263,7 @@ step_mailbox(void)
 #define SCM_THREE_VALUES        3
 #define SCM_VALUE_AND_BUFFER    (2 | 2 << 6)
 #define SCM_INTERRUPTED         1
+#define SCM_MP_ASSIGN           SCM_CALL(0x0c, 0x16)
 
 static LCK_MTX_DECLARE(dsp_lock, &slpi_lock_group);     /* the DSP being started or stopped */
 static bool rails_asked;                /* our request for its rails stands (until it asks for its own, or is shut down) */
@@ -1294,6 +1297,41 @@ scm(const char *what, uint64_t function, uint64_t arguments, uint64_t first, uin
 		if (x0 != SCM_INTERRUPTED) {
 			printf("slpi: %u: TrustZone returns %d, answer %#llx\n", step, (int32_t)x0, x1);
 			*answer = x1;
+			return (int32_t)x0;
+		}
+	}
+	printf("slpi: %u: TrustZone keeps saying the call was interrupted\n", step);
+	return -1;
+}
+
+/* The same call with six arguments after the argument description, as the memory-protect calls use. */
+static int32_t
+scm6(const char *what, uint64_t function, uint64_t argument_info, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+    uint64_t a4, uint64_t a5, uint64_t *answer)
+{
+	uint64_t session = 0;
+
+	function |= SCM_64 | SCM_SIP;
+	printf("slpi: %u: about to ask TrustZone %s: smc %#llx, arguments %#llx, %#llx, %#llx, %#llx, %#llx, %#llx, %#llx\n", step,
+	    what, function, argument_info, a0, a1, a2, a3, a4, a5);
+	for (int i = 0; i < 100; i++) {
+		register uint64_t x0 __asm__("x0") = i == 0 ? function : SCM_INTERRUPTED;
+		register uint64_t x1 __asm__("x1") = argument_info;
+		register uint64_t x2 __asm__("x2") = a0;
+		register uint64_t x3 __asm__("x3") = a1;
+		register uint64_t x4 __asm__("x4") = a2;
+		register uint64_t x5 __asm__("x5") = a3;
+		register uint64_t x6 __asm__("x6") = a4;
+		register uint64_t x7 __asm__("x7") = a5;
+
+		__asm__ volatile ("smc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3), "+r" (x4), "+r" (x5), "+r" (x6),
+		    "+r" (x7) : : "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
+		session = x6;
+		if (x0 != SCM_INTERRUPTED) {
+			printf("slpi: %u: TrustZone returns %d, answer %#llx\n", step, (int32_t)x0, x1);
+			if (answer != NULL) {
+				*answer = x1;
+			}
 			return (int32_t)x0;
 		}
 	}
@@ -3401,6 +3439,8 @@ static uint32_t fastrpc_attach_mid;      /* boot-arg fastrpc_attach_mid: registe
 static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
 static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to wait for that module load */
 static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
+static uint32_t fastrpc_create;          /* boot-arg fastrpc_create: take the 8 MB remote heap and INIT_CREATE_STATIC */
+static uint32_t fastrpc_create_pd = 1;   /* the PD of the create call (Linux uses USER_PD) */
 static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it after the listener is waiting */
 static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
@@ -4267,6 +4307,69 @@ fastrpc_module_open_send(uint32_t pd)
 	return sent;
 }
 
+/*
+ * The FastRPC remote heap the DSP's module loader needs: 8 MB (the size of the sdsp_region in
+ * the device tree), handed to VMIDs 22 and 37 (qcom,adsp-remoteheap-vmid = <0x16 0x25>) with an
+ * SCM memory-protect assignment before the DSP may use it.
+ */
+#define ITEM_FASTRPC_HEAP_DESC   624
+#define FASTRPC_HEAP_SIZE        (8u * 1024 * 1024)
+
+static bool
+fastrpc_heap_assign(uint64_t heap_physical, uint64_t heap_size)
+{
+	uint32_t offset = 0;
+	uint8_t *staging = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+	uint8_t *slot = fastrpc_smem_item(ITEM_FASTRPC_HEAP_DESC, &offset);
+	uint64_t answer = ~0ull, desc;
+	int32_t status;
+
+	if (staging == NULL || slot == NULL) {
+		if (staging != NULL) {
+			kfree_data(staging, 4096);
+		}
+		return false;
+	}
+	*(uint32_t *)(staging + 0) = 1;                  /* the source owner: HLOS (VMID 1) */
+	*(uint64_t *)(staging + 64) = heap_physical;     /* the memory to map */
+	*(uint64_t *)(staging + 72) = heap_size;
+	*(uint32_t *)(staging + 128) = 22;               /* destination VMIDs, RWX */
+	*(uint32_t *)(staging + 132) = 7;
+	*(uint32_t *)(staging + 144) = 37;
+	*(uint32_t *)(staging + 148) = 7;
+	fastrpc_smem_put(offset, staging, 4096);
+	kfree_data(staging, 4096);
+	desc = SMEM_PHYS + offset;
+	status = scm6("to hand the FastRPC heap to the sensor DSP", SCM_MP_ASSIGN, 0x1117, desc + 64, 16, desc, 4, desc + 128, 32,
+	    &answer);
+	printf("slpi: %u: the heap assignment returns %d, answer %#llx\n", step, status, answer);
+	return status == 0;
+}
+
+static bool
+fastrpc_create_static(uint64_t heap_physical, uint64_t heap_size, uint64_t physical, uint32_t shared_offset, bool shared,
+    uint8_t *packet)
+{
+	static const char name[] = "adsp_listener";
+	uint32_t inbuf[3] = { 1, sizeof(name), 1 };
+	uint64_t pages[2] = { heap_physical, heap_size };
+	const void *sources[3];
+	uint32_t lengths[3], size;
+
+	memset(packet, 0, 4096);
+	lengths[0] = sizeof(inbuf);
+	sources[0] = inbuf;
+	lengths[1] = sizeof(name);
+	sources[1] = name;
+	lengths[2] = sizeof(pages);
+	sources[2] = pages;
+	size = fastrpc_build(packet, physical, physical, 3, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	return fastrpc_call(0, 1, 0x08030000, 0x160 | fastrpc_create_pd, physical, size, 20000, "INIT_CREATE_STATIC");
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
@@ -4410,7 +4513,28 @@ fastrpc_first_calls(uint32_t stage)
 				    "INIT_ATTACH_SNS (mid)");
 			}
 		}
-		if (fastrpc_static_open) {
+		if (fastrpc_create) {
+			uint64_t heap_physical = 0;
+			void *heap = hakios_slpi_heap_alloc(FASTRPC_HEAP_SIZE, &heap_physical);
+
+			if (heap != NULL) {
+				printf("slpi: fastrpc: the 8 MB heap is %p, physical %#llx\n", heap, heap_physical);
+				if (fastrpc_heap_assign(heap_physical, FASTRPC_HEAP_SIZE)) {
+					fastrpc_create_static(heap_physical, FASTRPC_HEAP_SIZE, physical, shared_offset, shared, packet);
+					{
+						uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply,
+						    20000);
+
+						if (opened != 0) {
+							fastrpc_service = opened;
+							printf("slpi: fastrpc: the adsp_listener service handle is %u\n", fastrpc_service);
+						}
+					}
+				}
+			} else {
+				printf("slpi: fastrpc: no 8 MB physically contiguous heap\n");
+			}
+		} else if (fastrpc_static_open) {
 			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
 
 			if (opened != 0) {
@@ -5343,6 +5467,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_static_open", &fastrpc_static_open, sizeof(fastrpc_static_open));
 	PE_parse_boot_argn("fastrpc_open_wait", &fastrpc_open_wait, sizeof(fastrpc_open_wait));
 	PE_parse_boot_argn("fastrpc_open_async", &fastrpc_open_async, sizeof(fastrpc_open_async));
+	PE_parse_boot_argn("fastrpc_create", &fastrpc_create, sizeof(fastrpc_create));
+	PE_parse_boot_argn("fastrpc_create_pd", &fastrpc_create_pd, sizeof(fastrpc_create_pd));
 	PE_parse_boot_argn("fastrpc_open_after", &fastrpc_open_after, sizeof(fastrpc_open_after));
 	PE_parse_boot_argn("fastrpc_open_pd", &fastrpc_open_pd, sizeof(fastrpc_open_pd));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
