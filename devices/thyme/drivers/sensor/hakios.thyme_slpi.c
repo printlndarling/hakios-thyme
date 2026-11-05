@@ -2659,7 +2659,7 @@ qrtr_input(const uint8_t *data, uint32_t length)
 #define SNS_MSG_SENSOR_EVENT    1025u           /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_EVENT */
 
 static uint8_t sns_suid[16];
-static bool sns_have_suid;
+static bool sns_have_suid, sns_have_registry;
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 
@@ -2802,7 +2802,9 @@ sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint3
 	*p++ = 0;
 	*p++ = 0;                       /* the QMI length, filled below */
 	*p++ = 0;
-	*p++ = 0x01;                    /* TLV 0x01: the protobuf payload */
+	*p++ = 0x01;                    /* TLV 0x01: the protobuf, as the SSC array TLV (outer = inner + 2) */
+	*p++ = (uint8_t)((proto_length + 2) & 0xff);
+	*p++ = (uint8_t)((proto_length + 2) >> 8);
 	*p++ = (uint8_t)(proto_length & 0xff);
 	*p++ = (uint8_t)(proto_length >> 8);
 	memcpy(p, proto, proto_length);
@@ -2921,12 +2923,16 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 		}
 	}
 	if (name[0] != 0) {
-		memcpy(sns_suid, suid, sizeof(sns_suid));
-		sns_have_suid = true;
 		printf("slpi: sns: \"%s\" has SUID %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", name,
 		    suid[15], suid[14], suid[13], suid[12], suid[11], suid[10], suid[9], suid[8], suid[7], suid[6], suid[5],
 		    suid[4], suid[3], suid[2], suid[1], suid[0]);
-		sns_config();
+		if (strcmp(name, "accel") == 0) {
+			memcpy(sns_suid, suid, sizeof(sns_suid));
+			sns_have_suid = true;
+			sns_config();
+		} else if (strcmp(name, "registry") == 0) {
+			sns_have_registry = true;
+		}
 	}
 }
 
@@ -3027,7 +3033,12 @@ sns_input(const uint8_t *data, uint32_t length)
 			printf("slpi: sns: < QMI result %u, error %u\n", data[at] | data[at + 1] << 8,
 			    data[at + 2] | data[at + 3] << 8);
 		} else if (type == 0x02) {
-			sns_event(data + at, l);
+			/* the SSC sends an array TLV: outer length, then inner length, then the payload */
+			if (l >= 2 && (uint16_t)(data[at] | data[at + 1] << 8) + 2 == l) {
+				sns_event(data + at + 2, (uint32_t)(l - 2));
+			} else {
+				sns_event(data + at, l);
+			}
 		} else if (type == 0x11 && message == 0x20) {
 			uint16_t result = l >= 2 ? (uint16_t)(data[at] | data[at + 1] << 8) : 0xffff;
 
@@ -3038,14 +3049,26 @@ sns_input(const uint8_t *data, uint32_t length)
 }
 
 static void
-sns_start(void)
+sns_ask(const char *type)
 {
 	uint8_t inner[32], suid[16];
 	uint8_t *p = inner;
+
+	memset(suid, 0xab, sizeof(suid));
+	p = sns_bytes(p, 1, type, (uint32_t)strlen(type));
+	p = sns_varint(p, 0x10);        /* unkfield_2 = 1 */
+	p = sns_varint(p, 1);
+	p = sns_varint(p, 0x18);        /* unkfield_3 = 0 */
+	p = sns_varint(p, 0);
+	sns_qmi_send(SNS_MSG_SUID_REQ, suid, inner, (uint32_t)(p - inner));
+}
+
+static void
+sns_start(void)
+{
 	uint32_t node = 0, port = 0;
 
 	sns_enabled = 1;
-	memset(suid, 0xab, sizeof(suid));
 	/* register our port with the router for this service, so that its answers come back */
 	if (sns_server(&node, &port)) {
 		struct qrtr_control lookup = { .command = QRTR_NEW_LOOKUP, .words = { SNS_SERVICE, 1, 0 } };
@@ -3054,28 +3077,25 @@ sns_start(void)
 		qrtr_out_packet(QRTR_NEW_LOOKUP, SNS_OUR_PORT, node, QRTR_CONTROL, &lookup, sizeof(lookup));
 		sleep_ms(50);
 	}
-	p = sns_bytes(p, 1, "accel", 5);
-
-	p = sns_varint(p, 0x10);        /* unkfield_2 = 1 */
-	p = sns_varint(p, 1);
-	p = sns_varint(p, 0x18);        /* unkfield_3 = 0 */
-	p = sns_varint(p, 0);
 	{
 		static const uint8_t variants[] = { 0, 1, 2, 0xff };
 
 		for (unsigned v = 0; v < sizeof(variants); v++) {
 			sns_client_byte = variants[v];
-			sns_qmi_send(SNS_MSG_SUID_REQ, suid, inner, (uint32_t)(p - inner));
+			sns_ask("registry");
+			sns_ask("accel");
 			sleep_ms(200);
 		}
 		sns_client_byte = 0;
 	}
 	/* the sensor process may still be initialising at three seconds: ask again for a while */
-	for (unsigned attempt = 0; attempt < 40 && !sns_have_suid; attempt++) {
-		sns_qmi_send(SNS_MSG_SUID_REQ, suid, inner, (uint32_t)(p - inner));
+	for (unsigned attempt = 0; attempt < 40 && !(sns_have_registry && sns_have_suid); attempt++) {
+		sns_ask("registry");
+		sns_ask("accel");
 		sleep_ms(500);
 	}
-	printf("slpi: sns: asked for the accelerometer's SUID%s\n", sns_have_suid ? ", and it answered" : "");
+	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
+	    sns_have_suid ? "ANSWERED" : "silent");
 }
 
 /* ---- APR: the sensor services' protocol, on the channel apr_audio_svc ------------------------------------- */
