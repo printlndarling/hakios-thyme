@@ -3371,6 +3371,7 @@ static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: regist
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
 static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static listener first, the sensors PD after it */
+static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
@@ -4139,7 +4140,8 @@ fastrpc_listener_start(void)
 
 /* Which names the DSP's remotectl will open on this firmware, and with which handle and error. */
 static uint32_t
-fastrpc_open_name(const char *name, uint64_t physical, uint32_t shared_offset, uint8_t *packet, uint8_t *reply)
+fastrpc_open_name(const char *name, uint64_t physical, uint32_t shared_offset, uint8_t *packet, uint8_t *reply,
+    uint32_t wait_ms)
 {
 	uint32_t lengths[4], size, handle = 0, handles[2] = { 0, 0 }, scalar[2];
 	uint8_t error[256];
@@ -4159,7 +4161,7 @@ fastrpc_open_name(const char *name, uint64_t physical, uint32_t shared_offset, u
 	sources[3] = error;
 	size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
 	fastrpc_smem_put(shared_offset, packet, size);
-	if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, 2000, name)) {
+	if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, wait_ms, name)) {
 		struct fastrpc_remote_buf *rpra;
 
 		fastrpc_smem_get(shared_offset, reply, 4096);
@@ -4320,6 +4322,14 @@ fastrpc_first_calls(uint32_t stage)
 		if (fastrpc_attach0) {
 			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, client, "INIT_ATTACH (guest OS)");
 		}
+		if (fastrpc_static_open) {
+			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, 20000);
+
+			if (opened != 0) {
+				fastrpc_service = opened;
+				printf("slpi: fastrpc: the adsp_listener service handle is %u\n", fastrpc_service);
+			}
+		}
 		memset(packet, 0, 4096);
 		size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
 		if (shared) {
@@ -4388,6 +4398,17 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
 			}
 		}
+		if (ready && fastrpc_static_open) {
+			/* the static interface's handle is the module opened by name, not a fixed number */
+			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, 20000);
+
+			if (opened != 0) {
+				fastrpc_service = opened;
+				fastrpc_init2_sc = 0x03000000;
+				fastrpc_next2_sc = 0x040202;
+				printf("slpi: fastrpc: the adsp_listener service handle is %u\n", fastrpc_service);
+			}
+		}
 		if (ready && stage >= 7) {
 			/* method 3 on the static interface, method 5 on adsp_listener1: the reverse tunnel's first call */
 			memset(packet, 0, 4096);
@@ -4446,7 +4467,7 @@ fastrpc_first_calls(uint32_t stage)
 		};
 
 		for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-			fastrpc_open_name(names[i], physical, shared_offset, packet, reply);
+			fastrpc_open_name(names[i], physical, shared_offset, packet, reply, 2000);
 		}
 	}
 	}
@@ -5223,6 +5244,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_listener1", &fastrpc_listener1, sizeof(fastrpc_listener1));
 	PE_parse_boot_argn("fastrpc_bare", &fastrpc_bare, sizeof(fastrpc_bare));
 	PE_parse_boot_argn("fastrpc_attach0", &fastrpc_attach0, sizeof(fastrpc_attach0));
+	PE_parse_boot_argn("fastrpc_static_open", &fastrpc_static_open, sizeof(fastrpc_static_open));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));

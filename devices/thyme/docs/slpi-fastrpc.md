@@ -62,7 +62,22 @@ The bring-up's boot arguments:
 
 The handle `remotectl_open` returns is not the listener's own handle:
 `adsp_listener_init2` on it answers -1, on the fixed 3 it answers 0
-(`fastrpc_lhandle=1` tests the other; the default uses 3). The sensor process
+(`fastrpc_lhandle=1` tests the other; the default uses 3). Qualcomm's own
+`adsp_listener_stub.c` (Android 11 and current) shows why the fixed 3 is
+not the real listener: the static interface's handle is **opened by name**
+with `remote_handle_open("adsp_listener")`, i.e. `remotectl_open` of that
+name, and its methods are `init2` = 3 and `next2` = 4. The
+`fastrpc_static_open=1` boot argument opens it, after the default
+listener's register (the order the daemon uses); its module load can take
+longer than the two seconds the other opens need.
+
+The guest-OS attach matters: `adsp_listener_init2` in PD 0 answers 0 only
+after `INIT_ATTACH` (PD 0) has been sent; without an attach the same call
+answers `0x80000434` (tested in `fastrpc_bare` mode). An outstanding
+`next2` then holds the DSP's FastRPC thread: an `INIT_ATTACH_SNS` (PD 2)
+sent afterwards is not answered, even with another client id and thread id
+(`fastrpc_attach_client`, `fastrpc_attach_tid`), which is the order the
+phone itself uses with two separate daemons and processes. The sensor process
 reads its registry once, when its PD starts, so two orderings are available
 as boot arguments: `fastrpc_attach_late=1` registers the listener and starts
 `next2` before the first attach, and `fastrpc_restart=1` releases the sensors
