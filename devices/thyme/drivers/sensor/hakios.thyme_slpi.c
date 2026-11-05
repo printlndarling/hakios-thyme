@@ -3517,6 +3517,7 @@ static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the de
 static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
 static uint32_t fastrpc_client = 1;      /* boot-arg fastrpc_client: the session's client id; the DSP names its kthreads by it */
 static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the thread id the next2 loop runs on */
+static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: seconds before phone=3 re-attaches the sensors PD */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -4489,7 +4490,8 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
 		    "INIT_ATTACH (guest OS, phone)");
 	} else {
-		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client, "INIT_ATTACH_SNS (phone)");
+		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client,
+		    "INIT_ATTACH_SNS (phone)");
 	}
 	memset(packet, 0, 4096);
 	lengths[0] = 0;
@@ -4519,9 +4521,25 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
 	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
-	if (fastrpc_phone != 1) {
+	if (fastrpc_phone == 2) {
 		/* everything is registered first, then the thread waits: the DSP serves no control call
 		 * behind an outstanding next2, so this order is the one that always completes. */
+		fastrpc_listener_start();
+	} else if (fastrpc_phone == 3) {
+		/*
+		 * The sensor process starts with the DSP and reads its registry once, long before this
+		 * step: give its stalled instance time to meet the user-PD watchdog, attach a fresh one
+		 * with the listener registered, and only then wait for the request.
+		 */
+		printf("slpi: fastrpc: waiting %u s for the stalled sensor process to meet its watchdog\n", fastrpc_attach_delay);
+		sleep_ms(fastrpc_attach_delay * 1000);
+		if (fastrpc_pd == 0) {
+			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
+			    "INIT_ATTACH (guest OS, late)");
+		} else {
+			fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client,
+			    "INIT_ATTACH_SNS (late)");
+		}
 		fastrpc_listener_start();
 	}
 }
@@ -5665,6 +5683,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_client", &fastrpc_client, sizeof(fastrpc_client));
 	PE_parse_boot_argn("fastrpc_listener_tid", &fastrpc_listener_tid, sizeof(fastrpc_listener_tid));
 	PE_parse_boot_argn("fastrpc_tid", &fastrpc_call_tid, sizeof(fastrpc_call_tid));
+	PE_parse_boot_argn("fastrpc_attach_delay", &fastrpc_attach_delay, sizeof(fastrpc_attach_delay));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
