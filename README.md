@@ -19,7 +19,7 @@ build, not merely compiled.
 | Area | Status | What is verified |
 |---|---|---|
 | Boot to SpringBoard | **PASS** | launchd, backboardd, SpringBoard and the settings/UI stack reach the home screen from a cold RAM boot |
-| 90 Hz display and UI pacing | **PASS** | 1080 x 2340 panel timing sequence accepted; CoreAnimation follows the panel at 90 fps (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median) |
+| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median), but the display controller the firmware leaves behind refreshes the panel about 60 times a second: the DSI command-DMA status count is 118 transitions a second with `fb_hz=60` or `90` and with either panel timing, so 90 fps into it judders. The daily default is now a self-consistent 60 Hz, verified by a 32-minute soak (`logs/035725-run.log`); true 90 Hz needs the controller refresh reprogrammed |
 | CPU / DVFS | **PASS** | 7 CPUs start; all three EPSS domains reach 1804 / 2419 / 3187 MHz |
 | GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 735 frames in the canonical wireless run |
 | Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
@@ -63,8 +63,9 @@ build, not merely compiled.
 
 The canonical cold-boot gate is `logs/114117-run.log`: two Wi-Fi joins with
 DHCP `192.168.0.102`, Safari TLS, 85 LE reports (15 named), 735 `hakios-gl`
-frames, zero H4 faults and no panic. The 90 Hz UI check is
-`logs/115200-run.log`. `devices/thyme/ram-baseline.conf` is the machine-checked
+frames, zero H4 faults and no panic. The 90 fps pacing check is
+`logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
+`devices/thyme/ram-baseline.conf` is the machine-checked
 copy of these hashes; `devices/thyme/ram-regress.sh` refuses other bytes unless
 a new candidate is explicit.
 
