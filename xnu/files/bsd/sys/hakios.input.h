@@ -87,6 +87,9 @@ void hakios_adreno_minute(void);       /* once a minute: a line about how warm t
 void hakios_adsp_stop(void);           /* where a run ends in order: the audio DSP, if it was started, shut down */
 void hakios_wifi_init(void);           /* boot-arg wifi=1: the phone's Wi-Fi; wifi_step=N: the first N steps of it */
 void hakios_adsp_init(void);           /* boot-arg adsp=1: the phone's audio DSP started and linked; adsp_step=N: the first N steps */
+void hakios_slpi_init(void);           /* boot-arg slpi=1: the phone's sensor DSP started and linked; slpi_step=N: the first N steps */
+void hakios_slpi_stop(void);           /* where a run ends in order: the sensor DSP, if it was started, shut down */
+void hakios_slpi_quiesce(void);        /* on a panic's way back to the loader: the sensor DSP stopped */
 void hakios_mpss_init(void);           /* boot-arg modem=1: the phone's modem started and linked; modem_step=N: the first N steps */
 void hakios_wifi_stop(void);           /* where a run ends in order: the Wi-Fi DSP, if it was started, shut down */
 int hakios_wifi_say(const char *format, ...) __printflike(1, 2);      /* a line of the Wi-Fi steps' log */

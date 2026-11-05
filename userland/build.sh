@@ -571,6 +571,12 @@ if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
 		cp -R ../fw-audio/cs35l41/. root/fw/cs35l41/
 	fi
 fi
+# ... and with SLPI=1 the image of the sensor DSP, from the same place into ../fw-slpi
+# (drivers/sensor/hakios.thyme_slpi.c): slpi.mdt and slpi.b00 to slpi.b20, about 7.8 MB.
+if [ -n "$SLPI" ] && [ -f ../fw-slpi/slpi.mdt ]; then
+	mkdir -p root/fw
+	install -m 0644 ../fw-slpi/slpi.mdt ../fw-slpi/slpi.b[0-9][0-9] root/fw/
+fi
 # QCA6390 Bluetooth patch and NVM, from the phone's own vendor partition into ../fw-bluetooth.
 # The runtime driver looks for these in fw/qca6390-bt.
 if [ -d ../fw-bluetooth ]; then
@@ -586,7 +592,7 @@ fi
 # git worktree add has none of it, and neither has one whose tools/new-workspace.sh predates the fw-*
 # loop there. Say what went in and what was not there to go in; what each one is for is above.
 fwhave= fwnone=
-for d in gpu wifi bluetooth haptic camera audio; do
+for d in gpu wifi bluetooth haptic camera audio slpi; do
 	if [ -d ../fw-$d ]; then fwhave="$fwhave $d"; else fwnone="$fwnone $d"; fi
 done
 echo "build.sh: fw/: $(ls -1 root/fw 2>/dev/null | wc -l) files from ../fw-*:${fwhave:- none present}${fwnone:+, absent:$fwnone}"

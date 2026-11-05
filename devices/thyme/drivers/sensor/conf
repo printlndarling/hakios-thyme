@@ -1,0 +1,7 @@
+# drivers/sensor/conf: THYME SLPI sensor core.
+
+driver THYME_SLPI
+	file    bsd/dev/hakios.thyme_slpi.c
+	help    the Xiaomi Mi 10S SLPI sensor core: its signed firmware from fw-slpi/,
+	help    TrustZone startup, GLINK and the QRTR services (slpi=1, slpi_step=N).
+	help    The SNS sensor protocol is the layer above it.

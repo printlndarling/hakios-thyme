@@ -99,6 +99,12 @@ void hakios_adsp_stop(void) {}
 void hakios_adsp_quiesce(void) {}
 #endif
 
+#if !defined(HAKIOS_SLPI) && !defined(HAKIOS_THYME_SLPI)
+void hakios_slpi_init(void) {}
+void hakios_slpi_stop(void) {}
+void hakios_slpi_quiesce(void) {}
+#endif
+
 #ifndef HAKIOS_MODEM
 void hakios_mpss_init(void) {}
 void hakios_mpss_stop(void) {}

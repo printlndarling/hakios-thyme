@@ -239,6 +239,7 @@ thermal_thread(__unused void *arg, __unused wait_result_t wr)
 				hakios_adreno_stop();
 				hakios_wifi_stop();
 				hakios_adsp_stop();
+				hakios_slpi_stop();
 				loader_return();
 			}
 		} else {
