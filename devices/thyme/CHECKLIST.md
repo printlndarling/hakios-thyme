@@ -71,6 +71,32 @@ Free4 connected on a normal boot.
 | `logs/bttoggle-on.png` | `51721d7c1989c1fd3e09d144850616722209709f0e48d1ac274313f419337569` |
 | `logs/bttoggle-final.png` | `ee87eb291182a1dcfb4e654aae8f3ac9422a4a0a789bc6f578fd01addfbf4631` |
 
+### GPU userspace omission and guard (2026-11-04)
+
+The first Bluetooth-fix rebuild (`bfb90a58`) omitted `GL=1`. The image had no
+`libhakios.gl.dylib`, `libOSMesa.8.dylib` or `gl_test`, the log had zero
+`hakios-gl` frames, and the UI fell to a slow path: the 5-second windows in
+the audio run held 50-168 frames with p90 intervals near 100 ms. The kernel GPU
+was not hung; it reported `THE GPU STAYS ON`, FD650 and 587 MHz.
+
+Rebuilding with `GL=1` (candidate `46954054`) restored 940 `hakios-gl` lines.
+The jiggle animation presented `300 299 300 300 300` frames in five
+consecutive five-second windows (60 fps, the same pacing as the 60 Hz
+baseline); the only `softpipe` context is after the run deliberately hands the
+GPU back. The panel remains at 90 Hz, but the measured SpringBoard animation
+is 60 fps; a 90 fps UI would be a separate CoreAnimation frame-cap check.
+
+`devices/thyme/build-root.sh` now fixes `GL=1 ADSP=1 BLUETOOTH=1 REST=1`, and
+`devices/thyme/check-root.py` refuses an image missing the GL userspace, QCA
+responder, `scname`, ADSP/haptic/camera firmware or Bluetooth jobs. `bfb90a58`
+is not a daily-driver baseline; the canonical image is re-promoted after the
+full wireless GL run.
+
+| File | SHA-256 |
+|---|---|
+| `logs/224744-run.log` (jiggle) | `9558170d155e2f5f207170d43d2e4754325bdd7fed0584b67822d59c204f7edb` |
+| `logs/jiggle-gl.png` | `8272bd02a3a4170f0aee79c9880604d4591fe784e73adabfa283b0d55785500a` |
+
 ## Current-build regression (2026-11-02)
 
 The official-loader RAM run `logs/143146-run-cpoem.log` reached SpringBoard
@@ -446,7 +472,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi TCP/TLS and Safari | PASS | Safari opened through en0; DNS, TCP and TLS connections were established after each association (`logs/210532-run.log`) |
 | Combined wireless regression | PASS | The current GPU-enabled cold boot stayed at 3 Mbaud, completed two Wi-Fi associations with CCMP and DHCP, carried Safari traffic, submitted hardware GL frames and reached Bluetooth Settings discovery without H4 faults (`logs/024949-run.log`) |
 | CPU | PASS | 7 CPUs start and all three EPSS domains raise to 1804/2419/3187 MHz |
-| GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`) |
+| GPU acceleration | PASS | With `gpu=1` and the `GL=1` image, the THYME Adreno 650/GMU path reports `THE GPU STAYS ON`, Mesa/FD650 initializes and the current run submits more than 760 hardware `hakios-gl` frames with zero `softpipe` fallback (`logs/024949-run.log`). The 2026-11-04 first rebuild omitted `GL=1` and submitted zero `hakios-gl` frames; `devices/thyme/build-root.sh` and `check-root.py` now refuse that image (the GL jiggle run presents 300 frames per 5 s, `logs/224744-run.log`) |
 | UI animation frame pacing | PASS at 60 Hz | GPU-backed jiggle animation presented about 60 fps in four consecutive five-second windows (`302/301/301/301` frames), with software fallback absent during active use (`logs/041711-run.log`) |
 | 90 Hz panel refresh | PASS (user-confirmed) | The full DTB sequence is accepted and promoted (`logs/200350-run.log`: `seq=0 (ok), framebuffer rate 90 Hz`); the user confirmed smoothness with no dropped frames. If the sequence is rejected, the framebuffer falls back to 60 Hz |
 | Metal backend | PARTIAL; render blocked | `hakios-metal` cross-builds and the probe passes device open, GPU blit/fill, in-flight command buffers, a 16 MB copy and many AIR compute kernels. A minimal no-SpringBoard bisect still hangs the first render pass; every later variant is poisoned because `gpu_recover=1` has no implemented reset. Metal/CoreAnimation stays disabled (`docs/official-metal-probe.md`, `logs/033837-run.log`) |

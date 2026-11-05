@@ -124,20 +124,22 @@ make config
 make kernel -j8
 ```
 
-The userland root image for the wireless regression must carry the QCA6390
-launch services and the audio DSP firmware, or Bluetooth Settings stays on its
-spinner and audio has no DSP image:
+The canonical userland root image is built by one script. It sets `GL=1`,
+`BLUETOOTH=1`, `ADSP=1` and `REST=1`, then refuses an image missing any
+daily-driver component: the Mesa/EAGL userspace, the QCA responder, `scname`,
+the ADSP/haptic/camera firmware and the Bluetooth jobs.
 
 ```sh
-cd userland
-REST=1 BLUETOOTH=1 ADSP=1 RC_JOBS=rc.jobs.wirelessfull ./build.sh
-cp root.apfs ../out/thyme-boot/root-wirelessfull.apfs
+devices/thyme/build-root.sh
+SCENE=jiggle devices/thyme/build-root.sh   # the 90 Hz frame-pacing image
 ```
 
 `BLUETOOTH=1` adds `com.apple.bluetoothd`, the BlueTool responder and the
-`BTServer.*` jobs; `ADSP=1` adds `fw/adsp.*` and the audio calibration files.
-A verified run must update `devices/thyme/ram-baseline.conf` with the new
-scenario hash.
+`BTServer.*` jobs; `ADSP=1` adds `fw/adsp.*` and the audio calibration files;
+`GL=1` adds `libhakios.gl.dylib`, `libOSMesa.8.dylib` and `gl_test` (without
+them the kernel GPU stays on but no `hakios-gl` frame is submitted and the UI
+runs on the slow path). A verified run must update
+`devices/thyme/ram-baseline.conf` with the new scenario hash.
 
 The device is registered in `devices/manifest.conf`. The official tools must
 accept it before any build:

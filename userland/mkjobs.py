@@ -292,6 +292,12 @@ def tune_bluetool(job):
         job.pop(key, None)
     job["ProcessType"] = "Interactive"
     job["ProgramArguments"] = ["/redwood/bin/umi_bluetool"]
+    # The listener must exist before bluetoothd asks for it. With the stock
+    # on-demand Mach service the 233519 boot started bluetoothd first, never
+    # spawned the responder and never opened H4; the previous 225255 boot won
+    # the same race. Start it at boot and keep it alive.
+    job["RunAtLoad"] = True
+    job["KeepAlive"] = {"SuccessfulExit": False}
 
 
 angels = f'{src_root}/System/Library/LaunchAngels'

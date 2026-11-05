@@ -1,0 +1,7 @@
+# Bluetooth audio gate: open Settings, wait for the paired headset, play a
+# tone through the system-selected A2DP route, then ask AVAudioSession for the
+# explicit HFP/A2DP category options so the current route support is recorded.
+/redwood/bin/sound_test springboard
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/sound_test awaitbluetooth 150
+/redwood/bin/sound_test sessions
