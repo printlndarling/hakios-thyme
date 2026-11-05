@@ -787,6 +787,15 @@ modern registry path (the phone's JSON/config written to the SLPI registry
 sensor) and FastRPC/HexagonFS are the next layer to instrument. The fast
 diagnostic loop is `devices/thyme/slpi-run.sh`.
 
+The Android sensor HAL (`sensors.ssc.so`, pulled read-only) explains why:
+the registry is a direct-channel sensor and its discovery waits on FastRPC
+(`direct_channel::init_fastRPC_symbols`, `sensor_factory::is_registry_up`,
+`libsns_fastRPC_util.so`). The SLPI opens the `fastrpcglink-apps-dsp` GLINK
+channel; this kernel leaves it unanswered. The next layer is an AP-side
+FastRPC transport and the HexagonFS file service (the open `fastrpc/`
+implementation in the sensh project is a reference), not another SNS QMI
+message.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
