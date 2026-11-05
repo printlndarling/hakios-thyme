@@ -453,6 +453,18 @@ scan cannot be measured directly. True 90 Hz needs the controller's refresh
 reprogrammed (not just the DCS 2f/26 switch); until then the daily boot uses
 a self-consistent **60** (`fb_hz=60` in `ram.args`); set `fb_hz=90` back for
 the old behaviour.
+
+The push itself is the MDP ping-pong's auto-refresh (`MDP5_PP_AUTOREFRESH_CONFIG`:
+bit 31 enables it, bits 0-15 count the TE events between frames), and the TE
+it counts is the panel's own — so ~59 pushes a second says the panel still
+scans at 60 even though the DSI accepted the `2f 04`/`26 02` switch (it goes
+out in LP mode through the same command-DMA path as the working brightness
+writes, with the exact DT sequence). Next suspects: a latch condition the
+vendor meets with `b5 84` (it follows `2f`/`26` in every nolp sequence) and a
+TE that may not be routed at all (pin 66 reads 0). Reading the PP block is the
+way to see the count and what TE it waits for. Sending the vendor's `b5 84`
+after `2f`/`26` changes nothing either (119 a second, `logs/025552-run.log`):
+the switch is accepted but does not move the push.
 (the pane still initialising). The user confirmed on the physical phone that
 the full-sequence UI is smooth with no dropped frames. The panel's TE rate is
 inferred from this user-visible result; the INTF TE block is still unsafe

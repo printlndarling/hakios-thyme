@@ -321,6 +321,7 @@ send_panel_timing(uint32_t hz, uint32_t sequence)
 	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
 	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
 	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
+	uint8_t elvss[2] = { 0xb5, 0x84 };        /* the vendor's normal-operation value, after every 2f/26 */
 
 	if (sequence >= 2) {
 		return true;
@@ -340,7 +341,12 @@ send_panel_timing(uint32_t hz, uint32_t sequence)
 		return false;
 	}
 	tell("display: THYME panel timing: 26 %#x\n", mode[1]);
-	return dsi_send_short(mode, sizeof(mode));
+	if (!dsi_send_short(mode, sizeof(mode))) {
+		return false;
+	}
+	/* every vendor nolp sequence ends 2f/26/b5; try the same latch after the switch */
+	tell("display: THYME panel timing: b5 %#x\n", elvss[1]);
+	return dsi_send_short(elvss, sizeof(elvss));
 }
 
 SYSCTL_DECL(_kern_hakios);
