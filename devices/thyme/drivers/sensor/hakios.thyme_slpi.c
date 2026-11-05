@@ -3367,6 +3367,7 @@ fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count,
 #define ITEM_FASTRPC_ARGS        621
 #define ITEM_FASTRPC_OPEN        622
 #define ITEM_FASTRPC_LISTENER    623       /* the listener thread's packet: it can be outstanding while a control call runs */
+#define ITEM_FASTRPC_LISTENER2   626       /* the second listener (phone=4 runs one in the root PD and one in the sensors PD) */
 
 static uint8_t *
 fastrpc_smem_item(uint32_t item, uint32_t *offset)
@@ -4155,9 +4156,20 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 /* The reverse tunnel kept open: each nested call the DSP makes is served from fw/sensors. */
 static volatile bool fastrpc_listener_wanted;
 
+struct fastrpc_listener_args {
+	uint32_t client, pd, tid, item;
+};
+static struct fastrpc_listener_args fastrpc_listener_args[2];
+static unsigned fastrpc_listener_count;
+
 static void
-fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
+fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 {
+	struct fastrpc_listener_args *args = parameter;
+	uint32_t client = args != NULL ? args->client : fastrpc_client;
+	uint32_t pd = args != NULL ? args->pd : fastrpc_pd;
+	uint32_t tid = args != NULL ? args->tid : fastrpc_listener_tid;
+	uint32_t item = args != NULL ? args->item : ITEM_FASTRPC_LISTENER;
 	uint8_t *packet = kalloc_data(4096, Z_WAITOK | Z_ZERO), *reply = kalloc_data(4096, Z_WAITOK | Z_ZERO);
 	uint8_t *returned = kalloc_data(4096, Z_WAITOK | Z_ZERO);
 	uint32_t offset = 0, physical, rctx = 0, result_code = 0xffffffff, returned_length = 0, calls = 0;
@@ -4169,7 +4181,7 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		printf("slpi: fastrpc: the listener has no buffers\n");
 		goto out;
 	}
-	if (fastrpc_smem_item(ITEM_FASTRPC_LISTENER, &offset) == NULL) {
+	if (fastrpc_smem_item(item, &offset) == NULL) {
 		goto out;
 	}
 	physical = SMEM_PHYS + offset;
@@ -4201,8 +4213,8 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		 * daemon starts its listener before it registers). The DSP names its kthreads after the
 		 * client id and this tid, so both can be picked from the boot arguments.
 		 */
-		if (!fastrpc_call_as(fastrpc_client, fastrpc_listener_tid, fastrpc_service, fastrpc_next2_sc,
-		    0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical, size, 120000, "adsp_listener_next2")) {
+		if (!fastrpc_call_as(client, tid, fastrpc_service, fastrpc_next2_sc,
+		    0x600 | ((calls++ & 7) << 8) | pd, physical, size, 120000, "adsp_listener_next2")) {
 			if (!fastrpc_listener_wanted) {
 				break;
 			}
@@ -4223,8 +4235,8 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			fastrpc_smem_get(offset + (uint32_t)(rpra[2].pv - physical), (uint8_t *)numbers, sizeof(numbers));
 			fastrpc_smem_get(offset + (uint32_t)(rpra[3].pv - physical), nested, sizeof(nested));
 		}
-		printf("slpi: fastrpc: the DSP asks for handle %u sc %#x with %u bytes of inputs (ctx %#x)\n", numbers[1], numbers[2],
-		    numbers[3], numbers[0]);
+		printf("slpi: fastrpc: [client %u pd %u] the DSP asks for handle %u sc %#x with %u bytes of inputs (ctx %#x)\n", client,
+		    pd, numbers[1], numbers[2], numbers[3], numbers[0]);
 		for (uint32_t i = 0; i < numbers[3] && i < sizeof(nested); i++) {
 			printf("%s%02x", i % 16 == 0 ? "\nslpi: fastrpc:   " : " ", nested[i]);
 		}
@@ -4269,22 +4281,39 @@ out:
 	thread_terminate(current_thread());
 }
 
+/*
+ * One waiting listener per (client, PD): the phone's two daemons serve the root PD and the sensors
+ * PD with separate sessions, so a test can run both at once. The argument block is static because
+ * the thread reads it after the starter returns.
+ */
 static void
-fastrpc_listener_start(void)
+fastrpc_listener_start_as(uint32_t client, uint32_t pd, uint32_t tid, uint32_t item)
 {
 	thread_t thread;
+	struct fastrpc_listener_args *args;
 
-	if (fastrpc_listener_wanted) {
+	if (fastrpc_listener_count >= sizeof(fastrpc_listener_args) / sizeof(fastrpc_listener_args[0])) {
 		return;
 	}
+	args = &fastrpc_listener_args[fastrpc_listener_count];
+	args->client = client;
+	args->pd = pd;
+	args->tid = tid;
+	args->item = item;
 	fastrpc_listener_wanted = true;
-	if (kernel_thread_start(fastrpc_listener_thread, NULL, &thread) != KERN_SUCCESS) {
-		fastrpc_listener_wanted = false;
+	if (kernel_thread_start(fastrpc_listener_thread, args, &thread) != KERN_SUCCESS) {
 		printf("slpi: fastrpc: the listener's thread did not start\n");
 		return;
 	}
+	fastrpc_listener_count++;
 	thread_deallocate(thread);
-	printf("slpi: fastrpc: the listener's thread runs\n");
+	printf("slpi: fastrpc: a listener waits for client %u in PD %u (tid %u)\n", client, pd, tid);
+}
+
+static void
+fastrpc_listener_start(void)
+{
+	fastrpc_listener_start_as(fastrpc_client, fastrpc_pd, fastrpc_listener_tid, ITEM_FASTRPC_LISTENER);
 }
 
 /* Which names the DSP's remotectl will open on this firmware, and with which handle and error. */
@@ -4544,6 +4573,54 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	}
 }
 
+/*
+ * The two sessions the phone runs side by side: the root PD's listener (the plain sscrpcd) and the
+ * sensors PD's (sscrpcd sensorspd). The DSP's apps_std is served by the default listener of the
+ * PD that asks, and a request from the sensor process may go through either, so run both.
+ */
+static void
+fastrpc_dual_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
+{
+	uint32_t lengths[4], size, handle, saved = fastrpc_pd;
+	const void *sources[4];
+
+	/* the root PD: client 1 */
+	fastrpc_pd = 0;
+	fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, 1, "INIT_ATTACH (guest OS, dual)");
+	memset(packet, 0, 4096);
+	lengths[0] = 0;
+	sources[0] = NULL;
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(1, 3, 0x03000000, 0x400, physical, size, 10000, "adsp_listener_init2 (root)")) {
+		fastrpc_pd = saved;
+		return;
+	}
+	handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+	if (handle == 0) {
+		printf("slpi: fastrpc: the root PD's default listener did not open\n");
+		fastrpc_pd = saved;
+		return;
+	}
+	memset(packet, 0, 4096);
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(1, handle, 0, 0x300, physical, size, 5000, "adsp_default_listener_register (root)")) {
+		fastrpc_pd = saved;
+		return;
+	}
+	/* the sensors PD: client 2; the attach is what starts the sensor process */
+	fastrpc_pd = 2;
+	fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 2, "INIT_ATTACH_SNS (dual)");
+	fastrpc_listener_start_as(1, 0, 2, ITEM_FASTRPC_LISTENER);
+	fastrpc_listener_start_as(2, 2, 3, ITEM_FASTRPC_LISTENER2);
+	fastrpc_pd = saved;
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
@@ -4594,6 +4671,10 @@ fastrpc_first_calls(uint32_t stage)
 	size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (fastrpc_phone == 4) {
+		fastrpc_dual_chain(physical, shared_offset, shared, packet, reply);
+		goto done;
 	}
 	if (fastrpc_phone) {
 		fastrpc_phone_chain(physical, shared_offset, shared, packet, reply);
