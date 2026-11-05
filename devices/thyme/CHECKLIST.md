@@ -644,7 +644,7 @@ No item moves to `PASS` from source inspection alone.
 | Bluetooth UART firmware | PASS on official main | `htbtfw20.tlv` and `htnv20.bin` accepted |
 | Bluetooth HCI reset | PASS on official main | HCI 0x0c03 completed; iOS command flow followed |
 | Scan / pair / connect | PASS for scan, pairing and connection; PARTIAL for audio/reconnect | the user confirmed a known Bluetooth headset connects on the current RAM boot; next verify A2DP/HFP routing and reconnect after disabling/enabling Bluetooth |
-| ALS / proximity / accelerometer | FAIL | no usable sensor path |
+| ALS / proximity / accelerometer | PARTIAL | the SLPI boots and its SNS client answers QMI (see below); no sensor data or HID service yet |
 
 ## User space and daily use
 
@@ -739,9 +739,9 @@ Evidence:
 | Torch/flash | PASS | Hardware pulse: PM8150L channel 97 ramped up and cleaned up (`logs/081934-run.log`). End-to-end userspace and stock Control Center: AVFlashlight/mediaserverd requested 1000, 250 and 850 through `/dev/hakios-torch`; every request reached the kernel and the safety timer returned it to dark (`logs/090116-run.log`, `logs/091200-run.log`) |
 | Cellular modem / SIM | FAIL | MPSS/telephony stack is not implemented and no SIM registration has been verified |
 | Mobile data / calls / SMS | FAIL | depends on the cellular stack |
-| ALS / auto-brightness | FAIL | no usable ambient-light sensor path; brightness is manual |
-| Accelerometer / orientation | FAIL | backboardd reports no usable accelerometer HID service |
-| Proximity | TODO | no usable sensor path; lock-screen pocket behavior is unverified |
+| ALS / auto-brightness | PARTIAL | the SLPI ALS path is part of the sensor bring-up; brightness remains manual until the HID sensor service works |
+| Accelerometer / orientation | PARTIAL | the SLPI boots and the accelerometer SUID lookup is accepted; no samples reach backboardd yet |
+| Proximity | TODO | the SLPI bring-up covers the path; no proximity data or pocket behavior yet |
 | NFC | TODO | not ported |
 | Fingerprint | TODO | not ported and no secure unlock design exists |
 
@@ -750,12 +750,35 @@ Evidence:
 The decompiled THYME device tree has no accelerometer, light or proximity
 node on the AP's I2C buses. The sensors are behind the SLPI core
 (`qcom,ssc@5c00000`, `qcom,msm-ssc-sensors`, firmware-name `slpi`), reached
-over QRTR/GLINK. The stock Android partition exposes `slpi.b00` to `slpi.b18`
-at `/vendor/firmware_mnt/image` (readable as root), so the next step is an
-SLPI loader in the kernel and the SNS client path; the current kernel has no
-SLPI support (no `slpi` or `ssc` reference in `drivers/`). The ALS,
-accelerometer and proximity rows stay FAIL until that path is up and a HID
-sensor service is exposed to backboardd.
+over QRTR/GLINK. The stock Android partition exposes `slpi.b00` to `slpi.b20`
+at `/vendor/firmware_mnt/image` (readable as root).
+
+### SLPI bring-up (2026-11-05)
+
+The loader is `devices/thyme/drivers/sensor/hakios.thyme_slpi.c`, a copy of the
+audio DSP bring-up with the SLPI's numbers: processor 3 in shared memory,
+SMP2P items 481 (its) and 430 (ours), last words 424, IPCC client 4, PAS 12,
+the 0x8e800000 carveout (47 MB), GLINK items 478-480 and the IPCRTR channel.
+The firmware is `slpi.mdt` and `slpi.b00..b20` pulled from the phone into
+`fw-slpi/` (Git-ignored) and packed when `SLPI=1`.
+
+`logs/131207-run.log` with `slpi_step=10` proves the boot: the 20-segment
+8.18 MB image is accepted by TrustZone; the DSP says it is up 104 ms after
+the start; GLINK IPCRTR opens; QRTR reports node 9 and 8 services, including
+the SNS client (400). The AP's `fb_beam` guard is a separate fix.
+
+The SNS client QMI path is up. The SSC carries the protobuf payload in an
+array TLV (outer length = inner + 2); with that encoding the service returns
+QMI result 0 and a client id, where the plain TLV was rejected with error 19
+(`logs/140238-run.log`). The `accel` and `registry` SUID lookups are accepted,
+but no indication arrives yet, and the sensor process gives up after about
+164 s with the user-PD watchdog
+`dog_virtual_user.c`/`stalled initialization`. The next layer is the sensor
+registry: the phone's `/mnt/vendor/persist/sensors/registry/registry/` JSON
+and `/vendor/etc/sensors/config/*.json` have to be delivered to the SLPI (the
+Android HAL path), or served by an AP-side SNS_REG service; FastRPC/HexagonFS
+may also be required. No sensor data reaches iOS and no HID sensor service is
+exposed yet.
 
 ## Later product work
 
