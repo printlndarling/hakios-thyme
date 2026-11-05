@@ -577,6 +577,13 @@ if [ -n "$SLPI" ] && [ -f ../fw-slpi/slpi.mdt ]; then
 	mkdir -p root/fw
 	install -m 0644 ../fw-slpi/slpi.mdt ../fw-slpi/slpi.b[0-9][0-9] root/fw/
 fi
+# ... and the sensor DSP's registry: the phone's Android /vendor/etc/sensors/sns_reg_config and config/,
+# and /mnt/vendor/persist/sensors/prox_gain.txt, into ../fw-sensors. The DSP's sensor process reads
+# them through the FastRPC reverse tunnel, which drivers/sensor/hakios.thyme_slpi.c serves from fw/sensors.
+if [ -d ../fw-sensors ]; then
+	mkdir -p root/fw/sensors
+	cp -R ../fw-sensors/. root/fw/sensors/
+fi
 # QCA6390 Bluetooth patch and NVM, from the phone's own vendor partition into ../fw-bluetooth.
 # The runtime driver looks for these in fw/qca6390-bt.
 if [ -d ../fw-bluetooth ]; then
@@ -592,7 +599,7 @@ fi
 # git worktree add has none of it, and neither has one whose tools/new-workspace.sh predates the fw-*
 # loop there. Say what went in and what was not there to go in; what each one is for is above.
 fwhave= fwnone=
-for d in gpu wifi bluetooth haptic camera audio slpi; do
+for d in gpu wifi bluetooth haptic camera audio slpi sensors; do
 	if [ -d ../fw-$d ]; then fwhave="$fwhave $d"; else fwnone="$fwnone $d"; fi
 done
 echo "build.sh: fw/: $(ls -1 root/fw 2>/dev/null | wc -l) files from ../fw-*:${fwhave:- none present}${fwnone:+, absent:$fwnone}"

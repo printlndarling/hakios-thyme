@@ -41,10 +41,13 @@
 #include <mach/vm_param.h>
 #include <vm/memory_types.h>
 #include <pexpert/pexpert.h>
+#include <sys/dirent.h>
 #include <sys/errno.h>
 #include <sys/kauth.h>
 #include <sys/stat.h>
 #include <sys/systm.h>
+#include <sys/uio.h>
+#include <sys/uio_internal.h>
 #include <sys/vnode.h>
 #include <sys/vnode_internal.h>
 #include <vm/vm_kern.h>
@@ -66,6 +69,8 @@ extern lck_mtx_t hakios_aop_mailbox_lock;
 extern lck_mtx_t hakios_smem_alloc_lock;
 extern lck_mtx_t hakios_rsc_lock;            /* RPMh's sequencer, shared with the other DSP's driver */
 extern lck_mtx_t hakios_smmu_lock;           /* the apps SMMU's match registers (hakios.wifi.c) */
+extern void *hakios_slpi_dma_alloc(size_t size, uint64_t *physical);
+extern void hakios_slpi_dma_free(void *address, size_t size);
 
 static LCK_GRP_DECLARE(slpi_lock_group, "hakios-slpi");
 
@@ -3189,6 +3194,10 @@ struct fastrpc_msg {
 	uint64_t size;
 };
 
+static volatile bool fastrpc_rsp_seen;
+static uint64_t fastrpc_rsp_ctx;
+static int32_t fastrpc_rsp_retval;
+
 static void
 fastrpc_input(const uint8_t *data, uint32_t length)
 {
@@ -3197,13 +3206,1044 @@ fastrpc_input(const uint8_t *data, uint32_t length)
 		printf(" %02x", data[i]);
 	}
 	printf("\n");
-	if (length >= sizeof(struct fastrpc_msg)) {
+	if (length >= 12 && length < sizeof(struct fastrpc_msg)) {
+		/* the invoke response: a context and the DSP's return value */
+		uint64_t ctx;
+		int32_t retval;
+
+		memcpy(&ctx, data, 8);
+		memcpy(&retval, data + 8, 4);
+		fastrpc_rsp_ctx = ctx;
+		fastrpc_rsp_retval = retval;
+		fastrpc_rsp_seen = true;
+		printf("slpi: fastrpc: < response ctx %#llx retval %d\n", ctx, retval);
+	} else if (length >= sizeof(struct fastrpc_msg)) {
 		struct fastrpc_msg msg;
 
 		memcpy(&msg, data, sizeof(msg));
 		printf("slpi: fastrpc: client %d tid %d ctx %#llx handle %u sc %#x addr %#llx size %llu\n", msg.client_id, msg.tid,
 		    msg.ctx, msg.handle, msg.sc, msg.addr, msg.size);
 	}
+}
+
+struct fastrpc_remote_buf {
+	uint64_t pv, len;
+} __attribute__((packed));
+struct fastrpc_invoke_buf {
+	uint32_t num, pgidx;
+} __attribute__((packed));
+struct fastrpc_phy_page {
+	uint64_t addr, size;
+} __attribute__((packed));
+
+#define FASTRPC_FDLIST_BYTES     (8u * 16)
+#define FASTRPC_CRCLIST_BYTES    (4u * 64)
+
+/* Lay out the metadata and the inline buffers as Linux's fastrpc_get_args does. Returns the page size to send. */
+static uint32_t
+fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count, const uint32_t *lengths,
+    const void *const *sources)
+{
+	uint32_t meta = (16 + 8 + 16) * count + FASTRPC_FDLIST_BYTES + FASTRPC_CRCLIST_BYTES + 4;
+	uint32_t at = (meta + 127) & ~127u;
+	struct fastrpc_remote_buf *rpra = (struct fastrpc_remote_buf *)buf;
+	struct fastrpc_invoke_buf *list = (struct fastrpc_invoke_buf *)(buf + 16 * count);
+	struct fastrpc_phy_page *pages = (struct fastrpc_phy_page *)(buf + 24 * count);
+
+	for (uint32_t i = 0; i < count; i++) {
+		at = (at + 127) & ~127u;
+		rpra[i].pv = lengths[i] != 0 ? pv_base + at : 0;
+		rpra[i].len = lengths[i];
+		list[i].num = lengths[i] != 0;
+		list[i].pgidx = i;
+		if (lengths[i] == 0) {
+			/* as Linux leaves it: no page behind a buffer of no bytes */
+			continue;
+		}
+		pages[i].addr = (physical + at) & ~0xfffull;
+		pages[i].size = ((physical + at + lengths[i] - 1) & ~0xfffull) - pages[i].addr + 0x1000;
+		if (sources[i] != NULL) {
+			memcpy(buf + at, sources[i], lengths[i]);
+		}
+		at += lengths[i];
+	}
+	return (at + 0xfff) & ~0xfffu;
+}
+
+/*
+ * A FastRPC argument packet in the shared memory the sensor DSP reads anyway (its GLINK queues are
+ * there): 4 KB, in an item of ours in the partition for processor 0 and the DSP. The DSP has to
+ * read the packet before it can answer, and this memory is proven reachable by the link itself.
+ */
+#define ITEM_FASTRPC_ARGS        621
+
+static uint8_t *
+fastrpc_smem_buffer(uint32_t *offset)
+{
+	uint32_t cacheline = 0, partition_size = 0, bytes = 0, at;
+	uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
+
+	if (partition == 0) {
+		printf("slpi: fastrpc: no partition with the sensor DSP for the argument packet\n");
+		return NULL;
+	}
+	at = smem_item(ITEM_FASTRPC_ARGS, &bytes);
+	if (at == 0 || bytes < 4096) {
+		smem_private_item_make(partition, ITEM_FASTRPC_ARGS, 4096);
+		at = smem_item(ITEM_FASTRPC_ARGS, &bytes);
+		if (at == 0 || bytes < 4096) {
+			printf("slpi: fastrpc: the shared 4 KB buffer could not be made (%u bytes)\n", bytes);
+			return NULL;
+		}
+	}
+	*offset = at;
+	return (uint8_t *)(uintptr_t)(smem + at);
+}
+
+static void
+fastrpc_smem_put(uint32_t offset, const uint8_t *packet, uint32_t size)
+{
+	memcpy((void *)(uintptr_t)(smem + offset), packet, size);
+	settle();
+}
+
+static void
+fastrpc_smem_get(uint32_t offset, uint8_t *to, uint32_t size)
+{
+	memcpy(to, (const void *)(uintptr_t)(smem + offset), size);
+	settle();
+}
+
+static bool
+fastrpc_call(uint32_t client_id, uint32_t handle, uint32_t sc, uint32_t context, uint64_t physical, uint32_t size,
+    uint32_t wait_ms, const char *what)
+{
+	struct fastrpc_msg msg;
+
+	if (!glink.channel[CHANNEL_FASTRPC].open) {
+		printf("slpi: fastrpc: the channel is not open\n");
+		return false;
+	}
+	fastrpc_rsp_seen = false;
+	fastrpc_rsp_ctx = 0;
+	fastrpc_rsp_retval = 0;
+	bzero(&msg, sizeof(msg));
+	msg.client_id = (int32_t)client_id;
+	msg.tid = 1;
+	msg.ctx = context;
+	msg.handle = handle;
+	msg.sc = sc;
+	msg.addr = physical;
+	msg.size = (size + 0xfff) & ~0xfffu;
+	if (glink_send(&glink.channel[CHANNEL_FASTRPC], &msg, (uint32_t)sizeof(msg)) != 0) {
+		printf("slpi: fastrpc: %s: the channel did not take the call\n", what);
+		return false;
+	}
+	printf("slpi: fastrpc: > %s client %u handle %u sc %#x ctx %#x addr %#llx size %u\n", what, client_id, handle, sc, context,
+	    physical, size);
+	for (unsigned ms = 0; ms < wait_ms && !(fastrpc_rsp_seen && fastrpc_rsp_ctx == context); ms++) {
+		sleep_ms(1);
+	}
+	if (!(fastrpc_rsp_seen && fastrpc_rsp_ctx == context)) {
+		printf("slpi: fastrpc: %s: no response in %u ms%s\n", what, wait_ms,
+		    fastrpc_rsp_seen ? " (a response for another call came instead)" : "");
+		return false;
+	}
+	printf("slpi: fastrpc: %s: ctx %#llx retval %d\n", what, fastrpc_rsp_ctx, fastrpc_rsp_retval);
+	return true;
+}
+
+/*
+ * One look at the reverse tunnel: adsp_listener_next2 (handle 3, method 4) hands us the next call
+ * the DSP wants the AP to serve. Its inputs are the previous call's context and result and the
+ * previous call's encoded output buffers; its outputs are the next call's context, handle, scalars
+ * and input buffers. Nothing is served yet: this stage only shows what the sensor process asks for.
+ */
+static uint32_t fastrpc_pd;              /* the PD the listener's calls are addressed to (boot-arg fastrpc_pd, default the root) */
+
+static void
+fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
+{
+	uint32_t sizes[4] = { 0, 0, 0, 256 }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
+	uint8_t nested[256];
+	const void *sources[4];
+
+	lengths[0] = sizeof(sizes);
+	sources[0] = sizes;
+	lengths[1] = 0;
+	sources[1] = NULL;
+	lengths[2] = sizeof(numbers);
+	sources[2] = numbers;
+	lengths[3] = sizeof(nested);
+	sources[3] = nested;
+	memset(packet, 0, 4096);
+	size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(1, 3, 0x040202, 0x500 | fastrpc_pd, physical, size, 10000, "adsp_listener_next2")) {
+		return;
+	}
+	if (shared) {
+		struct fastrpc_remote_buf *rpra = (struct fastrpc_remote_buf *)reply;
+
+		fastrpc_smem_get(shared_offset, reply, 4096);
+		fastrpc_smem_get(shared_offset + (uint32_t)(rpra[2].pv - physical), (uint8_t *)numbers, sizeof(numbers));
+		fastrpc_smem_get(shared_offset + (uint32_t)(rpra[3].pv - physical), nested, sizeof(nested));
+	} else {
+		struct fastrpc_remote_buf *rpra = (struct fastrpc_remote_buf *)packet;
+		uint32_t *out = (uint32_t *)(uintptr_t)rpra[2].pv;
+		uint8_t *in = (uint8_t *)(uintptr_t)rpra[3].pv;
+
+		memcpy(numbers, out, sizeof(numbers));
+		memcpy(nested, in, sizeof(nested));
+	}
+	printf("slpi: fastrpc: the DSP asks for handle %u sc %#x with %u bytes of inputs (ctx %#x)\n", numbers[1], numbers[2],
+	    numbers[3], numbers[0]);
+	for (uint32_t i = 0; i < numbers[3] && i < sizeof(nested); i++) {
+		printf("%s%02x", i % 16 == 0 ? "\nslpi: fastrpc:   " : " ", nested[i]);
+	}
+	if (numbers[3] != 0) {
+		printf("\n");
+	}
+}
+
+/* ---- the reverse tunnel's apps_std: the sensor registry and configuration, served from fw/sensors ---- */
+
+#define FASTRPC_FILE_SLOTS      32
+#define FASTRPC_DIR_SLOTS       4
+#define FASTRPC_DIR_NAMES       96
+#define FASTRPC_DIR_NAME_LEN    96
+#define FASTRPC_FILE_LIMIT      (512 * 1024)
+#define FASTRPC_OUT_LIMIT       2048
+
+#define AEE_EBADPARM            0x80000434u
+#define AEE_EFAILED             0x80004005u
+#define AEE_ENOMEMORY           0x80000002u
+
+struct fastrpc_io {
+	uint32_t size;
+	uint8_t *data;
+};
+
+struct fastrpc_file_slot {
+	bool used;
+	uint32_t fd;
+	uint8_t *data;
+	uint32_t size, offset;
+};
+
+struct fastrpc_dir_slot {
+	bool used;
+	uint32_t fd;
+	uint32_t count, at;
+	char names[FASTRPC_DIR_NAMES][FASTRPC_DIR_NAME_LEN];
+};
+
+static struct fastrpc_file_slot fastrpc_files[FASTRPC_FILE_SLOTS];
+static struct fastrpc_dir_slot fastrpc_dirs[FASTRPC_DIR_SLOTS];
+static uint32_t fastrpc_next_fd = 1;
+
+/* The DSP's paths, to the copies in the root image that userland/build.sh puts there from fw-sensors/. */
+static const char *
+fastrpc_path(const char *name, char *to, size_t length)
+{
+	static const struct {
+		const char *from, *to;
+	} map[] = {
+		{ "/vendor/etc/sensors/sns_reg_config", "/fw/sensors/sns_reg_config" },
+		{ "/vendor/etc/sensors/config/", "/fw/sensors/config/" },
+		{ "/vendor/etc/sensors/config", "/fw/sensors/config" },
+		{ "/etc/qcom/sns_reg.conf", "/fw/sensors/sns_reg_config" },
+		{ "/etc/qcom/sensors.d/", "/fw/sensors/config/" },
+		{ "/etc/qcom/sensors.d", "/fw/sensors/config" },
+		{ "/var/lib/qcom/sensors/", "/fw/sensors/persist/" },
+		{ "/var/lib/qcom/sensors", "/fw/sensors/persist" },
+		{ "/mnt/vendor/persist/sensors/", "/fw/sensors/persist/" },
+		{ "/mnt/vendor/persist/sensors", "/fw/sensors/persist" },
+		{ "/usr/lib/qcom/adsp/avs/", "/fw/acdbdata/" },
+		{ "/usr/lib/qcom/adsp/avs", "/fw/acdbdata" },
+		{ "/usr/lib/qcom/adsp/", "/fw/sensors/adsp/" },
+		{ "/usr/lib/qcom/adsp", "/fw/sensors/adsp" },
+		{ "/vendor/dsp/adsp/", "/fw/sensors/adsp/" },
+		{ "/sys/devices/soc0/", "/fw/sensors/soc0/" },
+	};
+
+	for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+		size_t n = strlen(map[i].from);
+
+		if (strncmp(name, map[i].from, n) == 0) {
+			snprintf(to, length, "%s%s", map[i].to, name + n);
+			return to;
+		}
+	}
+	return NULL;
+}
+
+/* A file of the root image, whole, up to a limit. */
+static uint8_t *
+fastrpc_root_read(const char *path, uint64_t limit, uint32_t *size)
+{
+	vfs_context_t context = vfs_context_kernel();
+	vnode_t vnode = NULLVP;
+	struct vnode_attr attributes;
+	uint8_t *data;
+	int left = 0, error;
+
+	if (rootvnode == NULLVP || vnode_lookup(path, 0, &vnode, context) != 0) {
+		return NULL;
+	}
+	VATTR_INIT(&attributes);
+	VATTR_WANTED(&attributes, va_data_size);
+	if (vnode_getattr(vnode, &attributes, context) != 0 || attributes.va_data_size > limit ||
+	    attributes.va_data_size > 0xffffffffull) {
+		vnode_put(vnode);
+		return NULL;
+	}
+	data = kalloc_data((size_t)attributes.va_data_size + 1, Z_WAITOK | Z_ZERO);
+	if (data == NULL) {
+		vnode_put(vnode);
+		return NULL;
+	}
+	if (attributes.va_data_size != 0) {
+		error = vn_rdwr(UIO_READ, vnode, (caddr_t)data, (int)attributes.va_data_size, 0, UIO_SYSSPACE, 0,
+		    vfs_context_ucred(context), &left, vfs_context_proc(context));
+		if (error != 0 || left != 0) {
+			kfree_data(data, (size_t)attributes.va_data_size + 1);
+			vnode_put(vnode);
+			return NULL;
+		}
+	}
+	vnode_put(vnode);
+	*size = (uint32_t)attributes.va_data_size;
+	return data;
+}
+
+/* The entries of a directory of the root image, by name. */
+static uint32_t
+fastrpc_root_dir(const char *path, char names[][FASTRPC_DIR_NAME_LEN], uint32_t max)
+{
+	vfs_context_t context = vfs_context_kernel();
+	vnode_t vnode = NULLVP;
+	struct vnode_attr attributes;
+	uint32_t count = 0;
+	off_t offset = 0;
+	bool eof = false;
+
+	if (rootvnode == NULLVP || vnode_lookup(path, 0, &vnode, context) != 0) {
+		return 0;
+	}
+	VATTR_INIT(&attributes);
+	VATTR_WANTED(&attributes, va_mode);
+	if (vnode_getattr(vnode, &attributes, context) != 0 || (attributes.va_mode & S_IFMT) != S_IFDIR) {
+		vnode_put(vnode);
+		return 0;
+	}
+	while (!eof && count < max) {
+		char *buffer = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+		struct uio auio;
+		int eofflag = 0, numdirent = 0;
+		uint32_t used;
+		char *at;
+
+		if (buffer == NULL) {
+			break;
+		}
+		uio_reset(&auio, offset, UIO_READ, UIO_SYSSPACE);
+		uio_addiov(&auio, (uintptr_t)buffer, 4096);
+		if (VNOP_READDIR(vnode, &auio, 0, &eofflag, &numdirent, context) != 0) {
+			kfree_data(buffer, 4096);
+			break;
+		}
+		used = 4096 - (uint32_t)auio.uio_resid_64;
+		offset = auio.uio_offset;
+		for (at = buffer; at + offsetof(struct dirent, d_name) + 1 <= buffer + used && count < max;) {
+			struct dirent *entry = (struct dirent *)at;
+
+			if (entry->d_reclen < offsetof(struct dirent, d_name) + 1 || at + entry->d_reclen > buffer + used) {
+				break;
+			}
+			if (entry->d_namlen != 0 && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+				strlcpy(names[count++], entry->d_name, FASTRPC_DIR_NAME_LEN);
+			}
+			at += entry->d_reclen;
+		}
+		eof = eofflag != 0 || used == 0;
+		kfree_data(buffer, 4096);
+	}
+	vnode_put(vnode);
+	return count;
+}
+
+static struct fastrpc_file_slot *
+fastrpc_file_slot(uint32_t fd)
+{
+	for (unsigned i = 0; i < FASTRPC_FILE_SLOTS; i++) {
+		if (fastrpc_files[i].used && fastrpc_files[i].fd == fd) {
+			return &fastrpc_files[i];
+		}
+	}
+	return NULL;
+}
+
+static struct fastrpc_dir_slot *
+fastrpc_dir_slot(uint32_t fd)
+{
+	for (unsigned i = 0; i < FASTRPC_DIR_SLOTS; i++) {
+		if (fastrpc_dirs[i].used && fastrpc_dirs[i].fd == fd) {
+			return &fastrpc_dirs[i];
+		}
+	}
+	return NULL;
+}
+
+static const char *
+fastrpc_string(const struct fastrpc_io *io)
+{
+	if (io->data == NULL || io->size == 0 || io->data[io->size - 1] != 0) {
+		return NULL;
+	}
+	return (const char *)io->data;
+}
+
+/* The input buffers of a nested call, decoded: [size][padding][data], as the DSP encodes them. */
+static int
+fastrpc_decode(uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *io, uint32_t max)
+{
+	uint32_t count = (sc >> 16) & 0xff, at = 0, align = 0;
+
+	if (count > max) {
+		return -1;
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t size, skip;
+
+		if (at + 4 > length) {
+			return -1;
+		}
+		memcpy(&size, blob + at, 4);
+		at += 4;
+		align = (align + 4) & 7;
+		io[i].size = 0;
+		io[i].data = NULL;
+		if (size == 0) {
+			continue;
+		}
+		skip = align ? 8 - align : 0;
+		at += skip;
+		align = (align + skip) & 7;
+		if (at + size > length) {
+			return -1;
+		}
+		io[i].size = size;
+		io[i].data = __DECONST(uint8_t *, blob + at);
+		at += size;
+		align = (align + size) & 7;
+	}
+	return (int)count;
+}
+
+/* The output buffers of a nested call, encoded the same way, into the blob the next call returns. */
+static uint32_t
+fastrpc_encode(const struct fastrpc_io *io, uint32_t count, uint8_t *blob, uint32_t capacity)
+{
+	uint32_t at = 0, align = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t skip;
+
+		if (at + 4 > capacity) {
+			return 0;
+		}
+		memcpy(blob + at, &io[i].size, 4);
+		at += 4;
+		align = (align + 4) & 7;
+		if (io[i].size == 0) {
+			continue;
+		}
+		skip = align ? 8 - align : 0;
+		if (at + skip + io[i].size > capacity) {
+			return 0;
+		}
+		memset(blob + at, 0, skip);
+		at += skip;
+		align = (align + skip) & 7;
+		memcpy(blob + at, io[i].data, io[i].size);
+		at += io[i].size;
+		align = (align + io[i].size) & 7;
+	}
+	return at;
+}
+
+/* apps_std's methods, as far as the sensor registry needs them: method, in numbers, in buffers, out numbers, out buffers. */
+static const struct {
+	uint8_t method, in_numbers, in_buffers, out_numbers, out_buffers;
+} fastrpc_apps_std[] = {
+	{ 1, 1, 0, 1, 1 },      /* freopen */
+	{ 2, 8, 0, 0, 0 },      /* fflush */
+	{ 3, 1, 0, 0, 0 },      /* fclose */
+	{ 4, 1, 0, 2, 1 },      /* fread */
+	{ 9, 3, 0, 0, 0 },      /* fseek */
+	{ 19, 0, 4, 1, 0 },     /* fopen_with_env */
+	{ 26, 0, 1, 2, 0 },     /* opendir */
+	{ 27, 2, 0, 0, 0 },     /* closedir */
+	{ 28, 2, 0, 66, 0 },    /* readdir */
+	{ 31, 1, 1, 24, 0 },    /* stat */
+};
+
+static int32_t
+fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *out,
+    uint32_t max_out, uint32_t *out_count)
+{
+	struct fastrpc_io in[8];
+	uint32_t method = (sc >> 24) & 0x1f, def = 0, want, sizes[16];
+	int32_t result = (int32_t)AEE_EBADPARM;
+	uint32_t *numbers = NULL;
+
+	*out_count = 0;
+	if (handle != 1) {
+		printf("slpi: fastrpc: a call for handle %u is not served\n", handle);
+		return result;
+	}
+	while (def < sizeof(fastrpc_apps_std) / sizeof(fastrpc_apps_std[0]) && fastrpc_apps_std[def].method != method) {
+		def++;
+	}
+	if (def == sizeof(fastrpc_apps_std) / sizeof(fastrpc_apps_std[0])) {
+		printf("slpi: fastrpc: apps_std method %u is not served\n", method);
+		return result;
+	}
+	if (fastrpc_decode(sc, blob, length, in, 8) < 0 || in[0].size < 4) {
+		printf("slpi: fastrpc: apps_std %u: the arguments do not decode\n", method);
+		return result;
+	}
+	memset(sizes, 0, sizeof(sizes));
+	for (uint32_t i = 0; i < fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers +
+	    fastrpc_apps_std[def].out_buffers && i < 16; i++) {
+		if (4 * i + 4 <= in[0].size) {
+			memcpy(&sizes[i], in[0].data + 4 * i, 4);
+		}
+	}
+	want = (fastrpc_apps_std[def].out_numbers ? 1 : 0) + fastrpc_apps_std[def].out_buffers;
+	if (want > max_out) {
+		return result;
+	}
+	for (uint32_t i = 0; i < want; i++) {
+		uint32_t size;
+
+		if (i == 0 && fastrpc_apps_std[def].out_numbers) {
+			size = 4 * fastrpc_apps_std[def].out_numbers;
+		} else {
+			size = sizes[fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers +
+			    (fastrpc_apps_std[def].out_numbers ? i - 1 : i)];
+		}
+		if (size > FASTRPC_OUT_LIMIT) {
+			size = FASTRPC_OUT_LIMIT;
+		}
+		out[i].size = size;
+		out[i].data = kalloc_data(size ? size : 1, Z_WAITOK | Z_ZERO);
+		if (out[i].data == NULL) {
+			for (uint32_t n = 0; n < i; n++) {
+				kfree_data(out[n].data, out[n].size ? out[n].size : 1);
+				out[n].data = NULL;
+			}
+			return (int32_t)AEE_ENOMEMORY;
+		}
+		*out_count = i + 1;
+	}
+	if (fastrpc_apps_std[def].out_numbers && want > 0) {
+		numbers = (uint32_t *)out[0].data;
+	}
+
+	switch (method) {
+	case 19: {                         /* fopen_with_env */
+		const char *name = NULL, *mode;
+		char path[160];
+		uint32_t file_size = 0;
+		uint8_t *data;
+		int slot;
+
+		if (in[3].size != 0) {
+			name = fastrpc_string(&in[3]);
+		}
+		mode = in[4].size != 0 ? fastrpc_string(&in[4]) : NULL;
+		if (name == NULL || mode == NULL || (mode[0] != 'r' && mode[0] != 'R')) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			const char *env = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+
+			if (name[0] == '/') {
+				snprintf(path, sizeof(path), "%s", name);
+			} else if (env != NULL && strcmp(env, "ADSP_LIBRARY_PATH") == 0) {
+				snprintf(path, sizeof(path), "/fw/sensors/adsp/%s", name);
+			} else if (env != NULL && strcmp(env, "ADSP_AVS_CFG_PATH") == 0) {
+				snprintf(path, sizeof(path), "/fw/acdbdata/%s", name);
+			} else {
+				snprintf(path, sizeof(path), "/fw/sensors/%s", name);
+			}
+		}
+		data = fastrpc_root_read(path, FASTRPC_FILE_LIMIT, &file_size);
+		if (data == NULL) {
+			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
+			result = (int32_t)AEE_EFAILED;
+			break;
+		}
+		for (slot = 0; slot < FASTRPC_FILE_SLOTS && fastrpc_files[slot].used; slot++) {
+			;
+		}
+		if (slot == FASTRPC_FILE_SLOTS) {
+			kfree_data(data, file_size + 1);
+			result = (int32_t)AEE_ENOMEMORY;
+			break;
+		}
+		fastrpc_files[slot].used = true;
+		fastrpc_files[slot].fd = fastrpc_next_fd++;
+		fastrpc_files[slot].data = data;
+		fastrpc_files[slot].size = file_size;
+		fastrpc_files[slot].offset = 0;
+		if (numbers != NULL) {
+			numbers[0] = fastrpc_files[slot].fd;
+		}
+		printf("slpi: fastrpc: apps_std: opened %s (%u bytes) as %u\n", path, file_size, fastrpc_files[slot].fd);
+		result = 0;
+		break;
+	}
+	case 4: {                          /* fread */
+		struct fastrpc_file_slot *file = fastrpc_file_slot(sizes[0]);
+		uint32_t got;
+
+		if (file == NULL || numbers == NULL || out[1].data == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		got = file->size - file->offset;
+		if (got > sizes[1]) {
+			got = sizes[1];
+		}
+		if (got > out[1].size) {
+			got = out[1].size;
+		}
+		memcpy(out[1].data, file->data + file->offset, got);
+		file->offset += got;
+		numbers[0] = got;
+		numbers[1] = file->offset >= file->size;
+		result = 0;
+		break;
+	}
+	case 9: {                          /* fseek */
+		struct fastrpc_file_slot *file = fastrpc_file_slot(sizes[0]);
+
+		if (file == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (sizes[2] == 0) {
+			file->offset = sizes[1];
+		} else if (sizes[2] == 1) {
+			file->offset += sizes[1];
+		} else {
+			file->offset = (uint32_t)((int32_t)file->size + (int32_t)sizes[1]);
+		}
+		if (file->offset > file->size) {
+			file->offset = file->size;
+		}
+		result = 0;
+		break;
+	}
+	case 3: {                          /* fclose */
+		struct fastrpc_file_slot *file = fastrpc_file_slot(sizes[0]);
+
+		if (file == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		kfree_data(file->data, file->size + 1);
+		bzero(file, sizeof(*file));
+		result = 0;
+		break;
+	}
+	case 26: {                         /* opendir */
+		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+		char path[160];
+		int slot;
+
+		if (name == NULL || numbers == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			snprintf(path, sizeof(path), "%s", name);
+		}
+		for (slot = 0; slot < FASTRPC_DIR_SLOTS && fastrpc_dirs[slot].used; slot++) {
+			;
+		}
+		if (slot == FASTRPC_DIR_SLOTS) {
+			result = (int32_t)AEE_ENOMEMORY;
+			break;
+		}
+		fastrpc_dirs[slot].used = true;
+		fastrpc_dirs[slot].fd = fastrpc_next_fd++;
+		fastrpc_dirs[slot].count = fastrpc_root_dir(path, fastrpc_dirs[slot].names, FASTRPC_DIR_NAMES);
+		fastrpc_dirs[slot].at = 0;
+		{
+			uint64_t fd = fastrpc_dirs[slot].fd;
+
+			memcpy(numbers, &fd, sizeof(fd));
+		}
+		printf("slpi: fastrpc: apps_std: opened %s, %u entries\n", path, fastrpc_dirs[slot].count);
+		result = 0;
+		break;
+	}
+	case 28: {                         /* readdir */
+		uint64_t fd = 0;
+		struct fastrpc_dir_slot *dir;
+		struct {
+			uint32_t inode;
+			char name[255];
+			uint32_t is_eof;
+		} __attribute__((packed)) *entry = (void *)out[0].data;
+
+		if (in[0].size >= 8) {
+			memcpy(&fd, in[0].data, 8);
+		}
+		dir = fastrpc_dir_slot((uint32_t)fd);
+		if (dir == NULL || entry == NULL || out[0].size < sizeof(*entry)) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (dir->at < dir->count) {
+			strlcpy(entry->name, dir->names[dir->at++], sizeof(entry->name));
+			entry->is_eof = 0;
+		} else {
+			entry->name[0] = 0;
+			entry->is_eof = 1;
+		}
+		entry->inode = 0;
+		result = 0;
+		break;
+	}
+	case 27: {                         /* closedir */
+		uint64_t fd = 0;
+		struct fastrpc_dir_slot *dir;
+
+		if (in[0].size >= 8) {
+			memcpy(&fd, in[0].data, 8);
+		}
+		dir = fastrpc_dir_slot((uint32_t)fd);
+		if (dir == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		bzero(dir, sizeof(*dir));
+		result = 0;
+		break;
+	}
+	case 31: {                         /* stat */
+		char name[160], path[160];
+		vfs_context_t context = vfs_context_kernel();
+		vnode_t vnode = NULLVP;
+		struct vnode_attr attributes;
+		struct {
+			uint64_t tsz, dev, ino;
+			uint32_t mode, nlink;
+			uint64_t rdev, size;
+			int64_t atime, atimensec, mtime, mtimensec, ctime, ctimensec;
+		} *stats = (void *)out[0].data;
+
+		if (in[1].size == 0 || in[1].size >= sizeof(name) || stats == NULL || out[0].size < sizeof(*stats)) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		memcpy(name, in[1].data, in[1].size);
+		name[in[1].size] = 0;
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			snprintf(path, sizeof(path), "%s", name);
+		}
+		if (vnode_lookup(path, 0, &vnode, context) != 0) {
+			result = (int32_t)AEE_EFAILED;
+			break;
+		}
+		VATTR_INIT(&attributes);
+		VATTR_WANTED(&attributes, va_mode);
+		VATTR_WANTED(&attributes, va_data_size);
+		VATTR_WANTED(&attributes, va_fsid);
+		VATTR_WANTED(&attributes, va_fileid);
+		if (vnode_getattr(vnode, &attributes, context) == 0) {
+			stats->dev = attributes.va_fsid;
+			stats->ino = attributes.va_fileid;
+			stats->mode = (uint32_t)attributes.va_mode;
+			stats->nlink = 1;
+			stats->size = attributes.va_data_size;
+			result = 0;
+		}
+		vnode_put(vnode);
+		break;
+	}
+	case 2:                            /* fflush */
+		result = 0;
+		break;
+	default:
+		printf("slpi: fastrpc: apps_std method %u: not served yet\n", method);
+		result = (int32_t)AEE_ENOMEMORY;
+		break;
+	}
+	return result;
+}
+
+/* The reverse tunnel kept open: each nested call the DSP makes is served from fw/sensors. */
+static volatile bool fastrpc_listener_wanted;
+
+static void
+fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	uint8_t *packet = kalloc_data(4096, Z_WAITOK | Z_ZERO), *reply = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+	uint8_t *returned = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+	uint32_t offset = 0, physical, rctx = 0, result_code = 0xffffffff, returned_length = 0, calls = 0;
+	uint32_t sizes[4], numbers[4], lengths[4], size;
+	uint8_t nested[256];
+	const void *sources[4];
+
+	if (packet == NULL || reply == NULL || returned == NULL) {
+		printf("slpi: fastrpc: the listener has no buffers\n");
+		goto out;
+	}
+	if (fastrpc_smem_buffer(&offset) == NULL) {
+		goto out;
+	}
+	physical = SMEM_PHYS + offset;
+	while (fastrpc_listener_wanted) {
+		sizes[0] = rctx;
+		sizes[1] = result_code;
+		sizes[2] = returned_length;
+		sizes[3] = (uint32_t)sizeof(nested);
+		memset(numbers, 0, sizeof(numbers));
+		memset(nested, 0, sizeof(nested));
+		lengths[0] = sizeof(sizes);
+		sources[0] = sizes;
+		lengths[1] = returned_length;
+		sources[1] = returned_length != 0 ? returned : NULL;
+		lengths[2] = sizeof(numbers);
+		sources[2] = numbers;
+		lengths[3] = (uint32_t)sizeof(nested);
+		sources[3] = nested;
+		memset(packet, 0, 4096);
+		size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
+		if (size > 4096) {
+			printf("slpi: fastrpc: the listener's packet would be %u bytes\n", size);
+			break;
+		}
+		fastrpc_smem_put(offset, packet, size);
+		if (!fastrpc_call(1, 3, 0x040202, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical, size, 120000,
+		    "adsp_listener_next2")) {
+			if (!fastrpc_listener_wanted) {
+				break;
+			}
+			sleep_ms(5000);
+			continue;
+		}
+		if (fastrpc_rsp_retval != 0) {
+			/* nothing is waiting in the DSP's listener yet */
+			printf("slpi: fastrpc: the listener has nothing waiting (%d)\n", fastrpc_rsp_retval);
+			sleep_ms(100);
+			continue;
+		}
+		{
+			struct fastrpc_remote_buf *rpra;
+
+			fastrpc_smem_get(offset, reply, 4096);
+			rpra = (struct fastrpc_remote_buf *)reply;
+			fastrpc_smem_get(offset + (uint32_t)(rpra[2].pv - physical), (uint8_t *)numbers, sizeof(numbers));
+			fastrpc_smem_get(offset + (uint32_t)(rpra[3].pv - physical), nested, sizeof(nested));
+		}
+		printf("slpi: fastrpc: the DSP asks for handle %u sc %#x with %u bytes of inputs (ctx %#x)\n", numbers[1], numbers[2],
+		    numbers[3], numbers[0]);
+		for (uint32_t i = 0; i < numbers[3] && i < sizeof(nested); i++) {
+			printf("%s%02x", i % 16 == 0 ? "\nslpi: fastrpc:   " : " ", nested[i]);
+		}
+		if (numbers[3] != 0) {
+			printf("\n");
+		}
+		{
+			struct fastrpc_io out[4];
+			uint32_t out_count = 0;
+			int32_t served;
+
+			memset(out, 0, sizeof(out));
+			served = fastrpc_serve(numbers[1], numbers[2], nested,
+			    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count);
+			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 2300) : 0;
+			if (served != 0) {
+				printf("slpi: fastrpc: the call is answered with %#x\n", (uint32_t)served);
+			}
+			for (uint32_t i = 0; i < out_count; i++) {
+				if (out[i].data != NULL) {
+					kfree_data(out[i].data, out[i].size ? out[i].size : 1);
+				}
+			}
+			rctx = numbers[0];
+			result_code = (uint32_t)served;
+		}
+	}
+out:
+	if (packet != NULL) {
+		kfree_data(packet, 4096);
+	}
+	if (reply != NULL) {
+		kfree_data(reply, 4096);
+	}
+	if (returned != NULL) {
+		kfree_data(returned, 4096);
+	}
+	thread_terminate(current_thread());
+}
+
+static void
+fastrpc_listener_start(void)
+{
+	thread_t thread;
+
+	if (fastrpc_listener_wanted) {
+		return;
+	}
+	fastrpc_listener_wanted = true;
+	if (kernel_thread_start(fastrpc_listener_thread, NULL, &thread) != KERN_SUCCESS) {
+		fastrpc_listener_wanted = false;
+		printf("slpi: fastrpc: the listener's thread did not start\n");
+		return;
+	}
+	thread_deallocate(thread);
+	printf("slpi: fastrpc: the listener's thread runs\n");
+}
+
+static void
+fastrpc_first_calls(uint32_t stage)
+{
+	static const char listener[] = "adsp_default_listener";
+	uint8_t *buf = NULL, *packet = NULL, *parsed, reply[4096];
+	uint64_t physical = 0;
+	uint32_t client = 1, lengths[4], name_length = (uint32_t)strlen(listener) + 1;
+	uint32_t shared_offset = 0, size, fastrpc_listener = 0;
+	bool shared = stage >= 4;
+	const void *sources[4];
+	uint32_t scalar[2] = { 0, 256 };
+	uint32_t handles[2] = { 0, 0 };
+	uint8_t error[256];
+
+	if (shared) {
+		printf("slpi: fastrpc: stage %u: asking for a 4 KB packet in the shared memory\n", stage);
+		buf = fastrpc_smem_buffer(&shared_offset);
+		if (buf == NULL) {
+			return;
+		}
+		physical = SMEM_PHYS + shared_offset;
+		packet = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+		if (packet == NULL) {
+			printf("slpi: fastrpc: no staging buffer\n");
+			return;
+		}
+		printf("slpi: fastrpc: stage %u: the packet is at %#llx (%#x in the shared memory)\n", stage, physical, shared_offset);
+	} else {
+		printf("slpi: fastrpc: stage %u: asking for a physically contiguous 4 KB buffer\n", stage);
+		buf = hakios_slpi_dma_alloc(4096, &physical);
+		if (buf == NULL) {
+			printf("slpi: fastrpc: no physically contiguous buffer\n");
+			return;
+		}
+		packet = buf;
+		printf("slpi: fastrpc: stage %u: the buffer is %p, physical %#llx\n", stage, buf, physical);
+		if (stage == 1) {
+			hakios_slpi_dma_free(buf, 4096);
+			printf("slpi: fastrpc: stage 1: the buffer is given back\n");
+			return;
+		}
+	}
+	memset(packet, 0, 4096);
+	lengths[0] = 4;
+	sources[0] = &client;
+	size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS") && (shared ? stage >= 5 : stage >= 3)) {
+		memset(packet, 0, 4096);
+		memset(error, 0, sizeof(error));
+		scalar[0] = name_length;
+		lengths[0] = 8;
+		sources[0] = scalar;
+		lengths[1] = name_length;
+		sources[1] = listener;
+		lengths[2] = 8;
+		sources[2] = handles;
+		lengths[3] = (uint32_t)sizeof(error);
+		sources[3] = error;
+		size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
+		parsed = packet;
+		if (shared) {
+			fastrpc_smem_put(shared_offset, packet, size);
+			fastrpc_smem_get(shared_offset, reply, sizeof(reply));
+			parsed = reply;
+		}
+		if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, 2000, "remotectl_open")) {
+			struct fastrpc_remote_buf *rpra;
+
+			if (shared) {
+				fastrpc_smem_get(shared_offset, reply, sizeof(reply));
+				parsed = reply;
+			}
+			rpra = (struct fastrpc_remote_buf *)parsed;
+
+			if (shared) {
+				uint32_t out_offset = (uint32_t)(rpra[2].pv - physical);
+				uint32_t why_offset = (uint32_t)(rpra[3].pv - physical);
+				uint32_t out[2] = { 0, 0 };
+				char why[64] = { 0 };
+
+				fastrpc_smem_get(shared_offset + out_offset, (uint8_t *)out, sizeof(out));
+				fastrpc_smem_get(shared_offset + why_offset, (uint8_t *)why, sizeof(why) - 1);
+				printf("slpi: fastrpc: remotectl handle %u dlret %d error \"%s\"\n", out[0], (int32_t)out[1], why);
+				fastrpc_listener = out[0];
+			} else {
+				uint32_t *out = (uint32_t *)(uintptr_t)rpra[2].pv;
+				char *why = (char *)(uintptr_t)rpra[3].pv;
+
+				printf("slpi: fastrpc: remotectl handle %u dlret %d error \"%.64s\"\n", out[0], (int32_t)out[1], why);
+				fastrpc_listener = out[0];
+			}
+		}
+	}
+	if (fastrpc_listener != 0 && stage >= 6) {
+		/* the handle the open gave, no buffers: the DSP now knows this AP serves its default listener */
+		memset(packet, 0, 4096);
+		size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+		if (shared) {
+			fastrpc_smem_put(shared_offset, packet, size);
+		}
+		if (fastrpc_call(1, fastrpc_listener, 0x100000, 0x300 | fastrpc_pd, physical, size, 2000,
+		    "adsp_default_listener_register") &&
+		    stage >= 7) {
+			/* the fixed listener handle 3, method 3: the reverse tunnel's first call */
+			memset(packet, 0, 4096);
+			size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+			if (shared) {
+				fastrpc_smem_put(shared_offset, packet, size);
+			}
+			if (fastrpc_call(1, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 2000, "adsp_listener_init2") &&
+			    stage >= 8) {
+				if (stage >= 9) {
+					fastrpc_listener_start();
+				} else {
+					fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
+				}
+			}
+		}
+	}
+	if (shared) {
+		kfree_data(packet, 4096);
+	} else {
+		hakios_slpi_dma_free(buf, 4096);
+	}
+	printf("slpi: fastrpc: stage %u: done\n", stage);
 }
 
 /* Read-only look at the apps SMMU for the SLPI's FastRPC stream (dt: sdsprpc-smd, iommus 0x541). */
@@ -3819,6 +4859,7 @@ link_stop(void)
 {
 	struct glink_packet *packet;
 
+	fastrpc_listener_wanted = false;
 	if (link_runs) {
 		link_wanted = false;
 		for (unsigned ms = 0; ms < 2000 && link_runs; ms++) {
@@ -3957,10 +4998,12 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
-	uint32_t sns_on = 0, fastrpc_smmu = 0;
+	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0;
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
+	PE_parse_boot_argn("fastrpc_call", &fastrpc_call, sizeof(fastrpc_call));
+	PE_parse_boot_argn("fastrpc_pd", &fastrpc_pd, sizeof(fastrpc_pd));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
@@ -3983,6 +5026,9 @@ step_qrtr(void)
 	}
 	if (fastrpc_smmu >= 2) {
 		fastrpc_smmu_bypass();
+	}
+	if (fastrpc_call && fastrpc_smmu >= 2) {
+		fastrpc_first_calls(fastrpc_call);
 	}
 	if (sns_on) {
 		sns_start();
