@@ -438,19 +438,21 @@ longer produces the 90-into-60 ghosting that the seq=1 runs showed.
 (ok), framebuffer rate 90 Hz`, `brightness ready (ok)` and `bluetoothd: Got
 local-mac-address`; `logs/reliable-bt.png` shows the Bluetooth Settings page
 
-**The panel is still sent 60 frames a second** (2026-11-06). The DSI
-controller's status bits move with each command-DMA frame push; counted over
-a measured second (`panel_te_rate=1`, kernel clock, no sleeps) they change
-118 times, i.e. 59 pushes: the display controller the firmware left behind
-refreshes the panel at 60 Hz whatever the framebuffer does and whatever the
-panel's own scan runs at. Pacing the framebuffer at 90 into that is a 60 Hz
-push behind 90 Hz content — 3:2 judder and torn frames, which is the
-"stutter and ghosting while scrolling" the user reported. TE itself is not
-routed (pin 66 reads 0), so the panel's own scan cannot be measured this
-way; the frame *push* is the rate the content reaches it at. A true 90 Hz
-needs the DSI/DPU frame timing reprogrammed — not just the DCS 2f/26
-switch — and the INTF block that would say how is unsafe to read on THYME.
-A self-consistent 60 (`fb_hz=60`, no panel switch) is the clean fallback.
+**The controller behind the panel refreshes it at about 60 a second, whatever
+`fb_hz` says** (2026-11-06). The DSI status bits 0 and 2 move with the
+command DMA; counted over a measured second (`panel_te_rate=1`, kernel clock,
+no sleeps) they change 118 times, i.e. 59 events — and the same 118 with
+`fb_hz=60` or `90`, with the panel timing switched to 60 or 90. The count is
+therefore the controller's own auto-refresh cadence, not the framebuffer's
+writes: the firmware leaves the panel refreshed from its memory at ~60 Hz,
+so pacing the framebuffer at 90 puts 90 frames into a memory pushed 60 times
+a second — 3:2 judder and torn frames, the "stutter and ghosting while
+scrolling" the user reported. TE is not routed here (pin 66 reads 0) and the
+INTF block that would say more is unsafe to read on THYME, so the panel's own
+scan cannot be measured directly. True 90 Hz needs the controller's refresh
+reprogrammed (not just the DCS 2f/26 switch); until then the daily boot uses
+a self-consistent **60** (`fb_hz=60` in `ram.args`); set `fb_hz=90` back for
+the old behaviour.
 (the pane still initialising). The user confirmed on the physical phone that
 the full-sequence UI is smooth with no dropped frames. The panel's TE rate is
 inferred from this user-visible result; the INTF TE block is still unsafe
