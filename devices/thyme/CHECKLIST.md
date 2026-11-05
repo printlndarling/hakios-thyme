@@ -794,7 +794,8 @@ the registry is a direct-channel sensor and its discovery waits on FastRPC
 channel; this kernel leaves it unanswered. The next layer is an AP-side
 FastRPC transport and the HexagonFS file service (the open `fastrpc/`
 implementation in the sensh project is a reference), not another SNS QMI
-message.
+message. The working design and the implementation plan are in
+[`docs/slpi-fastrpc.md`](docs/slpi-fastrpc.md).
 
 ## Later product work
 
