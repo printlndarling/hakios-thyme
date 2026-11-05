@@ -4371,6 +4371,31 @@ fastrpc_create_static(uint64_t heap_physical, uint64_t heap_size, uint64_t physi
 	return fastrpc_call(0, 1, 0x08030000, 0x160 | fastrpc_create_pd, physical, size, 20000, "INIT_CREATE_STATIC");
 }
 
+/* A small heap out of the shared memory both sides already reach, when no contiguous buffer is free. */
+#define ITEM_FASTRPC_HEAP        625
+
+static void *
+fastrpc_smem_heap(uint32_t *offset, uint32_t *size)
+{
+	uint32_t cacheline = 0, partition_size = 0, bytes = 0, at;
+	uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
+
+	if (partition == 0) {
+		return NULL;
+	}
+	at = smem_item(ITEM_FASTRPC_HEAP, &bytes);
+	if (at == 0) {
+		smem_private_item_make(partition, ITEM_FASTRPC_HEAP, 64 * 1024);
+		at = smem_item(ITEM_FASTRPC_HEAP, &bytes);
+	}
+	if (at == 0 || bytes < 16 * 1024) {
+		return NULL;
+	}
+	*offset = at;
+	*size = bytes;
+	return (uint8_t *)(uintptr_t)(smem + at);
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
@@ -4516,21 +4541,32 @@ fastrpc_first_calls(uint32_t stage)
 		}
 		if (fastrpc_create) {
 			uint64_t heap_physical = 0;
-			uint32_t heap_mb = fastrpc_heap_mb != 0 ? fastrpc_heap_mb : 8;
+			uint32_t heap_kb = (fastrpc_heap_mb != 0 ? fastrpc_heap_mb : 8) << 10;
+			uint32_t shared_heap_offset = 0, shared_heap_size = 0;
+			bool heap_is_smem = false;
 			void *heap = NULL;
 
-			while (heap == NULL && heap_mb >= 1) {
-				heap = hakios_slpi_heap_alloc((size_t)heap_mb << 20, &heap_physical);
+			while (heap == NULL && heap_kb >= 16) {
+				heap = hakios_slpi_heap_alloc((size_t)heap_kb << 10, &heap_physical);
 				if (heap == NULL) {
-					heap_mb >>= 1;
+					heap_kb >>= 1;
+				}
+			}
+			if (heap == NULL) {
+				heap = fastrpc_smem_heap(&shared_heap_offset, &shared_heap_size);
+				if (heap != NULL) {
+					heap_physical = SMEM_PHYS + shared_heap_offset;
+					heap_kb = shared_heap_size >> 10;
+					heap_is_smem = true;
 				}
 			}
 			if (heap != NULL) {
-				printf("slpi: fastrpc: the %u MB heap is %p, physical %#llx\n", heap_mb, heap, heap_physical);
-				if (!fastrpc_heap_assign(heap_physical, (uint64_t)heap_mb << 20)) {
+				printf("slpi: fastrpc: the %u KB heap is %p, physical %#llx%s\n", heap_kb, heap, heap_physical,
+				    heap_is_smem ? " (in the shared memory)" : "");
+				if (!heap_is_smem && !fastrpc_heap_assign(heap_physical, (uint64_t)heap_kb << 10)) {
 					printf("slpi: fastrpc: the heap is not assigned; the DSP may still reach it with the SMMU bypass\n");
 				}
-				fastrpc_create_static(heap_physical, (uint64_t)heap_mb << 20, physical, shared_offset, shared, packet);
+				fastrpc_create_static(heap_physical, (uint64_t)heap_kb << 10, physical, shared_offset, shared, packet);
 				{
 					uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply,
 					    20000);
