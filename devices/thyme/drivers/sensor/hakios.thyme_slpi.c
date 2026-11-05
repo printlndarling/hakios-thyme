@@ -3515,6 +3515,8 @@ static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the 
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
 static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the default listener's control handle after registering */
 static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
+static uint32_t fastrpc_client = 1;      /* boot-arg fastrpc_client: the session's client id; the DSP names its kthreads by it */
+static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the thread id the next2 loop runs on */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -3536,7 +3538,7 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, fastrpc_service, fastrpc_next2_sc, 0x500 | fastrpc_pd, physical, size, 10000,
+	if (!fastrpc_call(fastrpc_client, fastrpc_service, fastrpc_next2_sc, 0x500 | fastrpc_pd, physical, size, 10000,
 	    "adsp_listener_next2")) {
 		return;
 	}
@@ -4195,10 +4197,11 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 		/*
 		 * A thread id of its own: an outstanding next2 holds the DSP's thread queue for its tid,
 		 * and the control thread still has to open and register the default listener (the phone's
-		 * daemon starts its listener before it registers).
+		 * daemon starts its listener before it registers). The DSP names its kthreads after the
+		 * client id and this tid, so both can be picked from the boot arguments.
 		 */
-		if (!fastrpc_call_as(1, 2, fastrpc_service, fastrpc_next2_sc, 0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical,
-		    size, 120000, "adsp_listener_next2")) {
+		if (!fastrpc_call_as(fastrpc_client, fastrpc_listener_tid, fastrpc_service, fastrpc_next2_sc,
+		    0x600 | ((calls++ & 7) << 8) | fastrpc_pd, physical, size, 120000, "adsp_listener_next2")) {
 			if (!fastrpc_listener_wanted) {
 				break;
 			}
@@ -4306,7 +4309,7 @@ fastrpc_open_name(const char *name, uint64_t physical, uint32_t shared_offset, u
 	sources[3] = error;
 	size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
 	fastrpc_smem_put(shared_offset, packet, size);
-	if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, wait_ms, name)) {
+	if (fastrpc_call(fastrpc_client, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, wait_ms, name)) {
 		struct fastrpc_remote_buf *rpra;
 
 		fastrpc_smem_get(shared_offset, reply, 4096);
@@ -4372,7 +4375,7 @@ fastrpc_module_open_send(uint32_t pd)
 		sources[3] = error;
 		size = fastrpc_build(staging, physical, physical, 4, lengths, sources);
 		fastrpc_smem_put(offset, staging, size);
-		sent = fastrpc_send_async(1, 0, 0x20200, 0x250 | pd, physical, size);
+		sent = fastrpc_send_async(fastrpc_client, 0, 0x20200, 0x250 | pd, physical, size);
 		printf("slpi: fastrpc: the adsp_listener open is sent to PD %u; the listener can serve it while it waits\n", pd);
 	}
 	if (staging != NULL) {
@@ -4483,9 +4486,10 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 
 	if (fastrpc_pd == 0) {
 		/* the plain sscrpcd instance: attachguestos, i.e. the root PD (the phone runs one of each) */
-		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, 1, "INIT_ATTACH (guest OS, phone)");
+		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
+		    "INIT_ATTACH (guest OS, phone)");
 	} else {
-		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 1, "INIT_ATTACH_SNS (phone)");
+		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client, "INIT_ATTACH_SNS (phone)");
 	}
 	memset(packet, 0, 4096);
 	lengths[0] = 0;
@@ -4494,11 +4498,16 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 10000, "adsp_listener_init2 (phone)")) {
+	if (!fastrpc_call(fastrpc_client, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 10000, "adsp_listener_init2 (phone)")) {
 		return;
 	}
-	fastrpc_listener_start();
-	sleep_ms(200);
+	if (fastrpc_phone == 1) {
+		/* the phone's racy order: the thread starts first, then the main thread opens; the DSP
+		 * answers no control call while a next2 is waiting, so this only works if the thread is
+		 * slower than the open. */
+		fastrpc_listener_start();
+		sleep_ms(200);
+	}
 	handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
 	if (handle == 0) {
 		printf("slpi: fastrpc: the phone order: the default listener did not open\n");
@@ -4509,7 +4518,12 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	fastrpc_call(1, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+	if (fastrpc_phone != 1) {
+		/* everything is registered first, then the thread waits: the DSP serves no control call
+		 * behind an outstanding next2, so this order is the one that always completes. */
+		fastrpc_listener_start();
+	}
 }
 
 static void
@@ -4520,7 +4534,7 @@ fastrpc_first_calls(uint32_t stage)
 	const char *open_name = fastrpc_listener1 ? listener_modern : listener;
 	uint8_t *buf = NULL, *packet = NULL, *parsed, reply[4096];
 	uint64_t physical = 0;
-	uint32_t client = 1, lengths[4], name_length = (uint32_t)strlen(open_name) + 1;
+	uint32_t client = fastrpc_client, lengths[4], name_length = (uint32_t)strlen(open_name) + 1;
 	uint32_t shared_offset = 0, size, fastrpc_listener = 0;
 	bool shared = stage >= 4;
 	const void *sources[4];
@@ -4598,7 +4612,7 @@ fastrpc_first_calls(uint32_t stage)
 			fastrpc_smem_get(shared_offset, reply, sizeof(reply));
 			parsed = reply;
 		}
-		if (fastrpc_call(1, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, 2000, "remotectl_open")) {
+		if (fastrpc_call(fastrpc_client, 0, 0x20200, 0x200 | fastrpc_pd, physical, size, 2000, "remotectl_open")) {
 			struct fastrpc_remote_buf *rpra;
 
 			if (shared) {
@@ -4649,7 +4663,7 @@ fastrpc_first_calls(uint32_t stage)
 				if (shared) {
 					fastrpc_smem_put(shared_offset, packet, size);
 				}
-				fastrpc_call(1, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
+				fastrpc_call(fastrpc_client, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
 			}
 			{
 				uint32_t ac = fastrpc_attach_client;
@@ -4712,7 +4726,7 @@ fastrpc_first_calls(uint32_t stage)
 		if (shared) {
 			fastrpc_smem_put(shared_offset, packet, size);
 		}
-		if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
+		if (fastrpc_call(fastrpc_client, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
 		    "adsp_listener_init2") && stage >= 8) {
 			if (stage >= 9) {
 				fastrpc_listener_start();
@@ -4754,7 +4768,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			ready = fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
+			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
 			    "adsp_default_listener_register");
 			if (ready && fastrpc_close) {
 				/*
@@ -4776,7 +4790,7 @@ fastrpc_first_calls(uint32_t stage)
 				if (shared) {
 					fastrpc_smem_put(shared_offset, packet, size);
 				}
-				fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
+				fastrpc_call(fastrpc_client, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
 			}
 		}
 		if (ready && fastrpc_static_open && fastrpc_open_async && !fastrpc_open_after) {
@@ -4800,7 +4814,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
+			if (fastrpc_call(fastrpc_client, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
 			    "adsp_listener_init2") && stage >= 8) {
 				if (fastrpc_restart == 1) {
 					/*
@@ -5648,6 +5662,9 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("fastrpc_close", &fastrpc_close, sizeof(fastrpc_close));
 	PE_parse_boot_argn("fastrpc_phone", &fastrpc_phone, sizeof(fastrpc_phone));
+	PE_parse_boot_argn("fastrpc_client", &fastrpc_client, sizeof(fastrpc_client));
+	PE_parse_boot_argn("fastrpc_listener_tid", &fastrpc_listener_tid, sizeof(fastrpc_listener_tid));
+	PE_parse_boot_argn("fastrpc_tid", &fastrpc_call_tid, sizeof(fastrpc_call_tid));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
