@@ -1997,7 +1997,7 @@ struct glink_packet {
  * carries APR, the sensor services' own protocol (below; Android's apr_tal_rpmsg.c asks for no
  * particular intents: what the DSP sends there is a few hundred bytes, up to a few kilobytes).
  */
-enum { CHANNEL_QRTR, CHANNEL_APR, CHANNEL_PMIC, CHANNELS };
+enum { CHANNEL_QRTR, CHANNEL_APR, CHANNEL_PMIC, CHANNEL_FASTRPC, CHANNELS };
 
 struct glink_channel {
 	const char *name;
@@ -2035,6 +2035,8 @@ static struct {
 		[CHANNEL_APR] = { .name = "apr_audio_svc", .ours = 2, .intents = { { 0x200, 8 }, { 0x1000, 4 }, { 0x2000, 2 } } },
 		/* the battery manager's (battmgr below): answers of a few dozen bytes, a name of 128 */
 		[CHANNEL_PMIC] = { .name = "PMIC_RTR_SLPI_APPS", .ours = 3, .intents = { { 0x200, 6 }, { 0x1000, 2 }, { 0, 0 } } },
+		/* the DSP's FastRPC: the AP serves its registry files (dt: qcom,msm_fastrpc_rpmsg, intents 0x64 x 64) */
+		[CHANNEL_FASTRPC] = { .name = "fastrpcglink-apps-dsp", .ours = 4, .intents = { { 0x64, 24 }, { 0, 0 }, { 0, 0 } } },
 	},
 };
 
@@ -3172,6 +3174,35 @@ sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length
 	qrtr_out_packet(QRTR_DATA, SNS_REG_PORT, node, port, out, (uint32_t)(p - out));
 }
 
+/* ---- FastRPC: the DSP's calls to the AP (the registry file service) ---------------------------------- */
+
+struct fastrpc_msg {
+	int32_t client_id;
+	int32_t tid;
+	uint64_t ctx;
+	uint32_t handle;
+	uint32_t sc;
+	uint64_t addr;
+	uint64_t size;
+};
+
+static void
+fastrpc_input(const uint8_t *data, uint32_t length)
+{
+	printf("slpi: fastrpc: %u bytes:", length);
+	for (uint32_t i = 0; i < length && i < 64; i++) {
+		printf(" %02x", data[i]);
+	}
+	printf("\n");
+	if (length >= sizeof(struct fastrpc_msg)) {
+		struct fastrpc_msg msg;
+
+		memcpy(&msg, data, sizeof(msg));
+		printf("slpi: fastrpc: client %d tid %d ctx %#llx handle %u sc %#x addr %#llx size %llu\n", msg.client_id, msg.tid,
+		    msg.ctx, msg.handle, msg.sc, msg.addr, msg.size);
+	}
+}
+
 /* ---- APR: the sensor services' protocol, on the channel apr_audio_svc ------------------------------------- */
 
 /*
@@ -3644,6 +3675,8 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 				qrtr_input(packet->data, packet->length);
 			} else if (from == CHANNEL_PMIC) {
 				battmgr_input(packet->data, packet->length);
+			} else if (from == CHANNEL_FASTRPC) {
+				fastrpc_input(packet->data, packet->length);
 			} else {
 				apr_input(packet->data, packet->length);
 			}

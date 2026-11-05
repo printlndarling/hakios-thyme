@@ -18,8 +18,10 @@ claim that any of it is done.
   registry is a direct-channel sensor whose discovery waits on FastRPC:
   `direct_channel::init_fastRPC_symbols`, `sensor_factory::is_registry_up`,
   `libsns_fastRPC_util.so`.
-- The SLPI opens the GLINK channel `fastrpcglink-apps-dsp`; this kernel leaves
-  it unanswered.
+- The SLPI opens the GLINK channel `fastrpcglink-apps-dsp`. It is now opened
+  both ways from our side too (ours 4, the DSP's 2) and its intents are
+  offered; the DSP sends no FastRPC message until the AP registers a listener
+  (`logs/152916-run.log`).
 
 ## The AP-side FastRPC contract
 
