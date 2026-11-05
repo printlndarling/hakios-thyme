@@ -427,6 +427,9 @@ public:
 
 OSDefineMetaClassAndStructors(IOMobileFramebuffer, IOService);
 
+/* the display, for a second announcement once its panel timing has been switched */
+static IOMobileFramebuffer * gPublishedFramebuffer;
+
 static void
 setNumber(OSDictionary * dict, const char * key, uint64_t value)
 {
@@ -478,6 +481,23 @@ IOMobileFramebuffer::publishRefresh(void)
 	refresh->release();
 	IOLog("MiniIOMobileFramebuffer: IOMFBDisplayRefresh: %u Hz (the panel: %u), an interval of %llu (2^-32 s), %llu ticks\n",
 	    told, refreshHz(), interval, ticks);
+}
+
+/*
+ * The device driver calls this once the panel timing sequence has been accepted. The framebuffer
+ * starts before that and announces the rate it has then (60 Hz); without this second announcement
+ * CoreAnimation keeps the 60 Hz it first read after the panel has moved to 90. If the sequence was
+ * not accepted the driver leaves hakios_panel_refresh_hz at 60 and this announces 60 again: the
+ * framebuffer never tells CoreAnimation a rate the panel did not take.
+ */
+extern "C" void
+hakios_fb_publish_refresh(void)
+{
+	IOMobileFramebuffer * fb = gPublishedFramebuffer;
+
+	if (fb != NULL) {
+		fb->publishRefresh();
+	}
 }
 
 void
@@ -624,6 +644,7 @@ IOMobileFramebuffer::start(IOService * provider)
 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
 	/* for who draws with the GPU (userland/src/eagl.c): a frame need not be waited for before it is handed over */
 	setProperty("HakiosWaitsForGPU", kOSBooleanTrue);
+	gPublishedFramebuffer = this;
 	publishModes();
 	setName("disp0");
 	registerService();

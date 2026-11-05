@@ -14,8 +14,9 @@ export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
 export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
-SCENE=${SCENE:-out/thyme-boot/root-jiggle-gl.apfs}
+SCENE=${SCENE:-out/thyme-boot/root-jiggle.apfs}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+[ -z "${RAM_EXTRA_ARGS:-}" ] || ARGS="$ARGS $RAM_EXTRA_ARGS"
 
 [ -f "$SYSTEM_IMAGE" ] || { echo "jiggle: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
 [ -f "$SCENE" ] || { echo "jiggle: no scenario image: $SCENE" >&2; exit 1; }

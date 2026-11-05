@@ -69,6 +69,14 @@ static unsigned brightness_logs;
  */
 int hakios_panel_refresh_hz = 60;
 
+/*
+ * The framebuffer starts before this driver and announces the 60 Hz it sees
+ * then. It offers this so that the new rate is announced after the panel has
+ * actually switched. A framebuffer without it (another phone) leaves the weak
+ * symbol undefined.
+ */
+extern void hakios_fb_publish_refresh(void) __attribute__((weak));
+
 static LCK_GRP_DECLARE(brightness_lck_grp, "hakios-brightness");
 static LCK_MTX_DECLARE(brightness_mtx, &brightness_lck_grp);
 
@@ -482,6 +490,9 @@ hakios_brightness_init(void)
 		}
 		if (switched && fb_hz == 90) {
 			hakios_panel_refresh_hz = 90;
+			if (&hakios_fb_publish_refresh != NULL) {
+				hakios_fb_publish_refresh();
+			}
 		}
 		tell("display: THYME panel timing %u Hz seq=%u (%s), framebuffer rate %d Hz\n", fb_hz, sequence,
 		    switched ? "ok" : "skipped", hakios_panel_refresh_hz);
