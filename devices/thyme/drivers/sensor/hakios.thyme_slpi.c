@@ -3397,6 +3397,7 @@ static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: regist
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
 static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static listener first, the sensors PD after it */
+static uint32_t fastrpc_attach_mid;      /* boot-arg fastrpc_attach_mid: register, attach the sensors PD, then the listener thread */
 static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
 static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to wait for that module load */
 static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
@@ -4385,6 +4386,30 @@ fastrpc_first_calls(uint32_t stage)
 		if (fastrpc_attach0) {
 			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, client, "INIT_ATTACH (guest OS)");
 		}
+		if (fastrpc_attach_mid) {
+			/*
+			 * The order the phone uses with two processes: the AP is the default listener
+			 * first, then the sensors PD starts, and only then does this side wait in next2.
+			 * Requests the sensor process makes in between are for the registered listener.
+			 */
+			uint32_t dl = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+
+			if (dl != 0) {
+				memset(packet, 0, 4096);
+				size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+				if (shared) {
+					fastrpc_smem_put(shared_offset, packet, size);
+				}
+				fastrpc_call(1, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
+			}
+			{
+				uint32_t ac = fastrpc_attach_client;
+				uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
+
+				fastrpc_pd_call(ac, 0x10000, 0x102, physical, shared_offset, shared, packet, abuf,
+				    "INIT_ATTACH_SNS (mid)");
+			}
+		}
 		if (fastrpc_static_open) {
 			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
 
@@ -4406,7 +4431,7 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
 			}
 			sleep_ms(200);
-			{
+			if (!fastrpc_attach_mid) {
 				/* a session of its own, so the DSP processes it while the listener's next2 waits */
 				uint32_t ac = fastrpc_attach_client;
 				uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
@@ -5313,6 +5338,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_delay", &fastrpc_delay, sizeof(fastrpc_delay));
 	PE_parse_boot_argn("fastrpc_listener1", &fastrpc_listener1, sizeof(fastrpc_listener1));
 	PE_parse_boot_argn("fastrpc_bare", &fastrpc_bare, sizeof(fastrpc_bare));
+	PE_parse_boot_argn("fastrpc_attach_mid", &fastrpc_attach_mid, sizeof(fastrpc_attach_mid));
 	PE_parse_boot_argn("fastrpc_attach0", &fastrpc_attach0, sizeof(fastrpc_attach0));
 	PE_parse_boot_argn("fastrpc_static_open", &fastrpc_static_open, sizeof(fastrpc_static_open));
 	PE_parse_boot_argn("fastrpc_open_wait", &fastrpc_open_wait, sizeof(fastrpc_open_wait));

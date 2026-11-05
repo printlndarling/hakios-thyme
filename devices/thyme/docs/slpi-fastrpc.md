@@ -63,6 +63,9 @@ The bring-up's boot arguments:
 | `fastrpc_static_open=1` | open the `adsp_listener` module for `init2`/`next2` (after the register) |
 | `fastrpc_open_wait=N` | how long that module open waits, in ms (default 20000) |
 | `fastrpc_open_async=1` | send that open without waiting, so the listener can serve its file request |
+| `fastrpc_open_after=1` | send it after the listener is waiting |
+| `fastrpc_open_pd=N` | the PD of that open (unset: `fastrpc_pd`) |
+| `fastrpc_attach_mid=1` | guest attach, register, sensors attach, then the listener thread (the daemon order) |
 
 The handle `remotectl_open` returns is not the listener's own handle:
 `adsp_listener_init2` on it answers -1, on the fixed 3 it answers 0
@@ -89,7 +92,17 @@ processes.
 The listener's input buffer matters too: the daemon reserves 1 MB for the
 `next2` inputs, while a 256-byte buffer gets `0x80000434` or silence; the
 kernel now passes 2 KB (the output encoding is capped at 1 KB so the 4 KB
-SMEM packet still holds both). A 2 KB run still shows no nested call. The sensor process
+SMEM packet still holds both). A 2 KB run still shows no nested call.
+
+The SM8250 SLPI libraries that do live on the AP side are in the
+linux-msm/hexagon-dsp-binaries tree (`sm8250/Thundercomm/RB5/...`): the
+user-PD shell `fastrpc_shell_2`, `libsns_direct_channel_skel.so` and the
+sysmon skels. There is **no** listener skel among them, so `adsp_listener`
+is internal to the DSP firmware and its open must not need an AP file; the
+reason it hangs is still open (the FastRPC remote heap and the DSP's
+session handling are the candidates). They are copied into
+`fw-sensors/adsp/` so the file service can serve them if the sensor
+process asks. The sensor process
 reads its registry once, when its PD starts, so two orderings are available
 as boot arguments: `fastrpc_attach_late=1` registers the listener and starts
 `next2` before the first attach, and `fastrpc_restart=1` releases the sensors
