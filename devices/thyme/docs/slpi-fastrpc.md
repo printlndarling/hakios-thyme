@@ -68,6 +68,40 @@ The pieces that matter here:
    per-sensor data are the files beside it, and the config JSONs are under
    `/vendor/etc/sensors/config/`.
 
+## The first two calls, exactly
+
+The reference is `libhexagonrpc`'s `vfastrpc2` and Linux's `fastrpc_get_args`.
+For both calls `fastrpc_msg.client_id` is 0 (a kernel call); `tid` is ours;
+`ctx` is `ctxid | pd` (`pd = 2` for the sensors PD, so `0x102` for
+`ctxid = 1 << 8`); `addr` is the buffer's physical address; `size` is the
+payload rounded to a page.
+
+1. **Sensors PD attach** (`FASTRPC_IOCTL_INIT_ATTACH_SNS`): handle
+   `FASTRPC_INIT_HANDLE = 1`, `sc = 0x10000` (one input buffer). The single
+   input buffer is a `uint32_t client_id` (nonzero; `1`). The DSP maps that
+   client to the sensors PD.
+2. **`remotectl_open`**: handle `REMOTECTL_HANDLE = 0`,
+   `sc = 0x20200` (2 in buffers, 2 out buffers), from the definition
+   `in_nums=0, in_bufs=1, out_nums=2, out_bufs=1`. The four buffers, in order:
+   - scalar input buffer, 8 bytes: `[0]` = name length, `[1]` = error buffer
+     size (256);
+   - name input buffer, `strlen("adsp_default_listener") + 1`;
+   - output scalar buffer, 8 bytes: the DSP returns the handle and `dlret`;
+   - error output buffer, 256 bytes.
+   The buffer's metadata is `nscalars = 4`; each scalar has a
+   `fastrpc_remote_buf` (16 bytes), `fastrpc_invoke_buf` (8) and
+   `fastrpc_phy_page` (16), then `fdlist` (8 x 16) and `crc` (4 x 64) and a
+   u32; the whole metadata is aligned to 128, then the four buffers are laid
+   out inline, each aligned to 128. The `rpra[i].buf.pv` is the kernel virtual
+   address, `pages[i].addr` the physical address of the same page, and
+   `list[i].num = 1`, `pgidx = i`. The DSP writes the two output words into
+   the output scalar buffer.
+
+The next call after a successful open is
+`adsp_default_listener_register` (handle from the open, `sc = 0x100000`:
+`in_nums=0, in_bufs=0, out_nums=0, out_bufs=0`), then the reverse `apps_std`
+calls arrive from the DSP.
+
 ## Implementation plan
 
 1. **Channel and message probe** — add `fastrpcglink-apps-dsp` to the SLPI
