@@ -3442,6 +3442,8 @@ static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send th
 static uint32_t fastrpc_create;          /* boot-arg fastrpc_create: take the 8 MB remote heap and INIT_CREATE_STATIC */
 static uint32_t fastrpc_create_pd = 1;   /* the PD of the create call (Linux uses USER_PD) */
 static uint32_t fastrpc_heap_mb = 8;     /* boot-arg fastrpc_heap_mb: the remote heap size to try */
+static uint32_t fastrpc_heap_smem;       /* boot-arg fastrpc_heap_smem: take the heap from the shared memory */
+static uint32_t fastrpc_assign = 1;      /* boot-arg fastrpc_assign: hand the heap to the DSP with SCM */
 static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it after the listener is waiting */
 static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
@@ -4546,7 +4548,7 @@ fastrpc_first_calls(uint32_t stage)
 			bool heap_is_smem = false;
 			void *heap = NULL;
 
-			while (heap == NULL && heap_kb >= 16) {
+			while (!fastrpc_heap_smem && heap == NULL && heap_kb >= 16) {
 				heap = hakios_slpi_heap_alloc((size_t)heap_kb << 10, &heap_physical);
 				if (heap == NULL) {
 					heap_kb >>= 1;
@@ -4563,7 +4565,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (heap != NULL) {
 				printf("slpi: fastrpc: the %u KB heap is %p, physical %#llx%s\n", heap_kb, heap, heap_physical,
 				    heap_is_smem ? " (in the shared memory)" : "");
-				if (!heap_is_smem && !fastrpc_heap_assign(heap_physical, (uint64_t)heap_kb << 10)) {
+				if (!heap_is_smem && fastrpc_assign && !fastrpc_heap_assign(heap_physical, (uint64_t)heap_kb << 10)) {
 					printf("slpi: fastrpc: the heap is not assigned; the DSP may still reach it with the SMMU bypass\n");
 				}
 				fastrpc_create_static(heap_physical, (uint64_t)heap_kb << 10, physical, shared_offset, shared, packet);
@@ -5515,6 +5517,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_create", &fastrpc_create, sizeof(fastrpc_create));
 	PE_parse_boot_argn("fastrpc_create_pd", &fastrpc_create_pd, sizeof(fastrpc_create_pd));
 	PE_parse_boot_argn("fastrpc_heap_mb", &fastrpc_heap_mb, sizeof(fastrpc_heap_mb));
+	PE_parse_boot_argn("fastrpc_heap_smem", &fastrpc_heap_smem, sizeof(fastrpc_heap_smem));
+	PE_parse_boot_argn("fastrpc_assign", &fastrpc_assign, sizeof(fastrpc_assign));
 	PE_parse_boot_argn("fastrpc_open_after", &fastrpc_open_after, sizeof(fastrpc_open_after));
 	PE_parse_boot_argn("fastrpc_open_pd", &fastrpc_open_pd, sizeof(fastrpc_open_pd));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
