@@ -260,6 +260,28 @@ calls arrive from the DSP.
    `accel`/`registry` SUID lookup, configure the accelerometer, and expose the
    samples to `backboardd` through a HID sensor service.
 
+## The next probe: the remote heap
+
+The DSP's fastrpc kernel itself asserts `pages[0].phy_addr != 0` for a
+static PD (the string sits next to `fastrpc_kprocess` and
+`adsp_default_listener` in the firmware), which is exactly what
+`fastrpc_init_create_static` passes: a physically contiguous remote heap,
+assigned to the DSP's VMIDs (`qcom,adsp-remoteheap-vmid = <0x16 0x25>`,
+i.e. 22 and 37) with an SCM `assign_mem` call before the DSP may use it.
+The kernel already makes the SCM calls for PAS and can allocate such a
+buffer, so the next implementation is:
+
+1. allocate an 8 MB physically contiguous heap below 4 GB;
+2. assign it to VMIDs 22 and 37 with SCM (the descriptor goes through a
+   shared buffer, as `qcom_scm_assign_mem` does in mainline);
+3. send `FASTRPC_RMID_INIT_CREATE_STATIC` (method 8, `sc = 0x08030000`,
+   handle 1) with `{client_id, namelen, pageslen = 1}`, the module name
+   (`adsp_listener`), and `{heap address, heap size}`;
+4. if the DSP accepts it, init2/next2 on the handle it makes available.
+
+The 60 s hang of the module open and the assertion are consistent: the
+module PD cannot be created without a heap.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
