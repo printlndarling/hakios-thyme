@@ -4481,7 +4481,12 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	uint32_t lengths[4], size, handle;
 	const void *sources[4];
 
-	fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 1, "INIT_ATTACH_SNS (phone)");
+	if (fastrpc_pd == 0) {
+		/* the plain sscrpcd instance: attachguestos, i.e. the root PD (the phone runs one of each) */
+		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, 1, "INIT_ATTACH (guest OS, phone)");
+	} else {
+		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 1, "INIT_ATTACH_SNS (phone)");
+	}
 	memset(packet, 0, 4096);
 	lengths[0] = 0;
 	sources[0] = NULL;

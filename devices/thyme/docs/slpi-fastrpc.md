@@ -66,7 +66,7 @@ The bring-up's boot arguments:
 | `fastrpc_open_after=1` | send it after the listener is waiting |
 | `fastrpc_open_pd=N` | the PD of that open (unset: `fastrpc_pd`) |
 | `fastrpc_attach_mid=1` | guest attach, register, sensors attach, then the listener thread (the daemon order) |
-| `fastrpc_phone=1` | the phone daemon's order: sensors attach, `init2`, `next2` waiting on a thread id of its own, then open and register the default listener |
+| `fastrpc_phone=1` | the phone daemon's order: sensors attach (`fastrpc_pd=0`: the guest-OS attach of the plain `sscrpcd`), `init2`, `next2` waiting on a thread id of its own, then open and register the default listener |
 | `fastrpc_close=1` | close the default listener's control handle after registering (mainline does; the phone's daemon does not) |
 
 The handle `remotectl_open` returns is not the listener's own handle:
