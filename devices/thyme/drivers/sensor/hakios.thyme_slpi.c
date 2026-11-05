@@ -3401,7 +3401,7 @@ static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open t
 static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to wait for that module load */
 static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
 static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it after the listener is waiting */
-static uint32_t fastrpc_open_pd;         /* boot-arg fastrpc_open_pd: the PD of that open (0: fastrpc_pd) */
+static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
@@ -4398,7 +4398,7 @@ fastrpc_first_calls(uint32_t stage)
 		if (shared) {
 			fastrpc_smem_put(shared_offset, packet, size);
 		}
-		if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 2000,
+		if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
 		    "adsp_listener_init2") && stage >= 8) {
 			if (stage >= 9) {
 				fastrpc_listener_start();
@@ -4440,7 +4440,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			ready = fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 2000,
+			ready = fastrpc_call(1, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
 			    "adsp_default_listener_register");
 			if (ready) {
 				/* the reference closes the control handle after registering */
@@ -4463,7 +4463,7 @@ fastrpc_first_calls(uint32_t stage)
 		}
 		if (ready && fastrpc_static_open && fastrpc_open_async && !fastrpc_open_after) {
 			/* the module load may ask the AP for the library: let the listener serve that request */
-			fastrpc_module_open_send(fastrpc_open_pd != 0 ? fastrpc_open_pd : fastrpc_pd);
+			fastrpc_module_open_send(fastrpc_open_pd != 0xffffffff ? fastrpc_open_pd : fastrpc_pd);
 		} else if (ready && fastrpc_static_open) {
 			/* the static interface's handle is the module opened by name, not a fixed number */
 			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
@@ -4482,7 +4482,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 2000,
+			if (fastrpc_call(1, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
 			    "adsp_listener_init2") && stage >= 8) {
 				if (fastrpc_restart == 1) {
 					/*
@@ -4529,7 +4529,7 @@ fastrpc_first_calls(uint32_t stage)
 		}
 	if (fastrpc_static_open && fastrpc_open_async && fastrpc_open_after) {
 		/* the listener is waiting now: the module load's file requests can be served */
-		fastrpc_module_open_send(fastrpc_open_pd != 0 ? fastrpc_open_pd : fastrpc_pd);
+		fastrpc_module_open_send(fastrpc_open_pd != 0xffffffff ? fastrpc_open_pd : fastrpc_pd);
 	}
 	if (stage >= 11 && shared) {
 		static const char *const names[] = {

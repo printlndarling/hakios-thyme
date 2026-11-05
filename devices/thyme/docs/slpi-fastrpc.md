@@ -77,11 +77,19 @@ longer than the two seconds the other opens need.
 
 The guest-OS attach matters: `adsp_listener_init2` in PD 0 answers 0 only
 after `INIT_ATTACH` (PD 0) has been sent; without an attach the same call
-answers `0x80000434` (tested in `fastrpc_bare` mode). An outstanding
-`next2` then holds the DSP's FastRPC thread: an `INIT_ATTACH_SNS` (PD 2)
-sent afterwards is not answered, even with another client id and thread id
-(`fastrpc_attach_client`, `fastrpc_attach_tid`), which is the order the
-phone itself uses with two separate daemons and processes. The sensor process
+answers `0x80000434` (tested in `fastrpc_bare` mode). The listener PD's
+readiness varies between boots: `init2` sometimes answers within two
+seconds and sometimes not, so the register and init2 waits are now 5 s and
+10 s. An outstanding `next2` then holds the DSP's FastRPC thread: an
+`INIT_ATTACH_SNS` (PD 2) sent afterwards is not answered, even with another
+client id and thread id (`fastrpc_attach_client`, `fastrpc_attach_tid`),
+which is the order the phone itself uses with two separate daemons and
+processes.
+
+The listener's input buffer matters too: the daemon reserves 1 MB for the
+`next2` inputs, while a 256-byte buffer gets `0x80000434` or silence; the
+kernel now passes 2 KB (the output encoding is capped at 1 KB so the 4 KB
+SMEM packet still holds both). A 2 KB run still shows no nested call. The sensor process
 reads its registry once, when its PD starts, so two orderings are available
 as boot arguments: `fastrpc_attach_late=1` registers the listener and starts
 `next2` before the first attach, and `fastrpc_restart=1` releases the sensors
