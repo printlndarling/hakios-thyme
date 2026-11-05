@@ -3400,6 +3400,8 @@ static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static li
 static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
 static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to wait for that module load */
 static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
+static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it after the listener is waiting */
+static uint32_t fastrpc_open_pd;         /* boot-arg fastrpc_open_pd: the PD of that open (0: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
@@ -3407,8 +3409,8 @@ static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
 {
-	uint32_t sizes[4] = { 0, 0, 0, 256 }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
-	uint8_t nested[256];
+	uint8_t nested[2048];
+	uint32_t sizes[4] = { 0, 0, 0, sizeof(nested) }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
 	const void *sources[4];
 
 	lengths[0] = sizeof(sizes);
@@ -3459,7 +3461,7 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 #define FASTRPC_DIR_NAMES       96
 #define FASTRPC_DIR_NAME_LEN    96
 #define FASTRPC_FILE_LIMIT      (512 * 1024)
-#define FASTRPC_OUT_LIMIT       2048
+#define FASTRPC_OUT_LIMIT       1024
 
 #define AEE_EBADPARM            0x80000434u
 #define AEE_EFAILED             0x80004005u
@@ -4047,7 +4049,7 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 	uint8_t *returned = kalloc_data(4096, Z_WAITOK | Z_ZERO);
 	uint32_t offset = 0, physical, rctx = 0, result_code = 0xffffffff, returned_length = 0, calls = 0;
 	uint32_t sizes[4], numbers[4], lengths[4], size;
-	uint8_t nested[256];
+	uint8_t nested[2048];
 	const void *sources[4];
 
 	if (packet == NULL || reply == NULL || returned == NULL) {
@@ -4122,7 +4124,7 @@ fastrpc_listener_thread(__unused void *parameter, __unused wait_result_t result)
 			memset(out, 0, sizeof(out));
 			served = fastrpc_serve(numbers[1], numbers[2], nested,
 			    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count);
-			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 2300) : 0;
+			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 1024) : 0;
 			if (served != 0) {
 				printf("slpi: fastrpc: the call is answered with %#x\n", (uint32_t)served);
 			}
@@ -4229,6 +4231,39 @@ fastrpc_pd_call(uint32_t msg_client, uint32_t sc, uint32_t context, uint64_t phy
 		fastrpc_call_tid = saved;
 		return sent;
 	}
+}
+
+/* Send the module open without waiting: its file requests are for the listener to serve meanwhile. */
+static bool
+fastrpc_module_open_send(uint32_t pd)
+{
+	uint32_t offset = 0, lengths[4], size, scalar[2], handles[2] = { 0, 0 };
+	uint8_t error[256] = { 0 }, *staging = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+	uint8_t *slot = fastrpc_smem_item(ITEM_FASTRPC_OPEN, &offset);
+	const void *sources[4];
+	uint64_t physical = SMEM_PHYS + offset;
+	bool sent = false;
+
+	if (staging != NULL && slot != NULL) {
+		scalar[0] = (uint32_t)strlen("adsp_listener") + 1;
+		scalar[1] = (uint32_t)sizeof(error);
+		lengths[0] = 8;
+		sources[0] = scalar;
+		lengths[1] = scalar[0];
+		sources[1] = "adsp_listener";
+		lengths[2] = 8;
+		sources[2] = handles;
+		lengths[3] = (uint32_t)sizeof(error);
+		sources[3] = error;
+		size = fastrpc_build(staging, physical, physical, 4, lengths, sources);
+		fastrpc_smem_put(offset, staging, size);
+		sent = fastrpc_send_async(1, 0, 0x20200, 0x250 | pd, physical, size);
+		printf("slpi: fastrpc: the adsp_listener open is sent to PD %u; the listener can serve it while it waits\n", pd);
+	}
+	if (staging != NULL) {
+		kfree_data(staging, 4096);
+	}
+	return sent;
 }
 
 static void
@@ -4426,37 +4461,9 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_call(1, 0, 0x01010200, 0x310 | fastrpc_pd, physical, size, 2000, "remotectl_close");
 			}
 		}
-		if (ready && fastrpc_static_open && fastrpc_open_async) {
-			/*
-			 * The module load can ask the AP for the library through apps_std. Send the open and
-			 * go on to init2/next2, so the listener is waiting to serve that request while the
-			 * open is in flight; its answer arrives later and is logged as a late response.
-			 */
-			uint32_t offset = 0, lengths[4], size2, scalar[2], handles[2] = { 0, 0 };
-			uint8_t error[256] = { 0 }, *staging = kalloc_data(4096, Z_WAITOK | Z_ZERO);
-			uint8_t *slot = fastrpc_smem_item(ITEM_FASTRPC_OPEN, &offset);
-			const void *sources[4];
-			uint64_t open_physical = SMEM_PHYS + offset;
-
-			if (staging != NULL && slot != NULL) {
-				scalar[0] = (uint32_t)strlen("adsp_listener") + 1;
-				scalar[1] = (uint32_t)sizeof(error);
-				lengths[0] = 8;
-				sources[0] = scalar;
-				lengths[1] = scalar[0];
-				sources[1] = "adsp_listener";
-				lengths[2] = 8;
-				sources[2] = handles;
-				lengths[3] = (uint32_t)sizeof(error);
-				sources[3] = error;
-				size2 = fastrpc_build(staging, open_physical, open_physical, 4, lengths, sources);
-				fastrpc_smem_put(offset, staging, size2);
-				fastrpc_send_async(1, 0, 0x20200, 0x250 | fastrpc_pd, open_physical, size2);
-				printf("slpi: fastrpc: the adsp_listener open is sent; the listener can serve it while it waits\n");
-			}
-			if (staging != NULL) {
-				kfree_data(staging, 4096);
-			}
+		if (ready && fastrpc_static_open && fastrpc_open_async && !fastrpc_open_after) {
+			/* the module load may ask the AP for the library: let the listener serve that request */
+			fastrpc_module_open_send(fastrpc_open_pd != 0 ? fastrpc_open_pd : fastrpc_pd);
 		} else if (ready && fastrpc_static_open) {
 			/* the static interface's handle is the module opened by name, not a fixed number */
 			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
@@ -4520,6 +4527,10 @@ fastrpc_first_calls(uint32_t stage)
 				}
 			}
 		}
+	if (fastrpc_static_open && fastrpc_open_async && fastrpc_open_after) {
+		/* the listener is waiting now: the module load's file requests can be served */
+		fastrpc_module_open_send(fastrpc_open_pd != 0 ? fastrpc_open_pd : fastrpc_pd);
+	}
 	if (stage >= 11 && shared) {
 		static const char *const names[] = {
 			"adsp_default_listener", "apps_std", "listener", "apps_remotectl", "sns_default_listener", "nonexistent",
@@ -5306,6 +5317,8 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_static_open", &fastrpc_static_open, sizeof(fastrpc_static_open));
 	PE_parse_boot_argn("fastrpc_open_wait", &fastrpc_open_wait, sizeof(fastrpc_open_wait));
 	PE_parse_boot_argn("fastrpc_open_async", &fastrpc_open_async, sizeof(fastrpc_open_async));
+	PE_parse_boot_argn("fastrpc_open_after", &fastrpc_open_after, sizeof(fastrpc_open_after));
+	PE_parse_boot_argn("fastrpc_open_pd", &fastrpc_open_pd, sizeof(fastrpc_open_pd));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
