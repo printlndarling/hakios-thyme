@@ -3203,6 +3203,54 @@ fastrpc_input(const uint8_t *data, uint32_t length)
 	}
 }
 
+/* Read-only look at the apps SMMU for the SLPI's FastRPC stream (dt: sdsprpc-smd, iommus 0x541). */
+static void
+fastrpc_smmu_look(void)
+{
+	vm_offset_t smmu = ml_io_map(0x15000000, 0x100000);
+	uint32_t scr0, idr0, idr1, matches, contexts, page, pages, valid = 0, covering = 0;
+
+	if (smmu == 0) {
+		printf("slpi: fastrpc: the apps SMMU cannot be mapped\n");
+		return;
+	}
+	scr0 = rd(smmu + 0x000);
+	idr0 = rd(smmu + 0x020);
+	idr1 = rd(smmu + 0x024);
+	matches = idr0 & 0xff;
+	contexts = idr1 & 0xff;
+	page = idr1 >> 31 ? 0x10000 : 0x1000;
+	pages = 2u << (idr1 >> 28 & 7);
+	printf("slpi: fastrpc: apps SMMU %s; %u match registers, %u contexts, %#x-byte pages; unmatched streams %s\n",
+	    scr0 & 1 ? "OFF" : "on", matches, contexts, page, scr0 & 1u << 10 ? "fault" : "pass untranslated");
+	for (uint32_t n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+		uint32_t smr = rd(smmu + 0x800 + 4 * n), s2cr = rd(smmu + 0xc00 + 4 * n);
+		uint32_t wide = scr0 & 1u << 3, stream = smr & (wide ? 0xffff : 0x7fff);
+		uint32_t mask = (smr >> 16) & (wide ? 0xffff : 0x7fff);
+
+		if (!(wide ? s2cr & 1u << 10 : smr >> 31)) {
+			continue;
+		}
+		valid++;
+		if (((stream ^ 0x541) & ~mask) != 0) {
+			continue;
+		}
+		covering++;
+		printf("slpi: fastrpc: SMR %u covers 0x541: stream %#x mask %#x, s2cr %#x, kind %u context %u\n", n, stream, mask,
+		    s2cr, (s2cr >> 16) & 3, s2cr & 0xff);
+		{
+			uint32_t context = s2cr & 0xff;
+			vm_offset_t cb = smmu + (pages + context) * page;
+
+			printf("slpi: fastrpc: context %u: cbar %#x cba2r %#x sctlr %#x ttbr0 %#x fsr %#x far %#x\n", context,
+			    rd(smmu + page + 4 * context), rd(smmu + page + 0x800 + 4 * context), rd(cb + 0x00), rd(cb + 0x20),
+			    rd(cb + 0x58), rd(cb + 0x60));
+		}
+	}
+	printf("slpi: fastrpc: %u of %u SMRs are in use; %u cover the SLPI's 0x541%s\n", valid, matches, covering,
+	    covering ? "" : " (the boot chain set nothing up for it)");
+}
+
 /* ---- APR: the sensor services' protocol, on the channel apr_audio_svc ------------------------------------- */
 
 /*
@@ -3830,9 +3878,10 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
-	uint32_t sns_on = 0;
+	uint32_t sns_on = 0, fastrpc_smmu = 0;
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
+	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
@@ -3850,6 +3899,9 @@ step_qrtr(void)
 	printf("slpi: %u: after %u s: %s; the DSP is node %u and has told of %u services; it looked for %u of ours; QRTR received %u "
 	    "and sent %u datagrams\n", step, listen_seconds, qrtr_hellos ? "HELLO BOTH WAYS" : "NO HELLO FROM THE DSP", qrtr_peer,
 	    services, qrtr_lookups, qrtr_in, qrtr_out);
+	if (fastrpc_smmu) {
+		fastrpc_smmu_look();
+	}
 	if (sns_on) {
 		sns_start();
 	}

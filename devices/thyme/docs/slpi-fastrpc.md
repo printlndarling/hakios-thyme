@@ -22,6 +22,11 @@ claim that any of it is done.
   both ways from our side too (ours 4, the DSP's 2) and its intents are
   offered; the DSP sends no FastRPC message until the AP registers a listener
   (`logs/152916-run.log`).
+- The apps SMMU is on with 87 match registers and 74 contexts; unmatched
+  streams **fault**, and no match register covers the SLPI stream `0x541`
+  (`logs/160408-run.log`). The AP has to add an SMR/S2CR for it: bypass for a
+  first bring-up, or a translated context built with the Wi-Fi page-table
+  code.
 
 ## The AP-side FastRPC contract
 
