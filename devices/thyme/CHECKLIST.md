@@ -706,6 +706,18 @@ Evidence:
 | NFC | TODO | not ported |
 | Fingerprint | TODO | not ported and no secure unlock design exists |
 
+### Sensor core finding (2026-11-05)
+
+The decompiled THYME device tree has no accelerometer, light or proximity
+node on the AP's I2C buses. The sensors are behind the SLPI core
+(`qcom,ssc@5c00000`, `qcom,msm-ssc-sensors`, firmware-name `slpi`), reached
+over QRTR/GLINK. The stock Android partition exposes `slpi.b00` to `slpi.b18`
+at `/vendor/firmware_mnt/image` (readable as root), so the next step is an
+SLPI loader in the kernel and the SNS client path; the current kernel has no
+SLPI support (no `slpi` or `ssc` reference in `drivers/`). The ALS,
+accelerometer and proximity rows stay FAIL until that path is up and a HID
+sensor service is exposed to backboardd.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
