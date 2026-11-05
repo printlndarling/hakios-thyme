@@ -94,6 +94,16 @@ The listener's input buffer matters too: the daemon reserves 1 MB for the
 kernel now passes 2 KB (the output encoding is capped at 1 KB so the 4 KB
 SMEM packet still holds both). A 2 KB run still shows no nested call.
 
+The middle order is the first one where the sensor process does **not**
+watchdog: guest-OS attach, register the default listener in PD 0, attach the
+sensors PD, then init2 and `next2`. The sensor process's first file request
+is therefore accepted by the registered listener; what is missing is the
+fetch: `adsp_listener_next2` on the fixed handle 3 never returns it, so the
+request stays in the listener PD. That is the same module the 60 s open
+cannot load, and the firmware's `pages[0].phy_addr != 0` assertion next to
+`fastrpc_kprocess`/`adsp_default_listener` points at the remote heap the
+kernel has never provided.
+
 The SM8250 SLPI libraries that do live on the AP side are in the
 linux-msm/hexagon-dsp-binaries tree (`sm8250/Thundercomm/RB5/...`): the
 user-PD shell `fastrpc_shell_2`, `libsns_direct_channel_skel.so` and the
