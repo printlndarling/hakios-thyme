@@ -465,6 +465,15 @@ TE that may not be routed at all (pin 66 reads 0). Reading the PP block is the
 way to see the count and what TE it waits for. Sending the vendor's `b5 84`
 after `2f`/`26` changes nothing either (119 a second, `logs/025552-run.log`):
 the switch is accepted but does not move the push.
+
+A 32-minute soak on the 60 Hz default (`logs/035725-run.log`, 2026-11-06)
+passed: no panic or watchdog reset; a steady 20 frames a second idle with
+every swap on a beat and none dropped; the GPU at 631-635 us a submission,
+98 MB of buffers kept and none made; the hottest core 70.5 C with the rows
+unchanged (no throttle); an ordered teardown (ADSP stopped, TrustZone shut
+it down). The `backboardd Corpse allowed`/`EXC_CORPSE_NOTIFY` lines at
++1919 s are the known teardown artifact after the GPU is given back, as in
+the previous official soak, not a runtime restart.
 (the pane still initialising). The user confirmed on the physical phone that
 the full-sequence UI is smooth with no dropped frames. The panel's TE rate is
 inferred from this user-visible result; the INTF TE block is still unsafe
