@@ -3441,6 +3441,7 @@ static uint32_t fastrpc_open_wait = 20000; /* boot-arg fastrpc_open_wait: ms to 
 static uint32_t fastrpc_open_async;      /* boot-arg fastrpc_open_async: send the open, let the listener serve it */
 static uint32_t fastrpc_create;          /* boot-arg fastrpc_create: take the 8 MB remote heap and INIT_CREATE_STATIC */
 static uint32_t fastrpc_create_pd = 1;   /* the PD of the create call (Linux uses USER_PD) */
+static uint32_t fastrpc_heap_mb = 8;     /* boot-arg fastrpc_heap_mb: the remote heap size to try */
 static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it after the listener is waiting */
 static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
@@ -4515,24 +4516,32 @@ fastrpc_first_calls(uint32_t stage)
 		}
 		if (fastrpc_create) {
 			uint64_t heap_physical = 0;
-			void *heap = hakios_slpi_heap_alloc(FASTRPC_HEAP_SIZE, &heap_physical);
+			uint32_t heap_mb = fastrpc_heap_mb != 0 ? fastrpc_heap_mb : 8;
+			void *heap = NULL;
 
+			while (heap == NULL && heap_mb >= 1) {
+				heap = hakios_slpi_heap_alloc((size_t)heap_mb << 20, &heap_physical);
+				if (heap == NULL) {
+					heap_mb >>= 1;
+				}
+			}
 			if (heap != NULL) {
-				printf("slpi: fastrpc: the 8 MB heap is %p, physical %#llx\n", heap, heap_physical);
-				if (fastrpc_heap_assign(heap_physical, FASTRPC_HEAP_SIZE)) {
-					fastrpc_create_static(heap_physical, FASTRPC_HEAP_SIZE, physical, shared_offset, shared, packet);
-					{
-						uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply,
-						    20000);
+				printf("slpi: fastrpc: the %u MB heap is %p, physical %#llx\n", heap_mb, heap, heap_physical);
+				if (!fastrpc_heap_assign(heap_physical, (uint64_t)heap_mb << 20)) {
+					printf("slpi: fastrpc: the heap is not assigned; the DSP may still reach it with the SMMU bypass\n");
+				}
+				fastrpc_create_static(heap_physical, (uint64_t)heap_mb << 20, physical, shared_offset, shared, packet);
+				{
+					uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply,
+					    20000);
 
-						if (opened != 0) {
-							fastrpc_service = opened;
-							printf("slpi: fastrpc: the adsp_listener service handle is %u\n", fastrpc_service);
-						}
+					if (opened != 0) {
+						fastrpc_service = opened;
+						printf("slpi: fastrpc: the adsp_listener service handle is %u\n", fastrpc_service);
 					}
 				}
 			} else {
-				printf("slpi: fastrpc: no 8 MB physically contiguous heap\n");
+				printf("slpi: fastrpc: no physically contiguous heap at all\n");
 			}
 		} else if (fastrpc_static_open) {
 			uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply, fastrpc_open_wait);
@@ -5469,6 +5478,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_open_async", &fastrpc_open_async, sizeof(fastrpc_open_async));
 	PE_parse_boot_argn("fastrpc_create", &fastrpc_create, sizeof(fastrpc_create));
 	PE_parse_boot_argn("fastrpc_create_pd", &fastrpc_create_pd, sizeof(fastrpc_create_pd));
+	PE_parse_boot_argn("fastrpc_heap_mb", &fastrpc_heap_mb, sizeof(fastrpc_heap_mb));
 	PE_parse_boot_argn("fastrpc_open_after", &fastrpc_open_after, sizeof(fastrpc_open_after));
 	PE_parse_boot_argn("fastrpc_open_pd", &fastrpc_open_pd, sizeof(fastrpc_open_pd));
 	PE_parse_boot_argn("fastrpc_attach_client", &fastrpc_attach_client, sizeof(fastrpc_attach_client));
