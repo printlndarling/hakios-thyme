@@ -99,5 +99,6 @@ The pieces that matter here:
 | `logs/131207-run.log` | SLPI firmware, TrustZone, GLINK, QRTR services |
 | `logs/140238-run.log` | SNS client QMI result 0, silent SUID lookups, watchdog |
 | `logs/141201-run.log` | Legacy AP SNS_REG service probe: no group requests |
+| `logs/152916-run.log` | `fastrpcglink-apps-dsp` open both ways; no DSP FastRPC message before listener registration |
 | `devices/thyme/drivers/sensor/hakios.thyme_slpi.c` | the loader, GLINK/QRTR and SNS client |
 | `devices/thyme/CHECKLIST.md` | the hardware checklist and current blockers |
