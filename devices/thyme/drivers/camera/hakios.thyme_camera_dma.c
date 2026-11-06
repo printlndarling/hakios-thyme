@@ -35,6 +35,8 @@ static struct {
 	uint32_t old_smrs[2], old_s2crs[2];
 	uint32_t old_smr, old_s2cr, old_cbar, old_cba2r, old_cb[9];
 	bool mapped, running, context_changed;
+	uint64_t frame_bytes;   /* one frame; the buffer holds two, the WM's ping-pong */
+	unsigned bank;          /* which of them the WM was last given */
 } ud;
 static const unsigned ud_cbregs[9] = {0,0x10,0x20,0x24,0x28,0x2c,0x30,0x38,0x3c};
 struct ud_header {
@@ -276,7 +278,10 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	if(!width||!height||!stride||lanes<1||lanes>4)return EINVAL;
 	uint64_t bytes=(uint64_t)stride*height;
 	if(bytes>32ull<<20)return EINVAL;
-	vm_size_t need=round_page(4096+(vm_size_t)bytes);
+	/* Two frames: the WM takes one buffer address per frame, so the ring
+	 * alternates between two so that each read can start the next frame.
+	 */
+	vm_size_t need=round_page(4096+(vm_size_t)bytes*2);
 	if(ud.memory){
 		if(ud.size<need)return ENOMEM; /* a reserved buffer that is too small */
 	}else if(kmem_alloc_contig(kernel_map,&ud.memory,need,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
@@ -285,7 +290,8 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	memcpy(h->magic,"RWCAM001",8);h->width=width;h->height=height;h->stride=stride;
 	h->format=1;h->bayer=bayer;h->frame_bytes=(uint32_t)bytes;h->source=1;
 	strlcpy(h->sensor,sensor,sizeof(h->sensor));
-	memset((void *)(ud.memory+4096),0xa5,(vm_size_t)bytes);dcache(ud.memory,ud.size);
+	memset((void *)(ud.memory+4096),0xa5,(vm_size_t)bytes*2);dcache(ud.memory,ud.size);
+	ud.frame_bytes=bytes;ud.bank=0;
 	lck_mtx_lock(&hakios_smmu_lock);int error=dmap();lck_mtx_unlock(&hakios_smmu_lock);
 	if(error){umi_camera_dma_quiesce(false);return error;}
 	ud.running=true;
@@ -336,6 +342,17 @@ umi_camera_stream_rearm(void)
 	dw(ud.ife,0x1c08,(uint32_t)(UD_IOVA+4096));
 }
 
+/* The next frame goes to the other bank; the caller reads the one that was
+ * armed before, whose frame the WM has written by now.
+ */
+void
+umi_camera_stream_advance(void)
+{
+	if(!ud.memory||!ud.running||!ud.frame_bytes)return;
+	ud.bank^=1;
+	dw(ud.ife,0x1c04,(uint32_t)(UD_IOVA+4096+ud.bank*ud.frame_bytes));
+}
+
 /* The buffer's current level (8-bit bytes, every 8th): what the sensor is
  * exposing now, for the mid-stream exposure test.
  */
@@ -347,7 +364,7 @@ umi_camera_stream_mean(void)
 	uint32_t n=h->frame_bytes;
 	if(!n)return 0;
 	dcache(ud.memory,ud.size);
-	const uint8_t *f=(const uint8_t *)(ud.memory+4096);
+	const uint8_t *f=(const uint8_t *)(ud.memory+4096+ud.bank*ud.frame_bytes);
 	uint64_t sum=0;uint32_t count=0;
 	for(uint32_t i=0;i<n;i+=8){sum+=f[i];count++;}
 	return count?(uint32_t)(sum/count):0;
@@ -369,12 +386,12 @@ umi_camera_stream_stop(void)
 	struct ud_header *h=(struct ud_header *)ud.memory;
 	bool faulted=(dr(ud.cb,0x58)&UD_FSR_FAULT)!=0;
 	umi_camera_dma_quiesce(false);dcache(ud.memory,ud.size);
-	const uint8_t *frame=(const uint8_t *)(ud.memory+4096);
+	const uint8_t *frame=(const uint8_t *)(ud.memory+4096+ud.bank*ud.frame_bytes);
 	uint32_t bytes=h->frame_bytes;
 	bool changed=false,varied=false;
 	for(uint32_t i=0;i<bytes;i++){changed|=frame[i]!=0xa5;varied|=frame[i]!=frame[0];}
 	bool guards=!memcmp(h->magic,"RWCAM001",8)&&h->width&&h->height&&h->stride;
-	for(vm_offset_t p=4096+bytes;p<ud.size;p++)guards&=((const uint8_t *)ud.memory)[p]==0;
+	for(vm_offset_t p=4096+(vm_offset_t)bytes*2;p<ud.size;p++)guards&=((const uint8_t *)ud.memory)[p]==0;
 	unsigned frames=changed&&varied&&guards&&!faulted?1:0;
 	h->frames=frames;
 	hakios_tl("UMI camera stream: buffer guards=%u fault=%u changed=%u varied=%u frames=%u first=%02x %02x %02x %02x\n",
@@ -387,8 +404,8 @@ umi_camera_stream_stop(void)
 /* A centre crop of the frame in the retained buffer, RAW10 packed, as the
  * session's own ring expects it; the crop offsets stay on the Bayer phase.
  */
-int
-umi_camera_stream_copy(void *dst,unsigned width,unsigned height)
+static int
+copy_bank(void *dst,unsigned width,unsigned height,unsigned bank)
 {
 	if(!ud.memory||!ud.running)return ENODEV;
 	struct ud_header *h=(struct ud_header *)ud.memory;
@@ -396,11 +413,32 @@ umi_camera_stream_copy(void *dst,unsigned width,unsigned height)
 	unsigned x0=((h->width-width)/2)&~3u,y0=((h->height-height)/2)&~1u;
 	unsigned dstride=(width*10/8+15)&~15u;
 	dcache(ud.memory,ud.size);
-	const uint8_t *src=(const uint8_t *)(ud.memory+4096)+(uint64_t)y0*h->stride+x0/4*5;
+	const uint8_t *src=(const uint8_t *)(ud.memory+4096+bank*ud.frame_bytes)+(uint64_t)y0*h->stride+x0/4*5;
 	uint8_t *out=(uint8_t *)dst;
 	for(unsigned y=0;y<height;y++)
 		memcpy(out+(uint64_t)y*dstride,src+(uint64_t)y*h->stride,width/4*5);
 	return 0;
+}
+
+int
+umi_camera_stream_copy(void *dst,unsigned width,unsigned height)
+{
+	return copy_bank(dst,width,height,ud.bank);
+}
+
+/* The frame for one read: the WM is sent to the other bank (it is writing the
+ * one the last read armed), a sensor frame is allowed to finish, and that
+ * earlier bank -- where the frame now is whole -- is copied out.
+ */
+int
+umi_camera_stream_grab(void *dst,unsigned width,unsigned height)
+{
+	if(!ud.memory||!ud.running)return ENODEV;
+	unsigned old=ud.bank;
+
+	umi_camera_stream_advance();
+	delay_for_interval(40,NSEC_PER_MSEC);
+	return copy_bank(dst,width,height,old);
 }
 
 /* Take the frame buffer while the system's memory is still in large pieces:
@@ -413,7 +451,7 @@ umi_camera_dma_reserve(unsigned width,unsigned height)
 	if(ud.memory)return 0;
 	if(!width||!height)return EINVAL;
 	unsigned stride=(width*10/8+15)&~15u;
-	vm_size_t size=round_page(4096+(vm_size_t)stride*height);
+	vm_size_t size=round_page(4096+(vm_size_t)stride*height*2);
 	if(kmem_alloc_contig(kernel_map,&ud.memory,size,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS){
 		ud.memory=0;
 		return ENOMEM;

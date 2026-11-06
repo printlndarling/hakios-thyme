@@ -444,6 +444,9 @@ struct stream {
 	CFDictionaryRef metadata;       /* the last frame's (frame_metadata()), for a buffer that has none of its own */
 	pthread_mutex_t metadata_lock;  /* (not `lock': AddAttachmentsToSampleBuffer may come while a frame is given out) */
 	unsigned        stills_wanted;  /* photographs asked for by StillImageCaptureNow, not yet given */
+	unsigned        flash_mode;     /* FlashMode: 0 off, 1 on, 2 automatic */
+	bool            flash_fired;    /* the torch is on for the photograph being given */
+	float           last_lux;       /* the last frame's lux index, for the automatic flash */
 	int             format_index;
 	double          min_fps, max_fps;
 	float           zoom;           /* ZoomFactor: the picture is the middle 1/zoom of the sensor each way */
@@ -570,8 +573,10 @@ stream_copy_property(CMBaseObjectRef o, CFStringRef key, CFAllocatorRef allocato
 		CFRelease(srgb);
 	} else if (key_is(key, "ColorSpace") || key_is(key, "DeviceOrientation") || key_is(key, "FlashMode")) {
 		value = number_i(0);
-	} else if (key_is(key, "HasAutoFocusPositionSensor") || key_is(key, "HighCurrentTorchEnabled") ||
-	    key_is(key, "DeferAdditionOfAttachments")) {
+	} else if (key_is(key, "HasAutoFocusPositionSensor")) {
+		/* the wide camera's lens motor (DW9800 at 0x0c); the front's is fixed */
+		value = CFRetain(s->camera->sensor == 1 ? kCFBooleanTrue : kCFBooleanFalse);
+	} else if (key_is(key, "HighCurrentTorchEnabled") || key_is(key, "DeferAdditionOfAttachments")) {
 		value = CFRetain(kCFBooleanFalse);
 	} else {
 		say_once("stream: no answer for", key, NULL);
@@ -740,6 +745,17 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 		 */
 		pthread_mutex_lock(&s->lock);
 		s->stills_wanted++;
+		/* The flash: on when asked for, automatic in a dark scene. The torch
+		 * lights the frames the photograph is taken from (the sensor's next
+		 * frame, a frame time away); it goes out once the still is given.
+		 */
+		if (s->flash_mode == 1 || (s->flash_mode == 2 && s->last_lux < 300)) {
+			s->flash_fired = true;
+			pthread_mutex_unlock(&s->lock);
+			torch_set(s, number_i(1000));
+			say("stream: the flash on for the photograph");
+			return 0;
+		}
 		pthread_mutex_unlock(&s->lock);
 		say_once("stream: a photograph asked for", key, value);
 		return 0;
@@ -755,6 +771,16 @@ stream_set_property(CMBaseObjectRef o, CFStringRef key, CFTypeRef value)
 	}
 	if (key_is(key, "TorchLevel")) {
 		torch_set(s, value);
+		return 0;
+	}
+	if (key_is(key, "FlashMode")) {
+		int64_t mode = 0;
+
+		if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+			CFNumberGetValue(value, kCFNumberSInt64Type, &mode);
+		}
+		s->flash_mode = (unsigned)(mode < 0 ? 0 : mode > 2 ? 2 : mode);
+		say("stream: flash mode %u", s->flash_mode);
 		return 0;
 	}
 	if (key_is(key, "AutoFocusNow") || key_is(key, "ContinuousAutoFocusNow") || key_is(key, "FocusNow") ||
@@ -1379,6 +1405,7 @@ worker(void *context)
 		 * picks changes what the white balance sees, and the colour matrix makes every swing of it plain.
 		 */
 		lux = lux < 0 ? lux_index(&isp, f) : lux * 0.9f + lux_index(&isp, f) * 0.1f;
+		s->last_lux = (float)lux;
 		cct = cct < 0 ? colour_temperature(&isp) : cct * 0.97f + colour_temperature(&isp) * 0.03f;
 		isp_tune(&isp, lux, cct);
 		isp.zoom = s->zoom;
@@ -1434,6 +1461,11 @@ worker(void *context)
 			if (still) {
 				s->stills_wanted--;
 				say("the photograph is given (%llu so far)", (unsigned long long)++s->stills_given);
+				if (s->flash_fired) {
+					s->flash_fired = false;
+					torch_set(s, number_i(0));
+					say("stream: the flash out again");
+				}
 			}
 		}
 		pthread_mutex_unlock(&s->lock);

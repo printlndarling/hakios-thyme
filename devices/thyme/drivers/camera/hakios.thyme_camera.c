@@ -103,6 +103,8 @@ extern void loader_log_putc(char c);
 extern void umi_camera_ios_prepare(void);
 extern int umi_camera_ios_start(unsigned, unsigned);
 extern void umi_camera_ios_set_sensor(unsigned);
+extern void umi_camera_ios_set_focus(unsigned);
+extern void umi_camera_ios_set_start_exposure(unsigned, unsigned);
 extern int umi_camera_ios_grab(void *, unsigned, unsigned);
 extern void umi_camera_ios_set_exposure(unsigned, unsigned);
 extern void umi_camera_ios_stop(void);
@@ -3797,6 +3799,10 @@ fake_session(void)
 	ios_last_read = ios_ms();
 	lck_mtx_unlock(&ios_lock);
 	if (real_source) {
+		/* the first exposure before the stream starts (the front sensor takes
+		 * it only then); the AE's later changes go the mid-stream way
+		 */
+		umi_camera_ios_set_start_exposure(lines, gain);
 		int error = umi_camera_ios_start(ios_mode->width, ios_mode->height);
 		if (error) {
 			say("camera: the S5KHMX did not start for iOS (error %d)\n", error);
@@ -3833,6 +3839,10 @@ fake_session(void)
 			ios_now.lines = lines;
 			ios_now.gain = gain;
 			ios_now.frame_lines = frame_lines;
+		}
+		if (ios_ask.focus_pending) {
+			ios_ask.focus_pending = false;
+			umi_camera_ios_set_focus(ios_ask.focus);
 		}
 		for (int i = 0; i < RING; i++) {
 			if (place[i].state != PLACE_READING && (p < 0 || place[i].sequence < place[p].sequence)) {

@@ -362,8 +362,17 @@ isp_awb(struct isp *isp, const struct isp_stats *s)
 	}
 	r = r < 0.5f ? 0.5f : r > 4 ? 4 : r;
 	b = b < 0.5f ? 0.5f : b > 4 ? 4 : b;
-	isp->wb[0] = isp->wb[0] * 0.9f + r * 0.1f;
-	isp->wb[2] = isp->wb[2] * 0.9f + b * 0.1f;
+	/* A session's first frames settle quickly (a green cast that lasted
+	 * seconds), the rest a little of the way at a time so a passing colour
+	 * does not pull the white point.
+	 */
+	float w = isp->wb_frames < 8 ? 0.35f : 0.1f;
+
+	isp->wb[0] = isp->wb[0] * (1 - w) + r * w;
+	isp->wb[2] = isp->wb[2] * (1 - w) + b * w;
+	if (isp->wb_frames < 1000) {
+		isp->wb_frames++;
+	}
 }
 
 /* the part of the sensor's cells the picture shows: its middle, in the picture's proportions, 1/zoom of it each way */

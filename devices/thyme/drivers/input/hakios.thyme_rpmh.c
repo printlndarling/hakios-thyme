@@ -387,8 +387,9 @@ umi_rpmh_camera_vreg(unsigned rail, bool enable)
 	static const struct { const char *resource; unsigned mv; } rails[] = {
 		{ "ldof6", 2850 }, { "ldof7", 1800 }, { "ldof1", 1104 },
 		{ "ldof4", 1104 },      /* the front S5K3T2's VDIG (pm8009_l4) */
+		{ "ldoc9", 2800 },      /* the wide camera's lens motor (VAF, PM8350C L9) */
 	};
-	static bool owned[4];
+	static bool owned[5];
 	if (rail >= sizeof(rails) / sizeof(rails[0])) return EINVAL;
 	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) return EBUSY;
 	int error = 0;

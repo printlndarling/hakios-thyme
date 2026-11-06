@@ -31,7 +31,9 @@ extern void umi_camera_stream_report(const char *);
 extern int umi_camera_stream_stop(void);
 extern uint32_t umi_camera_stream_mean(void);
 extern void umi_camera_stream_rearm(void);
+extern void umi_camera_stream_advance(void);
 extern int umi_camera_stream_copy(void *, unsigned, unsigned);
+extern int umi_camera_stream_grab(void *, unsigned, unsigned);
 extern int umi_camera_dma_reserve(unsigned, unsigned);
 extern void umi_camera_dma_quiesce(bool);
 extern const uint8_t *hakios_wifi_file(const char *, uint64_t *);
@@ -55,6 +57,10 @@ static struct {
  */
 static unsigned uios_force_mode;
 static bool uios_on, uc_keep;
+/* The exposure a session starts with (the capture stack's first request): the
+ * S5K3T2 ignores exposure writes once it streams, so it is set before 0x0100.
+ */
+static uint32_t ustart_lines, ustart_gain;
 /* cam_sensor=front: the S5K3T2 on CSIPHY 4 (DT cam-sensor@2) instead of the
  * S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
  * order and slave address.
@@ -337,6 +343,28 @@ static uint32_t
 utab_u32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+/* The wide camera's lens motor: a DW9800 on the sensor's I2C at 0x0c (the
+ * module file's actuatorDriver), 8-bit registers, its ten-bit position in 0x03
+ * and 0x04 within one transfer. The front camera's lens is fixed.
+ */
+static bool
+uvcm_write(uint8_t reg, uint8_t value)
+{
+	bool ok = ustart() && uput(0x0c) && uput(reg) && uput(value);
+
+	ustop();
+	return ok;
+}
+
+static bool
+uvcm_position(uint32_t position)
+{
+	bool ok = ustart() && uput(0x0c) && uput(0x03) && uput((position >> 8) & 3) && uput(position & 0xff);
+
+	ustop();
+	return ok;
 }
 
 static bool
@@ -980,12 +1008,29 @@ static void
 uset_exposure(uint32_t shutter, uint32_t gain)
 {
 	/* SMIA exposure inside the sensor's group hold: coarse integration in
-	 * lines (0x0202) and the analog gain code (0x0204, 32 is 1x).
+	 * lines (0x0202) and the analog gain code (0x0204, 32 is 1x). The hold is
+	 * bit 0 of 0x0104 on the S5KHMX (the module file's 0x0100, bit 8, registers
+	 * the values but the sensor keeps exposing with the old ones: the frame
+	 * level stayed put across a 60 -> 1000 line change, with bit 0 it goes
+	 * 29 -> 41 in the dark). The S5K3T2's front module specifies 0x0100.
 	 */
-	(void)usensor_write(0x0104, 0x0100);
-	if (shutter) (void)usensor_write(0x0202, (uint16_t)shutter);
-	if (gain) (void)usensor_write(0x0204, (uint16_t)gain);
-	(void)usensor_write(0x0104, 0x0000);
+	/* The sensor may be busy with a frame; a refused transfer is retried. */
+	bool ok = false;
+
+	for (unsigned tries = 0; tries < 3 && !ok; tries++) {
+		ok = usensor_write(0x0104, ufront ? 0x0100 : 0x0001);
+		ums(1);
+		ok = ok && (!shutter || usensor_write(0x0202, (uint16_t)shutter));
+		ok = ok && (!gain || usensor_write(0x0204, (uint16_t)gain));
+		ums(1);
+		ok = ok && usensor_write(0x0104, 0x0000);
+		if (!ok) {
+			ums(2);
+		}
+	}
+	if (!ok) {
+		hakios_tl("UMI camera: exposure %u lines, gain %#x not taken (3 tries)\n", shutter, gain);
+	}
 }
 
 /* The cameras up and armed, the sensor set and streaming: what a session keeps. */
@@ -1029,6 +1074,11 @@ ustream_begin(void)
 		if (usensor_read(0x0202, &readback)) hakios_tl("UMI camera: exposure register 0x0202=%#x\n", readback);
 		if (usensor_read(0x0204, &readback)) hakios_tl("UMI camera: gain register 0x0204=%#x\n", readback);
 	}
+	if (ustart_lines || ustart_gain) {
+		/* before the stream starts: the front sensor takes it only then */
+		uset_exposure(ustart_lines, ustart_gain);
+		ustart_lines = ustart_gain = 0;
+	}
 	if (!usensor_write(0x0100, 0x0100)) hakios_tl("UMI camera: stream-on write was not acknowledged\n");
 	uint16_t stream_state = 0;
 	if (usensor_read(0x0100, &stream_state))
@@ -1070,28 +1120,28 @@ ucapture(void)
 		(void)PE_parse_boot_argn("cam_shutter2", &shutter2, sizeof(shutter2));
 		(void)PE_parse_boot_argn("cam_gain2", &gain2, sizeof(gain2));
 		if (done && (shutter2 || gain2)) {
-			hakios_tl("UMI camera: IFE before re-arm: bus=%#x rdi=%#x addr0=%#x addr1=%#x r30=%#x r34=%#x r38=%#x r3c=%#x\n",
-			    ur(isp_ife, 0x1a28), ur(isp_ife, 0x1c00), ur(isp_ife, 0x1c04), ur(isp_ife, 0x1c08),
-			    ur(isp_ife, 0x1c30), ur(isp_ife, 0x1c34), ur(isp_ife, 0x1c38), ur(isp_ife, 0x1c3c));
-			umi_camera_stream_rearm();
-			ums(20);
-			hakios_tl("UMI camera: IFE after re-arm: bus=%#x rdi=%#x addr0=%#x addr1=%#x r30=%#x r34=%#x r38=%#x r3c=%#x\n",
-			    ur(isp_ife, 0x1a28), ur(isp_ife, 0x1c00), ur(isp_ife, 0x1c04), ur(isp_ife, 0x1c08),
-			    ur(isp_ife, 0x1c30), ur(isp_ife, 0x1c34), ur(isp_ife, 0x1c38), ur(isp_ife, 0x1c3c));
-			uint32_t live0 = umi_camera_stream_mean();
+			/* Bank 0 holds the stream's first frame; advance arms bank 1 for
+			 * the next one (0xa5 = 165 if the WM did not write it), then the
+			 * exposure changes and bank 0 is armed again.
+			 */
+			uint32_t bank0 = umi_camera_stream_mean();
 
+			umi_camera_stream_advance();
 			ums(100);
-			uint32_t live1 = umi_camera_stream_mean();
-			uset_exposure(shutter2, gain2);
+			uint32_t bank1 = umi_camera_stream_mean();
+			/* the hold at bit 0 rather than the module's bit 8 */
+			(void)usensor_write(0x0104, 0x0001);
+			(void)usensor_write(0x0202, (uint16_t)shutter2);
+			(void)usensor_write(0x0204, (uint16_t)gain2);
+			(void)usensor_write(0x0104, 0x0000);
 			uint16_t rb = 0;
 			if (usensor_read(0x0202, &rb)) hakios_tl("UMI camera: mid-stream exposure register reads %#x\n", rb);
 			if (usensor_read(0x0204, &rb)) hakios_tl("UMI camera: mid-stream gain register reads %#x\n", rb);
-			ums(100);
-			uint32_t after = umi_camera_stream_mean();
-			ums(100);
-			uint32_t later = umi_camera_stream_mean();
-			hakios_tl("UMI camera: mid-stream %u lines, gain %#x: frame mean %u, %u (live); after %u -> %u\n",
-			    shutter2, gain2, live0, live1, after, later);
+			umi_camera_stream_advance();
+			ums(120);
+			uint32_t again = umi_camera_stream_mean();
+			hakios_tl("UMI camera: banks %u (first), %u (next), %u (after %u lines, gain %#x)\n",
+			    bank0, bank1, again, shutter2, gain2);
 		}
 		umi_camera_stream_report(done ? "after the first frame" : "without a frame");
 	}
@@ -1111,6 +1161,13 @@ static void ucleanup(void);
  * dropped and the mode table is re-read by uprobe().
  */
 static bool unext_front, unext_pending;
+
+void
+umi_camera_ios_set_start_exposure(unsigned lines, unsigned gain)
+{
+	ustart_lines = lines;
+	ustart_gain = gain;
+}
 
 void
 umi_camera_ios_set_sensor(unsigned front)
@@ -1144,6 +1201,8 @@ umi_camera_ios_start(unsigned width, unsigned height)
 		return error;
 	}
 	uios_on = true;
+	/* The stream's first frame; the read that follows copies it. */
+	ums(80);
 	/* A room's first exposure until the program asks for its own. */
 	uset_exposure(1100, 1024);
 	hakios_tl("UMI camera: iOS session armed at %ux%u (the %ux%u sensor's centre crop)\n",
@@ -1155,8 +1214,20 @@ int
 umi_camera_ios_grab(void *dst, unsigned width, unsigned height)
 {
 	if (!uios_on) return ENODEV;
-	if (!umi_camera_stream_wait(300)) return ETIMEDOUT;
-	return umi_camera_stream_copy(dst, width, height);
+	/* The WM is given the other buffer and the frame already in flight is
+	 * copied whole -- reading the bank the WM is writing tore the picture
+	 * into bands of two frames.
+	 */
+	return umi_camera_stream_grab(dst, width, height);
+}
+
+void
+umi_camera_ios_set_focus(unsigned position)
+{
+	if (position == 0xffffffffu) return;   /* the lens is fixed (or absent) */
+	if (!uvcm_position(position & 0x3ff)) {
+		hakios_tl("UMI camera: lens position %u not taken\n", position);
+	}
 }
 
 void
@@ -1249,6 +1320,9 @@ ucleanup(void)
 		}
 		ums(1);
 	}
+		if (!ufront) {
+			(void)uvreg(4, false);
+		}
 	}
 	for (unsigned p = 0; p < 4; ++p)
 		if (uc.pins_valid & (1u << p)) {
@@ -1397,6 +1471,16 @@ uprobe(unsigned stage)
 		if (!uclock_on()) { hakios_tl("UMI camera: front MCLK4 startup failed\n"); goto done; }
 		ums(10);
 	} else {
+		/* The module's first power step: the lens motor's supply (VAF, ldoc9
+		 * at 2.8 V), ten milliseconds before the rest. Through the UMI RPMh
+		 * path, not the table path's (its RSC is not mapped here and the
+		 * vote hung the kernel).
+		 */
+		int vaf_error = uvreg(4, true);
+		if (vaf_error) {
+			hakios_tl("UMI camera: the lens motor's supply failed errno=%d\n", vaf_error);
+		}
+		ums(10);
 		for (unsigned step = 0; step < 6; ++step) {
 			if (step == 2 || step == 4 || step == 5) {
 				unsigned g = step == 2 ? 0 : step == 4 ? 1 : 2;
@@ -1500,6 +1584,17 @@ uprobe(unsigned stage)
 	if (ufront) {
 		hakios_tl("UMI camera: S5K3T2 ID %#x\n", id);
 	} else {
+		/* The lens motor's initialisation, the module file's: power down, up,
+		 * ring control, SAC3 with its timing, then 0x190 and 0x12c.
+		 */
+		(void)uvcm_write(0x02, 0x01); ums(1);
+		(void)uvcm_write(0x02, 0x00); ums(1);
+		(void)uvcm_write(0x02, 0x02);
+		(void)uvcm_write(0x06, 0x40);
+		(void)uvcm_write(0x07, 0x07);
+		(void)uvcm_position(0x190); ums(20);
+		(void)uvcm_position(0x12c);
+		hakios_tl("UMI camera: lens motor initialised (DW9800 at 0x0c)\n");
 		/* Samsung's chip revision register is read separately; no table selection
 		 * is inferred from it until it has been compared with the module selector.
 		 */
