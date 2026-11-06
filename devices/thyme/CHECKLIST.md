@@ -926,5 +926,5 @@ static PDs that way at all (`logs/090126-run.log`).
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.
 - [x] Rootless Procursus prefix, dpkg metadata and offline install/remove verification.
 - [ ] Online repository installation and Sileo long-run stability.
-- [ ] Performance and thermal soak under daily use.
+- [ ] Performance and thermal soak under daily use: a 20-minute soak on the daily scene with tonight's camera kernel changes stayed live (settings pages at 150-900 s, battery flat, no panics, no memory pressure; `logs/040632-run.log`); only backboardd meets SIGSEGV during the kernel's abrupt return. A longer interactive soak and a thermal log remain.
 - [ ] Battery-cycle integrity and no unexplained percentage jumps.
