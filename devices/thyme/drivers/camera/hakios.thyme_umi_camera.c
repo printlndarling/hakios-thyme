@@ -40,7 +40,7 @@ static struct {
 	uint32_t pin_cfg[4], pin_io[4], clock_cfg, clock_branch, gdsc;
 	uint32_t gcc_ahb, gcc_xo;
 	unsigned pins_valid, pin_io_valid;
-	bool active, panic, reset_changed, clock_changed, gdsc_changed, gcc_saved, rails[3];
+	bool active, panic, reset_changed, clock_changed, gdsc_changed, gcc_saved, rails[4];
 } uc;
 /* The sensor mode cam_mode selected (the module file's resN table and entry). */
 static struct {
@@ -53,6 +53,13 @@ static struct {
  */
 static unsigned uios_force_mode;
 static bool uios_on, uc_keep;
+/* cam_sensor=front: the S5K3T2 on CSIPHY 4 (DT cam-sensor@2) instead of the
+ * S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
+ * order and slave address.
+ */
+static bool ufront;
+static uint8_t uslave = 0x7a;
+static uint32_t umclk_cmd = 0x501c, umclk_cfg = 0x5020, umclk_branch = 0x5034;
 static struct {
 	uint16_t ppid, channel;
 	vm_offset_t write;
@@ -308,8 +315,8 @@ static bool
 usensor_read(uint16_t reg, uint16_t *value)
 {
 	uint8_t hi = 0, lo = 0;
-	bool ok = ustart() && uput(0x7a) && uput((uint8_t)(reg >> 8)) && uput((uint8_t)reg) &&
-	    ustart() && uput(0x7b) && uget(&hi, true) && uget(&lo, false);
+	bool ok = ustart() && uput(uslave) && uput((uint8_t)(reg >> 8)) && uput((uint8_t)reg) &&
+	    ustart() && uput(uslave | 1) && uget(&hi, true) && uget(&lo, false);
 	ustop();
 	*value = (uint16_t)((uint16_t)hi << 8 | lo);
 	return ok;
@@ -327,7 +334,7 @@ utab_u32(const uint8_t *p)
 static bool
 usensor_write(uint16_t reg, uint16_t value)
 {
-	bool ok = ustart() && uput(0x7a) && uput(reg >> 8) && uput(reg) &&
+	bool ok = ustart() && uput(uslave) && uput(reg >> 8) && uput(reg) &&
 	    uput(value >> 8) && uput(value);
 	ustop();
 	return ok;
@@ -420,18 +427,78 @@ umode_prepare(unsigned version)
 	return 0;
 }
 
+/* camcc's PLL2 (Zonda, 1440 MHz) for the front S5K3T2's 24 MHz MCLK4: the
+ * values of mainline's camcc-sm8250 (L 0x4b, config 0x08200920/0x05002015)
+ * set and started as clk_zonda_pll_configure()/enable() do (its user_ctl is
+ * 0x100 here; the yupik file's 0x301 carries extra post-divider bits).
+ */
+static bool upll2_on;
+
+static bool
+upll2_up(void)
+{
+	if (ur(uc.cc, 0x2000) & (1u | 1u << 20)) {
+		hakios_tl("UMI camera: camcc PLL2 is running already (mode %#x)\n", ur(uc.cc, 0x2000));
+		return false;
+	}
+	uw(uc.cc, 0x2004, 0x4b);
+	uw(uc.cc, 0x2010, 0x08200920);
+	uw(uc.cc, 0x2014, 0x05002015);
+	uw(uc.cc, 0x2018, 0x00000000);
+	uw(uc.cc, 0x200c, 0x00000100);
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) & ~2u);   /* into bypass */
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) & ~1u);   /* outputs off */
+	uw(uc.cc, 0x2028, 0);                          /* standby */
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) | 4u);    /* out of reset */
+	if (!(ur(uc.cc, 0x2000) & 4u)) return false;
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) | 2u);    /* out of bypass */
+	delay(1);
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) | 4u);
+	uw(uc.cc, 0x2028, 1);                          /* run */
+	uint32_t lock = (ur(uc.cc, 0x201c) & (1u << 16)) ? 1u << 29 : 1u << 31;
+
+	if (!upoll(uc.cc, 0x2000, lock, lock, 2000)) {
+		hakios_tl("UMI camera: camcc PLL2 did not lock (mode %#x)\n", ur(uc.cc, 0x2000));
+		return false;
+	}
+	uw(uc.cc, 0x200c, ur(uc.cc, 0x200c) | 0xfu);   /* early, main, even, odd */
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) | 1u);
+	upll2_on = true;
+	hakios_tl("UMI camera: camcc PLL2 locked at 1440 MHz (mode %#x)\n", ur(uc.cc, 0x2000));
+	return true;
+}
+
+static void
+upll2_down(void)
+{
+	if (!upll2_on) return;
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) & ~1u);
+	uw(uc.cc, 0x200c, ur(uc.cc, 0x200c) & ~0xfu);
+	uw(uc.cc, 0x2000, ur(uc.cc, 0x2000) & ~6u);
+	uw(uc.cc, 0x2028, 0);
+	upll2_on = false;
+}
+
 static bool
 uclock_on(void)
 {
 	uc.clock_changed = true;
-	uw(uc.cc, 0x5020, (uc.clock_cfg & ~0x371fu) | 1); /* XO 19.2 MHz, divide by 1 */
-	uw(uc.cc, 0x501c, ur(uc.cc, 0x501c) | 1);
-	if (!upoll(uc.cc, 0x501c, 1, 0, 1000)) return false;
-	uw(uc.cc, 0x5034, uc.clock_branch | 1);
-	if (!upoll(uc.cc, 0x5034, 1u << 31, 0, 1000)) return false;
+	/* The module file's power sequence asks for MCLK = 0x124f800 (19.2 MHz)
+	 * for both sensors; the device tree's 24 MHz is only the clock table's
+	 * turbo rate. MCLK4 therefore runs from the crystal like MCLK1 does.
+	 */
+	uw(uc.cc, umclk_cfg, (uc.clock_cfg & ~0x371fu) | 1); /* XO 19.2 MHz, divide by 1 */
+	uw(uc.cc, umclk_cmd, ur(uc.cc, umclk_cmd) | 1);
+	if (!upoll(uc.cc, umclk_cmd, 1, 0, 1000)) return false;
+	uw(uc.cc, umclk_branch, uc.clock_branch | 1);
+	if (!upoll(uc.cc, umclk_branch, 1u << 31, 0, 1000)) return false;
 	uint32_t config = uc.pin_cfg[1] & ~0x3ffu;
 	if (config & (1u << 11)) config |= 1u << 12;
-	uw(uc.pin[1], 0, config | 1u << 2 | 1u << 6); /* MCLK1, function 1, 4 mA */
+	uw(uc.pin[1], 0, config | 1u << 2 | 1u << 6); /* the sensor's MCLK pin, function 1, 4 mA */
+	if (ufront)
+		hakios_tl("UMI camera: MCLK4 cfg=%#x M=%#x N=%#x D=%#x branch=%#x pin cfg=%#x\n",
+		    ur(uc.cc, umclk_cfg), ur(uc.cc, umclk_cfg + 4), ur(uc.cc, umclk_cfg + 8),
+		    ur(uc.cc, umclk_cfg + 12), ur(uc.cc, umclk_branch), ur(uc.pin[1], 0));
 	return true;
 }
 
@@ -960,6 +1027,16 @@ umi_camera_ios_stop(void)
 }
 
 static void
+ugpio_restore(unsigned g)
+{
+	if (!gates[g].changed) return;
+	for (unsigned r = 0; r < 8; ++r)
+		if (!ugpio_put(g, gate_regs[r], gates[g].saved[r]))
+			hakios_tl("UMI camera: could not restore PPID %#x register %#x\n", gates[g].ppid, gate_regs[r]);
+	gates[g].changed = false;
+}
+
+static void
 ucleanup(void)
 {
 	if (!uc.active) return;
@@ -967,24 +1044,40 @@ ucleanup(void)
 	uisp_down();
 	upll0_down();
 	if (uc.clock_changed) {
-		uw(uc.cc, 0x5034, uc.clock_branch);
-		(void)upoll(uc.cc, 0x5034, 1u << 31, 1u << 31, 1000);
-		uw(uc.cc, 0x5020, uc.clock_cfg);
-		uw(uc.cc, 0x501c, ur(uc.cc, 0x501c) | 1);
-		(void)upoll(uc.cc, 0x501c, 1, 0, 1000);
+		uw(uc.cc, umclk_branch, uc.clock_branch);
+		(void)upoll(uc.cc, umclk_branch, 1u << 31, 1u << 31, 1000);
+		uw(uc.cc, umclk_cfg, uc.clock_cfg);
+		uw(uc.cc, umclk_cmd, ur(uc.cc, umclk_cmd) | 1);
+		(void)upoll(uc.cc, umclk_cmd, 1, 0, 1000);
 		uc.clock_changed = false;
 	}
+	if (ufront) upll2_down();
 	if (uc.reset_changed) { upin(0, false); ums(1); uc.reset_changed = false; }
+	if (ufront) {
+		/* Reverse of the S5K3T2's order: CUSTOM1, VDIG, VIO, VANA. */
+		ugpio_restore(1);
+		if (uc.rails[3]) {
+			int error = uvreg(3, false);
+			hakios_tl("UMI camera: release front VDIG error=%d\n", error);
+			uc.rails[3] = false;
+		}
+		if (uc.rails[1]) {
+			int error = uvreg(1, false);
+			hakios_tl("UMI camera: release front VIO error=%d\n", error);
+			uc.rails[1] = false;
+		}
+		if (uc.rails[0]) {
+			int error = uvreg(0, false);
+			hakios_tl("UMI camera: release front 2.85 V rail error=%d\n", error);
+			uc.rails[0] = false;
+		}
+		ums(1);
+		ugpio_restore(2);
+	} else {
 	/* Reverse module power order: CUSTOM2, CUSTOM1, VDIG, VANA, VIO, VAF. */
 	for (unsigned step = 0; step < 6; ++step) {
 		if (step == 0 || step == 1 || step == 3) {
-			unsigned g = step == 0 ? 2 : step == 1 ? 1 : 0;
-			if (gates[g].changed) {
-				for (unsigned r = 0; r < 8; ++r)
-					if (!ugpio_put(g, gate_regs[r], gates[g].saved[r]))
-						hakios_tl("UMI camera: could not restore PPID %#x register %#x\n", gates[g].ppid, gate_regs[r]);
-				gates[g].changed = false;
-			}
+			ugpio_restore(step == 0 ? 2 : step == 1 ? 1 : 0);
 		} else {
 			unsigned rail = step == 2 ? 2 : step == 4 ? 1 : 0;
 			if (uc.rails[rail]) {
@@ -994,6 +1087,7 @@ ucleanup(void)
 			}
 		}
 		ums(1);
+	}
 	}
 	for (unsigned p = 0; p < 4; ++p)
 		if (uc.pins_valid & (1u << p)) {
@@ -1030,7 +1124,16 @@ uprobe(unsigned stage)
 	uc.gcc = umap(0x00100000, 0x80000);
 	vm_offset_t south = umap(0x0f500000, 0x80000);
 	vm_offset_t north = umap(0x0f900000, 0x80000);
-	static const unsigned pins[4] = { 62, 95, 103, 104 };
+	static const unsigned hmx_pins[4] = { 62, 95, 103, 104 };
+	static const unsigned front_pins[4] = { 109, 98, 101, 102 };
+	char which[16] = "";
+
+	ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
+	const unsigned *pins = ufront ? front_pins : hmx_pins;
+	uslave = ufront ? 0x20 : 0x7a;
+	umclk_cmd = ufront ? 0x5070 : 0x501c;
+	umclk_cfg = umclk_cmd + 4;
+	umclk_branch = ufront ? 0x5088 : 0x5034;
 	if (!uc.core || !uc.config || !uc.observer || !uc.cc || !uc.gcc || !south || !north) return ENOMEM;
 	uc.active = true;
 	int error = EIO;
@@ -1047,7 +1150,7 @@ uprobe(unsigned stage)
 	uw(uc.gcc, 0xb040, uc.gcc_xo | 1);
 	delay(10);
 	if (!(ur(uc.gcc, 0xb008) & 1) || !(ur(uc.gcc, 0xb040) & 1)) goto done;
-	uc.clock_cfg = ur(uc.cc, 0x5020); uc.clock_branch = ur(uc.cc, 0x5034); uc.gdsc = ur(uc.cc, 0xc144);
+	uc.clock_cfg = ur(uc.cc, umclk_cfg); uc.clock_branch = ur(uc.cc, umclk_branch); uc.gdsc = ur(uc.cc, 0xc144);
 	if ((uc.clock_branch & 1) || !ugpio_prepare()) {
 		hakios_tl("UMI camera: MCLK1 busy or PM8150L GPIOs unavailable\n");
 		error = EBUSY;
@@ -1064,7 +1167,7 @@ uprobe(unsigned stage)
 		goto done;
 	}
 	for (unsigned p = 0; p < 4; ++p) {
-		uc.pin[p] = (p == 0 ? south : north) + 0x1000UL * pins[p];
+		uc.pin[p] = (pins[p] < 64 ? south : north) + 0x1000UL * pins[p];
 		hakios_tl("UMI camera: reading GPIO%u configuration\n", pins[p]);
 		uc.pin_cfg[p] = ur(uc.pin[p], 0);
 #if defined(__aarch64__)
@@ -1083,52 +1186,144 @@ uprobe(unsigned stage)
 	}
 	uc.reset_changed = true;
 	upin(0, false);
-	for (unsigned step = 0; step < 6; ++step) {
-		if (step == 2 || step == 4 || step == 5) {
-			unsigned g = step == 2 ? 0 : step == 4 ? 1 : 2;
-			if (!ugpio_on(g)) goto done;
-		} else {
-			unsigned rail = step == 0 ? 0 : step == 1 ? 1 : 2;
-			int rail_error = uvreg(rail, true);
-			if (rail_error) {
-				error = rail_error;
-				hakios_tl("UMI camera: supply %u enable failed errno=%d\n", rail, error);
-				goto done;
+	if (ufront) {
+		/* The S5K3T2 module's order: VANA, VIO, VDIG (+3 ms), CUSTOM1
+		 * (+1 ms), reset (+2 ms), MCLK (+10 ms).
+		 */
+		/* The rear camera's 2.85 V rail goes first as well: the wide/tele
+		 * fixed regulators are fed from the same board rail the rear module
+		 * uses, and the front sensor is on those regulators' outputs.
+		 */
+		error = uvreg(0, true);
+		if (error) { hakios_tl("UMI camera: front 2.85 V rail failed errno=%d\n", error); goto done; }
+		uc.rails[0] = true;
+		/* All three PM8150L gate channels: the front node names the same
+		 * wide/tele fixed regulators the rear camera uses (GPIO1/GPIO4), and
+		 * powering the third (GPIO3) as well costs nothing.
+		 */
+		if (!ugpio_on(2) || !ugpio_on(0) || !ugpio_on(1)) goto done;
+		ums(1);
+		error = uvreg(1, true);                         /* VIO: PM8009 LDOF7 1.8 V */
+		if (error) { hakios_tl("UMI camera: front VIO failed errno=%d\n", error); goto done; }
+		uc.rails[1] = true;
+		error = uvreg(3, true);                         /* VDIG: PM8009 LDOF4 1.104 V */
+		if (error) { hakios_tl("UMI camera: front VDIG failed errno=%d\n", error); goto done; }
+		uc.rails[3] = true;
+		ums(3);
+		if (!ugpio_on(1)) goto done;                    /* CUSTOM1: camera_wide_vana_ldo (PM8150L GPIO1) */
+		ums(1);
+		upin(0, true); ums(2);
+		if (!uclock_on()) { hakios_tl("UMI camera: front MCLK4 startup failed\n"); goto done; }
+		ums(10);
+	} else {
+		for (unsigned step = 0; step < 6; ++step) {
+			if (step == 2 || step == 4 || step == 5) {
+				unsigned g = step == 2 ? 0 : step == 4 ? 1 : 2;
+				if (!ugpio_on(g)) goto done;
+			} else {
+				unsigned rail = step == 0 ? 0 : step == 1 ? 1 : 2;
+				int rail_error = uvreg(rail, true);
+				if (rail_error) {
+					error = rail_error;
+					hakios_tl("UMI camera: supply %u enable failed errno=%d\n", rail, error);
+					goto done;
+				}
+				uc.rails[rail] = true;
 			}
-			uc.rails[rail] = true;
+			ums(step == 0 ? 10 : 1);
 		}
-		ums(step == 0 ? 10 : 1);
+		upin(0, true); ums(3);
+		if (!uclock_on()) { hakios_tl("UMI camera: MCLK1/Titan-top startup failed\n"); goto done; }
+		ums(2);
 	}
-	upin(0, true); ums(3);
-	if (!uclock_on()) { hakios_tl("UMI camera: MCLK1/Titan-top startup failed\n"); goto done; }
-	ums(2);
-	if (!usensor_read(0, &id) || id != 0x1ad0) {
-		hakios_tl("UMI camera: S5KHMX ID read failed, got %#x (expected 0x1ad0)\n", id);
+	if (ufront) {
+		/* Both lines released high: if the sensor were holding one low the
+		 * bus would read 0 here (unpowered sensor, or a stuck pin).
+		 */
+		(void)uline(2, true);
+		(void)uline(3, true);
+		hakios_tl("UMI camera: front CCI idle levels: SDA %u, SCL %u (GPIO%u/GPIO%u)\n",
+		    ur(uc.pin[2], 4) & 1, ur(uc.pin[3], 4) & 1, pins[2], pins[3]);
+	}
+	for (unsigned retry = 0; retry < 3 && !usensor_read(0, &id); ++retry) {
+		ums(10);
+	}
+	if (ufront && id != 0x3142) {
+		/* The module file's 0x20 is the address this phone's stack uses; if
+		 * nothing answers there, look for the sensor on the bus before
+		 * giving up (a wrong address is the cheapest thing to disprove).
+		 */
+		uint8_t found = uslave;
+		for (uint8_t a = 0x08; a < 0x7f; a += 2) {
+			uint16_t probe_id = 0;
+			if (a == uslave) continue;
+			uslave = a;
+			if (usensor_read(0, &probe_id) && probe_id != 0 && probe_id != 0xffff) {
+				hakios_tl("UMI camera: front sensor answers at 8-bit %#x: ID %#x\n", a, probe_id);
+				found = a;
+				id = probe_id;
+				break;
+			}
+			ums(1);
+		}
+		if (found != uslave) uslave = found;
+	}
+	if (ufront && id != 0x3142) {
+		/* Reset polarity, if this module's "RESET" acts the other way round. */
+		upin(0, false);
+		ums(20);
+		for (unsigned retry = 0; retry < 3 && !usensor_read(0, &id); ++retry) {
+			ums(10);
+		}
+		if (id == 0x3142) hakios_tl("UMI camera: front sensor answers with reset low\n");
+		upin(0, true);
+	}
+	if (ufront && id != 0x3142) {
+		/* The other CCI0 master's pins, in case the port map is the reverse
+		 * of the device tree's: the rear sensor is not powered in this run,
+		 * so nothing else can answer there.
+		 */
+		uc.pin[2] = north + 0x1000UL * 103;
+		uc.pin[3] = north + 0x1000UL * 104;
+		for (unsigned retry = 0; retry < 3 && !usensor_read(0, &id); ++retry) {
+			ums(5);
+		}
+		if (id == 0x3142) hakios_tl("UMI camera: front sensor answers on GPIO103/104\n");
+	}
+	if (id != (ufront ? 0x3142 : 0x1ad0)) {
+		hakios_tl("UMI camera: %s ID read failed, got %#x (expected %#x)\n", ufront ? "S5K3T2" : "S5KHMX", id,
+		    ufront ? 0x3142 : 0x1ad0);
 		goto done;
 	}
-	/* Samsung's chip revision register is read separately; no table selection
- * is inferred from it until it has been compared with the module selector.
- */
-	if (usensor_read(2, &revision)) hakios_tl("UMI camera: S5KHMX ID %#x, revision register %#x\n", id, revision);
-	else hakios_tl("UMI camera: S5KHMX ID %#x; revision read did not answer\n", id);
-	/* The module's EEPROM map appends a sensor read at 0x000e after
-	 * 0x4000 EEPROM bytes. SensorVersionOffset selects that appended byte,
-	 * not register 0x0002 and not EEPROM address 0x4000. Read the full word
-	 * here to retain byte-order evidence before selecting a version table.
-	 */
 	uint16_t selector = 0;
-	if (usensor_read(0x000e, &selector))
-		hakios_tl("UMI camera: module sensor-version source register 0x000e=%#x\n", selector);
-	else hakios_tl("UMI camera: module sensor-version source did not answer\n");
-	error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
-	if (!error && stage >= 4) error = uisp_probe();
-	if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
-	if (!error && stage == 7) error = ucapture();
-	if (!error && stage == 8) {
-		error = ustream_begin();
-		if (!error) {
-			uc_keep = true;        /* the session owns the cameras until ios_stop() */
-			uios_on = true;
+	if (ufront) {
+		hakios_tl("UMI camera: S5K3T2 ID %#x\n", id);
+	} else {
+		/* Samsung's chip revision register is read separately; no table selection
+		 * is inferred from it until it has been compared with the module selector.
+		 */
+		if (usensor_read(2, &revision)) hakios_tl("UMI camera: S5KHMX ID %#x, revision register %#x\n", id, revision);
+		else hakios_tl("UMI camera: S5KHMX ID %#x; revision read did not answer\n", id);
+		/* The module's EEPROM map appends a sensor read at 0x000e after
+		 * 0x4000 EEPROM bytes. SensorVersionOffset selects that appended byte,
+		 * not register 0x0002 and not EEPROM address 0x4000. Read the full word
+		 * here to retain byte-order evidence before selecting a version table.
+		 */
+		if (usensor_read(0x000e, &selector))
+			hakios_tl("UMI camera: module sensor-version source register 0x000e=%#x\n", selector);
+		else hakios_tl("UMI camera: module sensor-version source did not answer\n");
+	}
+	if (!ufront) {
+		error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
+		if (!error && stage >= 4) error = uisp_probe();
+		if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
+		if (!error && stage == 7) error = ucapture();
+		if (!error && stage == 8) {
+			error = ustream_begin();
+			if (!error) {
+				uc_keep = true;        /* the session owns the cameras until ios_stop() */
+				uios_on = true;
+			}
 		}
 	}
 done:
