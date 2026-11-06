@@ -29,7 +29,7 @@ build, not merely compiled.
 | Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
-| Camera | **PARTIAL** | the S5KHMX's own frames stream through CSIPHY 3, CSID480 and IFE-lite into `/dev/hakios-camera` (`cam=5 cam_real=1`): Camera.app and AVFoundation received 1167 real 1280×720 frames in a session, and the program's exposure/gain reach the sensor. Colour tuning, higher frame rates, the front camera and still capture remain |
+| Camera | **PARTIAL** | the S5KHMX's own frames stream through CSIPHY 3, CSID480 and IFE-lite into `/dev/hakios-camera` (`cam=5 cam_real=1`): Camera.app and AVFoundation received 3174 real 1280×720 frames at 15 fps in one session, the program's exposure/gain reach the sensor, and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings) is applied. Auto white balance, still capture and the front camera remain |
 | Sensors (accelerometer, ALS, proximity) | **IN PROGRESS** | the SLPI sensor core now loads its signed firmware, comes out of reset and exposes its QRTR services; the SNS client and a HID sensor service are being brought up. No sensor reaches iOS yet |
 | Cellular (modem, SIM, calls/data) | **FAIL** | the MPSS/telephony stack is not implemented |
 | Persistent storage | **TODO** | the root and user data are RAM-backed; a guarded persistent-storage design is not accepted yet |
@@ -43,11 +43,11 @@ build, not merely compiled.
    `IPCRTR` channel and the QRTR service list are up. The next steps are the
    SNS client protocol (the accelerometer first), the sensor registry served
    over FastRPC, and an IOHID sensor service for `backboardd`.
-2. **Real camera capture** — the S5KHMX's frames now reach Camera.app through
-   `/dev/hakios-camera` (`cam=5 cam_real=1`) with exposure/gain controlled by
-   the capture stack; the next pieces are colour tuning (a matrix/lens-shading
-   file for this sensor), higher preview rates, still capture and the front
-   camera.
+2. **Real camera capture** — the S5KHMX's frames reach Camera.app through
+   `/dev/hakios-camera` (`cam=5 cam_real=1`) at 15 fps, with exposure/gain from
+   the capture stack and the phone's own colour matrices and lens shading; the
+   next pieces are auto white balance (the tuning file's reference lights are
+   zero), still capture and the front camera.
 3. **Cellular** — the largest remaining block: MPSS, QMI and the telephony
    stack.
 4. **Persistent storage and a standalone installer** — designed around a

@@ -32,6 +32,12 @@ floats), the number of temperature ranges, per range { CCT from, to, the matrix 
 same for the lens shading, with per temperature range { CCT from, to, R, Gr, Gb, B grids (17 x 13 floats
 each) }; the number of reference lights (0 where there are not the ten) and each { R/G, B/G, CCT }.
 Everything little-endian, counts as 32-bit words.
+
+Files of the older "Parameter Parser V2.0.0" (THYME's S5KHMX tuning is one)
+are read too: their 0x48-byte symbol entries, eight-byte fields and padded
+lens-shading grids are described at symbols_v2/module_v2. Their colour
+correction lives in cc12 (cc13 is the IPE instance and is identity here), and
+their reference lights are not in the V3 layout, so the output has none.
 """
 import struct
 import sys
@@ -74,6 +80,85 @@ def module(syms, name, floats):
 REFERENCE_CCTS = (10000, 7500, 6500, 5000, 4150, 4000, 3800, 2850, 2300, 1900)
 
 
+# ---- the older "Parameter Parser V2.0.0", which some phones' tuning files use ---------------------------
+#
+# V2 keeps the symbol table in 0x48-byte entries (name[0x20], then five 8-byte
+# fields: 0, -1, offset, size, id) starting at the "revision" entry; the data
+# they point into begins at the pool offset the header gives at 0xc0. A float
+# field is stored in the low four bytes of an eight-byte slot; a matrix or a
+# lens-shading grid is a packed array of 32-bit floats after the two CCT
+# bounds (cct_from at +0, cct_to at +8, the values at +16).
+def symbols_v2(data):
+    """(by_name, by_id) of the V2 symbol table, or None"""
+    try:
+        count = struct.unpack_from('<I', data, 0xe8)[0]
+        pool = struct.unpack_from('<I', data, 0xc0)[0]
+    except struct.error:
+        return None
+    start = data.find(b'revision')
+    if (start < 0 or count < 16 or count > 20000 or
+            start + 0x48 * count > len(data) or pool > len(data)):
+        return None
+    by_name, by_id = {}, {}
+    for k in range(count):
+        at = start + 0x48 * k
+        name = data[at:at + 0x20].split(b'\0')[0].decode('latin1')
+        off, size, sid = struct.unpack_from('<3Q', data, at + 0x20 + 16)
+        if pool + off + size > len(data):
+            continue
+        blob = data[pool + off:pool + off + size]
+        if name and name not in by_name:
+            by_name[name] = blob
+        by_id[sid] = blob
+    return by_name, by_id
+
+
+def module_v2(by_name, by_id, name, floats, padded=False):
+    """[(lux from, lux to, [(cct from, cct to, values)])] of a V2 module's first tree, without the flash"""
+    led = by_name.get('mod_%s_led_idx_data' % name)
+    if led is None:
+        return []
+    sid = None
+    for i in range(0, len(led) - 23, 24):
+        flash, regions, s = struct.unpack_from('<3Q', led, i)
+        if flash == 0 and regions:
+            sid = int(s)
+            break
+    # A V2 reference names the symbol one below the one it means (the file's
+    # ids are the symbol's own; a tree's pointers are consistently one less).
+    aec = by_id.get(sid + 1)
+    if aec is None:
+        return []
+    out = []
+    for i in range(0, len(aec) - 47, 48):
+        lux_from = struct.unpack_from('<f', aec, i)[0]
+        lux_to = struct.unpack_from('<f', aec, i + 8)[0]
+        n = struct.unpack_from('<I', aec, i + 32)[0]
+        cct_sid = struct.unpack_from('<I', aec, i + 40)[0]
+        cct = by_id.get(cct_sid + 1)
+        if not n or cct is None or len(cct) // n < 16 + 4 * floats:
+            continue
+        size = len(cct) // n
+        ranges = []
+        for j in range(n):
+            base = size * j + 16
+            cct_from = struct.unpack_from('<f', cct, base - 16)[0]
+            cct_to = struct.unpack_from('<f', cct, base - 8)[0]
+            if padded:
+                # A lens-shading entry keeps each 17 x 13 grid followed by one
+                # zero (222 floats a grid); the .isp wants the grids alone.
+                per = floats // 4
+                vals = []
+                for c in range(4):
+                    vals.extend(struct.unpack_from('<%df' % per, cct, base + c * (per + 1) * 4))
+                values = tuple(vals)
+            else:
+                values = struct.unpack_from('<%df' % floats, cct, base)
+            ranges.append((cct_from, cct_to, values))
+        out.append((lux_from, lux_to, ranges))
+    return out
+
+
 def references(syms):
     """[(R/G, B/G, CCT)] of the AWB's reference lights, or [] where they are not the ten known"""
     v = next((v for n, v in syms.values() if n == 'refPtV1'), None)
@@ -90,12 +175,27 @@ def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     data = open(sys.argv[1], 'rb').read()
-    if not data.startswith(b'QTI Chromatix Header') or b'Parameter Parser V3.0.1' not in data[:0x60]:
+    if not data.startswith(b'QTI Chromatix Header'):
         sys.exit('camtuning.py: not a tuning file of the kind known here')
-    syms = symbols(data)
-    ccm = module(syms, 'cc13', 9)
-    lsc = module(syms, 'lsc34', 4 * GRID)
-    refs = references(syms)
+    if b'Parameter Parser V2.0.0' in data[:0x80]:
+        parsed = symbols_v2(data)
+        if parsed is None:
+            sys.exit('camtuning.py: the V2 symbol table is not where it was expected')
+        by_name, by_id = parsed
+        # V2's cc13 is the IPE instance's matrix (identity in this phone's
+        # file); the sensor's own colour correction is cc12's.
+        ccm = module_v2(by_name, by_id, 'cc12' if 'mod_cc12_led_idx_data' in by_name else 'cc13', 9)
+        lsc = module_v2(by_name, by_id, 'lsc34', 4 * GRID, padded=True)
+        refs = []               # V2's reference lights are not laid out as V3's
+        if not ccm:
+            sys.exit('camtuning.py: the V2 file has no colour matrices')
+    elif b'Parameter Parser V3.0.1' in data[:0x60]:
+        syms = symbols(data)
+        ccm = module(syms, 'cc13', 9)
+        lsc = module(syms, 'lsc34', 4 * GRID)
+        refs = references(syms)
+    else:
+        sys.exit('camtuning.py: not a tuning file of the kind known here')
 
     for what, tree in (('colour matrix', ccm), ('lens shading', lsc)):
         for lux_from, lux_to, ranges in tree:

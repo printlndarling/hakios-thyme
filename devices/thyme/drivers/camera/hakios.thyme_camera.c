@@ -3748,7 +3748,7 @@ fake_fill(int p, uint32_t lines, uint32_t gain)
 static void
 fake_session(void)
 {
-	uint32_t fps = 5, lines, gain, frame_lines, filled_lines[RING] = { 0 }, filled_gain[RING] = { 0 };
+	uint32_t fps = real_source ? 15 : 5, lines, gain, frame_lines, filled_lines[RING] = { 0 }, filled_gain[RING] = { 0 };
 
 	(void)PE_parse_boot_argn("cam_fake_fps", &fps, sizeof(fps));
 	fps = fps < 1 ? 1 : fps > 30 ? 30 : fps;

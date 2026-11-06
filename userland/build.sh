@@ -554,6 +554,14 @@ if [ -f ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin ]; then
 	python3 ../devices/thyme/tools/umi-camsensor-v2.py ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin \
 		--sensor-version 0x13 --output root/fw/camera-s5khmx-v19.tab >/dev/null
 fi
+# ... and the S5KHMX's colour tuning (a Parameter Parser V2.0.0 file):
+# camtuning.py reads it too. The /dev/hakios-camera sessions name sensor 1
+# "s5khm2sd" (camera_device.c), so the file takes that name.
+if [ -f ../fw-camera/com.qti.tuned.thyme_semco_s5khmx_wide.bin ]; then
+	mkdir -p root/fw
+	../tools/camtuning.py ../fw-camera/com.qti.tuned.thyme_semco_s5khmx_wide.bin \
+		root/fw/camera-s5khm2sd.isp >/dev/null
+fi
 # ... and with ADSP=1 the image of the audio DSP, from the same place into ../fw-audio (drivers/audio/hakios.adsp.c):
 # adsp.mdt and adsp.b00 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
 # the loader takes.
