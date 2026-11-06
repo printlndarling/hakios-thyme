@@ -1233,10 +1233,18 @@ umi_camera_ios_set_focus(unsigned position)
 void
 umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 {
-	if (!uios_on) return;
 	if (lines == 0 || lines > (um.frame_length > 40 ? um.frame_length - 40 : 1))
 		lines = um.frame_length > 40 ? um.frame_length - 40 : 1;
 	gain = gain < 32 ? 32 : gain > 0x800 ? 0x800 : gain;
+	if (!uios_on) {
+		/* Between sessions (the capture stack asks while the last one is
+		 * going down): the next session starts with it.
+		 */
+		ustart_lines = lines;
+		ustart_gain = gain;
+		hakios_tl("UMI camera: exposure %u lines, gain %#x kept for the next session\n", lines, gain);
+		return;
+	}
 	if (ufront) {
 		/* The S5K3T2 takes the exposure only while it is not streaming, so the
 		 * change is made between a stop and a start (a frame's gap), with the
@@ -1252,6 +1260,7 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 		ums(10);
 		(void)usensor_write(0x0100, 0x0100);
 	} else {
+		hakios_tl("UMI camera: rear exposure %u lines, gain %#x\n", lines, gain);
 		uset_exposure(lines, gain);
 	}
 }
