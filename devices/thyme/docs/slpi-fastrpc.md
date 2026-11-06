@@ -172,7 +172,26 @@ they cannot be captured without turning SELinux permissive.
 ## The file service behind the tunnel
 
 `apps_std` methods 1, 2, 3, 4, 9, 19, 26, 27, 28 and 31 are decoded and
-served in the kernel from `fw/sensors/` in the root image. The input and
+served in the kernel from `fw/sensors/` in the root image. The DSP's
+`libapps_std_skel.so` numbers its whole interface, decoded from the SLIM
+string table in the skel's generated source; the ones not served yet are the
+next candidates when a request names them:
+
+| # | method | # | method | # | method |
+|---|---|---|---|---|---|
+| 0 | fopen | 13 | ferror | 26 | opendir |
+| 1 | freopen | 14 | clearerr | 27 | closedir |
+| 2 | fflush | 15 | print_string | 28 | readdir |
+| 3 | fclose | 16 | getenv | 29 | mkdir |
+| 4 | fread | 17 | (unused) | 30 | rmdir |
+| 5 | fwrite | 18 | unsetenv | 31 | stat |
+| 6 | fgetpos | 19 | fopen_with_env | 32 | ftrunc |
+| 7 | fsetpos | 20 | fgets | 33 | frename |
+| 8 | ftell | 21 | get_search_paths_with_env | 34 | fopen_fd |
+| 9 | fseek | 22 | fileExists | 35 | fclose_fd |
+| 10 | flen | 23 | fsync | 36 | fopen_with_env_fd |
+| 11 | rewind | 24 | fremove | | |
+| 12 | feof | 25 | fdopen_decrypt | | | The input and
 output blobs are `[u32 size][padding][data]` sequences with 8-byte alignment,
 as sensh's `iobuffer.c` encodes them. The paths the DSP asks for map to:
 
@@ -361,6 +380,20 @@ module file the DSP's own `mod_table` asks the AP for — the AP-side
 `apps_std_imp.c` looks in `/vendor/lib/rfsa/adsp` and `/vendor/dsp/adsp` —
 and `FASTRPC_RMID_INIT_CREATE` (method 6) with the `fastrpc_shell_2` that
 the hexagon-dsp-binaries tree carries for SM8250.
+
+## The remote heap, and what it did not fix
+
+The vendor's remotectl has a second method, `grow_heap(phyAddr, nSize)`: method
+2, one 8-byte input buffer, no output (`sc = 0x02010000` on the wire). It is
+**refused before any attach** (`0x80000474`) and **accepted after one**
+(retval 0). The shared-memory partition fits a 124 KB page-aligned heap, which
+is what the driver offers (`fastrpc_grow_kb=1024`, `fastrpc_grow_after=1` for
+the sensors PD's own session, `fastrpc_phone=6` for the root PD's first).
+
+None of the placements wakes the sensor process: every call still answers 0,
+`next2` still times out, and the process still meets its user-PD watchdog.
+The missing piece is in the DSP's own start of `sensor_process`, not in the
+remote heap, the listener or the file service.
 
 ## Risks and open questions
 
