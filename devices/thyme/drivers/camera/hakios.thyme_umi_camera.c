@@ -1239,12 +1239,17 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 	gain = gain < 32 ? 32 : gain > 0x800 ? 0x800 : gain;
 	if (ufront) {
 		/* The S5K3T2 takes the exposure only while it is not streaming, so the
-		 * change is made between a stop and a start (a frame's gap).
+		 * change is made between a stop and a start (a frame's gap), with the
+		 * sensor given time to reach standby and the register read back.
 		 */
 		(void)usensor_write(0x0100, 0x0000);
-		ums(5);
+		ums(30);
 		uset_exposure(lines, gain);
-		ums(5);
+		uint16_t rb = 0;
+		if (usensor_read(0x0202, &rb)) {
+			hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x\n", lines, rb, gain);
+		}
+		ums(10);
 		(void)usensor_write(0x0100, 0x0100);
 	} else {
 		uset_exposure(lines, gain);
