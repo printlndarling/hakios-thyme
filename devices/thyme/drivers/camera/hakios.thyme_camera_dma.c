@@ -268,12 +268,14 @@ int
 umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned height,unsigned stride,
     unsigned lanes,unsigned lane_cfg,unsigned phy,unsigned vc,unsigned dt,unsigned bayer,const char *sensor)
 {
-	if(ud.memory)return EBUSY; /* one retained capture per diagnostic boot */
 	if(!width||!height||!stride||lanes<1||lanes>4)return EINVAL;
 	uint64_t bytes=(uint64_t)stride*height;
 	if(bytes>32ull<<20)return EINVAL;
-	ud.ife=ife;ud.csid=csid;ud.size=round_page(4096+(vm_size_t)bytes);
-	if(kmem_alloc_contig(kernel_map,&ud.memory,ud.size,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
+	vm_size_t need=round_page(4096+(vm_size_t)bytes);
+	if(ud.memory){
+		if(ud.size<need)return ENOMEM; /* a reserved buffer that is too small */
+	}else if(kmem_alloc_contig(kernel_map,&ud.memory,need,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
+	ud.ife=ife;ud.csid=csid;ud.size=need;
 	struct ud_header *h=(struct ud_header *)ud.memory;
 	memcpy(h->magic,"RWCAM001",8);h->width=width;h->height=height;h->stride=stride;
 	h->format=1;h->bayer=bayer;h->frame_bytes=(uint32_t)bytes;h->source=1;
@@ -345,4 +347,43 @@ umi_camera_stream_stop(void)
 	dcache(ud.memory,4096);
 	loader_recording[0]=kvtophys(ud.memory);loader_recording[1]=ud.size;loader_recording[2]=ud.memory;
 	return frames?0:EIO;
+}
+
+/* A centre crop of the frame in the retained buffer, RAW10 packed, as the
+ * session's own ring expects it; the crop offsets stay on the Bayer phase.
+ */
+int
+umi_camera_stream_copy(void *dst,unsigned width,unsigned height)
+{
+	if(!ud.memory||!ud.running)return ENODEV;
+	struct ud_header *h=(struct ud_header *)ud.memory;
+	if(width<4||!height||width>h->width||height>h->height||width%4)return EINVAL;
+	unsigned x0=((h->width-width)/2)&~3u,y0=((h->height-height)/2)&~1u;
+	unsigned dstride=(width*10/8+15)&~15u;
+	dcache(ud.memory,ud.size);
+	const uint8_t *src=(const uint8_t *)(ud.memory+4096)+(uint64_t)y0*h->stride+x0/4*5;
+	uint8_t *out=(uint8_t *)dst;
+	for(unsigned y=0;y<height;y++)
+		memcpy(out+(uint64_t)y*dstride,src+(uint64_t)y*h->stride,width/4*5);
+	return 0;
+}
+
+/* Take the frame buffer while the system's memory is still in large pieces:
+ * a cam=5 session starts after userspace is up, when a 2.6 MB contiguous
+ * allocation may no longer succeed.
+ */
+int
+umi_camera_dma_reserve(unsigned width,unsigned height)
+{
+	if(ud.memory)return 0;
+	if(!width||!height)return EINVAL;
+	unsigned stride=(width*10/8+15)&~15u;
+	vm_size_t size=round_page(4096+(vm_size_t)stride*height);
+	if(kmem_alloc_contig(kernel_map,&ud.memory,size,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS){
+		ud.memory=0;
+		return ENOMEM;
+	}
+	ud.size=size;
+	hakios_tl("UMI camera DMA: reserved %lu bytes for a %ux%u frame\n",(unsigned long)size,width,height);
+	return 0;
 }

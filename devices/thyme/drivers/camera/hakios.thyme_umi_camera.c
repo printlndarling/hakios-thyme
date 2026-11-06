@@ -22,12 +22,15 @@ int umi_camera_prepare(void);
 int umi_camera_isp_probe(void);
 int umi_camera_capture_tpg(void);
 int umi_camera_capture_sensor(void);
+void umi_camera_ios_prepare(void);
 extern int umi_camera_tpg(vm_offset_t, vm_offset_t);
 extern int umi_camera_stream_arm(vm_offset_t, vm_offset_t, unsigned, unsigned, unsigned,
     unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, const char *);
 extern bool umi_camera_stream_wait(unsigned);
 extern void umi_camera_stream_report(const char *);
 extern int umi_camera_stream_stop(void);
+extern int umi_camera_stream_copy(void *, unsigned, unsigned);
+extern int umi_camera_dma_reserve(unsigned, unsigned);
 extern void umi_camera_dma_quiesce(bool);
 extern const uint8_t *hakios_wifi_file(const char *, uint64_t *);
 void umi_camera_probe_quiesce(void);
@@ -45,6 +48,11 @@ static struct {
 	uint64_t rate;
 	unsigned mode;
 } um;
+/* A cam=5 cam_real session owns the sensor: it keeps uprobe's state across the
+ * session, runs the module file's 1080p mode and copies frames on demand.
+ */
+static unsigned uios_force_mode;
+static bool uios_on, uc_keep;
 static struct {
 	uint16_t ppid, channel;
 	vm_offset_t write;
@@ -54,9 +62,22 @@ static struct {
 static const uint8_t gate_regs[8] = { 0x41, 0x42, 0x45, 0x43, 0x40, 0x4a, 0x44, 0x46 };
 static const uint8_t gate_on[8] = { 0, 4, 1, 0, 2, 0, 0x80, 0x80 };
 
+/* The loader's IO window is small and shared with every later driver: a cam=5
+ * cam_real session starts after they have taken theirs, so the UMI blocks are
+ * mapped once early (umi_camera_ios_prepare) and handed back from here.
+ */
+static struct {
+	vm_offset_t physical, mapped;
+	vm_size_t size;
+} umaps[12];
+static unsigned umaps_used;
+
 static vm_offset_t
 umap(vm_offset_t physical, vm_size_t size)
 {
+	for (unsigned i = 0; i < umaps_used; ++i)
+		if (umaps[i].physical == physical && umaps[i].size == size)
+			return umaps[i].mapped;
 	uint64_t available = umi_camera_iomap_free();
 	uint64_t required = (size + (physical & 0x3fffUL) + 0x3fffUL) & ~0x3fffUL;
 	hakios_tl("UMI camera: mapping %#lx + %#lx, IO window free=%llu\n",
@@ -67,7 +88,31 @@ umap(vm_offset_t physical, vm_size_t size)
 	__asm__ volatile("dsb sy; isb" ::: "memory");
 #endif
 	hakios_tl("UMI camera: mapping %#lx complete\n", (unsigned long)physical);
+	if (mapped && umaps_used < sizeof(umaps) / sizeof(umaps[0])) {
+		umaps[umaps_used].physical = physical;
+		umaps[umaps_used].size = size;
+		umaps[umaps_used].mapped = mapped;
+		umaps_used++;
+	}
 	return mapped;
+}
+
+/* Reserve the session's mappings while the loader's IO window still has room. */
+void
+umi_camera_ios_prepare(void)
+{
+	(void)umap(0x0c440000, 0x1100);  /* PMIC arbiter core */
+	(void)umap(0x0c40a000, 0x1000);  /* its config */
+	(void)umap(0x0e600000, 0x10000); /* observer */
+	(void)umap(0x0ad00000, 0x10000); /* camcc */
+	(void)umap(0x00100000, 0x80000); /* gcc */
+	(void)umap(0x0f500000, 0x80000); /* TLMM south */
+	(void)umap(0x0f900000, 0x80000); /* TLMM north */
+	(void)umap(0x0acd9000, 0x2200);  /* IFE-lite 0 (CSID at +0x200) */
+	(void)umap(0x0ac70000, 0x2000);  /* CSIPHY 3 */
+	if (umi_camera_dma_reserve(1920, 1080) != 0)
+		hakios_tl("UMI camera: no frame buffer for the iOS session\n");
+	hakios_tl("UMI camera: iOS session mappings reserved (%u blocks)\n", umaps_used);
 }
 
 static uint32_t
@@ -293,7 +338,8 @@ umode_prepare(unsigned version)
 {
 	if (version != 3 && version != 0x13) return ENODEV;
 	unsigned mode_n = 3;
-	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6)
+	if (uios_force_mode) mode_n = uios_force_mode;
+	else if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6)
 		mode_n = 3;
 	uint64_t size = 0;
 	const char *name = version == 3 ? "camera-s5khmx-v3.tab" : "camera-s5khmx-v19.tab";
@@ -788,8 +834,21 @@ ustream_up(void)
 	return 0;
 }
 
+static void
+uset_exposure(uint32_t shutter, uint32_t gain)
+{
+	/* SMIA exposure inside the sensor's group hold: coarse integration in
+	 * lines (0x0202) and the analog gain code (0x0204, 32 is 1x).
+	 */
+	(void)usensor_write(0x0104, 0x0100);
+	if (shutter) (void)usensor_write(0x0202, (uint16_t)shutter);
+	if (gain) (void)usensor_write(0x0204, (uint16_t)gain);
+	(void)usensor_write(0x0104, 0x0000);
+}
+
+/* The cameras up and armed, the sensor set and streaming: what a session keeps. */
 static int
-ucapture(void)
+ustream_begin(void)
 {
 	if (!um.width) {
 		hakios_tl("UMI camera: no sensor mode was selected for a capture\n");
@@ -821,13 +880,7 @@ ucapture(void)
 	(void)PE_parse_boot_argn("cam_shutter", &shutter, sizeof(shutter));
 	(void)PE_parse_boot_argn("cam_gain", &gain, sizeof(gain));
 	if (shutter || gain) {
-		/* SMIA exposure, inside the sensor's group hold: coarse integration
-		 * in lines (0x0202) and the analog gain code (0x0204, 32 is 1x).
-		 */
-		(void)usensor_write(0x0104, 0x0100);
-		if (shutter) (void)usensor_write(0x0202, (uint16_t)shutter);
-		if (gain) (void)usensor_write(0x0204, (uint16_t)gain);
-		(void)usensor_write(0x0104, 0x0000);
+		uset_exposure(shutter, gain);
 		hakios_tl("UMI camera: exposure %u lines, gain %#x\n", shutter, gain);
 		uint16_t readback = 0;
 		if (usensor_read(0x0202, &readback)) hakios_tl("UMI camera: exposure register 0x0202=%#x\n", readback);
@@ -835,11 +888,75 @@ ucapture(void)
 	}
 	if (!usensor_write(0x0100, 0x0100)) hakios_tl("UMI camera: stream-on write was not acknowledged\n");
 	hakios_tl("UMI camera: sensor streaming mode %u (%ux%u)\n", um.mode, um.width, um.height);
+	return 0;
+}
+
+static int
+ucapture(void)
+{
+	int error = ustream_begin();
+	if (error) return error;
 	bool done = umi_camera_stream_wait(1500);
 	umi_camera_stream_report(done ? "after the first frame" : "without a frame");
 	(void)usensor_write(0x0100, 0x0000);
 	ums(30);
 	return umi_camera_stream_stop();
+}
+
+/* ---- cam=5 cam_real: the sensor's frames for iOS ------------------------------------------------------ */
+
+static int uprobe(unsigned stage);
+static void ucleanup(void);
+
+int
+umi_camera_ios_start(unsigned width, unsigned height)
+{
+	if (uc.active || uios_on) return EBUSY;
+	if (width < 64 || height < 64 || width > 1920 || height > 1080 || width % 4) return EINVAL;
+	uios_force_mode = 5;    /* the module file's 1080p mode; the session gets a centre crop */
+	int error = uprobe(8);
+	uios_force_mode = 0;
+	if (error) {
+		uios_on = false;
+		uc_keep = false;
+		return error;
+	}
+	uios_on = true;
+	/* A room's first exposure until the program asks for its own. */
+	uset_exposure(1100, 1024);
+	hakios_tl("UMI camera: iOS session armed at %ux%u (the %ux%u sensor's centre crop)\n",
+	    width, height, um.width, um.height);
+	return 0;
+}
+
+int
+umi_camera_ios_grab(void *dst, unsigned width, unsigned height)
+{
+	if (!uios_on) return ENODEV;
+	if (!umi_camera_stream_wait(300)) return ETIMEDOUT;
+	return umi_camera_stream_copy(dst, width, height);
+}
+
+void
+umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
+{
+	if (!uios_on) return;
+	if (lines == 0 || lines > (um.frame_length > 40 ? um.frame_length - 40 : 1))
+		lines = um.frame_length > 40 ? um.frame_length - 40 : 1;
+	gain = gain < 32 ? 32 : gain > 0x800 ? 0x800 : gain;
+	uset_exposure(lines, gain);
+}
+
+void
+umi_camera_ios_stop(void)
+{
+	if (!uios_on) return;
+	(void)usensor_write(0x0100, 0x0000);
+	ums(30);
+	(void)umi_camera_stream_stop();
+	uios_on = false;
+	uc_keep = false;
+	ucleanup();
 }
 
 static void
@@ -1007,9 +1124,17 @@ uprobe(unsigned stage)
 	if (!error && stage >= 4) error = uisp_probe();
 	if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
 	if (!error && stage == 7) error = ucapture();
+	if (!error && stage == 8) {
+		error = ustream_begin();
+		if (!error) {
+			uc_keep = true;        /* the session owns the cameras until ios_stop() */
+			uios_on = true;
+		}
+	}
 done:
-	ucleanup();
+	if (!uc_keep) ucleanup();
 	if (stage == 7) hakios_tl("UMI camera: capture finished error=%d\n", error);
+	else if (stage == 8) hakios_tl("UMI camera: iOS session start error=%d\n", error);
 	else hakios_tl("UMI camera: sensor probe finished error=%d; sensor stream was not started\n", error);
 	return error;
 }

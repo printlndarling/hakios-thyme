@@ -99,6 +99,12 @@
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern kern_return_t thread_terminate(thread_t thread);
 extern void loader_log_putc(char c);
+/* the UMI capture session behind cam=5 cam_real (hakios.thyme_umi_camera.c) */
+extern void umi_camera_ios_prepare(void);
+extern int umi_camera_ios_start(unsigned, unsigned);
+extern int umi_camera_ios_grab(void *, unsigned, unsigned);
+extern void umi_camera_ios_set_exposure(unsigned, unsigned);
+extern void umi_camera_ios_stop(void);
 
 static uint32_t level;
 static bool broken, leaving;
@@ -3677,8 +3683,14 @@ ios_session(void)
  * exposure asked for makes them, so that everything above the kernel (the ISP of camera_test and of
  * the media library, the capture graph, Camera.app) runs as it does on the phone and has a known
  * picture to show. cam_fake_fps: frames a second (default 5: QEMU's processor is slow).
+ *
+ * cam_real=1 (with cam=5) uses the same device, sessions and mode, but the
+ * frames are the S5KHMX's own: a cam=5 session starts the UMI capture (stage 8,
+ * 1920x1080 through CSIPHY 3) and every ring place gets a centre crop of the
+ * latest frame in the sensor's RAW10 Bayer order.
  */
 static bool fake;
+static bool real_source;
 
 /* the bars' linear reflectance, R, G, B in thousandths */
 static const uint16_t fake_bars[8][3] = {
@@ -3760,8 +3772,25 @@ fake_session(void)
 	ios_streaming = true;
 	ios_last_read = ios_ms();
 	lck_mtx_unlock(&ios_lock);
-	say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width, ios_mode->height,
-	    hw->chip, fps);
+	if (real_source) {
+		int error = umi_camera_ios_start(ios_mode->width, ios_mode->height);
+		if (error) {
+			say("camera: the S5KHMX did not start for iOS (error %d)\n", error);
+			lck_mtx_lock(&ios_lock);
+			ios_streaming = false;
+			lck_mtx_unlock(&ios_lock);
+			ring_free();
+			return;
+		}
+		say("camera: the frames for iOS: the S5KHMX's own, %ux%u centre crop of mode 5, up to %u a second\n",
+		    ios_mode->width, ios_mode->height, fps);
+	} else {
+		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
+		    ios_mode->height, hw->chip, fps);
+	}
+	uint32_t last_lines = lines, last_gain = gain;
+	unsigned grab_failures = 0;
+
 	while (ios_open && ios_switch_to == 0) {
 		int p = -1;
 
@@ -3794,7 +3823,18 @@ fake_session(void)
 			ios_writes_late++;
 			continue;
 		}
-		if (filled_lines[p] != ios_now.lines || filled_gain[p] != ios_now.gain) {
+		if (real_source) {
+			uint8_t *at = (uint8_t *)(ring + (uint64_t)p * ring_place_bytes);
+
+			if (lines != last_lines || gain != last_gain) {
+				umi_camera_ios_set_exposure(lines, gain);
+				last_lines = lines;
+				last_gain = gain;
+			}
+			if (umi_camera_ios_grab(at, ios_mode->width, ios_mode->height) != 0 && grab_failures++ == 0) {
+				say("camera: a frame of the S5KHMX did not complete in time; keeping the session\n");
+			}
+		} else if (filled_lines[p] != ios_now.lines || filled_gain[p] != ios_now.gain) {
 			fake_fill(p, ios_now.lines, ios_now.gain);
 			filled_lines[p] = ios_now.lines;
 			filled_gain[p] = ios_now.gain;
@@ -3809,6 +3849,7 @@ fake_session(void)
 		lck_mtx_unlock(&ios_lock);
 		wakeup(&ios_frames_done);
 	}
+	if (real_source) umi_camera_ios_stop();
 	lck_mtx_lock(&ios_lock);
 	ios_streaming = false;
 	for (int i = 0; i < RING; i++) {
@@ -4080,7 +4121,10 @@ camdev_make(void)
 static bool
 ios_select(unsigned index, uint32_t mode_n)
 {
-	select_sensor(index);
+	/* (cam_real: the wide descriptor only lends the Bayer order and the gain
+	 * scale to the sensor's frames; its Redwood tables are not loaded)
+	 */
+	select_sensor(real_source ? 1 : index);
 	if (!fake) {
 		find_pins();
 	}
@@ -4240,6 +4284,10 @@ extern int umi_camera_prepare(void);
 extern int umi_camera_isp_probe(void);
 extern int umi_camera_capture_tpg(void);
 extern int umi_camera_capture_sensor(void);
+extern int umi_camera_ios_start(unsigned, unsigned);
+extern int umi_camera_ios_grab(void *, unsigned, unsigned);
+extern void umi_camera_ios_set_exposure(unsigned, unsigned);
+extern void umi_camera_ios_stop(void);
 extern void umi_camera_probe_quiesce(void);
 
 static void
@@ -4367,9 +4415,13 @@ camera_thread(__unused void *parameter, __unused wait_result_t result)
 		}
 	}
 	if (fake) {
-		say("camera: cam=5 cam_fake=1: the %s camera's frames for iOS are a chart made here; nothing of the phone is touched\n",
-		    hw->name);
-		umi_camera_readonly();
+		if (real_source) {
+			say("camera: cam=5 cam_real=1: the S5KHMX's own frames for iOS, through the UMI capture session\n");
+		} else {
+			say("camera: cam=5 cam_fake=1: the %s camera's frames for iOS are a chart made here; nothing of the phone is touched\n",
+			    hw->name);
+			umi_camera_readonly();
+		}
 		serve_ios();
 		say("camera: done\n");
 		thread_terminate(current_thread());
@@ -4420,9 +4472,20 @@ hakios_camera_init(void)
 		return;
 	}
 	level = level > 7 ? 7 : level;
-	uint32_t fake_n = 0;
+	uint32_t fake_n = 0, real_n = 0;
 
 	fake = level == 5 && PE_parse_boot_argn("cam_fake", &fake_n, sizeof(fake_n)) && fake_n != 0;
+	/* cam_real=1: the same /dev/hakios-camera and sessions, but the frames are
+	 * the S5KHMX's own (the UMI stage-8 session), not the colour chart.
+	 */
+	real_source = level == 5 && PE_parse_boot_argn("cam_real", &real_n, sizeof(real_n)) && real_n != 0;
+	if (real_source) {
+		fake = true;
+		/* The session starts after userspace is up, when the loader's IO
+		 * window is spent; take the camera blocks' mappings now.
+		 */
+		umi_camera_ios_prepare();
+	}
 	if (level == 5) {
 		/*
 		 * Memory in one piece for the host (cam_keep_mb, default 24: a 12-megapixel NV12 picture of cam=5,
