@@ -896,6 +896,14 @@ sensors PD is attached and bringing the sensors PD up as a second client
 answers 0 at every step and next2 still times out; the sensor process never
 asks for a file (`logs/072345-run.log`).
 
+Disassembling the firmware segment `slpi.b15` (loaded at `0x8A000000`; wrapped
+as a one-segment ELF32 for `llvm-objdump --arch-name=hexagon`) shows what the
+watchdog string means: `timer_client_user_init.c` opens the QDI device
+`/dev/timers` under the name `TMR_CLNT_%u`, and the failure logged is
+`TMR_CLNT_1:0x88` — that `qdi_open` failing. The sensor process dies before it
+ever reaches a file: its QDI timer client cannot open in the PD the AP starts,
+which is a PD/QDI capability question inside the DSP, not a FastRPC one.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
