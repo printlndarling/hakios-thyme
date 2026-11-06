@@ -266,7 +266,7 @@ umi_camera_tpg(vm_offset_t ife,vm_offset_t csid)
  */
 int
 umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned height,unsigned stride,
-    unsigned lanes,unsigned lane_cfg,unsigned phy,unsigned vc,unsigned dt,unsigned bayer,const char *sensor)
+    unsigned lanes,unsigned lane_cfg,unsigned phy,unsigned cphy,unsigned vc,unsigned dt,unsigned bayer,const char *sensor)
 {
 	if(!width||!height||!stride||lanes<1||lanes>4)return EINVAL;
 	uint64_t bytes=(uint64_t)stride*height;
@@ -287,7 +287,7 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	/* CSID480 RX from the PHY: lane count and assignment, C-PHY, physical
 	 * PHY index in bits 21:20, RAW10 vc/dt in the RDI0 configuration.
 	 */
-	dw(csid,0x100,(lanes-1)|lane_cfg<<4|1u<<24|(phy&3u)<<20);
+	dw(csid,0x100,(lanes-1)|lane_cfg<<4|(cphy?1u:0u)<<24|(phy&3u)<<20);
 	dw(csid,0x104,1u<<6|1u);
 	uint32_t cfg0=vc<<22|dt<<16|0xfu<<12|1u<<2|3u;
 	dw(csid,0x200,cfg0);dw(csid,0x204,2);
