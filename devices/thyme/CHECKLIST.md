@@ -903,6 +903,11 @@ watchdog string means: `timer_client_user_init.c` opens the QDI device
 `TMR_CLNT_1:0x88` — that `qdi_open` failing. The sensor process dies before it
 ever reaches a file: its QDI timer client cannot open in the PD the AP starts,
 which is a PD/QDI capability question inside the DSP, not a FastRPC one.
+`INIT_CREATE_STATIC` is not the answer for it either: with the shared-memory
+heap it answers `0x80000416` for every plausible module name (`sensor_process`,
+`sensorspd`, `sensor`, `sensors`, `sns_process`, `adsp_sensors`, `ssc`,
+`sensor_pd`, `sensors_pd`, `adsp_listener`), so this firmware does not create
+static PDs that way at all (`logs/090126-run.log`).
 
 ## Later product work
 

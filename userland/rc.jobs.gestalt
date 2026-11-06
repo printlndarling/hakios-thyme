@@ -1,0 +1,3 @@
+# The device as Darwin's MobileGestalt sees it, for the camera-app question:
+# SpringBoard hides /Applications/Camera.app when the device does not report a camera.
+/redwood/bin/mg_test
