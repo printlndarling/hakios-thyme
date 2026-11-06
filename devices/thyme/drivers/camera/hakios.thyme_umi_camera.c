@@ -1022,10 +1022,11 @@ ucapture(void)
 			uw(isp_csid, 0x100, (um.lanes - 1) | (um.lane_assign & 0xffff) << 4 | (phy & 3) << 20);
 			uw(isp_csid, 0x208, 1);
 			done = umi_camera_stream_wait(200);
-			hakios_tl("UMI camera: front phy %u: CSID packets %u, rx irq %#x, ecc %#x, crc %u, RDI bytes %u/%u, "
-			    "IFE irq %#x/%#x, done %u\n", phy, ur(isp_csid, 0x160), ur(isp_csid, 0x20),
-			    ur(isp_csid, 0x164), ur(isp_csid, 0x168), ur(isp_csid, 0x2e0), ur(isp_csid, 0x2e4),
-			    ur(isp_ife, 0x40), ur(isp_ife, 0x44), done);
+			hakios_tl("UMI camera: front phy %u: CSID ver %#x cfg %#x packets %u, rx irq %#x, ecc %#x, crc %u, "
+			    "RDI cfg %#x status %#x bytes %u/%u, IFE irq %#x/%#x, done %u\n", phy, ur(isp_csid, 0),
+			    ur(isp_csid, 0x100), ur(isp_csid, 0x160), ur(isp_csid, 0x20), ur(isp_csid, 0x164),
+			    ur(isp_csid, 0x168), ur(isp_csid, 0x200), ur(isp_csid, 0x250), ur(isp_csid, 0x2e0),
+			    ur(isp_csid, 0x2e4), ur(isp_ife, 0x40), ur(isp_ife, 0x44), done);
 		}
 		umi_camera_stream_report(done ? "after the first frame" : "without a frame (phy sweep)");
 	} else {
