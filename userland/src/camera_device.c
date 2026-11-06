@@ -1420,6 +1420,14 @@ worker(void *context)
 			af.now = true;
 			af.sweep = true;
 		}
+		if (s->frames == 1 && s->camera->sensor == 1 && !s->af_locked) {
+			/* The lens starts at the module's position; one hunt at the start,
+			 * whether or not the capture stack has asked for a focus yet.
+			 */
+			af.state = AF_STEADY;
+			af.now = true;
+			af.sweep = true;
+		}
 		af_frame(device, &af, f, raw, s->af_window, s->af_locked);
 		s->frames++;
 
@@ -1692,6 +1700,13 @@ stream_create(CFAllocatorRef allocator, const struct camera *camera, CFStringRef
 
 	s->formats = CFArrayCreate(NULL, (const void **)f, 2, &kCFTypeArrayCallBacks);
 	s->supported = supported(stream_props, sizeof(stream_props) / sizeof(stream_props[0]));
+	if (camera->sensor != 1) {
+		/* the flashlight is the wide camera's; the front has none, and the
+		 * capture stack must not offer it there
+		 */
+		CFDictionaryRemoveValue((CFMutableDictionaryRef)s->supported, CFSTR("TorchLevel"));
+		CFDictionaryRemoveValue((CFMutableDictionaryRef)s->supported, CFSTR("FlashMode"));
+	}
 	CFRelease(f[0]);
 	CFRelease(f[1]);
 	return o;

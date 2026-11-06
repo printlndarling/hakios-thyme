@@ -1237,7 +1237,18 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 	if (lines == 0 || lines > (um.frame_length > 40 ? um.frame_length - 40 : 1))
 		lines = um.frame_length > 40 ? um.frame_length - 40 : 1;
 	gain = gain < 32 ? 32 : gain > 0x800 ? 0x800 : gain;
-	uset_exposure(lines, gain);
+	if (ufront) {
+		/* The S5K3T2 takes the exposure only while it is not streaming, so the
+		 * change is made between a stop and a start (a frame's gap).
+		 */
+		(void)usensor_write(0x0100, 0x0000);
+		ums(5);
+		uset_exposure(lines, gain);
+		ums(5);
+		(void)usensor_write(0x0100, 0x0100);
+	} else {
+		uset_exposure(lines, gain);
+	}
 }
 
 void
@@ -1595,6 +1606,11 @@ uprobe(unsigned stage)
 		(void)uvcm_position(0x190); ums(20);
 		(void)uvcm_position(0x12c);
 		hakios_tl("UMI camera: lens motor initialised (DW9800 at 0x0c)\n");
+		uint32_t focus_pos = 0xffffffff;
+		if (PE_parse_boot_argn("cam_focus", &focus_pos, sizeof(focus_pos)) && focus_pos != 0xffffffff) {
+			(void)uvcm_position(focus_pos & 0x3ff);
+			hakios_tl("UMI camera: lens at %u (boot arg)\n", focus_pos & 0x3ff);
+		}
 		/* Samsung's chip revision register is read separately; no table selection
 		 * is inferred from it until it has been compared with the module selector.
 		 */
