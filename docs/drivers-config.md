@@ -87,6 +87,11 @@ make config                # says which are built and which are not
 make kernel                # builds that kernel
 ```
 
+Editing a driver through a network share (the `\\wsl$` path) can keep the old
+modification time, and `xnu/sync-drivers.sh` copies only what is newer than the
+kernel tree's copy: `touch` the driver before `make kernel`, and if the built
+kernel's hash is unchanged, that is what happened.
+
 A port to another phone starts the same way: its `configs/<name>.config` leaves out each driver whose hardware it has not
 ported yet (the addresses and pins in a driver are the POCO X5 Pro's, and its head says where each came from), and turns one
 on when it has been made to work there. A phone with another touch controller adds a driver, not a branch: its file in
