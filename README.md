@@ -29,7 +29,7 @@ build, not merely compiled.
 | Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
-| Camera | **PARTIAL** | the S5KHMX's own frames stream through CSIPHY 3, CSID480 and IFE-lite into `/dev/hakios-camera` (`cam=5 cam_real=1`): Camera.app and AVFoundation received 3174 real 1280×720 frames at 15 fps, the program's exposure/gain reach the sensor, the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings) is applied, and the shutter takes 12 MP stills scaled from the preview stream. The front S5K3T2 is powered and identified (ID `0x3142` on its CCI bus, GPIO105/106); its stream, auto white balance and a full-resolution still path remain |
+| Camera | **PARTIAL** | both cameras now stream into `/dev/hakios-camera` with `cam=5 cam_real=1` (now part of the daily boot args, so the Camera icon is always there). The S5KHMX runs 1920×1080 through CSIPHY 3, CSID480 and IFE-lite, cropped to 1280×720 at 15 fps for Camera.app and AVFoundation, with the program's exposure/gain and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings); the shutter takes 12 MP stills scaled from the preview stream. The front S5K3T2 runs the module's 2592×1940 mode through CSIPHY 4 and CSID-lite 1 (the CSID's PHY select is a 3-bit field: CSIPHY 4 is input 4) and Camera.app switches between the two cameras. Auto white balance, a full-resolution still path and the front's own tuning remain |
 | Sensors (accelerometer, ALS, proximity) | **IN PROGRESS** | the SLPI sensor core now loads its signed firmware, comes out of reset and exposes its QRTR services; the SNS client and a HID sensor service are being brought up. No sensor reaches iOS yet |
 | Cellular (modem, SIM, calls/data) | **FAIL** | the MPSS/telephony stack is not implemented |
 | Persistent storage | **TODO** | the root and user data are RAM-backed; a guarded persistent-storage design is not accepted yet |
@@ -46,8 +46,10 @@ build, not merely compiled.
 2. **Real camera capture** — the S5KHMX's frames reach Camera.app through
    `/dev/hakios-camera` (`cam=5 cam_real=1`) at 15 fps, with exposure/gain from
    the capture stack and the phone's own colour matrices and lens shading; the
-   next pieces are auto white balance (the tuning file's reference lights are
-   zero), still capture and the front camera.
+   S5K3T2 front camera streams 2592×1940 through CSIPHY 4 and CSID-lite 1, and
+   the app switches between them. The next pieces are auto white balance (the
+   tuning file's reference lights are zero), still capture and the front's own
+   colour tuning.
 3. **Cellular** — the largest remaining block: MPSS, QMI and the telephony
    stack.
 4. **Persistent storage and a standalone installer** — designed around a

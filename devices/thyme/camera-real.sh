@@ -15,6 +15,9 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-camera.apfs}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# The daily args already select the real camera; keep this script the single
+# source of its own cam= selection rather than appending a duplicate.
+ARGS=$(printf '%s\n' "$ARGS" | sed -E 's/(^| +)(cam|cam_real|cam_keep_mb)=[^ ]*//g')
 
 [ -f "$SYSTEM_IMAGE" ] || { echo "camera-real: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
 [ -f "$SCENE" ] || { echo "camera-real: no scene: $SCENE (build it with SCENE=camera RC_JOBS=rc.jobs.camera devices/thyme/build-root.sh)" >&2; exit 1; }

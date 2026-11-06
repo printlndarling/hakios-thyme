@@ -116,8 +116,11 @@ umi_camera_ios_prepare(void)
 	(void)umap(0x0f500000, 0x80000); /* TLMM south */
 	(void)umap(0x0f900000, 0x80000); /* TLMM north */
 	(void)umap(0x0acd9000, 0x2200);  /* IFE-lite 0 (CSID at +0x200) */
+	(void)umap(0x0acdb200, 0x2200);  /* IFE-lite 1, the front's lite block */
 	(void)umap(0x0ac70000, 0x2000);  /* CSIPHY 3 */
-	if (umi_camera_dma_reserve(1920, 1080) != 0)
+	(void)umap(0x0ac72000, 0x2000);  /* CSIPHY 4 */
+	/* The front's 2592x1940 mode is the largest frame a session runs. */
+	if (umi_camera_dma_reserve(2592, 1940) != 0)
 		hakios_tl("UMI camera: no frame buffer for the iOS session\n");
 	hakios_tl("UMI camera: iOS session mappings reserved (%u blocks)\n", umaps_used);
 }
@@ -232,8 +235,11 @@ ugpio_prepare(void)
 		for (unsigned r = 0; r < 8; ++r)
 			if (!ugpio_io(g, gate_regs[r], &gates[g].saved[r], false)) return false;
 		if ((gates[g].saved[6] & 0x80) && (gates[g].saved[7] & 0x80)) {
-			hakios_tl("UMI camera: PPID %#x already drives high; refusing to take an active supply\n", gates[g].ppid);
-			return false;
+			/* A supply left on by the last session (or by Android before the
+			 * loader): the camera rails are ours alone in this session, and
+			 * the saved state is what the release puts back.
+			 */
+			hakios_tl("UMI camera: PPID %#x drives high already; taking it over\n", gates[g].ppid);
 		}
 	}
 	return true;
@@ -904,6 +910,20 @@ ucsiphy_up(unsigned lanes, bool cphy, uint32_t lane_assign, unsigned settle, uin
 	return true;
 }
 
+/* The PHY's own error status (11 registers from 0x8B0): a lane that saw
+ * activity but lost it, a clock lane error, or nothing at all.
+ */
+static void
+ucsiphy_status(const char *when)
+{
+	if (!uc.csiphy || !ucsiphy_on) return;
+	char line[240];
+	int n = snprintf(line, sizeof(line), "UMI camera CSIPHY status %s:", when);
+	for (unsigned i = 0; i < 11 && n < (int)sizeof(line) - 8; i++)
+		n += snprintf(line + n, sizeof(line) - (size_t)n, " %#x", ur(uc.csiphy, 0x8b0 + 4 * i));
+	hakios_tl("%s\n", line);
+}
+
 static void
 ucsiphy_down(void)
 {
@@ -980,7 +1000,7 @@ ustream_begin(void)
 		return error;
 	}
 	error = umi_camera_stream_arm(isp_ife, isp_csid, um.width, um.height, um.stride, um.lanes,
-	    um.lane_assign & ((1u << (4 * um.lanes)) - 1), ufront ? 0 : 3, um.cphy ? 1 : 0, 0, um.data_type, 1,
+	    um.lane_assign & ((1u << (4 * um.lanes)) - 1), ufront ? 4 : 3, um.cphy ? 1 : 0, 0, um.data_type, 1,
 	    ufront ? "S5K3T2" : "S5KHMX");
 	if (error) {
 		hakios_tl("UMI camera: stream arm failed error=%d\n", error);
@@ -1008,6 +1028,9 @@ ustream_begin(void)
 		if (usensor_read(0x0204, &readback)) hakios_tl("UMI camera: gain register 0x0204=%#x\n", readback);
 	}
 	if (!usensor_write(0x0100, 0x0100)) hakios_tl("UMI camera: stream-on write was not acknowledged\n");
+	uint16_t stream_state = 0;
+	if (usensor_read(0x0100, &stream_state))
+		hakios_tl("UMI camera: sensor stream register 0x0100=%#x\n", stream_state);
 	hakios_tl("UMI camera: sensor streaming mode %u (%ux%u)\n", um.mode, um.width, um.height);
 	return 0;
 }
@@ -1023,8 +1046,8 @@ ucapture(void)
 		 * tree: sweep the receiver's phy select and see whether packets appear.
 		 */
 		done = false;
-		for (unsigned phy = 0; phy < 4 && !done; ++phy) {
-			uw(isp_csid, 0x100, (um.lanes - 1) | (um.lane_assign & 0xffff) << 4 | (phy & 3) << 20);
+		for (unsigned phy = 0; phy < 8 && !done; ++phy) {
+			uw(isp_csid, 0x100, (um.lanes - 1) | (um.lane_assign & 0xffff) << 4 | (phy & 7) << 20);
 			uw(isp_csid, 0x208, 1);
 			done = umi_camera_stream_wait(200);
 			hakios_tl("UMI camera: front phy %u: CSID ver %#x cfg %#x packets %u, rx irq %#x, ecc %#x, crc %u, "
@@ -1033,6 +1056,7 @@ ucapture(void)
 			    ur(isp_csid, 0x168), ur(isp_csid, 0x200), ur(isp_csid, 0x250), ur(isp_csid, 0x2e0),
 			    ur(isp_csid, 0x2e4), ur(isp_ife, 0x40), ur(isp_ife, 0x44), done);
 		}
+		ucsiphy_status(done ? "after the first frame" : "after the phy sweep");
 		umi_camera_stream_report(done ? "after the first frame" : "without a frame (phy sweep)");
 	} else {
 		done = umi_camera_stream_wait(1500);
@@ -1048,12 +1072,37 @@ ucapture(void)
 static int uprobe(unsigned stage);
 static void ucleanup(void);
 
+/* Between cam=5 sessions: the sensor the next session runs. The request is
+ * kept until umi_camera_ios_start(), when the last session is down: the two
+ * sensors use different CSIPHY blocks and pin sets, so the PHY mapping is
+ * dropped and the mode table is re-read by uprobe().
+ */
+static bool unext_front, unext_pending;
+
+void
+umi_camera_ios_set_sensor(unsigned front)
+{
+	unext_front = front != 0;
+	unext_pending = true;
+	hakios_tl("UMI camera: the %s camera asked for the next iOS session\n", unext_front ? "front" : "rear");
+}
+
 int
 umi_camera_ios_start(unsigned width, unsigned height)
 {
 	if (uc.active || uios_on) return EBUSY;
-	if (width < 64 || height < 64 || width > 1920 || height > 1080 || width % 4) return EINVAL;
-	uios_force_mode = 5;    /* the module file's 1080p mode; the session gets a centre crop */
+	if (unext_pending) {
+		if (unext_front != ufront) {
+			ufront = unext_front;
+			uc.csiphy = 0;  /* the other CSIPHY block is mapped afresh */
+		}
+		unext_pending = false;
+	}
+	if (width < 64 || height < 64 || width > 4096 || height > 3072 || width % 4) return EINVAL;
+	/* The module file's 1080p mode for the S5KHMX (the session gets a centre
+	 * crop); the S5K3T2's 2592x1940 mode 1 is the app's front stream.
+	 */
+	uios_force_mode = ufront ? 1 : 5;
 	int error = uprobe(8);
 	uios_force_mode = 0;
 	if (error) {
@@ -1151,6 +1200,7 @@ ucleanup(void)
 		}
 		ums(1);
 		ugpio_restore(2);
+		ugpio_restore(0);       /* the third gate the power-up took */
 	} else {
 	/* Reverse module power order: CUSTOM2, CUSTOM1, VDIG, VANA, VIO, VAF. */
 	for (unsigned step = 0; step < 6; ++step) {
@@ -1438,7 +1488,7 @@ uprobe(unsigned stage)
 	 */
 	if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
 	if (!error && stage == 7) error = ucapture();
-	if (!error && stage == 8 && !ufront) {
+	if (!error && stage == 8) {
 		error = ustream_begin();
 		if (!error) {
 			uc_keep = true;        /* the session owns the cameras until ios_stop() */

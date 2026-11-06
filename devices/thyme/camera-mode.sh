@@ -16,6 +16,9 @@ MODE=${CAM_MODE:-3}
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-wirelessfull.apfs}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# The daily args bring the camera up (cam=5) so the Camera icon is always there;
+# a diagnostic run replaces that with its own cam= selection.
+ARGS=$(printf '%s\n' "$ARGS" | sed -E 's/(^| +)(cam|cam_real|cam_keep_mb)=[^ ]*//g')
 
 case "$MODE" in
 1|2|3|4|6|7) ;;

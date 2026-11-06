@@ -285,9 +285,10 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	if(error){umi_camera_dma_quiesce(false);return error;}
 	ud.running=true;
 	/* CSID480 RX from the PHY: lane count and assignment, C-PHY, physical
-	 * PHY index in bits 21:20, RAW10 vc/dt in the RDI0 configuration.
+	 * PHY index in bits 22:20 (three bits: CSIPHY 4 is input 4), RAW10
+	 * vc/dt in the RDI0 configuration.
 	 */
-	dw(csid,0x100,(lanes-1)|lane_cfg<<4|(cphy?1u:0u)<<24|(phy&3u)<<20);
+	dw(csid,0x100,(lanes-1)|lane_cfg<<4|(cphy?1u:0u)<<24|(phy&7u)<<20);
 	dw(csid,0x104,1u<<6|1u);
 	uint32_t cfg0=vc<<22|dt<<16|0xfu<<12|1u<<2|3u;
 	dw(csid,0x200,cfg0);dw(csid,0x204,2);

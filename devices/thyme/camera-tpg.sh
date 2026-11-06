@@ -16,6 +16,8 @@ SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-wirelessfull.apfs}
 PREFIX=${1:-logs/cam-tpg}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# The daily args bring the camera up (cam=5); the test pattern replaces that.
+ARGS=$(printf '%s\n' "$ARGS" | sed -E 's/(^| +)(cam|cam_real|cam_keep_mb)=[^ ]*//g')
 
 [ -f "$SYSTEM_IMAGE" ] || { echo "camera-tpg: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
 [ -f "$SCENE" ] || { echo "camera-tpg: no full scene: $SCENE" >&2; exit 1; }

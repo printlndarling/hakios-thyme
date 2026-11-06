@@ -102,6 +102,7 @@ extern void loader_log_putc(char c);
 /* the UMI capture session behind cam=5 cam_real (hakios.thyme_umi_camera.c) */
 extern void umi_camera_ios_prepare(void);
 extern int umi_camera_ios_start(unsigned, unsigned);
+extern void umi_camera_ios_set_sensor(unsigned);
 extern int umi_camera_ios_grab(void *, unsigned, unsigned);
 extern void umi_camera_ios_set_exposure(unsigned, unsigned);
 extern void umi_camera_ios_stop(void);
@@ -241,12 +242,15 @@ static const struct sensor_hw sensors[] = {
 		.csiphy = 1, .phy_cbcr = 0xe0ec, .timer_cmd = 0xe0d0, .timer_cbcr = 0xe0e8, .regs = REGS_SMIA, .bayer = 1,
 		.pattern_bayer = 2, .chip = "S5KHM2SD", .gain_unity = 32, .gain_max = 0x800,
 	},
-	{       /* cam-sensor1: OV16A1Q, CCI 0 master 0 (GPIO 69/70), reset GPIO 20, MCLK0 (GPIO 64), csiphy 0 */
-		.name = "front (OV16A1Q)", .tab = "camera-ov16a1q.tab", .bus_name = "CCI 0 master 0", .sda = 69, .scl = 70, .reset = 20,
-		.mclk_cmd = 0xe000, .mclk_cbcr = 0xe018, .mclk_pin = 64,
+	{       /* cam-sensor1: S5K3T2, CCI 0 master 0 on 0xac50000 (GPIO 105/106), reset GPIO 109, MCLK4 (GPIO 98),
+		 * csiphy 4; the real sensor's frames come through the UMI path (cam_real), and this descriptor
+		 * lends them the mode table, the Bayer order and the gain scale.
+		 */
+		.name = "front (S5K3T2)", .tab = "camera-s5k3t2.tab", .bus_name = "CCI 0 master 0", .sda = 105, .scl = 106, .reset = 109,
+		.mclk_cmd = 0x5070, .mclk_cbcr = 0x5088, .mclk_pin = 98,
 		.vana = { SUPPLY_LDO, 3, 2800, 0, 0 }, .vdig = { SUPPLY_LDO, 2, 1200, 0, 0 }, .vio = { SUPPLY_LDO, 5, 1800, 0, 0 },
-		.csiphy = 0, .phy_cbcr = 0xe0c8, .timer_cmd = 0xe0ac, .timer_cbcr = 0xe0c4, .regs = REGS_OV16, .bayer = 3,
-		.pattern_bayer = 0, .chip = "OV16A1Q", .gain_unity = 0x100, .gain_max = 0xf80,
+		.csiphy = 4, .phy_cbcr = 0x609c, .timer_cmd = 0x6098, .timer_cbcr = 0x609c, .regs = REGS_SMIA, .bayer = 1,
+		.pattern_bayer = 0, .chip = "S5K3T2", .gain_unity = 32, .gain_max = 0x800,
 	},
 	{       /* cam-sensor3: S5K4H7, CCI 1 master 1 (GPIO 75/76), reset GPIO 78, MCLK3 (GPIO 67, 24 MHz: camcc's PLL2), csiphy 3;
 		 * VDIG: camera_ultra_dvdd_ldo, a fixed 1.2 V regulator from PM7325 S8 switched by GPIO 108 (ramp 135 us) */
@@ -4082,6 +4086,12 @@ camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		if (c.a >= sizeof(sensors) / sizeof(sensors[0])) {
 			return EINVAL;
 		}
+		if (real_source) {
+			/* The UMI path powers one sensor at a time: tell it which the
+			 * next session runs (the descriptor number is 1 back, 2 front).
+			 */
+			umi_camera_ios_set_sensor(c.a == 2);
+		}
 		lck_mtx_lock(&ios_lock);
 		ios_switch_mode = c.b;
 		ios_switch_to = c.a + 1;
@@ -4121,10 +4131,10 @@ camdev_make(void)
 static bool
 ios_select(unsigned index, uint32_t mode_n)
 {
-	/* (cam_real: the wide descriptor only lends the Bayer order and the gain
-	 * scale to the sensor's frames; its Redwood tables are not loaded)
+	/* (cam_real: the descriptor only lends the mode table, the Bayer order
+	 * and the gain scale to the sensor's frames; its tables are not loaded)
 	 */
-	select_sensor(real_source ? 1 : index);
+	select_sensor(index);
 	if (!fake) {
 		find_pins();
 	}
@@ -4190,7 +4200,7 @@ serve_ios(void)
 		return;
 	}
 	(void)PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n));
-	if (!ios_select(hw_index, mode_n)) {
+	if (!ios_select(real_source ? 1 : hw_index, mode_n)) {
 		return;
 	}
 	while (!broken) {
