@@ -3532,6 +3532,7 @@ static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the 
 static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: seconds before phone=3 re-attaches the sensors PD */
 static uint32_t fastrpc_grow_kb;         /* boot-arg fastrpc_grow_kb: offer the DSP that much remote heap before the attach */
 static uint32_t fastrpc_grow_after;      /* boot-arg fastrpc_grow_after: offer it after the attach instead */
+static uint32_t fastrpc_create_probe;    /* boot-arg fastrpc_create_probe: ask the DSP to create candidate static PD names */
 
 static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
@@ -4538,10 +4539,10 @@ fastrpc_heap_assign(uint64_t heap_physical, uint64_t heap_size)
 
 static bool
 fastrpc_create_static(uint64_t heap_physical, uint64_t heap_size, uint64_t physical, uint32_t shared_offset, bool shared,
-    uint8_t *packet)
+    const char *name, uint8_t *packet)
 {
-	static const char name[] = "adsp_listener";
-	uint32_t inbuf[3] = { 1, sizeof(name), 1 };
+	uint32_t name_length = (uint32_t)strlen(name) + 1;
+	uint32_t inbuf[3] = { 1, name_length, 1 };
 	uint64_t pages[2] = { heap_physical, heap_size };
 	const void *sources[3];
 	uint32_t lengths[3], size;
@@ -4549,7 +4550,7 @@ fastrpc_create_static(uint64_t heap_physical, uint64_t heap_size, uint64_t physi
 	memset(packet, 0, 4096);
 	lengths[0] = sizeof(inbuf);
 	sources[0] = inbuf;
-	lengths[1] = sizeof(name);
+	lengths[1] = name_length;
 	sources[1] = name;
 	lengths[2] = sizeof(pages);
 	sources[2] = pages;
@@ -4711,6 +4712,57 @@ fastrpc_dual_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	fastrpc_pd = saved;
 }
 
+/*
+ * The remote heap in the root PD's session: attach to the guest OS (client 1), offer the heap
+ * there, then bring up the sensors PD as client 2 and wait. The heap is a DSP-wide resource, so
+ * giving it in the PD that exists first may be what the sensor process is missing.
+ */
+static void
+fastrpc_heap_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
+{
+	uint32_t saved_pd = fastrpc_pd, saved_client = fastrpc_client, lengths[4], size, handle;
+	const void *sources[4];
+
+	fastrpc_pd = 0;
+	fastrpc_client = 1;
+	fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, 1, "INIT_ATTACH (guest OS, heap)");
+	fastrpc_offer_heap(physical, shared_offset, shared, packet);
+	fastrpc_pd = 2;
+	fastrpc_client = 2;
+	fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, 2, "INIT_ATTACH_SNS (heap)");
+	memset(packet, 0, 4096);
+	lengths[0] = 0;
+	sources[0] = NULL;
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(2, 3, 0x03000000, 0x402, physical, size, 10000, "adsp_listener_init2 (heap)")) {
+		fastrpc_pd = saved_pd;
+		fastrpc_client = saved_client;
+		return;
+	}
+	handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+	if (handle == 0) {
+		fastrpc_pd = saved_pd;
+		fastrpc_client = saved_client;
+		return;
+	}
+	memset(packet, 0, 4096);
+	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+	if (shared) {
+		fastrpc_smem_put(shared_offset, packet, size);
+	}
+	if (!fastrpc_call(2, handle, 0, 0x302, physical, size, 5000, "adsp_default_listener_register (heap)")) {
+		fastrpc_pd = saved_pd;
+		fastrpc_client = saved_client;
+		return;
+	}
+	fastrpc_listener_start_as(2, 2, 2, ITEM_FASTRPC_LISTENER);
+	fastrpc_pd = saved_pd;
+	fastrpc_client = saved_client;
+}
+
 static void
 fastrpc_first_calls(uint32_t stage)
 {
@@ -4764,6 +4816,10 @@ fastrpc_first_calls(uint32_t stage)
 	}
 	if (fastrpc_phone == 4) {
 		fastrpc_dual_chain(physical, shared_offset, shared, packet, reply);
+		goto done;
+	}
+	if (fastrpc_phone == 6) {
+		fastrpc_heap_chain(physical, shared_offset, shared, packet, reply);
 		goto done;
 	}
 	if (fastrpc_phone) {
@@ -4889,7 +4945,21 @@ fastrpc_first_calls(uint32_t stage)
 				if (!heap_is_smem && fastrpc_assign && !fastrpc_heap_assign(heap_physical, (uint64_t)heap_kb << 10)) {
 					printf("slpi: fastrpc: the heap is not assigned; the DSP may still reach it with the SMMU bypass\n");
 				}
-				fastrpc_create_static(heap_physical, (uint64_t)heap_kb << 10, physical, shared_offset, shared, packet);
+				if (fastrpc_create_probe) {
+					static const char *const names[] = {
+						"sensor_process", "sensorspd", "sensor", "sensors", "sns_process",
+						"adsp_sensors", "ssc", "sensor_pd", "sensors_pd",
+					};
+
+					for (unsigned n = 0; n < sizeof(names) / sizeof(names[0]); n++) {
+						printf("slpi: fastrpc: does this firmware create a static PD named \"%s\"?\n", names[n]);
+						fastrpc_create_static(heap_physical, (uint64_t)heap_kb << 10, physical, shared_offset, shared,
+						    names[n], packet);
+						sleep_ms(200);
+					}
+				}
+				fastrpc_create_static(heap_physical, (uint64_t)heap_kb << 10, physical, shared_offset, shared,
+				    "adsp_listener", packet);
 				{
 					uint32_t opened = fastrpc_open_name("adsp_listener", physical, shared_offset, packet, reply,
 					    20000);
@@ -5857,6 +5927,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_attach_delay", &fastrpc_attach_delay, sizeof(fastrpc_attach_delay));
 	PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
 	PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
+	PE_parse_boot_argn("fastrpc_create_probe", &fastrpc_create_probe, sizeof(fastrpc_create_probe));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
