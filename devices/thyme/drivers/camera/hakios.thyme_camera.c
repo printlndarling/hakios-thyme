@@ -1115,9 +1115,23 @@ static const struct ctab_mode fake_mode = {
     .width = 1280, .height = 720, .lanes = 4, .pixel_clock = 9000000,
     .line_length = 800, .frame_length = 750, .fps_milli = 15000, .data_type = 0x2b,
 };
+/* cam_real: the UMI modes the sessions run, whole -- the wide's mode 5 at
+ * 1920x1080 and the front's mode 1 at 2592x1940, not a centre crop.
+ */
+static const struct ctab_mode real_modes[2] = {
+	{ .width = 1920, .height = 1080, .x = 42, .y = 200, .lanes = 3, .cphy = 1, .settle = 19,
+	  .pixel_clock = 512179200, .line_length = 6408, .frame_length = 1220, .fps_milli = 120000, .data_type = 0x2b },
+	{ .width = 2592, .height = 1940, .lanes = 4, .cphy = 0, .settle = 19,
+	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 30130, .data_type = 0x2b },
+};
+static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
 static const uint8_t fake_power[24];
 static const uint32_t fake_tables;
 static bool fake;
+static bool real_source;
+/* cam_dump=1: the first frame of the wide camera's real session, for xl camera */
+static bool dump_raw_on, dumped_raw;
+static void dump_frame(const void *, uint32_t, uint32_t, uint32_t);
 
 /* the sensor the rest works on: its descriptor, its CCI master's pins (its tables are loaded afresh: ctab_load()) */
 static void
@@ -1139,12 +1153,20 @@ ctab_load(void)
 	const uint8_t *at, *end;
 
 	if (fake) {
-		ctab = &fake_ctab;
-		ctab_modes = &fake_mode;
+		/* cam_real: the modes are the sensors' own; the frames come from the
+		 * UMI session, not a chart.
+		 */
+		ctab = real_source ? &real_ctab : &fake_ctab;
+		ctab_modes = real_source ? real_modes : &fake_mode;
 		ctab_power = fake_power;
 		ctab_tables = (const uint8_t *)&fake_tables;
-		ctab_size = sizeof(fake_ctab) + sizeof(fake_mode) + sizeof(fake_power) + sizeof(fake_tables);
-		say("camera: UMI capture-pipeline check: synthetic 1280x720 RAW10 stream; no camera rails, pins or registers touched\n");
+		ctab_size = (real_source ? sizeof(real_ctab) + sizeof(real_modes) : sizeof(fake_ctab) + sizeof(fake_mode)) +
+		    sizeof(fake_power) + sizeof(fake_tables);
+		if (real_source)
+			say("camera: UMI capture-pipeline: the sensor's own frames, %ux%u (wide) and %ux%u (front)\n",
+			    real_modes[0].width, real_modes[0].height, real_modes[1].width, real_modes[1].height);
+		else
+			say("camera: UMI capture-pipeline check: synthetic 1280x720 RAW10 stream; no camera rails, pins or registers touched\n");
 		return true;
 	}
 	ctab = (const struct ctab_head *)hakios_image_file("fw", hw->tab, &ctab_size, NULL);
@@ -3693,8 +3715,6 @@ ios_session(void)
  * 1920x1080 through CSIPHY 3) and every ring place gets a centre crop of the
  * latest frame in the sensor's RAW10 Bayer order.
  */
-static bool fake;
-static bool real_source;
 
 /* the bars' linear reflectance, R, G, B in thousandths */
 static const uint16_t fake_bars[8][3] = {
@@ -3835,8 +3855,15 @@ fake_session(void)
 				last_lines = lines;
 				last_gain = gain;
 			}
-			if (umi_camera_ios_grab(at, ios_mode->width, ios_mode->height) != 0 && grab_failures++ == 0) {
-				say("camera: a frame of the S5KHMX did not complete in time; keeping the session\n");
+			int grab = umi_camera_ios_grab(at, ios_mode->width, ios_mode->height);
+
+			if (grab != 0) {
+				if (grab_failures++ == 0) {
+					say("camera: a frame of the S5KHMX did not complete in time; keeping the session\n");
+				}
+			} else if (dump_raw_on && !dumped_raw && hw_index == 1) {
+				dumped_raw = true;
+				dump_frame(at, ios_mode->width, ios_mode->height, RAW10_STRIDE(ios_mode->width));
 			}
 		} else if (filled_lines[p] != ios_now.lines || filled_gain[p] != ios_now.gain) {
 			fake_fill(p, ios_now.lines, ios_now.gain);
@@ -4054,6 +4081,42 @@ keep_picture(const struct hakios_camera_command *c, struct uio *uio)
 	return error;
 }
 
+/* cam_dump: the RAW10 frame the capture stack is reading, written to the keep
+ * buffer for xl camera (the same header and place as the still path).
+ */
+static void
+dump_frame(const void *at, uint32_t width, uint32_t height, uint32_t stride)
+{
+	uint64_t bytes = (uint64_t)stride * height;
+	uint64_t want = round_page(CAM_HEADER_BYTES + bytes);
+
+	if (!keep || keep_bytes < want) return;
+	lck_mtx_lock(&keep_lock);
+	struct cam_header *h = (struct cam_header *)keep;
+
+	bzero(h, CAM_HEADER_BYTES);
+	memcpy(h->magic, "RWCAM001", 8);
+	h->width = width;
+	h->height = height;
+	h->stride = stride;
+	h->format = 1;
+	h->bayer = hw->bayer;
+	h->frames = 1;
+	h->frame_bytes = (uint32_t)bytes;
+	h->source = 2;
+	strlcpy(h->sensor, "iOS", sizeof(h->sensor));
+	memcpy((void *)(keep + CAM_HEADER_BYTES), at, (size_t)bytes);
+	for (vm_offset_t line = keep; line < keep + want; line += 64) {
+		__asm__ volatile ("dc cvac, %0" : : "r" (line));
+	}
+	__asm__ volatile ("dsb sy");
+	loader_recording[0] = kvtophys(keep);
+	loader_recording[1] = want;
+	loader_recording[2] = (uint64_t)keep;
+	lck_mtx_unlock(&keep_lock);
+	say("camera: cam_dump: the %ux%u frame the stack read\n", width, height);
+}
+
 static int
 camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 {
@@ -4141,7 +4204,10 @@ ios_select(unsigned index, uint32_t mode_n)
 	if (!ctab_load()) {
 		return false;
 	}
-	if (mode_n >= ctab->modes) {
+	if (real_source) {
+		/* the wide's mode 5 or the front's mode 1, whatever the app asked */
+		mode_n = hw_index == 2 ? 1 : 0;
+	} else if (mode_n >= ctab->modes) {
 		uint64_t best = 0;
 
 		mode_n = 0;
@@ -4490,7 +4556,10 @@ hakios_camera_init(void)
 	 */
 	real_source = level == 5 && PE_parse_boot_argn("cam_real", &real_n, sizeof(real_n)) && real_n != 0;
 	if (real_source) {
+		uint32_t dump_n = 0;
+
 		fake = true;
+		dump_raw_on = PE_parse_boot_argn("cam_dump", &dump_n, sizeof(dump_n)) && dump_n != 0;
 		/* The session starts after userspace is up, when the loader's IO
 		 * window is spent; take the camera blocks' mappings now.
 		 */

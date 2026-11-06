@@ -29,6 +29,8 @@ extern int umi_camera_stream_arm(vm_offset_t, vm_offset_t, unsigned, unsigned, u
 extern bool umi_camera_stream_wait(unsigned);
 extern void umi_camera_stream_report(const char *);
 extern int umi_camera_stream_stop(void);
+extern uint32_t umi_camera_stream_mean(void);
+extern void umi_camera_stream_rearm(void);
 extern int umi_camera_stream_copy(void *, unsigned, unsigned);
 extern int umi_camera_dma_reserve(unsigned, unsigned);
 extern void umi_camera_dma_quiesce(bool);
@@ -1060,6 +1062,37 @@ ucapture(void)
 		umi_camera_stream_report(done ? "after the first frame" : "without a frame (phy sweep)");
 	} else {
 		done = umi_camera_stream_wait(1500);
+		/* cam_shutter2/cam_gain2: change the exposure while streaming and let
+		 * several frames land, to see whether the sensor takes it mid-stream
+		 * (the iOS session's exposure changes go the same way).
+		 */
+		uint32_t shutter2 = 0, gain2 = 0;
+		(void)PE_parse_boot_argn("cam_shutter2", &shutter2, sizeof(shutter2));
+		(void)PE_parse_boot_argn("cam_gain2", &gain2, sizeof(gain2));
+		if (done && (shutter2 || gain2)) {
+			hakios_tl("UMI camera: IFE before re-arm: bus=%#x rdi=%#x addr0=%#x addr1=%#x r30=%#x r34=%#x r38=%#x r3c=%#x\n",
+			    ur(isp_ife, 0x1a28), ur(isp_ife, 0x1c00), ur(isp_ife, 0x1c04), ur(isp_ife, 0x1c08),
+			    ur(isp_ife, 0x1c30), ur(isp_ife, 0x1c34), ur(isp_ife, 0x1c38), ur(isp_ife, 0x1c3c));
+			umi_camera_stream_rearm();
+			ums(20);
+			hakios_tl("UMI camera: IFE after re-arm: bus=%#x rdi=%#x addr0=%#x addr1=%#x r30=%#x r34=%#x r38=%#x r3c=%#x\n",
+			    ur(isp_ife, 0x1a28), ur(isp_ife, 0x1c00), ur(isp_ife, 0x1c04), ur(isp_ife, 0x1c08),
+			    ur(isp_ife, 0x1c30), ur(isp_ife, 0x1c34), ur(isp_ife, 0x1c38), ur(isp_ife, 0x1c3c));
+			uint32_t live0 = umi_camera_stream_mean();
+
+			ums(100);
+			uint32_t live1 = umi_camera_stream_mean();
+			uset_exposure(shutter2, gain2);
+			uint16_t rb = 0;
+			if (usensor_read(0x0202, &rb)) hakios_tl("UMI camera: mid-stream exposure register reads %#x\n", rb);
+			if (usensor_read(0x0204, &rb)) hakios_tl("UMI camera: mid-stream gain register reads %#x\n", rb);
+			ums(100);
+			uint32_t after = umi_camera_stream_mean();
+			ums(100);
+			uint32_t later = umi_camera_stream_mean();
+			hakios_tl("UMI camera: mid-stream %u lines, gain %#x: frame mean %u, %u (live); after %u -> %u\n",
+			    shutter2, gain2, live0, live1, after, later);
+		}
 		umi_camera_stream_report(done ? "after the first frame" : "without a frame");
 	}
 	(void)usensor_write(0x0100, 0x0000);

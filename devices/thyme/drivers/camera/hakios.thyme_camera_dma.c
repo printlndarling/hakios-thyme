@@ -230,9 +230,14 @@ umi_camera_tpg(vm_offset_t ife,vm_offset_t csid)
 	/* VFE bus-v3 frame mode, RDI0 at 1c00, completion group bit4. */
 	dw(ife,0x1a08,0x3ffffff);dw(ife,0x1a34,0);dw(ife,0x1adc,0);
 	dw(ife,0x1c64,15);dw(ife,0x1c0c,0xffff);dw(ife,0x1c10,0);dw(ife,0x1c14,UD_STRIDE);dw(ife,0x1c18,0);
-	dw(ife,0x1c08,0);dw(ife,0x1c30,0);dw(ife,0x1c34,1);dw(ife,0x1c38,0);dw(ife,0x1c3c,1);
+	/* Both frame-address banks: the WM alternates between them, and with the
+	 * second one left at 0 the IFE wrote one frame and stopped, so every later
+	 * read returned the same (often the first, often black) frame.
+	 */
+	dw(ife,0x1c04,(uint32_t)(UD_IOVA+4096));dw(ife,0x1c08,(uint32_t)(UD_IOVA+4096));
+	dw(ife,0x1c30,0);dw(ife,0x1c34,1);dw(ife,0x1c38,0);dw(ife,0x1c3c,1);
 	dw(ife,0x1a20,1u<<4);dw(ife,0x1a30,1);dw(ife,0x1a18,1u<<4);
-	dw(ife,0x1c04,(uint32_t)(UD_IOVA+4096));dw(ife,0x1c00,0x10001);dw(ife,0x20,1);
+	dw(ife,0x1c00,0x10001);dw(ife,0x20,1);
 	dw(csid,0x604,1u<<10);dw(csid,0x608,0x3ffu<<12|0x740);
 	dw(csid,0x60c,0x12345678);dw(csid,0x610,UD_WIDTH<<16|UD_HEIGHT);
 	dw(csid,0x614,0x2b);dw(csid,0x618,2u<<16|8);dw(csid,0x640,1u<<5);dw(csid,0x648,0);
@@ -317,6 +322,35 @@ umi_camera_stream_wait(unsigned ms)
 		if(dr(ud.cb,0x58)&UD_FSR_FAULT)break;
 	}
 	return done;
+}
+
+/* Arm the next frame: clear the frame-done and give the WM its addresses again
+ * (it consumes one address per frame, as the vendor's per-buffer writes do).
+ */
+void
+umi_camera_stream_rearm(void)
+{
+	if(!ud.memory||!ud.running)return;
+	dw(ud.ife,0x1a30,1u<<4);
+	dw(ud.ife,0x1c04,(uint32_t)(UD_IOVA+4096));
+	dw(ud.ife,0x1c08,(uint32_t)(UD_IOVA+4096));
+}
+
+/* The buffer's current level (8-bit bytes, every 8th): what the sensor is
+ * exposing now, for the mid-stream exposure test.
+ */
+uint32_t
+umi_camera_stream_mean(void)
+{
+	if(!ud.memory)return 0;
+	struct ud_header *h=(struct ud_header *)ud.memory;
+	uint32_t n=h->frame_bytes;
+	if(!n)return 0;
+	dcache(ud.memory,ud.size);
+	const uint8_t *f=(const uint8_t *)(ud.memory+4096);
+	uint64_t sum=0;uint32_t count=0;
+	for(uint32_t i=0;i<n;i+=8){sum+=f[i];count++;}
+	return count?(uint32_t)(sum/count):0;
 }
 
 void

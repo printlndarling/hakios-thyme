@@ -321,6 +321,19 @@ isp_awb(struct isp *isp, const struct isp_stats *s)
 	if (s->neutral_cells * 32 >= s->cells && s->neutral[0] > 0.01 && s->neutral[1] > 0.01) {
 		r = (float)(1 / s->neutral[0]);
 		b = (float)(1 / s->neutral[1]);
+		/*
+		 * The neutral cells refine the scene's average, and only so far as they are part of it:
+		 * on the grey mat a few bright reflections (2-3 % of the cells) held the white point 20 %
+		 * short in red against the camera's other ISP, and the mat came out green.
+		 */
+		if (s->grey_cells * 16 >= s->cells && s->grey[0] > 0.01 && s->grey[1] > 0.01) {
+			float gr = (float)(1 / s->grey[0]), gb = (float)(1 / s->grey[1]);
+			float w = (float)s->neutral_cells / (0.25f * (float)s->cells);
+
+			w = w > 1 ? 1 : w;
+			r = r * w + gr * (1 - w);
+			b = b * w + gb * (1 - w);
+		}
 	} else if (s->grey_cells * 16 >= s->cells && s->grey[0] > 0.01 && s->grey[1] > 0.01) {
 		r = (float)(1 / s->grey[0]);
 		b = (float)(1 / s->grey[1]);
