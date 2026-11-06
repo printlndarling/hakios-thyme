@@ -57,7 +57,7 @@ static bool uios_on, uc_keep;
  * S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
  * order and slave address.
  */
-static bool ufront;
+static bool ufront, ufront_lite0;
 static uint8_t uslave = 0x7a;
 static uint32_t umclk_cmd = 0x501c, umclk_cfg = 0x5020, umclk_branch = 0x5034;
 static struct {
@@ -612,7 +612,9 @@ uisp_probe(void)
 	/* The front sensor is on CSIPHY 4, which the second lite block
 	 * (ife-lite1 at 0xacdb200, csid-lite1 at +0x200) receives.
 	 */
-	if (!isp_ife) isp_ife = umap(ufront ? 0x0acdb200 : 0x0acd9000, 0x2200);
+	uint32_t lite_base = 0x0acd9000;
+	if (ufront && !ufront_lite0) lite_base = 0x0acdb200;
+	if (!isp_ife) isp_ife = umap(lite_base, 0x2200);
 	if (!isp_ife) return ENOMEM;
 	isp_csid = isp_ife + 0x200;
 	hakios_tl("UMI camera: reading IFE core version\n");
@@ -655,22 +657,25 @@ uisp_probe(void)
 	for (unsigned i = 0; i < 4; ++i) uw(isp_csid, 0x38+0x10*i, 0x7fff);
 	uw(isp_csid, 0x104, 0x80);
 	for (unsigned i = 0; i < 4; ++i) uw(isp_csid, 0x200+0x100*i, 2);
-	/* The SM8250 driver's global reset performs hardware, then registers. */
+	/* The SM8250 driver's global reset performs hardware, then registers;
+	 * cam_ife_csid_hw_ver1.c's reset completion checks top status bit 0.
+	 */
+	uint32_t rst_done = 1u;
 	for (unsigned step = 0; step < 2; ++step) {
 		bool hw = step == 0;
-		uw(isp_csid, 0x78, 1); uw(isp_csid, 0x80, 1);
-		if (!upoll(isp_csid, 0x70, 1, 0, 1000)) return EIO;
+		uw(isp_csid, 0x78, rst_done); uw(isp_csid, 0x80, 1);
+		if (!upoll(isp_csid, 0x70, rst_done, 0, 1000)) return EIO;
 		if (hw) { uw(isp_csid, 0x74, 1); uw(isp_csid, 0x80, 1); }
 		uw(isp_csid, 0x10, hw ? 0x1e : 1);
 		if (!hw) { uw(isp_csid, 0x74, 1); uw(isp_csid, 0x80, 1); }
-		if (!upoll(isp_csid, 0x70, 1, 1, 100000)) {
+		if (!upoll(isp_csid, 0x70, rst_done, rst_done, 100000)) {
 			hakios_tl("UMI camera: CSID %s reset timed out, IRQ %#x\n", hw ? "hardware" : "register", ur(isp_csid, 0x70));
 			/* The second lite block's reset acknowledgement does not
 			 * reach this status bit on the front's instance; the block
 			 * still takes its configuration (cam=4 on the phone). */
 			if (!ufront) return ETIMEDOUT;
 		}
-		uw(isp_csid, 0x78, 1); uw(isp_csid, 0x80, 1);
+		uw(isp_csid, 0x78, rst_done); uw(isp_csid, 0x80, 1);
 	}
 	/* VFE lite48x/top-v3: command 2 resets HW+registers; bit17 ACK.
 	 * Redwood's top-v2 command 0x3f9f/bit31 must never be used here.
@@ -1206,14 +1211,17 @@ uprobe(unsigned stage)
 	char which[16] = "";
 
 	ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
+	uint32_t lite0_arg = 0;
+	ufront_lite0 = ufront &&
+	    PE_parse_boot_argn("cam_front_lite0", &lite0_arg, sizeof(lite0_arg)) && lite0_arg != 0;
 	const unsigned *pins = ufront ? front_pins : hmx_pins;
 	/* The lite block's last clock entries are the sensor's CSIPHY
 	 * timer and PHY branches: CSIPHY 3 for the rear, CSIPHY 4 (RCG
 	 * 0x6080, branches 0x6098/0x609c) for the front.
 	 */
 	isp_rcgs[3].cmd = ufront ? 0x6080 : 0x6060;
-	isp_branches[9].reg = ufront ? 0x6098 : 0x6078;
-	isp_branches[10].reg = ufront ? 0x609c : 0x607c;
+	isp_branches[10].reg = ufront ? 0x6098 : 0x6078;
+	isp_branches[11].reg = ufront ? 0x609c : 0x607c;
 	uslave = ufront ? 0x20 : 0x7a;
 	umclk_cmd = ufront ? 0x5070 : 0x501c;
 	umclk_cfg = umclk_cmd + 4;
@@ -1425,7 +1433,10 @@ uprobe(unsigned stage)
 	}
 	error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
 	if (!error && stage >= 4) error = uisp_probe();
-	if (!error && stage == 6 && !ufront) error = umi_camera_tpg(isp_ife, isp_csid);
+	/* cam=6 on the front runs the CSID's own test pattern through lite1: it
+	 * proves the lite1 CSID/IFE path without the PHY or the sensor.
+	 */
+	if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
 	if (!error && stage == 7) error = ucapture();
 	if (!error && stage == 8 && !ufront) {
 		error = ustream_begin();
