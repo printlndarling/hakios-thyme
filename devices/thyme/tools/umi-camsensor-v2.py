@@ -180,8 +180,6 @@ def table_entries(data, pool, symbols, sid):
 
 
 def export_main(data, pool, symbols, sensor_name, version, output, source):
-    if sensor_name != "s5khmx":
-        raise ValueError("table export currently supports only UMI's main s5khmx module")
     probe = probe_fields(data, pool, symbols)
     if probe is None:
         raise ValueError("unrecognized sensor probe layout")
@@ -202,17 +200,25 @@ def export_main(data, pool, symbols, sensor_name, version, output, source):
     for has_version, version_id, count, resolution_id in array("resolutionInfo", 4):
         version_symbol = symbols.get(version_id)
         resolution = symbols.get(resolution_id)
-        if has_version != 1 or not version_symbol or version_symbol["name"] != "sensorVersion":
-            raise ValueError("unsupported resolution version selector")
         if not resolution or resolution["name"] != "resolutionData":
             raise ValueError("invalid resolutionData reference")
-        variant = as_words(value(data, pool, version_symbol))
-        if len(variant) != 1 or variant[0] in variants:
-            raise ValueError("ambiguous sensorVersion")
+        if has_version == 1:
+            if not version_symbol or version_symbol["name"] != "sensorVersion":
+                raise ValueError("unsupported resolution version selector")
+            variant = as_words(value(data, pool, version_symbol))
+            if len(variant) != 1 or variant[0] in variants:
+                raise ValueError("ambiguous sensorVersion")
+            key = variant[0]
+        elif has_version == 0:
+            # A module without versioned resolution sets (the front S5K3T2):
+            # one set, exported as version 0.
+            key = 0
+        else:
+            raise ValueError("unsupported resolution version selector")
         modes = resolution_modes(data, pool, symbols, resolution)
         if len(modes) != count:
             raise ValueError("resolutionInfo: mode count mismatch")
-        variants[variant[0]] = modes
+        variants[key] = modes
     if version not in variants:
         raise ValueError(f"sensor version {version:#x} is absent; available: {', '.join(hex(v) for v in variants)}")
     modes = variants[version]
@@ -240,11 +246,14 @@ def export_main(data, pool, symbols, sensor_name, version, output, source):
     tables = [(f"res{i}", settings(mode["table_id"])) for i, mode in enumerate(modes)]
     tables.append(("init", settings(init[0][1], init[0][0])))
     gain_refs = [i for i, word in enumerate(driver) if word in symbols and symbols[word]["name"] == "regToRealGain"]
-    if len(gain_refs) != 1 or gain_refs[0] + 8 >= len(driver):
-        raise ValueError("unrecognized stream/group-hold settings layout")
-    for i, name in enumerate(("on", "off", "holdon", "holdoff")):
-        count, sid = driver[gain_refs[0] + 1 + 2 * i:gain_refs[0] + 3 + 2 * i]
-        tables.append((name, settings(sid, count)))
+    if len(gain_refs) == 1 and gain_refs[0] + 8 < len(driver):
+        for i, name in enumerate(("on", "off", "holdon", "holdoff")):
+            count, sid = driver[gain_refs[0] + 1 + 2 * i:gain_refs[0] + 3 + 2 * i]
+            symbol = symbols.get(sid)
+            # A module may have none of these (the front S5K3T2 has no
+            # stream-on/off tables): export the ones that are there.
+            if symbol and symbol["name"] == "regSetting" and symbol["size"] == count * REGSETTING_SIZE:
+                tables.append((name, settings(sid, count)))
 
     lanes = named(symbols, "laneAssign")
     if len(lanes) != 1:

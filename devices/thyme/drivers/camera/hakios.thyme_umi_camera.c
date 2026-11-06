@@ -343,26 +343,31 @@ usensor_write(uint16_t reg, uint16_t value)
 static int
 umode_prepare(unsigned version)
 {
-	if (version != 3 && version != 0x13) return ENODEV;
-	unsigned mode_n = 3;
+	/* The S5KHMX module has two versioned sets (3 and 0x13); the front
+	 * S5K3T2 module one unversioned set, which its exporter writes as 0.
+	 */
+	if (ufront ? version != 0 : (version != 3 && version != 0x13)) return ENODEV;
+	unsigned mode_n = ufront ? 2 : 3;      /* the front's 1280x720 mode */
 	if (uios_force_mode) mode_n = uios_force_mode;
 	else if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6)
-		mode_n = 3;
+		mode_n = ufront ? 2 : 3;
 	uint64_t size = 0;
-	const char *name = version == 3 ? "camera-s5khmx-v3.tab" : "camera-s5khmx-v19.tab";
+	const char *name = ufront ? "camera-s5k3t2.tab" :
+	    version == 3 ? "camera-s5khmx-v3.tab" : "camera-s5khmx-v19.tab";
 	const uint8_t *file = hakios_wifi_file(name, &size);
 	if (!file || size < 40 || size > 65536 || memcmp(file, "RWCTAB02", 8) ||
-	    utab_u32(file+8) != 0x7a || utab_u32(file+12) != 2 || utab_u32(file+16) != 2 ||
-	    utab_u32(file+20) != 0 || utab_u32(file+24) != 0x1ad0 ||
-	    utab_u32(file+32) > 0xfff || utab_u32(file+36) <= mode_n) return EINVAL;
-	uint64_t offset = 40 + 7*48;
+	    utab_u32(file+8) != (ufront ? 0x20 : 0x7a) || utab_u32(file+12) != 2 || utab_u32(file+16) != 2 ||
+	    utab_u32(file+20) != 0 || utab_u32(file+24) != (ufront ? 0x3142 : 0x1ad0) ||
+	    utab_u32(file+36) <= mode_n || utab_u32(file+36) > 16) return EINVAL;
+	uint32_t modes_in_tab = utab_u32(file+36);
+	uint64_t offset = 40 + (uint64_t)modes_in_tab * 48;
 	if (offset > size) return EINVAL;
 	const uint8_t *mode = file + 40 + mode_n*48;
 	uint32_t width = utab_u32(mode), height = utab_u32(mode+4), lanes = utab_u32(mode+16);
 	uint32_t cphy = utab_u32(mode+20), settle = utab_u32(mode+24), pclk = utab_u32(mode+28);
 	uint32_t line = utab_u32(mode+32), frame = utab_u32(mode+36), dt = utab_u32(mode+44);
 	if (!width || !height || width > 16384 || height > 16384 || width % 4 ||
-	    !lanes || lanes > 3 || !cphy || dt != 0x2b || !pclk || frame <= 40) return EINVAL;
+	    !lanes || lanes > 4 || (cphy && lanes > 3) || cphy > 1 || dt != 0x2b || !pclk || frame <= 40) return EINVAL;
 	for (unsigned p = 0; p < 2; ++p) {
 		if (size-offset < 12) return EINVAL;
 		uint64_t bytes = 12 + 12ull*utab_u32(file+offset+8);
@@ -1348,8 +1353,8 @@ uprobe(unsigned stage)
 			hakios_tl("UMI camera: module sensor-version source register 0x000e=%#x\n", selector);
 		else hakios_tl("UMI camera: module sensor-version source did not answer\n");
 	}
+	error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
 	if (!ufront) {
-		error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
 		if (!error && stage >= 4) error = uisp_probe();
 		if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
 		if (!error && stage == 7) error = ucapture();

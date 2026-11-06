@@ -554,6 +554,12 @@ if [ -f ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin ]; then
 	python3 ../devices/thyme/tools/umi-camsensor-v2.py ../fw-camera/com.qti.sensormodule.umi_semco_s5khmx.bin \
 		--sensor-version 0x13 --output root/fw/camera-s5khmx-v19.tab >/dev/null
 fi
+# ... and the front S5K3T2's one unversioned mode set, as version 0.
+if [ -f ../fw-camera/com.qti.sensormodule.umi_sunny_s5k3t2.bin ]; then
+	mkdir -p root/fw
+	python3 ../devices/thyme/tools/umi-camsensor-v2.py ../fw-camera/com.qti.sensormodule.umi_sunny_s5k3t2.bin \
+		--sensor-version 0 --output root/fw/camera-s5k3t2.tab >/dev/null
+fi
 # ... and the S5KHMX's colour tuning (a Parameter Parser V2.0.0 file):
 # camtuning.py reads it too. The /dev/hakios-camera sessions name sensor 1
 # "s5khm2sd" (camera_device.c), so the file takes that name.
