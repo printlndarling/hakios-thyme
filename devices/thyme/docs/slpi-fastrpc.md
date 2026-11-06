@@ -395,6 +395,23 @@ None of the placements wakes the sensor process: every call still answers 0,
 The missing piece is in the DSP's own start of `sensor_process`, not in the
 remote heap, the listener or the file service.
 
+## Reading the DSP's own code
+
+The firmware can be disassembled: `readelf -l fw-slpi/slpi.mdt` gives each
+segment's load address (b15 is the segment at `0x8A000000`), and
+`tools/hexagon-wrap.py fw-slpi/slpi.b15 /tmp/slpi15.elf 0x8A000000` followed by
+`llvm-objdump -d --arch-name=hexagon` (LLVM lists hexagon among its targets).
+A string at file offset N is then at `0x8A000000 + N`.
+
+That is how the watchdog string was decoded. `TMR_CLNT_1:0x88` is not a file
+error: b15's `timer_client_user_init.c` opens the QDI device `/dev/timers`
+under the name `TMR_CLNT_%u`, and the string it would log is
+`timer_client_user_init: qdi_open failed`. The sensor process dies opening its
+timer client, before it ever asks the AP for anything. The remaining question
+is what makes that `qdi_open` fail in the PD the AP starts (a PD attribute or
+a resource the Android kernel supplies at PD creation), and the disassembly is
+now the way to answer it.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
