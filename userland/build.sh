@@ -568,6 +568,13 @@ if [ -f ../fw-camera/com.qti.tuned.thyme_semco_s5khmx_wide.bin ]; then
 	../tools/camtuning.py ../fw-camera/com.qti.tuned.thyme_semco_s5khmx_wide.bin \
 		root/fw/camera-s5khm2sd.isp >/dev/null
 fi
+# ... and the front S5K3T2's colour tuning, under the name camera_device.c gives
+# sensor 2 ("s5k3t2").
+if [ -f ../fw-camera/com.qti.tuned.thyme_sunny_s5k3t2_front.bin ]; then
+	mkdir -p root/fw
+	../tools/camtuning.py ../fw-camera/com.qti.tuned.thyme_sunny_s5k3t2_front.bin \
+		root/fw/camera-s5k3t2.isp >/dev/null
+fi
 # ... and with ADSP=1 the image of the audio DSP, from the same place into ../fw-audio (drivers/audio/hakios.adsp.c):
 # adsp.mdt and adsp.b00 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
 # the loader takes.

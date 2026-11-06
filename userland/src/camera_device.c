@@ -1285,7 +1285,7 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 static void
 load_tuning(struct isp *isp, uint32_t sensor)
 {
-	static const char *const names[] = { "ov02b10", "s5khm2sd", "ov16a1q", "s5k4h7" };
+	static const char *const names[] = { "ov02b10", "s5khm2sd", "s5k3t2", "s5k4h7" };
 	char path[96];
 
 	if (sensor >= sizeof(names) / sizeof(names[0])) {
