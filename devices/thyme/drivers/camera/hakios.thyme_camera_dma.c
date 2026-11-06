@@ -118,12 +118,21 @@ dmap(void)
 	ud.old_cbar=dr(ud.gr1,4*cb);ud.old_cba2r=dr(ud.gr1,0x800+4*cb);
 	for(unsigned i=0;i<9;i++)ud.old_cb[i]=dr(ud.cb,ud_cbregs[i]);
 	hakios_tl("UMI camera DMA: selected CB%u at %#lx SMR%u old CBAR=%#x CBA2R=%#x SCTLR=%#x FSR=%#x\n",cb,(unsigned long)(0x15000000+(uint64_t)(pages+cb)*page),free_match,ud.old_cbar,ud.old_cba2r,ud.old_cb[0],dr(ud.cb,0x58));
-	uint64_t *l1=(uint64_t *)ud.tables,*l2=(uint64_t *)(ud.tables+4096),*l3=(uint64_t *)(ud.tables+8192);
+	/* The IOVA window is 0x40000000 and may span more than one 2 MB L2
+	 * entry: one L3 table per 2 MB, allocated after the L1 and L2 tables.
+	 */
+	unsigned npages=(unsigned)(ud.size/4096),chunks=(npages+511)/512;
+	vm_size_t tables=8192+4096ull*chunks;
+	if(!ud.tables&&kmem_alloc(kernel_map,&ud.tables,tables,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
+	uint64_t *l1=(uint64_t *)ud.tables,*l2=(uint64_t *)(ud.tables+4096);
 	l1[(UD_IOVA>>30)&511]=kvtophys((vm_offset_t)l2)|3;
-	l2[(UD_IOVA>>21)&511]=kvtophys((vm_offset_t)l3)|3;
-	for(unsigned p=0;p<ud.size/4096;p++)
-		l3[p]=kvtophys(ud.memory+4096ull*p)|3ull|(1ull<<6)|(2ull<<8)|(1ull<<10)|(1ull<<11);
-	dcache(ud.tables,16384);
+	for(unsigned c=0;c<chunks;c++){
+		uint64_t *l3=(uint64_t *)(ud.tables+8192+4096ull*c);
+		l2[((UD_IOVA>>21)+c)&511]=kvtophys((vm_offset_t)l3)|3;
+		for(unsigned i=0;i<512&&c*512+i<npages;i++)
+			l3[i]=kvtophys(ud.memory+4096ull*(c*512+i))|3ull|(1ull<<6)|(2ull<<8)|(1ull<<10)|(1ull<<11);
+	}
+	dcache(ud.tables,tables);
 	ud.context_changed=true;
 	dw(ud.cb,0,0);dw(ud.gr1,0x800+4*cb,1);dw(ud.gr1,4*cb,1u<<16|3u<<8|15u<<12);
 	dw(ud.cb,0x10,1u|1u<<4|7u<<15);dw(ud.cb,0x30,25u|1u<<8|1u<<10|3u<<12|1u<<23);
@@ -205,7 +214,6 @@ umi_camera_tpg(vm_offset_t ife,vm_offset_t csid)
 	if(ud.memory)return EBUSY; /* one retained capture per diagnostic boot */
 	ud.ife=ife;ud.csid=csid;ud.size=round_page(4096+UD_BYTES);
 	if(kmem_alloc_contig(kernel_map,&ud.memory,ud.size,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
-	if(kmem_alloc(kernel_map,&ud.tables,16384,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
 	struct ud_header *h=(struct ud_header *)ud.memory;
 	memcpy(h->magic,"RWCAM001",8);h->width=UD_WIDTH;h->height=UD_HEIGHT;h->stride=UD_STRIDE;
 	h->format=1;h->bayer=0;h->frame_bytes=UD_BYTES;h->source=0;strlcpy(h->sensor,"UMI CSID TPG",sizeof(h->sensor));
@@ -250,4 +258,91 @@ umi_camera_tpg(vm_offset_t ife,vm_offset_t csid)
 	dcache(ud.memory,4096);
 	loader_recording[0]=kvtophys(ud.memory);loader_recording[1]=ud.size;loader_recording[2]=ud.memory;
 	return h->frames?0:EIO;
+}
+
+/* Real sensor stream: CSID RX from CSIPHY `phy' (not the generator), RAW10
+ * RDI0, IFE bus-v3 writing one frame into the retained buffer. The caller
+ * starts the sensor afterwards and then calls stream_wait/stop.
+ */
+int
+umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned height,unsigned stride,
+    unsigned lanes,unsigned lane_cfg,unsigned phy,unsigned vc,unsigned dt,unsigned bayer,const char *sensor)
+{
+	if(ud.memory)return EBUSY; /* one retained capture per diagnostic boot */
+	if(!width||!height||!stride||lanes<1||lanes>4)return EINVAL;
+	uint64_t bytes=(uint64_t)stride*height;
+	if(bytes>32ull<<20)return EINVAL;
+	ud.ife=ife;ud.csid=csid;ud.size=round_page(4096+(vm_size_t)bytes);
+	if(kmem_alloc_contig(kernel_map,&ud.memory,ud.size,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
+	struct ud_header *h=(struct ud_header *)ud.memory;
+	memcpy(h->magic,"RWCAM001",8);h->width=width;h->height=height;h->stride=stride;
+	h->format=1;h->bayer=bayer;h->frame_bytes=(uint32_t)bytes;h->source=1;
+	strlcpy(h->sensor,sensor,sizeof(h->sensor));
+	memset((void *)(ud.memory+4096),0xa5,(vm_size_t)bytes);dcache(ud.memory,ud.size);
+	lck_mtx_lock(&hakios_smmu_lock);int error=dmap();lck_mtx_unlock(&hakios_smmu_lock);
+	if(error){umi_camera_dma_quiesce(false);return error;}
+	ud.running=true;
+	/* CSID480 RX from the PHY: lane count and assignment, C-PHY, physical
+	 * PHY index in bits 21:20, RAW10 vc/dt in the RDI0 configuration.
+	 */
+	dw(csid,0x100,(lanes-1)|lane_cfg<<4|1u<<24|(phy&3u)<<20);
+	dw(csid,0x104,1u<<6|1u);
+	uint32_t cfg0=vc<<22|dt<<16|0xfu<<12|1u<<2|3u;
+	dw(csid,0x200,cfg0);dw(csid,0x204,2);
+	static const unsigned rdi_regs[]={0x20c,0x210,0x214,0x218,0x224,0x228,0x22c,0x230};
+	for(unsigned i=0;i<8;i++)dw(csid,rdi_regs[i],i&1?1:0);
+	dw(csid,0x200,1u<<31|cfg0);dw(csid,0x208,1);
+	dw(csid,0x34,1u<<1|1u<<2|1u<<3|1u<<4|1u<<5|1u<<6);
+	/* VFE bus-v3 frame mode, RDI0 at 1c00, completion group bit4. */
+	dw(ife,0x1a08,0x3ffffff);dw(ife,0x1a34,0);dw(ife,0x1adc,0);
+	dw(ife,0x1c64,15);dw(ife,0x1c0c,0xffff);dw(ife,0x1c10,0);dw(ife,0x1c14,stride);dw(ife,0x1c18,0);
+	dw(ife,0x1c08,0);dw(ife,0x1c30,0);dw(ife,0x1c34,1);dw(ife,0x1c38,0);dw(ife,0x1c3c,1);
+	dw(ife,0x1a20,1u<<4);dw(ife,0x1a30,1);dw(ife,0x1a18,1u<<4);
+	dw(ife,0x1c04,(uint32_t)(UD_IOVA+4096));dw(ife,0x1c00,0x10001);dw(ife,0x20,1);
+	hakios_tl("UMI camera stream: armed %ux%u stride %u, %u lane(s) cfg %#x phy %u vc %u dt %#x, %lu bytes\n",
+	    width,height,stride,lanes,lane_cfg,phy,vc,dt,(unsigned long)bytes);
+	return 0;
+}
+
+bool
+umi_camera_stream_wait(unsigned ms)
+{
+	bool done=false;
+	for(unsigned waited=0;waited<ms;waited+=10){
+		delay_for_interval(10,NSEC_PER_MSEC);
+		if(dr(ud.ife,0x1a28)&(1u<<4)){done=true;break;}
+		if(dr(ud.cb,0x58)&UD_FSR_FAULT)break;
+	}
+	return done;
+}
+
+void
+umi_camera_stream_report(const char *when)
+{
+	hakios_tl("UMI camera stream %s: IFE IRQ=%#x/%#x bus=%#x/%#x CSID rx=%#x pkts=%u ecc=%#x crc=%u RDI=%#x status=%#x bytes=%u/%u SMMU=%#x/%#x\n",
+	    when,dr(ud.ife,0x40),dr(ud.ife,0x44),dr(ud.ife,0x1a28),dr(ud.ife,0x1a2c),dr(ud.csid,0x20),
+	    dr(ud.csid,0x160),dr(ud.csid,0x164),dr(ud.csid,0x168),dr(ud.csid,0x30),dr(ud.csid,0x250),
+	    dr(ud.csid,0x2e0),dr(ud.csid,0x2e4),dr(ud.smmu,0x48),dr(ud.smmu,0x54));
+}
+
+int
+umi_camera_stream_stop(void)
+{
+	if(!ud.memory)return EINVAL;
+	struct ud_header *h=(struct ud_header *)ud.memory;
+	bool faulted=(dr(ud.cb,0x58)&UD_FSR_FAULT)!=0;
+	umi_camera_dma_quiesce(false);dcache(ud.memory,ud.size);
+	const uint8_t *frame=(const uint8_t *)(ud.memory+4096);
+	uint32_t bytes=h->frame_bytes;
+	bool changed=false,varied=false;
+	for(uint32_t i=0;i<bytes;i++){changed|=frame[i]!=0xa5;varied|=frame[i]!=frame[0];}
+	bool guards=!memcmp(h->magic,"RWCAM001",8)&&h->width&&h->height&&h->stride;
+	for(vm_offset_t p=4096+bytes;p<ud.size;p++)guards&=((const uint8_t *)ud.memory)[p]==0;
+	unsigned frames=changed&&varied&&guards&&!faulted?1:0;
+	h->frames=frames;
+	hakios_tl("UMI camera stream: buffer guards=%u fault=%u changed=%u varied=%u frames=%u first=%02x %02x %02x %02x\n",
+	    guards,faulted,changed,varied,frames,frame[0],frame[1],frame[2],frame[3]);
+	dcache(ud.memory,4096);
+	loader_recording[0]=kvtophys(ud.memory);loader_recording[1]=ud.size;loader_recording[2]=ud.memory;
+	return frames?0:EIO;
 }

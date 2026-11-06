@@ -1,10 +1,13 @@
 /*
  * UMI overlay status: cam=1 performs a UMI-specific read-only GPIO/CamCC/ISP ID
  * probe, cam=2 identifies S5KHMX, cam=3 verifies mode programming without
- * streaming, cam=4 probes the Kona ISP clocks/reset through umi_camera.c, and
- * cam=5 cam_fake=1 supplies synthetic frames for iOS integration.
- * Every inherited hardware capture mode is refused before touching MMIO; the
- * register maps and sensor power sequence below are still Redwood-specific.
+ * streaming, cam=4 probes the Kona ISP clocks/reset through umi_camera.c,
+ * cam=6 captures the CSID's test pattern through IFE-lite, cam=7 streams the
+ * sensor itself through CSIPHY 1 (cam_mode=N picks the module file's resN,
+ * default 3), and cam=5 cam_fake=1 supplies synthetic frames for iOS
+ * integration. Every inherited hardware capture mode is refused before
+ * touching MMIO; the register maps and sensor power sequence below are still
+ * Redwood-specific.
  */
 /*
  * The cameras of the POCO X5 Pro (redwood): the macro one, an OmniVision OV02B10 (2 MP, Android's
@@ -4236,6 +4239,7 @@ extern int umi_camera_probe(void);
 extern int umi_camera_prepare(void);
 extern int umi_camera_isp_probe(void);
 extern int umi_camera_capture_tpg(void);
+extern int umi_camera_capture_sensor(void);
 extern void umi_camera_probe_quiesce(void);
 
 static void
@@ -4321,9 +4325,10 @@ camera_thread(__unused void *parameter, __unused wait_result_t result)
 	char which[16] = "";
 
 	(void)PE_parse_boot_argn("cam_after", &secs, sizeof(secs));
-	if (!fake && ((level >= 2 && level <= 4) || level == 6)) {
+	if (!fake && ((level >= 2 && level <= 4) || level == 6 || level == 7)) {
 		wait_ms(secs * 1000);
-		if (level == 6) (void)umi_camera_capture_tpg();
+		if (level == 7) (void)umi_camera_capture_sensor();
+		else if (level == 6) (void)umi_camera_capture_tpg();
 		else if (level == 4) (void)umi_camera_isp_probe();
 		else if (level == 3) (void)umi_camera_prepare();
 		else (void)umi_camera_probe();
@@ -4339,12 +4344,13 @@ camera_thread(__unused void *parameter, __unused wait_result_t result)
 	/*
 	 * This file is a device overlay, but its hardware path is still the Redwood
 	 * implementation: the TLMM, sensor power, CamCC and Titan register maps
-	 * below do not describe UMI. Keep the synthetic capture graph available for
-	 * iOS bring-up, and refuse every hardware mode until the UMI path is ported.
-	 * In particular, don't even map or read the inherited addresses here.
+	 * below do not describe UMI. The UMI sensor path is cam=7 (uprobe's stage 7,
+	 * devices/thyme/drivers/camera/hakios.thyme_umi_camera.c); this one keeps the
+	 * synthetic capture graph available for iOS bring-up and refuses the
+	 * inherited Redwood register map.
 	 */
 	if (!fake) {
-		say("camera: UMI hardware capture is not ported; refusing to use the inherited Redwood camera register map\n");
+		say("camera: UMI hardware capture for iOS is not ported; its sensor path is cam=7, not the inherited Redwood register map\n");
 		thread_terminate(current_thread());
 		return;
 	}
@@ -4413,7 +4419,7 @@ hakios_camera_init(void)
 	if (!PE_parse_boot_argn("cam", &level, sizeof(level)) || level == 0) {
 		return;
 	}
-	level = level > 6 ? 6 : level;
+	level = level > 7 ? 7 : level;
 	uint32_t fake_n = 0;
 
 	fake = level == 5 && PE_parse_boot_argn("cam_fake", &fake_n, sizeof(fake_n)) && fake_n != 0;

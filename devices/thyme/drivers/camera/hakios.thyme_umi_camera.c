@@ -11,6 +11,7 @@
 #include <sys/hakios.input.h>
 #include <kern/clock.h>
 #include <machine/machine_routines.h>
+#include <pexpert/pexpert.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
@@ -20,18 +21,30 @@ int umi_camera_probe(void);
 int umi_camera_prepare(void);
 int umi_camera_isp_probe(void);
 int umi_camera_capture_tpg(void);
+int umi_camera_capture_sensor(void);
 extern int umi_camera_tpg(vm_offset_t, vm_offset_t);
+extern int umi_camera_stream_arm(vm_offset_t, vm_offset_t, unsigned, unsigned, unsigned,
+    unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, const char *);
+extern bool umi_camera_stream_wait(unsigned);
+extern void umi_camera_stream_report(const char *);
+extern int umi_camera_stream_stop(void);
 extern void umi_camera_dma_quiesce(bool);
 extern const uint8_t *hakios_wifi_file(const char *, uint64_t *);
 void umi_camera_probe_quiesce(void);
 
 static struct {
-	vm_offset_t core, config, observer, cc, gcc, pin[4];
+	vm_offset_t core, config, observer, cc, gcc, csiphy, pin[4];
 	uint32_t pin_cfg[4], pin_io[4], clock_cfg, clock_branch, gdsc;
 	uint32_t gcc_ahb, gcc_xo;
 	unsigned pins_valid, pin_io_valid;
 	bool active, panic, reset_changed, clock_changed, gdsc_changed, gcc_saved, rails[3];
 } uc;
+/* The sensor mode cam_mode selected (the module file's resN table and entry). */
+static struct {
+	uint32_t width, height, stride, lanes, lane_assign, settle, pixel_clock, line_length, frame_length, data_type;
+	uint64_t rate;
+	unsigned mode;
+} um;
 static struct {
 	uint16_t ppid, channel;
 	vm_offset_t write;
@@ -96,23 +109,29 @@ upoll(vm_offset_t p, unsigned o, uint32_t mask, uint32_t value, unsigned us)
 static bool
 ugpio_io(unsigned g, uint8_t reg, uint8_t *byte, bool write)
 {
-	if (g >= 3 || !gates[g].write ||
-	    ((ur(uc.core, 0x900 + 4 * gates[g].channel) >> 8) & 0xfff) != gates[g].ppid ||
-	    (ur(uc.config, 0x700 + 4 * gates[g].channel) & 7) != 0) return false;
+	if (g >= 3 || !gates[g].write) return false;
 	vm_offset_t channel = write ? gates[g].write : uc.observer + 0x80UL * gates[g].channel;
-	if (!uc.panic) hakios_spmi_lock();
-	if (write) uw(channel, 0x10, *byte);
-	uw(channel, 0, (write ? 0 : 1u << 27) | (uint32_t)reg << 4);
-	bool done = upoll(channel, 8, 1, 1, 2000);
-	uint32_t status = ur(channel, 8);
-	if (!write && done && !(status & 14)) *byte = (uint8_t)ur(channel, 0x18);
-	if (!uc.panic) hakios_spmi_unlock();
-	if (!done || (status & 14)) {
-		hakios_tl("UMI camera: GPIO PPID %#x register %#x write=%u status=%#x\n",
-		    gates[g].ppid, reg, write, status);
-		return false;
+
+	/* Other PMIC clients (the torch's flash channels, the charger) share the
+	 * arbiter: a transfer can come back with status bit 3 when it collides.
+	 * Retry rather than taking the camera down for one lost transaction.
+	 */
+	for (unsigned attempt = 0; attempt < 3; ++attempt) {
+		if (((ur(uc.core, 0x900 + 4 * gates[g].channel) >> 8) & 0xfff) != gates[g].ppid ||
+		    (ur(uc.config, 0x700 + 4 * gates[g].channel) & 7) != 0) return false;
+		if (!uc.panic) hakios_spmi_lock();
+		if (write) uw(channel, 0x10, *byte);
+		uw(channel, 0, (write ? 0 : 1u << 27) | (uint32_t)reg << 4);
+		bool done = upoll(channel, 8, 1, 1, 2000);
+		uint32_t status = ur(channel, 8);
+		if (!write && done && !(status & 14)) *byte = (uint8_t)ur(channel, 0x18);
+		if (!uc.panic) hakios_spmi_unlock();
+		if (done && !(status & 14)) return true;
+		hakios_tl("UMI camera: GPIO PPID %#x register %#x write=%u status=%#x (attempt %u)\n",
+		    gates[g].ppid, reg, write, status, attempt + 1);
+		if (!uc.panic) delay(2000);
 	}
-	return true;
+	return false;
 }
 
 static bool
@@ -273,18 +292,24 @@ static int
 umode_prepare(unsigned version)
 {
 	if (version != 3 && version != 0x13) return ENODEV;
+	unsigned mode_n = 3;
+	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6)
+		mode_n = 3;
 	uint64_t size = 0;
 	const char *name = version == 3 ? "camera-s5khmx-v3.tab" : "camera-s5khmx-v19.tab";
 	const uint8_t *file = hakios_wifi_file(name, &size);
 	if (!file || size < 40 || size > 65536 || memcmp(file, "RWCTAB02", 8) ||
 	    utab_u32(file+8) != 0x7a || utab_u32(file+12) != 2 || utab_u32(file+16) != 2 ||
 	    utab_u32(file+20) != 0 || utab_u32(file+24) != 0x1ad0 ||
-	    utab_u32(file+32) != 0x210 || utab_u32(file+36) != 7) return EINVAL;
+	    utab_u32(file+32) > 0xfff || utab_u32(file+36) <= mode_n) return EINVAL;
 	uint64_t offset = 40 + 7*48;
 	if (offset > size) return EINVAL;
-	const uint8_t *mode = file + 40 + 3*48;
-	if (utab_u32(mode) != 3008 || utab_u32(mode+4) != 2256 ||
-	    utab_u32(mode+16) != 3 || utab_u32(mode+20) != 1 || utab_u32(mode+44) != 0x2b) return EINVAL;
+	const uint8_t *mode = file + 40 + mode_n*48;
+	uint32_t width = utab_u32(mode), height = utab_u32(mode+4), lanes = utab_u32(mode+16);
+	uint32_t cphy = utab_u32(mode+20), settle = utab_u32(mode+24), pclk = utab_u32(mode+28);
+	uint32_t line = utab_u32(mode+32), frame = utab_u32(mode+36), dt = utab_u32(mode+44);
+	if (!width || !height || width > 16384 || height > 16384 || width % 4 ||
+	    !lanes || lanes > 3 || !cphy || dt != 0x2b || !pclk || frame <= 40) return EINVAL;
 	for (unsigned p = 0; p < 2; ++p) {
 		if (size-offset < 12) return EINVAL;
 		uint64_t bytes = 12 + 12ull*utab_u32(file+offset+8);
@@ -296,6 +321,8 @@ umode_prepare(unsigned version)
 	if (!tables || tables > 32) return EINVAL;
 	const uint8_t *selected[2] = { NULL, NULL };
 	unsigned counts[2] = { 0, 0 };
+	char res[8];
+	snprintf(res, sizeof(res), "res%u", mode_n);
 	for (unsigned t = 0; t < tables; ++t) {
 		if (size-offset < 12) return EINVAL;
 		const uint8_t *table = file+offset;
@@ -303,7 +330,7 @@ umode_prepare(unsigned version)
 		uint64_t bytes = 12 + 12ull*count;
 		if (bytes > size-offset) return EINVAL;
 		int slot = !memcmp(table, "init\0\0\0\0", 8) ? 0 :
-		    !memcmp(table, "res3\0\0\0\0", 8) ? 1 : -1;
+		    !strncmp((const char *)table, res, 8) ? 1 : -1;
 		if (slot >= 0) {
 			if (selected[slot] || !count || count > 4096) return EINVAL;
 			selected[slot] = table+12; counts[slot] = count;
@@ -316,7 +343,8 @@ umode_prepare(unsigned version)
 		offset += bytes;
 	}
 	if (offset != size || !selected[0] || !selected[1]) return EINVAL;
-	hakios_tl("UMI camera: initialize version %#x mode 3 without stream-on (%u+%u writes)\n", version, counts[0], counts[1]);
+	hakios_tl("UMI camera: initialize version %#x mode %u (%ux%u) without stream-on (%u+%u writes)\n",
+	    version, mode_n, width, height, counts[0], counts[1]);
 	for (unsigned t = 0; t < 2; ++t)
 		for (unsigned i = 0; i < counts[t]; ++i) {
 			const uint8_t *e = selected[t]+12*i;
@@ -332,13 +360,17 @@ umode_prepare(unsigned version)
 	/* Restore the indirect-write page before verifying direct output registers. */
 	if (!usensor_write(0x6028, 0x4000)) return EIO;
 	static const unsigned regs[5] = { 0x034c, 0x034e, 0x0342, 0x0340, 0x0100 };
-	const unsigned expected[5] = { 3008, 2256, utab_u32(mode+32), utab_u32(mode+36), 0 };
+	const unsigned expected[5] = { width, height, line, frame, 0 };
 	for (unsigned i = 0; i < 5; ++i) {
 		uint16_t value = 0;
 		if (!usensor_read(regs[i], &value)) return EIO;
 		hakios_tl("UMI camera: mode register %#x=%#x expected %#x\n", regs[i], value, expected[i]);
 		if (value != expected[i]) return EIO;
 	}
+	um.width = width; um.height = height; um.stride = ((width * 10 / 8 + 15) & ~15u);
+	um.lanes = lanes; um.lane_assign = utab_u32(file+32); um.settle = settle; um.pixel_clock = pclk;
+	um.line_length = line; um.frame_length = frame; um.data_type = dt;
+	um.rate = (uint64_t)pclk * 10 / lanes; um.mode = mode_n;
 	return 0;
 }
 
@@ -367,7 +399,7 @@ static struct {
 	{ .cmd = 0x7058 }, /* slow AHB */
 	{ .cmd = 0xc0f8 }, /* CAMNOC AXI */
 	{ .cmd = 0xa068 }, /* C-PHY RX */
-	{ .cmd = 0x6060 }, /* PHY3 timer */
+	{ .cmd = 0x6060 }, /* PHY3 timer (the sensor's CSIPHY: DT csiphy-sd-index 3) */
 	{ .cmd = 0xc000 }, /* IFE-lite */
 	{ .cmd = 0xc01c }, /* IFE-lite CSID */
 };
@@ -383,8 +415,8 @@ static struct {
 	{ .reg = 0xc018 }, /* IFE-lite */
 	{ .reg = 0xc034 }, /* IFE-lite CSID */
 	{ .reg = 0xc03c }, /* IFE-lite C-PHY RX */
-	{ .reg = 0x6078 }, /* PHY3 timer */
-	{ .reg = 0x607c }, /* PHY3 */
+	{ .reg = 0x6078 }, /* PHY3 timer (camcc-kona: csi3phytimer_clk) */
+	{ .reg = 0x607c }, /* PHY3 (camcc-kona: csiphy3_clk) */
 };
 static vm_offset_t isp_ife, isp_csid;
 static bool isp_resetting;
@@ -529,11 +561,294 @@ uisp_probe(void)
 	return 0;
 }
 
+/* ---- cam=7: the sensor's own frames ---------------------------------------------------------------- */
+
+/*
+ * The clocks Android's camera runs at: camcc's PLL0 (Lucid, 1200 MHz: L 0x3e,
+ * alpha 0x8000, the values of camcc-kona.c and mainline's camcc-sm8250), then
+ * the RCGs from its even (600) and odd (400) outputs at the rates the device
+ * tree gives: ife_lite 400, ife_lite_csid 400, cphy_rx 400, csi1phytimer 300
+ * (the settle count's 300 MHz time base), camnoc_axi 150, slow_ahb 80. The
+ * branches are off while their sources change.
+ */
+#define UMI_CSIPHY3_PHYS	0x0ac70000UL
+
+static bool upll0_on, ucsiphy_on;
+
+static bool
+upll0_up(void)
+{
+	static const struct { uint32_t offset, value; } config[] = {
+		{ 0x04, 0x3e }, { 0x08, 0x44 }, { 0x40, 0x8000 }, { 0x18, 0x20485699 },
+		{ 0x1c, 0x00002261 }, { 0x20, 0x329a699c }, { 0x0c, 0x00003100 },
+		{ 0x10, 0x00000805 }, { 0x14, 0x00000000 },
+	};
+
+	if (ur(uc.cc, 0x00) & 1) {
+		hakios_tl("UMI camera: camcc PLL0 is running already (mode %#x); not taking it\n", ur(uc.cc, 0x00));
+		return false;
+	}
+	for (unsigned i = 0; i < sizeof(config) / sizeof(config[0]); ++i)
+		uw(uc.cc, config[i].offset, config[i].value);
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) | 1u << 23); /* update bypass */
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) & ~1u);       /* outputs off */
+	uw(uc.cc, 0x38, 0);                            /* standby */
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) | 1u << 2);    /* out of reset */
+	uw(uc.cc, 0x38, 1);                            /* run */
+	if (!upoll(uc.cc, 0x00, 1u << 31, 1u << 31, 2000)) {
+		hakios_tl("UMI camera: camcc PLL0 did not lock (mode %#x)\n", ur(uc.cc, 0x00));
+		return false;
+	}
+	uw(uc.cc, 0x0c, ur(uc.cc, 0x0c) | 7);          /* main, even, odd */
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) | 1);
+	upll0_on = true;
+	hakios_tl("UMI camera: camcc PLL0 locked at 1200 MHz (mode %#x)\n", ur(uc.cc, 0x00));
+	return true;
+}
+
+static void
+upll0_down(void)
+{
+	if (!upll0_on) return;
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) & ~1u);
+	uw(uc.cc, 0x0c, ur(uc.cc, 0x0c) & ~7u);
+	uw(uc.cc, 0x38, 0);
+	uw(uc.cc, 0x00, ur(uc.cc, 0x00) & ~(1u << 2));
+	upll0_on = false;
+}
+
+/* An RCG set (source, divider field 2n - 1, no M/N) and updated. */
+static bool
+urcg_set(uint32_t cmd, uint32_t source, uint32_t divider)
+{
+	uw(uc.cc, cmd + 4, (ur(uc.cc, cmd + 4) & ~0x371fu) | source << 8 | divider);
+	uw(uc.cc, cmd, ur(uc.cc, cmd) | 1);
+	if (!upoll(uc.cc, cmd, 1, 0, 1000)) {
+		hakios_tl("UMI camera: RCG %#x does not take its configuration (cmd %#x)\n", cmd, ur(uc.cc, cmd));
+		return false;
+	}
+	return true;
+}
+
+static bool
+ucsh_put(unsigned offset, uint32_t value)
+{
+	uw(uc.csiphy, offset, value);
+	uint32_t back = ur(uc.csiphy, offset);
+	if (back != value) {
+		hakios_tl("UMI camera: CSIPHY %#x <- %#x, but it reads %#x\n", offset, value, back);
+		return false;
+	}
+	return true;
+}
+
+/* cam_csiphy_config_dev's common part and the C-PHY register set (cam_csiphy_1_2_1). */
+static bool
+ucsiphy_common(uint32_t lane_enable)
+{
+	if (!ucsh_put(0x814, lane_enable) || !ucsh_put(0x818, 0x01) || !ucsh_put(0x81c, 0x52))
+		return false;
+	uw(uc.csiphy, 0x800, 0x03);
+	delay(1);
+	uw(uc.csiphy, 0x800, 0x0e);
+	return true;
+}
+
+static bool
+ucsiphy_cphy(unsigned settle, uint64_t bits_per_trio)
+{
+	static const uint32_t trios[3][2] = { { 0x100, 0x980 }, { 0x300, 0xa80 }, { 0x500, 0xb80 } };
+	static const struct {
+		uint64_t bandwidth;
+		uint8_t r144, r164, r16c, rb4;
+	} rates[3] = {
+		{ 5700000000ull, 0x32, 0x0b, 0x25, 0 }, { 7980000000ull, 0xb2, 0x33, 0x1d, 0x03 },
+		{ 10260000000ull, 0xb2, 0x33, 0x25, 0x02 },
+	};
+	unsigned r = 0;
+
+	for (unsigned t = 0; t < 3; t++) {
+		uint32_t b = trios[t][0], m = trios[t][1];
+
+		if (!ucsh_put(m + 0x10, 0x00) || !ucsh_put(m + 0x14, 0x00) ||
+		    !ucsh_put(m + 0x18, 0x00) || !ucsh_put(m + 0x10, 0x08) ||
+		    !ucsh_put(m + 0x14, 0x08) || !ucsh_put(m + 0x18, 0x1a) ||
+		    !ucsh_put(m + 0x0c, 0xaf)) return false;
+		delay(1);
+		if (!ucsh_put(b + 0x5c, 0x46) || !ucsh_put(b + 0x68, 0xa0) ||
+		    !ucsh_put(b + 0x04, 0x06) || !ucsh_put(b + 0x0c, settle & 0xff) ||
+		    !ucsh_put(b + 0x08, (settle >> 8) & 0xff) || !ucsh_put(b + 0x14, 0x20) ||
+		    !ucsh_put(b + 0x50, 0x00) || !ucsh_put(b + 0x88, 0x00) ||
+		    !ucsh_put(b + 0x8c, 0x7f) || !ucsh_put(b + 0x90, 0x7f) ||
+		    !ucsh_put(b + 0x18, 0x3e) || !ucsh_put(b + 0x1c, 0x41) ||
+		    !ucsh_put(b + 0x20, 0x41) || !ucsh_put(b + 0x24, 0x7f) ||
+		    !ucsh_put(b + 0x28, 0x00) || !ucsh_put(b + 0x2c, 0x00) ||
+		    !ucsh_put(b + 0x60, 0x02) || !ucsh_put(b + 0xcc, 0x41) ||
+		    !ucsh_put(b + 0xdc, 0x50) || !ucsh_put(m + 0x04, 0x20) ||
+		    !ucsh_put(m + 0x08, 0x05) || !ucsh_put(m + 0x00, 0x60) ||
+		    !ucsh_put(m + 0x2c, 0x35) || !ucsh_put(m + 0x30, 0x01) ||
+		    !ucsh_put(0x800, 0x0e) || !ucsh_put(0x884, 0x01)) return false;
+	}
+	while (r < 2 && bits_per_trio > rates[r].bandwidth) r++;
+	for (unsigned t = 0; t < 3; t++) {
+		uint32_t b = trios[t][0], m = trios[t][1];
+
+		if (!ucsh_put(b + 0x44, rates[r].r144) || !ucsh_put(b + 0x64, rates[r].r164) ||
+		    !ucsh_put(b + 0x6c, rates[r].r16c) ||
+		    (rates[r].rb4 != 0 && !ucsh_put(m + 0x34, rates[r].rb4))) return false;
+		if (rates[r].rb4 != 0) delay(1);
+	}
+	hakios_tl("UMI camera CSIPHY: C-PHY row %u (up to %llu bit/s a trio) for %llu, settle %u\n",
+	    r, rates[r].bandwidth, bits_per_trio, settle);
+	return true;
+}
+
+static bool
+ucsiphy_up(unsigned lanes, bool cphy, uint32_t lane_assign, unsigned settle, uint64_t bits_per_lane)
+{
+	static const uint8_t irq_masks[11] = { 0xff, 0xff, 0xfb, 0xff, 0x7f, 0xff, 0xff, 0xef, 0xff, 0xff, 0xff };
+	uint32_t lane_enable = 0;
+
+	for (unsigned l = 0; l < lanes; l++, lane_assign >>= 4) {
+		unsigned n = lane_assign & 0xf;
+
+		if (n > (cphy ? 2u : 3u)) {
+			hakios_tl("UMI camera: CSIPHY lane assignment %#x not known here\n", lane_assign);
+			return false;
+		}
+		lane_enable |= cphy ? 1u << (2 * n + 1) : 1u << (2 * n) | 0x80u;
+	}
+	if (!uc.csiphy) {
+		uc.csiphy = umap(UMI_CSIPHY3_PHYS, 0x2000);
+		if (!uc.csiphy) return false;
+	}
+	uw(uc.csiphy, 0x814, 0x00);
+	delay(1);
+	uw(uc.csiphy, 0x818, 0x00);
+	uw(uc.csiphy, 0x81c, 0x00);
+	uw(uc.csiphy, 0x800, 0x01);
+	delay(1);
+	uw(uc.csiphy, 0x800, 0x00);
+	ucsiphy_on = true;
+	if (!ucsiphy_common(lane_enable) || !ucsiphy_cphy(settle, bits_per_lane)) return false;
+	for (unsigned i = 0; i < 11; i++) {
+		uw(uc.csiphy, 0x82c + 4 * i, irq_masks[i]);
+		uw(uc.csiphy, 0x858 + 4 * i, 0xff);
+	}
+	uw(uc.csiphy, 0x828, 0x1);
+	uw(uc.csiphy, 0x828, 0x0);
+	hakios_tl("UMI camera: CSIPHY 3 configured: %u trio(s), lanes %#x, settle %u\n", lanes, lane_enable, settle);
+	return true;
+}
+
+static void
+ucsiphy_down(void)
+{
+	if (!ucsiphy_on) return;
+	uw(uc.csiphy, 0x814, 0x00);
+	delay(1);
+	uw(uc.csiphy, 0x818, 0x00);
+	uw(uc.csiphy, 0x81c, 0x00);
+	uw(uc.csiphy, 0x800, 0x01);
+	delay(1);
+	uw(uc.csiphy, 0x800, 0x00);
+	ucsiphy_on = false;
+}
+
+/* The branches off, PLL0 and the cameras' rates, the branches on, the PHY. */
+static int
+ustream_up(void)
+{
+	for (unsigned i = 0; i < sizeof(isp_branches)/sizeof(isp_branches[0]); ++i) {
+		if (!isp_branches[i].changed) continue;
+		vm_offset_t base = isp_branches[i].gcc ? uc.gcc : uc.cc;
+		uw(base, isp_branches[i].reg, ur(base, isp_branches[i].reg) & ~1u);
+	}
+	if (!upll0_up()) return EIO;
+	static const struct { uint32_t cmd, source, divider; } rcgs[] = {
+		{ 0x7058, 2, 14 },      /* slow_ahb 600 / 7.5 = 80 MHz */
+		{ 0xc0f8, 2, 7 },       /* camnoc_axi 600 / 4 = 150 MHz */
+		{ 0xa068, 3, 1 },       /* cphy_rx 400 / 1 */
+		{ 0x6060, 2, 3 },       /* csi3phytimer 600 / 2 = 300 MHz */
+		{ 0xc000, 3, 1 },       /* ife_lite 400 / 1 */
+		{ 0xc01c, 3, 1 },       /* ife_lite_csid 400 / 1 */
+	};
+	for (unsigned i = 0; i < sizeof(rcgs)/sizeof(rcgs[0]); ++i)
+		if (!urcg_set(rcgs[i].cmd, rcgs[i].source, rcgs[i].divider)) return EIO;
+	for (unsigned i = 0; i < sizeof(isp_branches)/sizeof(isp_branches[0]); ++i) {
+		vm_offset_t base = isp_branches[i].gcc ? uc.gcc : uc.cc;
+		unsigned reg = isp_branches[i].reg;
+		uw(base, reg, ur(base, reg) | 1);
+		if (!(ur(base, reg) & 1) || (!isp_branches[i].delay_only && !upoll(base, reg, 1u<<31, 0, 2000))) {
+			hakios_tl("UMI camera: stream clock %#x failed to start (%#x)\n", reg, ur(base, reg));
+			return EIO;
+		}
+	}
+	if (!ucsiphy_up(um.lanes, true, um.lane_assign, um.settle, um.rate)) return EIO;
+	return 0;
+}
+
+static int
+ucapture(void)
+{
+	if (!um.width) {
+		hakios_tl("UMI camera: no sensor mode was selected for a capture\n");
+		return EINVAL;
+	}
+	int error = ustream_up();
+	if (error) {
+		hakios_tl("UMI camera: stream clock and PHY setup failed error=%d\n", error);
+		return error;
+	}
+	error = umi_camera_stream_arm(isp_ife, isp_csid, um.width, um.height, um.stride, um.lanes,
+	    um.lane_assign & 0xfff, 3, 0, um.data_type, 1, "S5KHMX");
+	if (error) {
+		hakios_tl("UMI camera: stream arm failed error=%d\n", error);
+		return error;
+	}
+	uint32_t frame_lines = 0;
+	(void)PE_parse_boot_argn("cam_frame_lines", &frame_lines, sizeof(frame_lines));
+	if (frame_lines >= 64) {
+		/* The frame length register (0x0340): the exposure's ceiling and the
+		 * frame time. A still look at a dim scene uses a long one.
+		 */
+		(void)usensor_write(0x0104, 0x0100);
+		(void)usensor_write(0x0340, (uint16_t)frame_lines);
+		(void)usensor_write(0x0104, 0x0000);
+		hakios_tl("UMI camera: frame length %u lines\n", frame_lines);
+	}
+	uint32_t shutter = 0, gain = 0;
+	(void)PE_parse_boot_argn("cam_shutter", &shutter, sizeof(shutter));
+	(void)PE_parse_boot_argn("cam_gain", &gain, sizeof(gain));
+	if (shutter || gain) {
+		/* SMIA exposure, inside the sensor's group hold: coarse integration
+		 * in lines (0x0202) and the analog gain code (0x0204, 32 is 1x).
+		 */
+		(void)usensor_write(0x0104, 0x0100);
+		if (shutter) (void)usensor_write(0x0202, (uint16_t)shutter);
+		if (gain) (void)usensor_write(0x0204, (uint16_t)gain);
+		(void)usensor_write(0x0104, 0x0000);
+		hakios_tl("UMI camera: exposure %u lines, gain %#x\n", shutter, gain);
+		uint16_t readback = 0;
+		if (usensor_read(0x0202, &readback)) hakios_tl("UMI camera: exposure register 0x0202=%#x\n", readback);
+		if (usensor_read(0x0204, &readback)) hakios_tl("UMI camera: gain register 0x0204=%#x\n", readback);
+	}
+	if (!usensor_write(0x0100, 0x0100)) hakios_tl("UMI camera: stream-on write was not acknowledged\n");
+	hakios_tl("UMI camera: sensor streaming mode %u (%ux%u)\n", um.mode, um.width, um.height);
+	bool done = umi_camera_stream_wait(1500);
+	umi_camera_stream_report(done ? "after the first frame" : "without a frame");
+	(void)usensor_write(0x0100, 0x0000);
+	ums(30);
+	return umi_camera_stream_stop();
+}
+
 static void
 ucleanup(void)
 {
 	if (!uc.active) return;
+	ucsiphy_down();
 	uisp_down();
+	upll0_down();
 	if (uc.clock_changed) {
 		uw(uc.cc, 0x5034, uc.clock_branch);
 		(void)upoll(uc.cc, 0x5034, 1u << 31, 1u << 31, 1000);
@@ -691,9 +1006,11 @@ uprobe(unsigned stage)
 	error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
 	if (!error && stage >= 4) error = uisp_probe();
 	if (!error && stage == 6) error = umi_camera_tpg(isp_ife, isp_csid);
+	if (!error && stage == 7) error = ucapture();
 done:
 	ucleanup();
-	hakios_tl("UMI camera: sensor probe finished error=%d; sensor stream was not started\n", error);
+	if (stage == 7) hakios_tl("UMI camera: capture finished error=%d\n", error);
+	else hakios_tl("UMI camera: sensor probe finished error=%d; sensor stream was not started\n", error);
 	return error;
 }
 
@@ -719,4 +1036,10 @@ int
 umi_camera_capture_tpg(void)
 {
 	return uprobe(6);
+}
+
+int
+umi_camera_capture_sensor(void)
+{
+	return uprobe(7);
 }

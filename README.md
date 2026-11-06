@@ -29,7 +29,7 @@ build, not merely compiled.
 | Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
-| Camera | **PARTIAL** | S5KHMX sensor power/mode and CSID/IFE probes pass; the torch works end to end; synthetic frames reach AVFoundation; real rear-camera capture still fails |
+| Camera | **PARTIAL** | the S5KHMX streams real 1920×1080 RAW10 frames through CSIPHY 3, CSID480 RDI 0 and IFE-lite 0 into memory (`cam=7`; clean CSI, no SMMU faults); the torch works end to end; AVFoundation still receives synthetic frames until the stream is wired into `/dev/hakios-camera` |
 | Sensors (accelerometer, ALS, proximity) | **IN PROGRESS** | the SLPI sensor core now loads its signed firmware, comes out of reset and exposes its QRTR services; the SNS client and a HID sensor service are being brought up. No sensor reaches iOS yet |
 | Cellular (modem, SIM, calls/data) | **FAIL** | the MPSS/telephony stack is not implemented |
 | Persistent storage | **TODO** | the root and user data are RAM-backed; a guarded persistent-storage design is not accepted yet |
@@ -43,9 +43,9 @@ build, not merely compiled.
    `IPCRTR` channel and the QRTR service list are up. The next steps are the
    SNS client protocol (the accelerometer first), the sensor registry served
    over FastRPC, and an IOHID sensor service for `backboardd`.
-2. **Real camera capture** — the S5KHMX sensor and CSID/IFE path probe; the
-   missing piece is the full CSI/ISP capture into the `/dev/hakios-camera`
-   userspace path.
+2. **Real camera capture** — the S5KHMX now streams through CSIPHY 3, CSID480
+   and IFE-lite into kernel memory (`cam=7`); the next pieces are exposure/3A,
+   the ring buffer and the `/dev/hakios-camera` userspace path.
 3. **Cellular** — the largest remaining block: MPSS, QMI and the telephony
    stack.
 4. **Persistent storage and a standalone installer** — designed around a

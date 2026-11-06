@@ -766,7 +766,8 @@ Evidence:
 
 | Check | Status | Evidence / next action |
 |---|---|---|
-| Rear camera capture | FAIL | no working official-main capture path; sensor tables are available |
+| Rear camera capture | PASS (hardware stream) | `cam=7` streams the S5KHMX itself: 1920×1080 RAW10 through CSIPHY 3, CSID480 RDI 0 and IFE-lite 0 into memory — clean CSI (1591–2329 packets, no ECC/CRC errors), exactly 2,592,000 bytes written, no SMMU fault, one frame retained (`logs/100723-run.log`, `logs/104032-run.log`). `cam_shutter`, `cam_gain` and `cam_frame_lines` set the SMIA exposure (0x0202), gain (0x0204) and frame length (0x0340) and read back; a 16384-line frame with a 16000-line exposure and 128× gain captured a real light gradient (`logs/111407-run.log`, `logs/camera-umi-long-0.png`). The iOS camera graph still uses the synthetic path for now |
+| Rear camera stream path | PASS | stage 7 of `hakios.thyme_umi_camera.c`: camcc PLL0 (Lucid, 1200 MHz) feeds ife_lite 400 / ife_lite_csid 400 / cphy_rx 400 / csi3phytimer 300 MHz; CSIPHY 3 is C-PHY, 3 trios, lane enable `0x2a`, settle 19, rate row 0 (1.707 Gbit/s a trio); CSID receives from PHY 3, vc 0, RAW10 `0x2b`; the SMMU mapper was extended past one 2 MB L2 entry for the 2.47 MB frame. The DT's `cam-sensor@1` names `csiphy-sd-index = 3` — the first attempt listened on CSIPHY 1 and saw 0 packets. `cam_mode=N` selects the module file's `resN` (default 3) |
 | Front camera capture | TODO | not exercised |
 | Rear camera sensor/power probe | PASS | `cam=2` reached the S5KHMX sensor: ID `0x1ad0`, revision `0xa000`, module selector `0x1301`; all three supplies released with error 0 (`logs/101242-run.log`) |
 | Camera sensor mode programming | PASS | `cam=3` applied 259 init and 179 mode writes; dimensions `3008x2256`, line/frame lengths `0x3ea0/0x0945`, stream register `0x0100=0`, then powered down cleanly (`logs/114440-run.log`) |
