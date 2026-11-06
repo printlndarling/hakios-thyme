@@ -1066,6 +1066,11 @@ ucleanup(void)
 			hakios_tl("UMI camera: release front VIO error=%d\n", error);
 			uc.rails[1] = false;
 		}
+		if (uc.rails[2]) {
+			int error = uvreg(2, false);
+			hakios_tl("UMI camera: release front VDIG alternative error=%d\n", error);
+			uc.rails[2] = false;
+		}
 		if (uc.rails[0]) {
 			int error = uvreg(0, false);
 			hakios_tl("UMI camera: release front 2.85 V rail error=%d\n", error);
@@ -1125,7 +1130,11 @@ uprobe(unsigned stage)
 	vm_offset_t south = umap(0x0f500000, 0x80000);
 	vm_offset_t north = umap(0x0f900000, 0x80000);
 	static const unsigned hmx_pins[4] = { 62, 95, 103, 104 };
-	static const unsigned front_pins[4] = { 109, 98, 101, 102 };
+	/* cam-sensor@2 sits on the CCI controller at ac50000, whose master 0 is
+	 * CCI_I2C_DATA2/CLK2 = GPIO105/106 (its node's gpios property), not on
+	 * the ac4f000 controller the rear sensor uses.
+	 */
+	static const unsigned front_pins[4] = { 109, 98, 105, 106 };
 	char which[16] = "";
 
 	ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
@@ -1197,6 +1206,12 @@ uprobe(unsigned stage)
 		error = uvreg(0, true);
 		if (error) { hakios_tl("UMI camera: front 2.85 V rail failed errno=%d\n", error); goto done; }
 		uc.rails[0] = true;
+		/* The rear camera's VDIG rail too: if the front node's pm8009_l4
+		 * numbering is off, the sensor's VDIG is this one at the same 1.104 V.
+		 */
+		error = uvreg(2, true);
+		if (error) { hakios_tl("UMI camera: front VDIG alternative failed errno=%d\n", error); goto done; }
+		uc.rails[2] = true;
 		/* All three PM8150L gate channels: the front node names the same
 		 * wide/tele fixed regulators the rear camera uses (GPIO1/GPIO4), and
 		 * powering the third (GPIO3) as well costs nothing.
@@ -1237,6 +1252,15 @@ uprobe(unsigned stage)
 		ums(2);
 	}
 	if (ufront) {
+		/* Nine clocks, then a stop: the bus-recovery sequence, in case the
+		 * sensor's I2C state machine came up mid-byte.
+		 */
+		for (unsigned i = 0; i < 9; ++i) {
+			(void)uline(3, false);
+			(void)uline(3, true);
+		}
+		ustart();
+		ustop();
 		/* Both lines released high: if the sensor were holding one low the
 		 * bus would read 0 here (unpowered sensor, or a stuck pin).
 		 */
@@ -1289,6 +1313,17 @@ uprobe(unsigned stage)
 			ums(5);
 		}
 		if (id == 0x3142) hakios_tl("UMI camera: front sensor answers on GPIO103/104\n");
+	}
+	if (ufront && id != 0x3142) {
+		/* Swapped SDA/SCL on the device tree's pair, in case the pinctrl
+		 * order lists the clock line first.
+		 */
+		uc.pin[2] = north + 0x1000UL * 102;
+		uc.pin[3] = north + 0x1000UL * 101;
+		for (unsigned retry = 0; retry < 3 && !usensor_read(0, &id); ++retry) {
+			ums(5);
+		}
+		if (id == 0x3142) hakios_tl("UMI camera: front sensor answers on swapped SDA/SCL (102/101)\n");
 	}
 	if (id != (ufront ? 0x3142 : 0x1ad0)) {
 		hakios_tl("UMI camera: %s ID read failed, got %#x (expected %#x)\n", ufront ? "S5K3T2" : "S5KHMX", id,
