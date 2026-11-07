@@ -747,6 +747,15 @@ Still open:
   `jb-preinstall.py` — and the install is unaffected. The earlier attempt with
   the 2026-11-04 *root* never completed the Wi-Fi handshake
   (`logs/011346-run.log`), so the current root is what made the difference;
+- Sileo's own install flow: on 2026-11-08 the package page answered
+  "Couldn't find the package tree in the repositories you currently have
+  installed" at 178 s after launch (`logs/014318-run.log`,
+  `logs/015237-run.log`, `logs/sileo210.png`), with the notification prompt
+  dismissed and the page reopened — Sileo's own three-repository refresh had
+  not put `tree` in its index yet; the scene now dismisses the prompt and
+  reopens the page, but its 70–80 s waits are shorter than the refresh, so a
+  further attempt needs a longer wait (or the havoc/chariz sources removed
+  for the test). The apt path through the same repositories is PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 
