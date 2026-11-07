@@ -283,9 +283,14 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	 */
 	vm_size_t need=round_page(4096+(vm_size_t)bytes*2);
 	if(ud.memory){
+		/* The boot-time reserve is the largest mode (the front's 2592x1940);
+		 * a session must not shrink it, or the next larger sensor finds the
+		 * buffer "too small" although the memory is the full reserve.
+		 */
 		if(ud.size<need)return ENOMEM; /* a reserved buffer that is too small */
 	}else if(kmem_alloc_contig(kernel_map,&ud.memory,need,PAGE_MASK,0,0,KMA_KOBJECT|KMA_ZERO|KMA_DATA,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return ENOMEM;
-	ud.ife=ife;ud.csid=csid;ud.size=need;
+	else ud.size=need;
+	ud.ife=ife;ud.csid=csid;
 	struct ud_header *h=(struct ud_header *)ud.memory;
 	memcpy(h->magic,"RWCAM001",8);h->width=width;h->height=height;h->stride=stride;
 	h->format=1;h->bayer=bayer;h->frame_bytes=(uint32_t)bytes;h->source=1;

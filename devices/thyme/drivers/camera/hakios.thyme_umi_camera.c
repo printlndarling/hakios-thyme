@@ -65,7 +65,7 @@ static uint32_t ustart_lines, ustart_gain;
  * S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
  * order and slave address.
  */
-static bool ufront, ufront_lite0;
+static bool ufront, ufront_lite0, ufront_from_session;
 static uint8_t uslave = 0x7a;
 static uint32_t umclk_cmd = 0x501c, umclk_cfg = 0x5020, umclk_branch = 0x5034;
 static struct {
@@ -1182,6 +1182,10 @@ umi_camera_ios_start(unsigned width, unsigned height)
 {
 	if (uc.active || uios_on) return EBUSY;
 	if (unext_pending) {
+		/* (the session's sensor is the app's choice: uprobe() must not
+		 * overwrite it from the boot argument, which only sets the first)
+		 */
+		ufront_from_session = true;
 		if (unext_front != ufront) {
 			ufront = unext_front;
 			uc.csiphy = 0;  /* the other CSIPHY block is mapped afresh */
@@ -1392,7 +1396,9 @@ uprobe(unsigned stage)
 	static const unsigned front_pins[4] = { 109, 98, 105, 106 };
 	char which[16] = "";
 
-	ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
+	if (!ufront_from_session) {
+		ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
+	}
 	uint32_t lite0_arg = 0;
 	ufront_lite0 = ufront &&
 	    PE_parse_boot_argn("cam_front_lite0", &lite0_arg, sizeof(lite0_arg)) && lite0_arg != 0;
