@@ -516,6 +516,22 @@ stall is the PD's own timer client, and the SUID lookup's silence points at
 the registry the sns may expect (`sns_reg_config` and the persist registry on
 the phone) as the next question.
 
+The registry's shape is known now: on the phone it is one JSON file per group
+under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
+`ak0991x_0`, `bmp285_0`, `<sensor>.<item>`, each
+`{"<group>":{"owner":"sns_…","<item>":{"type":"grp","ver":"0","data":""}}}`),
+and the AP does not *serve* the files: the sensors HAL carries the protobuf
+messages `SNS_REGISTRY_READ_REQ`/`WRITE_REQ`/`READ_EVENT`/`WRITE_EVENT` and
+`SNS_REGISTRY_TYPE_…` in `libsnsapi.so` (the DSP's strings say
+`Sending registry request for group name:%s` and `Registry Event decoding
+complete (%s)`), so the AP **uploads** the groups over the SNS client service
+(QRTR 400) and the DSP keeps them. Populating the sns therefore means sending
+those groups ourselves; the message IDs and protobuf field numbers are the
+next thing to take from the phone's `libsnsapi.so`/`sensors.qti` (an arm64
+disassembly; REA's providers are not configured here) or from the DSP's IDL
+tables (Hexagon). The registry files themselves are already readable and can
+travel in the scene.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
