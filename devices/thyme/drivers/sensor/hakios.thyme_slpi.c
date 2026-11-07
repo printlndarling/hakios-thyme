@@ -2534,6 +2534,19 @@ glink_send(struct glink_channel *channel, const void *data, uint32_t length)
 enum { QRTR_DATA = 1, QRTR_HELLO = 2, QRTR_BYE = 3, QRTR_NEW_SERVER = 4, QRTR_DEL_SERVER = 5, QRTR_DEL_CLIENT = 6, QRTR_RESUME_TX = 7,
        QRTR_NEW_LOOKUP = 10, QRTR_DEL_LOOKUP = 11 };
 
+/* The APSS service locator (Android's pd-mapper): QRTR service 64, the QMI
+ * messages of servreg_loc.h in the open-source pd-mapper. The sensor DSP's
+ * servreg asks it where "tms/servreg" is served before its protection domain
+ * finishes starting; with nobody answering, the domain's watchdog reports a
+ * stalled initialization (docs/slpi-fastrpc.md).
+ */
+#define SERVREG_LOC_SERVICE     64u
+#define SERVREG_LOC_PORT        0x102u
+#define SERVREG_LOC_GET_DOMAIN_LIST 0x21u
+#define SERVREG_LOC_PFR         0x24u
+
+static void servreg_loc_advertise(void);
+
 struct qrtr_header {
 	uint32_t version, type, from_node, from_port, confirm, size, to_node, to_port;
 };
@@ -2617,10 +2630,15 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 		}
 		break;
 	case QRTR_NEW_LOOKUP:
-		/* the DSP looks for a service of ours (a protection domain's locator, say): there are none yet */
+		/* the DSP looks for a service of ours: the service locator is the one
+		 * its servreg needs before a protection domain's start completes */
+		if (control->words[0] == SERVREG_LOC_SERVICE) {
+			servreg_loc_advertise();
+		}
 		if (qrtr_lookups++ < 16) {
-			printf("slpi: qrtr: the DSP looks for service %u (%#x), instance %u: nobody here offers it\n", control->words[0],
-			    control->words[0], control->words[1]);
+			printf("slpi: qrtr: the DSP looks for service %u (%#x), instance %u%s\n", control->words[0],
+			    control->words[0], control->words[1],
+			    control->words[0] == SERVREG_LOC_SERVICE ? " (the service locator, told of it)" : ": nobody here offers it");
 		}
 		break;
 	case QRTR_BYE:
@@ -2640,6 +2658,7 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 static void sns_input(const uint8_t *data, uint32_t length);
 static void sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
 static void servreg_input(const uint8_t *data, uint32_t length);
+static void servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
 
 static void
 qrtr_input(const uint8_t *data, uint32_t length)
@@ -2701,6 +2720,10 @@ qrtr_input(const uint8_t *data, uint32_t length)
 	}
 	if (header.type == QRTR_DATA && header.to_port == SNS_REG_PORT) {
 		sns_reg_input(header.from_node, header.from_port, data + at, header.size);
+		return;
+	}
+	if (header.type == QRTR_DATA && header.to_port == SERVREG_LOC_PORT) {
+		servreg_loc_input(header.from_node, header.from_port, data + at, header.size);
 		return;
 	}
 	if (header.type == QRTR_DATA && header.to_port == SERVREG_OUR_PORT) {
@@ -3404,6 +3427,143 @@ sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length
 		out[6] = (uint8_t)((l - 7) >> 8);
 	}
 	qrtr_out_packet(QRTR_DATA, SNS_REG_PORT, node, port, out, (uint32_t)(p - out));
+}
+
+/* ---- the APSS service locator: the domains "tms/servreg" is served in --------------------------------- */
+
+/*
+ * The phone's pd-mapper answers the DSP's servreg with the domains a service is
+ * served in, taken from the firmware's slpir/slpius/adspr/adspua/cdspr.jsn:
+ * here the one service the sensor DSP asks about, "tms/servreg", and the five
+ * domains those files name (qmi_instance_id each). The QMI layout is the
+ * open-source pd-mapper's (servreg_loc.qmi): service 64, get_domain_list 0x21
+ * with the service name in TLV 1, the answer's result in TLV 2, the domains in
+ * TLV 0x12 as a count and name/instance/valid/data entries.
+ */
+static const struct {
+	const char *domain;
+	uint32_t instance;
+} servreg_loc_domains[] = {
+	{ "msm/slpi/root_pd", 90 },             /* slpir.jsn */
+	{ "msm/slpi/sensor_pd", 90 },           /* slpius.jsn */
+	{ "msm/adsp/root_pd", 74 },             /* adspr.jsn */
+	{ "msm/adsp/audio_pd", 74 },            /* adspua.jsn */
+	{ "msm/cdsp/root_pd", 76 },             /* cdspr.jsn */
+};
+
+static void
+servreg_loc_advertise(void)
+{
+	struct qrtr_control server = { .command = QRTR_NEW_SERVER, .words = { SERVREG_LOC_SERVICE, 0x0101, 1, SERVREG_LOC_PORT } };
+
+	if (qrtr_peer == 0) {
+		return;                 /* (the DSP has not said hello yet) */
+	}
+	qrtr_out_packet(QRTR_NEW_SERVER, QRTR_CONTROL, qrtr_peer, QRTR_CONTROL, &server, sizeof(server));
+	printf("slpi: qrtr: the service locator (service %u, version 1 instance 1) is at node 1 port %#x\n", SERVREG_LOC_SERVICE,
+	    SERVREG_LOC_PORT);
+}
+
+static void
+servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length)
+{
+	uint8_t out[512], name[64];
+	uint16_t txn, msg;
+	uint32_t at, total = 0;
+
+	if (length < 7) {
+		return;
+	}
+	txn = (uint16_t)(data[1] | data[2] << 8);
+	msg = (uint16_t)(data[3] | data[4] << 8);
+	if (msg == SERVREG_LOC_PFR) {
+		printf("slpi: servreg-loc: a protection domain's failure, from node %u port %u\n", node, port);
+		return;
+	}
+	if (msg != SERVREG_LOC_GET_DOMAIN_LIST) {
+		printf("slpi: servreg-loc: QMI %u from node %u port %u: no answer written for it\n", msg, node, port);
+		return;
+	}
+	bzero(name, sizeof(name));
+	for (at = 7; at + 3 <= length;) {
+		uint8_t type = data[at];
+		uint16_t l = (uint16_t)(data[at + 1] | data[at + 2] << 8);
+
+		at += 3;
+		if (at + l > length) {
+			break;
+		}
+		if (type == 1) {
+			uint32_t n = l < sizeof(name) - 1 ? l : sizeof(name) - 1;
+
+			memcpy(name, data + at, n);
+			name[n] = 0;
+		}
+		at += l;
+	}
+	if (strcmp(name, "tms/servreg") == 0) {
+		total = (uint32_t)(sizeof(servreg_loc_domains) / sizeof(servreg_loc_domains[0]));
+	}
+	{
+		uint8_t *p = out;
+
+		*p++ = 2;                       /* response */
+		*p++ = (uint8_t)(txn & 0xff);
+		*p++ = (uint8_t)(txn >> 8);
+		*p++ = SERVREG_LOC_GET_DOMAIN_LIST;
+		*p++ = 0;
+		*p++ = 0;                       /* the QMI length, below */
+		*p++ = 0;
+		*p++ = 2;                       /* TLV 2: the result, success */
+		*p++ = 4;
+		*p++ = 0;
+		*p++ = 0;
+		*p++ = 0;
+		*p++ = 0;
+		*p++ = 0;
+		*p++ = 0x10;                    /* TLV 0x10: how many domains */
+		*p++ = 2;
+		*p++ = 0;
+		*p++ = (uint8_t)(total & 0xff);
+		*p++ = (uint8_t)(total >> 8);
+		*p++ = 0x11;                    /* TLV 0x11: the database's revision */
+		*p++ = 2;
+		*p++ = 0;
+		*p++ = 1;
+		*p++ = 0;
+		if (total != 0) {
+			uint8_t *len_at;
+
+			*p++ = 0x12;            /* TLV 0x12: the domains, a count and entries */
+			len_at = p;
+			p += 2;
+			*p++ = (uint8_t)total;
+			for (uint32_t i = 0; i < total; i++) {
+				size_t n = strlen(servreg_loc_domains[i].domain);
+				uint32_t instance = servreg_loc_domains[i].instance;
+				uint32_t data_word = 0;
+
+				*p++ = (uint8_t)n;
+				memcpy(p, servreg_loc_domains[i].domain, n);
+				p += n;
+				memcpy(p, &instance, 4);
+				p += 4;
+				*p++ = 0;       /* service_data_valid */
+				memcpy(p, &data_word, 4);
+				p += 4;
+			}
+			uint16_t l = (uint16_t)(p - (len_at + 2));
+
+			len_at[0] = (uint8_t)(l & 0xff);
+			len_at[1] = (uint8_t)(l >> 8);
+		}
+		uint16_t l = (uint16_t)(p - out - 7);
+
+		out[5] = (uint8_t)(l & 0xff);
+		out[6] = (uint8_t)(l >> 8);
+		printf("slpi: servreg-loc: \"%s\" asked by node %u port %u: %u domain(s) answered\n", name, node, port, total);
+		qrtr_out_packet(QRTR_DATA, SERVREG_LOC_PORT, node, port, out, (uint32_t)(p - out));
+	}
 }
 
 /* ---- FastRPC: the DSP's calls to the AP (the registry file service) ---------------------------------- */
@@ -6121,12 +6281,14 @@ step_qrtr(void)
 	if (sns_on) {
 		sns_reg_advertise();
 	}
+	servreg_loc_advertise();
 	for (unsigned ms = 0; ms < listen_seconds * 1000; ms++) {
 		sleep_ms(1);
 	}
 	if (sns_on) {
 		sns_reg_advertise();
 	}
+	servreg_loc_advertise();
 	for (unsigned i = 0; i < sizeof(qrtr_servers) / sizeof(qrtr_servers[0]); i++) {
 		services += qrtr_servers[i].there;
 	}

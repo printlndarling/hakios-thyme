@@ -944,6 +944,23 @@ the TMS proxy handler attached), so the failure is a later QDI call, not
 remaining work is the DSP-side timer client code, not the AP tunnel
 ([`docs/slpi-fastrpc.md`](docs/slpi-fastrpc.md)).
 
+The AP side's last gap was the **APSS service locator** (QRTR service 64,
+Android's pd-mapper): the DSP's servreg asks it where a service is served
+before its protection domain finishes starting. The driver now serves it
+(`servreg_loc_advertise`/`servreg_loc_input`, the open-source pd-mapper's
+`servreg_loc.qmi`: service 64, get_domain_list 0x21 with the service name in
+TLV 1, the domains in TLV 0x12) with the phone's own maps from the firmware
+JSONs (`slpir/slpius/adspr/adspua/cdspr.jsn`: `msm/slpi/root_pd` and
+`msm/slpi/sensor_pd` instance 90, `msm/adsp/root_pd`/`audio_pd` instance 74,
+`msm/cdsp/root_pd` instance 76). In the boot the DSP's node 9 port 13 asked it
+for `tms/pdr_enabled` and `tms/pddump_disabled` (answered, 0 domains — the
+JSONs map only `tms/servreg`) and the SNS service 400 answered the SUID
+request's QMI with result 0; the sensor process's crash item still reads
+`TMR_CLNT_1:0x89 ... stalled initialization`, and no SUID event followed
+(`logs/200444-run.log`). The locator is not the missing piece either: the stall
+is the PD's own timer client, and the SUID lookup is accepted but silent — the
+registry it may need is the next question.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the

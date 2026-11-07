@@ -488,6 +488,34 @@ its data position-independently (through the GP register, or a loader-patched
 table), so following the call needs a Hexagon-aware tool (Ghidra's Hexagon
 module) or the QuRT `timer_client_user_init.c` source, not a flat objdump.
 
+## The APSS service locator (QRTR service 64)
+
+The DSP's servreg has a client of Android's `pd-mapper`: the firmware's
+strings say it (`Attempting APSS Service Locator Server connection`,
+`SERVREG_QDI: user-pd servreg_qdi_init failed`, `Servreg ack timedout`), and
+Android's QRTR table has the AP's "Service registry locator service" at node 1
+(`qrtr-lookup` on the running phone; service 64, version 1 instance 1). The
+protocol is the open-source `andersson/pd-mapper`: QRTR service 64, QMI
+`servreg_loc.qmi` (get_domain_list 0x21, the service name in TLV 1, the
+result in TLV 2, the domains in TLV 0x12 as a count and
+name/instance/valid/data entries; pfr 0x24), and the maps come from the
+firmware's JSONs on the phone (`/vendor/firmware_mnt/image/slpir.jsn`,
+`slpius.jsn`, `adspr.jsn`, `adspua.jsn`, `cdspr.jsn`: `tms/servreg` in
+`msm/slpi/root_pd`, `msm/slpi/sensor_pd` (instance 90), `msm/adsp/root_pd`,
+`msm/adsp/audio_pd` (74), `msm/cdsp/root_pd` (76)).
+
+The driver serves it (`slpi=… servreg_loc_advertise/servreg_loc_input`). In the
+boot the DSP's node 9 port 13 asked for `tms/pdr_enabled` and
+`tms/pddump_disabled` (answered, 0 domains — the JSONs map only
+`tms/servreg`), so the locator is reachable and the wire format is accepted;
+the sensor process's crash item still reads `TMR_CLNT_1:0x89 ...
+USER-PD DOG detects stalled initialization`, and the SNS service 400 acked
+the SUID request (QMI result 0) without sending a SUID event
+(`logs/200444-run.log`). The locator is therefore not the missing piece: the
+stall is the PD's own timer client, and the SUID lookup's silence points at
+the registry the sns may expect (`sns_reg_config` and the persist registry on
+the phone) as the next question.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
