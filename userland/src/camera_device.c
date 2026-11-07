@@ -1126,9 +1126,9 @@ colour_temperature(const struct isp *isp)
  */
 enum { AF_WATCH, AF_STEADY, AF_CLIMB, AF_SWEEP, AF_FINE_SEARCH, AF_SETTLE };
 #define AF_NEAR         16              /* (off the stop at 0) */
-#define AF_FAR          768             /* (its module file's actuator region goes to 700; near 1023 the PM8008i's LDO5 said over-current) */
-#define AF_STEP         48
-#define AF_FINE         12
+#define AF_FAR          3072            /* (the AK7377's twelve bits; the fridge at ~2 m is sharp near 1023) */
+#define AF_STEP         96
+#define AF_FINE         24
 
 struct af {
 	int             state;
@@ -1166,6 +1166,7 @@ af_go(int device, struct af *af, uint32_t target)
 	af->steps++;
 	af->sum_sharpness = af->sum_level = 0;
 	af->measured = 0;
+	say("focus: the lens to %u (target %u)", c.a, af->target);
 	(void)write(device, &c, sizeof(c));
 }
 
@@ -1199,6 +1200,9 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	level = af->sum_level / af->measured;
 	af->sum_sharpness = af->sum_level = 0;
 	af->measured = 0;
+	if (af->state == AF_SWEEP || af->state == AF_CLIMB || af->state == AF_FINE_SEARCH) {
+		say("focus: at %u: sharpness %.1f, level %.1f", af->at, sharpness, level);
+	}
 	switch (af->state) {
 	case AF_WATCH:
 		if (locked || (af->sharpness > 0 && sharpness > af->sharpness * 0.6f && level > af->level * 0.7f &&

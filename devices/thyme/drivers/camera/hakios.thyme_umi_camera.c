@@ -345,13 +345,19 @@ utab_u32(const uint8_t *p)
 	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
-/* The wide camera's lens motor: a DW9800 on the sensor's I2C. The module file's
- * actuatorDriver names the chip's 7-bit address 0x0c; the CCI bus here is
- * addressed the 8-bit way everywhere else (the sensor answers at 0x7a), and on
- * this bus 0x0c is nobody: the motor answers at 0x18. Its ten-bit position is in
- * 0x03 and 0x04 within one transfer. The front camera's lens is fixed.
+/* The wide camera's lens motor: the module file names it "umi_ak7377_s5khmx" --
+ * an AKM AK7377, not the DW9800 the earlier notes assumed. The AK73xx family
+ * (the mainline ak7375 driver) takes the position in register 0x00 as a 16-bit
+ * value, the position shifted left by four (twelve bits), and register 0x02 is
+ * the control: 0x00 active, 0x40 standby. The module's own optimal position is
+ * 343. The CCI bus is addressed the 8-bit way (the sensor answers at 0x7a) and
+ * the chip answers at 0x18 (the 7-bit 0x0c of the module file).
  */
 #define VCM_ADDRESS     0x18
+#define VCM_REG_POSITION 0x00
+#define VCM_REG_CONTROL  0x02
+#define VCM_SHIFT        4
+#define VCM_OPTIMAL      343
 
 static bool
 uvcm_write_at(uint8_t address, uint8_t reg, uint8_t value)
@@ -370,52 +376,14 @@ uvcm_write(uint8_t reg, uint8_t value)
 
 static bool uvcm_read_at(uint8_t address, uint8_t reg, uint8_t *value);
 
-/* The addresses the bus scan found, each asked whether it takes a position and
- * gives it back: the motor is one of them, at an address the module file did not
- * name for this phone.
- */
-static void
-uvcm_probe_neighbours(void)
-{
-	static const uint8_t candidates[] = { 0x18, 0x1c };
-
-	for (unsigned i = 0; i < sizeof(candidates); i++) {
-		uint8_t a = candidates[i], r0 = 0, hi = 0, lo = 0, hi2 = 0, lo2 = 0;
-
-		if (!uvcm_read_at(a, 0x00, &r0)) {
-			continue;
-		}
-		uvcm_write_at(a, 0x03, 0x01);
-		uvcm_write_at(a, 0x04, 0x23);
-		uvcm_read_at(a, 0x03, &hi);
-		uvcm_read_at(a, 0x04, &lo);
-		uvcm_write_at(a, 0x03, 0x02);
-		uvcm_write_at(a, 0x04, 0x34);
-		uvcm_read_at(a, 0x03, &hi2);
-		uvcm_read_at(a, 0x04, &lo2);
-		hakios_tl("UMI camera: CCI %#x: register 0 %#x; wrote 0x123 and read %#x%02x; wrote 0x234 and read %#x%02x\n",
-		    a, r0, hi, lo, hi2, lo2);
-	}
-}
-
 static bool uvcm_read(uint8_t reg, uint8_t *value);
 
 static bool
 uvcm_position(uint32_t position)
 {
-	/* The chip refuses a position while it is busy: the DW9807 driver polls
-	 * status 0x05 until it reads zero before writing 0x03/0x04 (this family's
-	 * sequence, from the module file, matches that driver's).
-	 */
-	for (unsigned i = 0; i < 10; i++) {
-		uint8_t status = 0;
-
-		if (uvcm_read(0x05, &status) && (int8_t)status <= 0) {
-			break;
-		}
-		ums(1);
-	}
-	bool ok = ustart() && uput(VCM_ADDRESS) && uput(0x03) && uput((position >> 8) & 3) && uput(position & 0xff);
+	uint32_t data = (position << VCM_SHIFT) & 0xffff;
+	bool ok = ustart() && uput(VCM_ADDRESS) && uput(VCM_REG_POSITION) &&
+	    uput((data >> 8) & 0xff) && uput(data & 0xff);
 
 	ustop();
 	return ok;
@@ -1318,7 +1286,7 @@ void
 umi_camera_ios_set_focus(unsigned position)
 {
 	if (position == 0xffffffffu) return;   /* the lens is fixed (or absent) */
-	if (!uvcm_position(position & 0x3ff)) {
+	if (!uvcm_position(position & 0xfff)) {
 		hakios_tl("UMI camera: lens position %u not taken\n", position);
 	}
 }
@@ -1709,20 +1677,18 @@ uprobe(unsigned stage)
 		 * ring control, SAC3 with its timing, then 0x190 and 0x12c.
 		 */
 		uvcm_scan();                    /* (the bus is up now: the sensor answers) */
-		uvcm_probe_neighbours();
-		bool wrote = uvcm_write(0x02, 0x01) && uvcm_write(0x02, 0x00) && uvcm_write(0x02, 0x02) &&
-		    uvcm_write(0x06, 0x40) && uvcm_write(0x07, 0x07) && uvcm_position(0x190) && uvcm_position(0x12c);
-		uint8_t mode = 0, hi = 0, lo = 0, m6 = 0, m7 = 0;
-		bool read = uvcm_read(0x02, &mode) && uvcm_read(0x03, &hi) && uvcm_read(0x04, &lo) &&
-		    uvcm_read(0x06, &m6) && uvcm_read(0x07, &m7);
-		hakios_tl("UMI camera: lens motor initialised (DW9800 at 0x0c): writes %s, mode %#x register 6 %#x 7 %#x, position %#x%02x (%s)\n",
-		    wrote ? "taken" : "REFUSED", mode, m6, m7, hi, lo, read ? "read back" : "NO ANSWER");
+		bool wrote = uvcm_write(VCM_REG_CONTROL, 0x00) && uvcm_position(VCM_OPTIMAL);
+		uint8_t mode = 0, p0 = 0, p1 = 0;
+		bool read = uvcm_read(VCM_REG_CONTROL, &mode) && uvcm_read(VCM_REG_POSITION, &p0) &&
+		    uvcm_read(VCM_REG_POSITION + 1, &p1);
+		hakios_tl("UMI camera: lens motor initialised (AK7377 at %#x): writes %s, control %#x position %#x%02x (%s)\n",
+		    VCM_ADDRESS, wrote ? "taken" : "REFUSED", mode, p0, p1, read ? "read back" : "NO ANSWER");
 		uint32_t focus_pos = 0xffffffff;
 		if (PE_parse_boot_argn("cam_focus", &focus_pos, sizeof(focus_pos)) && focus_pos != 0xffffffff) {
-			(void)uvcm_position(focus_pos & 0x3ff);
+			(void)uvcm_position(focus_pos & 0xfff);
 			uint8_t fhi = 0, flo = 0;
-			bool fr = uvcm_read(0x03, &fhi) && uvcm_read(0x04, &flo);
-			hakios_tl("UMI camera: lens at %u (boot arg), register %#x%02x (%s)\n", focus_pos & 0x3ff, fhi, flo,
+			bool fr = uvcm_read(VCM_REG_POSITION, &fhi) && uvcm_read(VCM_REG_POSITION + 1, &flo);
+			hakios_tl("UMI camera: lens at %u (boot arg), register %#x%02x (%s)\n", focus_pos & 0xfff, fhi, flo,
 			    fr ? "read back" : "NO ANSWER");
 		}
 		/* Samsung's chip revision register is read separately; no table selection
