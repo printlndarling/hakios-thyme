@@ -66,18 +66,19 @@ build, not merely compiled.
    guarded write path and RAM-boot-from-flash, without touching Android until
    an explicit authorization and recovery gate exists.
 
-## Verified RAM baseline (7 November 2026)
+## Verified RAM baseline (8 November 2026)
 
 | Artifact | SHA-256 |
 |---|---|
-| `hakios-kernel` | `ab427cc33a55985186406aba1325e9a6093f56e1e0b45ce72c13106ffe01c120` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `8f4271d57985795e3e2b1b2783b01daa4fd44bbede203de4b2b3d0a46cb14acb` |
+| `hakios-kernel` | `9488e22872819a11cd329972b4b61bd2379c03b68718dd5434e4e4ff202ce089` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `2b961f37628edfb0fcf1691563f58589eab9628e82c7ec22d1390b29a9a2e2f8` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/230840-run.log`: two Wi-Fi joins with
-DHCP `192.168.0.109`, Safari TLS, 560 LE reports (126 named), 110 `hakios-gl`
+The canonical cold-boot gate is `logs/001145-run.log`: two Wi-Fi joins with
+DHCP `192.168.0.109`, Safari TLS, 563 LE reports (128 named), 110 `hakios-gl`
 frames (the scene's screens are mostly still), zero H4 faults and no panic.
+The kernel and the root are the camera-focus and pacing build (`17237ab`).
 The 90 fps pacing check is
 `logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
 `devices/thyme/ram-baseline.conf` is the machine-checked
