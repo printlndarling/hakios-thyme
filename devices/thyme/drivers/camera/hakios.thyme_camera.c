@@ -1121,8 +1121,12 @@ static const struct ctab_mode fake_mode = {
  * 1920x1080 and the front's mode 1 at 2592x1940, not a centre crop.
  */
 static const struct ctab_mode real_modes[2] = {
-	{ .width = 1920, .height = 1080, .x = 42, .y = 200, .lanes = 3, .cphy = 1, .settle = 19,
-	  .pixel_clock = 512179200, .line_length = 6408, .frame_length = 1220, .fps_milli = 120000, .data_type = 0x2b },
+	/* The wide's session runs the sensor's mode 3 (3008x2256) and hands up its centre
+	 * 2592x1940: the same size as the front's stream, 2.4 times the pixels of the old
+	 * 1920x1080 crop, so a photograph made from it carries real detail when zoomed.
+	 */
+	{ .width = 2592, .height = 1940, .x = 208, .y = 158, .lanes = 3, .cphy = 1, .settle = 19,
+	  .pixel_clock = 512179200, .line_length = 16032, .frame_length = 2373, .fps_milli = 30000, .data_type = 0x2b },
 	{ .width = 2592, .height = 1940, .lanes = 4, .cphy = 0, .settle = 19,
 	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 30130, .data_type = 0x2b },
 };

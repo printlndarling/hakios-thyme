@@ -128,7 +128,7 @@ umi_camera_ios_prepare(void)
 	(void)umap(0x0ac70000, 0x2000);  /* CSIPHY 3 */
 	(void)umap(0x0ac72000, 0x2000);  /* CSIPHY 4 */
 	/* The front's 2592x1940 mode is the largest frame a session runs. */
-	if (umi_camera_dma_reserve(2592, 1940) != 0)
+	if (umi_camera_dma_reserve(3008, 2256) != 0)
 		hakios_tl("UMI camera: no frame buffer for the iOS session\n");
 	hakios_tl("UMI camera: iOS session mappings reserved (%u blocks)\n", umaps_used);
 }
@@ -1196,7 +1196,7 @@ umi_camera_ios_start(unsigned width, unsigned height)
 	/* The module file's 1080p mode for the S5KHMX (the session gets a centre
 	 * crop); the S5K3T2's 2592x1940 mode 1 is the app's front stream.
 	 */
-	uios_force_mode = ufront ? 1 : 5;
+	uios_force_mode = ufront ? 1 : 3;
 	int error = uprobe(8);
 	uios_force_mode = 0;
 	if (error) {

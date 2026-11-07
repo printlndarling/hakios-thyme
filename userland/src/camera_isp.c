@@ -580,6 +580,14 @@ nv12_pair(const uint8_t *rgb0, const uint8_t *rgb1, uint32_t width, uint8_t *y0,
 		uv[x] = (uint8_t)(cb < 0 ? 0 : cb > 255 ? 255 : cb);
 		uv[x + 1] = (uint8_t)(cr < 0 ? 0 : cr > 255 ? 255 : cr);
 	}
+	/* A light horizontal smoothing of the chroma: at the gains a dark room needs,
+	 * the colour speckles from one sample to the next and the eye reads that as
+	 * noise before it reads the luma's own (the still and the preview both take it).
+	 */
+	for (uint32_t x = 2; x + 3 < 2 * width; x += 2) {
+		uv[x] = (uint8_t)((uv[x - 2] + 2 * uv[x] + uv[x + 2] + 2) >> 2);
+		uv[x + 1] = (uint8_t)((uv[x - 1] + 2 * uv[x + 1] + uv[x + 3] + 2) >> 2);
+	}
 }
 
 void
@@ -744,6 +752,26 @@ demosaic_row(const struct isp *isp, const struct hakios_camera_frame *f, const u
 	full_line(isp, f, (const int *const *)l, row, colour, p, rgb);
 }
 
+/* The still's edges: a light unsharp across each row. The photograph is one
+ * frame, so the lift costs nothing but the loop; the preview keeps its own path.
+ */
+static void
+sharpen_rgb_row(uint8_t *row, uint32_t width, uint8_t *tmp)
+{
+	if (width < 3) {
+		return;
+	}
+	memcpy(tmp, row, 3 * (size_t)width);
+	for (uint32_t x = 1; x + 1 < width; x++) {
+		for (int c = 0; c < 3; c++) {
+			int mid = tmp[3 * x + c], left = tmp[3 * (x - 1) + c], right = tmp[3 * (x + 1) + c];
+			int v = mid + (mid - (left + right) / 2) * 3 / 4;
+
+			row[3 * x + c] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+		}
+	}
+}
+
 void
 isp_render_still_nv12(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, uint8_t *y, size_t y_stride,
     uint8_t *uv, size_t uv_stride, uint32_t width, uint32_t height, uint32_t first_row, uint32_t end_row, bool video_range)
@@ -752,7 +780,7 @@ isp_render_still_nv12(const struct isp *isp, const struct hakios_camera_frame *f
 	int colour[4];
 	struct pipe p;
 	static __thread int *lines[3];
-	static __thread uint8_t *rows[2], *out[2];
+	static __thread uint8_t *rows[2], *out[2], *sharp;
 	static __thread uint32_t have_fw, have_width;
 	int32_t cached[2] = { -1, -1 };
 
@@ -772,9 +800,11 @@ isp_render_still_nv12(const struct isp *isp, const struct hakios_camera_frame *f
 			free(out[i]);
 			out[i] = malloc(3 * (size_t)width);
 		}
+		free(sharp);
+		sharp = malloc(3 * (size_t)width);
 		have_width = width;
 	}
-	if (lines[2] == NULL || rows[1] == NULL || out[1] == NULL) {
+	if (lines[2] == NULL || rows[1] == NULL || out[1] == NULL || sharp == NULL) {
 		return;
 	}
 	crop(isp, f, width, height, &x0, &y0, &cw, &ch);
@@ -826,6 +856,10 @@ isp_render_still_nv12(const struct isp *isp, const struct hakios_camera_frame *f
 		}
 		bool second = row + 1 < height;
 
+		sharpen_rgb_row(out[0], width, sharp);
+		if (second) {
+			sharpen_rgb_row(out[1], width, sharp);
+		}
 		nv12_pair(out[0], out[1], width, y + (size_t)row * y_stride, second ? y + (size_t)(row + 1) * y_stride : NULL,
 		    uv + (size_t)(row / 2) * uv_stride, video_range);
 	}
