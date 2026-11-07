@@ -755,9 +755,13 @@ Still open:
   (`logs/031850-run.log`, `logs/032907-run.log`: `getaddrinfo apt.procurs.us`
   0, gateway 192.168.0.1:80 connected, 21 tasks `status 200, error none`), the
   tree page loads from the Procursus repository and GET changes the button to
-  QUEUE (`logs/sileoA-380.png`). What is still open is only the scripted taps
-  into the queue's Confirm; the apt path through the same repositories is
-  PASS;
+  QUEUE (`logs/sileoA-380.png`). Later runs timed the first-launch
+  notification prompt (it appears only once the page has loaded,
+  `logs/sileoD-260.png`), dismissed it and tapped GET again: the button reads
+  QUEUE (`logs/sileoE-340.png`, `logs/041449-run.log`) but a tap at the same
+  point does not open the queue sheet in this scripted flow, so the Confirm
+  step is still the open piece and `dpkg-query` stays empty; the apt path
+  through the same repositories is PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 
