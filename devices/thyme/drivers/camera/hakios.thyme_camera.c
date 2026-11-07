@@ -108,7 +108,7 @@ extern void umi_camera_ios_set_focus(unsigned);
 extern uint32_t umi_camera_ios_focus(void);
 extern void umi_camera_ios_set_start_exposure(unsigned, unsigned);
 extern int umi_camera_ios_grab(void *, unsigned, unsigned);
-extern void umi_camera_ios_set_exposure(unsigned, unsigned);
+extern void umi_camera_ios_set_exposure(unsigned, unsigned, unsigned);
 extern void umi_camera_ios_stop(void);
 
 static uint32_t level;
@@ -1128,9 +1128,9 @@ static const struct ctab_mode real_modes[2] = {
 	 * shows what the sensor resolved rather than an enlargement of a centre crop.
 	 */
 	{ .width = 3008, .height = 2256, .x = 0, .y = 0, .lanes = 3, .cphy = 1, .settle = 19,
-	  .pixel_clock = 512179200, .line_length = 16032, .frame_length = 2373, .fps_milli = 30000, .data_type = 0x2b },
+	  .pixel_clock = 412530000, .line_length = 16032, .frame_length = 2373, .fps_milli = 10850, .data_type = 0x2b },
 	{ .width = 2592, .height = 1940, .lanes = 4, .cphy = 0, .settle = 19,
-	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 30130, .data_type = 0x2b },
+	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 11060, .data_type = 0x2b },
 };
 static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
 static const uint8_t fake_power[24];
@@ -3341,6 +3341,13 @@ capture_sensor(void)
 #define IDLE_MS                 1000
 #define FRAME_TIMEOUT_MS        1500
 #define EXPOSURE_MARGIN         40
+/* The shortest frame the UMI path's AE may ask for: 1000 lines of the wide's
+ * 38.84 us line is 39 ms, twenty-six frames a second (the mode's own 2373-line
+ * frame is 92 ms, ten). The AE lengthens the frame again when the light needs
+ * it -- the exposure's ceiling is the frame's length -- and the still averages
+ * eight frames, enough light for the noise the shorter one costs.
+ */
+#define UMI_FRAME_LINES_MIN     1000
 #define GAIN_UNITY              (hw->gain_unity)
 #define GAIN_MAX                (hw->gain_max)
 #define FRAME_LINES_MAX         0xfff0
@@ -3392,14 +3399,20 @@ ios_ms(void)
 static void
 exposure_limits(uint32_t *lines, uint32_t *gain, uint32_t *frame_lines)
 {
-	uint32_t shortest = ios_mode->frame_length;
+	/* (the UMI path's sensor takes shorter frames than the module's mode sets:
+	 * the capture stack's AE asks for one just long enough for the exposure) */
+	uint32_t shortest = real_source ? UMI_FRAME_LINES_MIN : ios_mode->frame_length;
 
 	*gain = *gain < GAIN_UNITY ? GAIN_UNITY : *gain > GAIN_MAX ? GAIN_MAX : *gain;
 	*lines = *lines < 4 ? 4 : *lines > FRAME_LINES_MAX - EXPOSURE_MARGIN ? FRAME_LINES_MAX - EXPOSURE_MARGIN : *lines;
 	if (*frame_lines == 0) {
 		*frame_lines = *lines + EXPOSURE_MARGIN > shortest ? *lines + EXPOSURE_MARGIN : shortest;
 	}
-	*frame_lines = *frame_lines < shortest ? shortest : *frame_lines > FRAME_LINES_MAX ? FRAME_LINES_MAX : *frame_lines;
+	if (*frame_lines < shortest) {
+		*frame_lines = shortest;
+	} else if (*frame_lines > FRAME_LINES_MAX) {
+		*frame_lines = FRAME_LINES_MAX;
+	}
 	if (*lines > *frame_lines - EXPOSURE_MARGIN) {
 		*lines = *frame_lines - EXPOSURE_MARGIN;
 	}
@@ -3829,8 +3842,8 @@ fake_session(void)
 			ring_free();
 			return;
 		}
-		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (mode 3 whole), up to %u a second\n",
-		    ios_mode->width, ios_mode->height, ios_mode->fps_milli / 1000);
+		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (mode 3 whole); the frame length follows "
+		    "the capture stack's AE\n", ios_mode->width, ios_mode->height);
 	} else {
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
 		    ios_mode->height, hw->chip, fps);
@@ -3896,7 +3909,7 @@ fake_session(void)
 			given_lines = last_lines;
 			given_gain = last_gain;
 			if (lines != last_lines || gain != last_gain) {
-				umi_camera_ios_set_exposure(lines, gain);
+				umi_camera_ios_set_exposure(lines, gain, frame_lines);
 				last_lines = lines;
 				last_gain = gain;
 			}
@@ -4045,7 +4058,9 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 	f.gain_unity = GAIN_UNITY;
 	f.gain_max = GAIN_MAX;
 	f.frame_lines = place[b].frame_lines;
-	f.frame_lines_min = ios_mode->frame_length;
+	/* (the mode's own frame, or the shorter one the UMI path's AE may ask for:
+	 * the frame length sets the frame rate as well as the exposure's ceiling) */
+	f.frame_lines_min = real_source ? UMI_FRAME_LINES_MIN : ios_mode->frame_length;
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
 	f.sensor = hw_index;
@@ -4417,7 +4432,7 @@ extern int umi_camera_capture_tpg(void);
 extern int umi_camera_capture_sensor(void);
 extern int umi_camera_ios_start(unsigned, unsigned);
 extern int umi_camera_ios_grab(void *, unsigned, unsigned);
-extern void umi_camera_ios_set_exposure(unsigned, unsigned);
+extern void umi_camera_ios_set_exposure(unsigned, unsigned, unsigned);
 extern void umi_camera_ios_stop(void);
 extern void umi_camera_probe_quiesce(void);
 

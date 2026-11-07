@@ -49,19 +49,23 @@ static struct {
 /* The sensor mode cam_mode selected (the module file's resN table and entry). */
 static struct {
 	uint32_t width, height, stride, lanes, lane_assign, settle, pixel_clock, line_length, frame_length, data_type, cphy;
+	uint32_t frame_lines_now;       /* the frame length the sensor runs (the mode's, or the capture stack's shorter) */
 	uint64_t rate;
 	unsigned mode;
 } um;
 
-/* The mode's frame time: the sensor's own HTS x VTS / PCLK (SMIA's timing),
- * 92 ms for the wide's mode 3 and 90 for the front's mode 1 -- about eleven
- * frames a second, whatever the ctab's "30" label says. The stream's reads pace
- * themselves by it (hakios.thyme_camera_dma.c's grab).
+/* The frame time now: the sensor's own HTS x VTS / PCLK (SMIA's timing), with
+ * the VTS the capture stack asked for -- the mode's 2373 lines are 92 ms, ten
+ * frames a second, and the shorter frame its AE asks for in a room's light is
+ * faster. The stream's reads pace themselves by it (hakios.thyme_camera_dma.c's
+ * grab).
  */
 uint64_t
 umi_camera_frame_ns(void)
 {
-	return um.pixel_clock ? (uint64_t)um.frame_length * um.line_length * NSEC_PER_SEC / um.pixel_clock : 0;
+	uint32_t vts = um.frame_lines_now ? um.frame_lines_now : um.frame_length;
+
+	return um.pixel_clock ? (uint64_t)vts * um.line_length * NSEC_PER_SEC / um.pixel_clock : 0;
 }
 /* A cam=5 cam_real session owns the sensor: it keeps uprobe's state across the
  * session, runs the module file's 1080p mode and copies frames on demand.
@@ -543,6 +547,7 @@ umode_prepare(unsigned version)
 	um.width = width; um.height = height; um.stride = ((width * 10 / 8 + 15) & ~15u);
 	um.lanes = lanes; um.lane_assign = utab_u32(file+32); um.settle = settle; um.pixel_clock = pclk;
 	um.line_length = line; um.frame_length = frame; um.data_type = dt;
+	um.frame_lines_now = frame;
 	um.cphy = cphy;
 	um.rate = (uint64_t)pclk * 10 / lanes; um.mode = mode_n;
 	return 0;
@@ -1084,14 +1089,16 @@ ustream_up(void)
 }
 
 static void
-uset_exposure(uint32_t shutter, uint32_t gain)
+uset_exposure(uint32_t shutter, uint32_t gain, uint32_t frame_lines)
 {
 	/* SMIA exposure inside the sensor's group hold: coarse integration in
-	 * lines (0x0202) and the analog gain code (0x0204, 32 is 1x). The hold is
-	 * bit 0 of 0x0104 on the S5KHMX (the module file's 0x0100, bit 8, registers
-	 * the values but the sensor keeps exposing with the old ones: the frame
-	 * level stayed put across a 60 -> 1000 line change, with bit 0 it goes
-	 * 29 -> 41 in the dark). The S5K3T2's front module specifies 0x0100.
+	 * lines (0x0202), the analog gain code (0x0204, 32 is 1x), and the frame
+	 * length (0x0340: the frame time is HTS x VTS / PCLK, so this is also the
+	 * frame rate). The hold is bit 0 of 0x0104 on the S5KHMX (the module file's
+	 * 0x0100, bit 8, registers the values but the sensor keeps exposing with the
+	 * old ones: the frame level stayed put across a 60 -> 1000 line change, with
+	 * bit 0 it goes 29 -> 41 in the dark). The S5K3T2's front module specifies
+	 * 0x0100.
 	 */
 	/* The sensor may be busy with a frame; a refused transfer is retried. */
 	bool ok = false;
@@ -1101,6 +1108,7 @@ uset_exposure(uint32_t shutter, uint32_t gain)
 		ums(1);
 		ok = ok && (!shutter || usensor_write(0x0202, (uint16_t)shutter));
 		ok = ok && (!gain || usensor_write(0x0204, (uint16_t)gain));
+		ok = ok && (!frame_lines || usensor_write(0x0340, (uint16_t)frame_lines));
 		ums(1);
 		ok = ok && usensor_write(0x0104, 0x0000);
 		if (!ok) {
@@ -1108,7 +1116,7 @@ uset_exposure(uint32_t shutter, uint32_t gain)
 		}
 	}
 	if (!ok) {
-		hakios_tl("UMI camera: exposure %u lines, gain %#x not taken (3 tries)\n", shutter, gain);
+		hakios_tl("UMI camera: exposure %u lines, gain %#x, frame %u not taken (3 tries)\n", shutter, gain, frame_lines);
 	}
 }
 
@@ -1147,7 +1155,7 @@ ustream_begin(void)
 	(void)PE_parse_boot_argn("cam_shutter", &shutter, sizeof(shutter));
 	(void)PE_parse_boot_argn("cam_gain", &gain, sizeof(gain));
 	if (shutter || gain) {
-		uset_exposure(shutter, gain);
+		uset_exposure(shutter, gain, 0);
 		hakios_tl("UMI camera: exposure %u lines, gain %#x\n", shutter, gain);
 		uint16_t readback = 0;
 		if (usensor_read(0x0202, &readback)) hakios_tl("UMI camera: exposure register 0x0202=%#x\n", readback);
@@ -1155,7 +1163,7 @@ ustream_begin(void)
 	}
 	if (ustart_lines || ustart_gain) {
 		/* before the stream starts: the front sensor takes it only then */
-		uset_exposure(ustart_lines, ustart_gain);
+		uset_exposure(ustart_lines, ustart_gain, 0);
 		ustart_lines = ustart_gain = 0;
 	}
 	if (!usensor_write(0x0100, 0x0100)) hakios_tl("UMI camera: stream-on write was not acknowledged\n");
@@ -1317,10 +1325,28 @@ umi_camera_ios_set_focus(unsigned position)
 }
 
 void
-umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
+umi_camera_ios_set_exposure(unsigned lines, unsigned gain, unsigned frame_lines)
 {
-	if (lines == 0 || lines > (um.frame_length > 40 ? um.frame_length - 40 : 1))
-		lines = um.frame_length > 40 ? um.frame_length - 40 : 1;
+	/*
+	 * The frame length the capture stack asked for (0: the mode's own): a frame
+	 * just long enough for the exposure, so the mode's 92 ms frames become the
+	 * 47 ms the room's light needs and the preview follows at twenty a second.
+	 * The line time is the sensor's HTS / PCLK and does not change with it.
+	 */
+	uint32_t vts = frame_lines ? frame_lines : um.frame_length;
+
+	if (vts > um.frame_length) {
+		vts = um.frame_length;          /* (the mode's VTS is the longest) */
+	}
+	if (vts < lines + 40) {
+		vts = lines + 40;
+	}
+	if (vts > 0xfff0) {
+		vts = 0xfff0;
+	}
+	if (lines == 0 || lines > vts - 40) {
+		lines = vts - 40;
+	}
 	gain = gain < 32 ? 32 : gain > 0x800 ? 0x800 : gain;
 	if (!uios_on) {
 		/* Between sessions (the capture stack asks while the last one is
@@ -1331,6 +1357,7 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 		hakios_tl("UMI camera: exposure %u lines, gain %#x kept for the next session\n", lines, gain);
 		return;
 	}
+	um.frame_lines_now = vts;
 	if (ufront) {
 		/* The S5K3T2 takes the exposure only while it is not streaming, so the
 		 * change is made between a stop and a start (a frame's gap), with the
@@ -1338,16 +1365,16 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain)
 		 */
 		(void)usensor_write(0x0100, 0x0000);
 		ums(30);
-		uset_exposure(lines, gain);
+		uset_exposure(lines, gain, vts);
 		uint16_t rb = 0;
 		if (usensor_read(0x0202, &rb)) {
-			hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x\n", lines, rb, gain);
+			hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x, frame %u\n", lines, rb, gain, vts);
 		}
 		ums(10);
 		(void)usensor_write(0x0100, 0x0100);
 	} else {
-		hakios_tl("UMI camera: rear exposure %u lines, gain %#x\n", lines, gain);
-		uset_exposure(lines, gain);
+		hakios_tl("UMI camera: rear exposure %u lines, gain %#x, frame %u\n", lines, gain, vts);
+		uset_exposure(lines, gain, vts);
 	}
 }
 

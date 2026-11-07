@@ -1434,7 +1434,11 @@ send_picture(int device, CVPixelBufferRef pb)
  * out again. (Android's night shot does the same, with alignment; this one trusts the phone to
  * be still for the third of a second it takes.)
  */
-#define STILL_FRAMES    4
+/* Eight, not four: the preview runs the sensor in a shorter frame (the AE asks
+ * for one, and the frame rate rises with it), so each frame carries less light
+ * and the still averages twice as many to keep the same noise.
+ */
+#define STILL_FRAMES    8
 static uint8_t *still_acc;              /* uint16_t a pixel, summed */
 static uint8_t *still_packed;           /* the mean, RAW10 as the sensor gave it */
 static uint32_t still_w, still_h, still_stride;

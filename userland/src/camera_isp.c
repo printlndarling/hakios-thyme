@@ -263,9 +263,13 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 	if (want <= fast) {
 		lines = want < 4 ? 4 : (uint32_t)want;
 		gain = f->gain_unity;
+		/* (the frame is as short as the shortest the sensor offers: its length
+		 * is the frame time, and so the frame rate, as well as a ceiling) */
+		frame_lines = f->frame_lines_min;
 	} else if (want <= (double)fast * 16) {
 		lines = fast;
 		gain = (uint32_t)(want / fast * f->gain_unity);
+		frame_lines = f->frame_lines_min;
 	} else {
 		lines = (uint32_t)(want / 16);
 		lines = lines > longest - f->margin ? longest - f->margin : lines < fast ? fast : lines;
