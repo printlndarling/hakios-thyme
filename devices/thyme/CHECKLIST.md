@@ -760,7 +760,11 @@ Still open:
   `logs/sileoD-260.png`), dismissed it and tapped GET again: the button reads
   QUEUE (`logs/sileoE-340.png`, `logs/041449-run.log`) but a tap at the same
   point does not open the queue sheet in this scripted flow, so the Confirm
-  step is still the open piece and `dpkg-query` stays empty; the apt path
+  step is still the open piece and `dpkg-query` stays empty
+  (`logs/042541-run.log`). The page's Repository row still reads "Untitled
+  Repo" after the index fetched (`logs/sileoF-450.png`), so Sileo's
+  repository object never got its name — the likely reason its queue sheet
+  does not open, and the next thing to read in its logs; the apt path
   through the same repositories is PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
