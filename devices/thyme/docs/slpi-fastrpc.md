@@ -539,16 +539,33 @@ message ids as `msgid - 0x200 < 3` plus `msgid == 0x300` — so
 `SNS_CLIENT_REQ` (message 0x20) to QRTR service 400, the protobuf's field 2
 carrying that suite id and the registry protobuf in the payload, the target
 SUID being the registry sensor's (our `sns_ask("registry")` already asks for
-it). The protobuf field numbers of `sns_registry_data`/
-`sns_registry_write_req` are the next thing. The first is in: disassembling
-`sns_registry_data::MergePartialFromCodedStream` shows its parser accepting
-only tag `0x1a` (field 3, length-delimited) and creating
-`sns_registry_data_item` objects there — a group's data is a repeated field 3
-of items. The item's own fields (its name, type, version and data bytes, as
-the phone's registry JSON files write them) are the rest of that class's
-parsers; the same `llvm-objdump` pass over
-`sns_registry_data_item::MergePartialFromCodedStream` and the write/read
-request classes gives them.
+it). The protobuf layout is now read off the library outright. `llvm-objdump`
+over the generated parsers in `libsnsapi.so` (ARM64, the exported
+`_ZN…MergePartialFromCodedStreamE` symbols) shows each accepted tag as a 32-bit
+compare against the full tag byte — field number in the top bits, wire type in
+the low three:
+
+- `sns_registry_data` (at `0xb1f5c`): only tag `0x1a` — field 3,
+  length-delimited, repeated: a group's data is a list of
+  `sns_registry_data_item`s.
+- `sns_registry_data_item` (at `0xb0e44`): `0x0a` field 1 string (the item's
+  name), `0x15` field 2 fixed32 (version), then the oneof `0x52` field 10
+  `sns_registry_data` (a subgroup), `0x5a` field 11 string, `0x65` field 12
+  float, `0x69` field 13 sfixed64 — the JSON files' `"type":"grp"` item is the
+  subgroup, `"type":"int"`/`"flt"`/`"str"` the scalar fields.
+- `sns_registry_read_req` (at `0xb29dc`): `0x0a` field 1 string.
+- `sns_registry_write_req` (at `0xb403c`): `0x0a` field 1 string (the group's
+  full name), `0x12` field 2 the `sns_registry_data`.
+- `sns_registry_write_event` (at `0xb4b7c`): `0x08` field 1 varint
+  (`SNS_REGISTRY_WRITE_STATUS_SUCCESS` 0, `ERROR_OTHER` 1).
+
+So a write is: `SNS_REGISTRY_MSGID_SNS_REGISTRY_WRITE_REQ` (0x201) as the
+suite message id, protobuf `{1: name, 2: {3: [{1: item, 2: version,
+10/11/12/13: data}...]}}`, to the registry sensor's SUID over the SNS client
+service. What is still open is that SUID: the client acks the request without a
+SUID event (`logs/200444-run.log`), so the upload cannot be addressed until the
+registry sensor's SUID is known — the same PD stall that keeps the sensor
+process from starting a nested call.
 
 ## Risks and open questions
 
