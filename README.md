@@ -104,7 +104,7 @@ evidence, test recipes and open items.
 
 This fork tracks [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel)
 for the common kernel, loader, user space and tools, and keeps THYME-only work
-in `devices/thyme/`. Upstream main `87bf485` is merged; the Metal-on-Vulkan/
+in `devices/thyme/`. Upstream main `63fc2b4` is merged; the Metal-on-Vulkan/
 Turnip path is opt-in (`TURNIP=1 M2V=1`, `metal_m2v=1`) and is not part of the
 daily-driver image. The device-specific work is never pushed upstream.
 
@@ -112,9 +112,13 @@ daily-driver image. The device-specific work is never pushed upstream.
 
 | Repository | Contents |
 |---|---|
-| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | upstream common kernel, loader, user space and documentation |
-| [hakios-metal](https://github.com/oosexgang/hakios-metal) | Metal's command model on the Adreno |
-| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | the UEFI that starts the loader |
+| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | **common**: the kernel port, every common driver, the loader, user space, the tools, this documentation, and `devices/qemu` |
+| [`hakios-metal/`](hakios-metal) | Metal's command model on the Adreno, through the kernel's GPU driver |
+| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G: its defconfig, status, UEFI platform, firmware script, and its SoC's layer (Qualcomm SC7280 family) |
+| [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768) | Infinix Hot 20 (MediaTek Helio G85): an experimental port with its own loader. Not in this repository's manifest |
+| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | the firmware that starts the loader: Mu-Silicium with HakiOS's boot path, banner and name, and HakiOS's U-Boot |
+| [hackios-web](https://github.com/oosexgang/hackios-web) | the website |
+| [hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland) | old: a pointer kept for its links. User space is `userland/` here |
 
 Nothing of Apple's and no vendor firmware is in this repository. The Darwin
 user space, if used, is laid out from an IPSW the user provides; firmware

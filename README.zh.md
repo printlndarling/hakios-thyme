@@ -85,7 +85,7 @@ devices/thyme/ram-regress.sh
 本分支跟踪
 [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) 的公共
 内核、引导加载器、用户空间和工具，把 THYME 专属工作放在
-`devices/thyme/`。上游 main `87bf485` 已合并；Metal-on-Vulkan/Turnip 路径
+`devices/thyme/`。上游 main `63fc2b4` 已合并；Metal-on-Vulkan/Turnip 路径
 是可选功能（`TURNIP=1 M2V=1`、`metal_m2v=1`），不属于日用镜像。设备专属
 修改不会推送到上游。
 
@@ -93,9 +93,13 @@ devices/thyme/ram-regress.sh
 
 | 仓库 | 内容 |
 |---|---|
-| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | 上游公共内核、加载器、用户空间和文档 |
-| [hakios-metal](https://github.com/oosexgang/hakios-metal) | Adreno 上的 Metal 命令模型 |
-| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | 启动加载器的 UEFI |
+| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | **公共部分**：内核移植、所有公共驱动、引导加载器、用户空间、工具、本文档以及 `devices/qemu` |
+| [`hakios-metal/`](hakios-metal) | 通过内核的 GPU 驱动，在 Adreno 上实现 Metal 的命令模型 |
+| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G：defconfig、状态、UEFI 平台、固件脚本及其 SoC 层（Qualcomm SC7280 系列） |
+| [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768) | Infinix Hot 20（MediaTek Helio G85）：实验性移植，有自己的引导加载器。不在本仓库的清单中 |
+| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | 启动引导加载器的固件：带有 HakiOS 启动路径、横幅和名称的 Mu-Silicium，以及 HakiOS 的 U-Boot |
+| [hackios-web](https://github.com/oosexgang/hackios-web) | 网站 |
+| [hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland) | 旧仓库：只为保留链接而存在的指向。用户空间现在在这里的 `userland/` |
 
 本仓库不包含任何 Apple 的软件或厂商固件。Darwin 用户空间由用户从自己获取
 的 IPSW 中布置；固件来自用户自己的手机。Apple 的服务（激活、Apple ID、

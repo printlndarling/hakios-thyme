@@ -52,8 +52,8 @@ APFS_WRITE_PATH	arg	apfs_write_path	Storage and APFS	k	hakios.apfs_check.c	the f
 APPLOG	arg	applog	CPU, memory and boot	k	(patch)	
 APPLOG_NAME	arg	applog_name	CPU, memory and boot	k	(patch)	
 AUTOUNLOCK	arg	autounlock	User space	u	inject_sb.c	
-BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.thyme_adsp.c,loader.c	
-BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	every property once, for the log (which number is which on this phone's firmware)
+BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.thyme_adsp.c,hakios.thyme_slpi.c,loader.c	
+BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c,hakios.thyme_slpi.c	every property once, for the log (which number is which on this phone's firmware)
 BT	arg	bt	Bluetooth	k	hakios.bt.c,hakios.thyme_bluetooth.c	start the Bluetooth controller path selected by the build
 BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds later (0: no second look; 30)
 BT_BAUD	arg	bt_baud	Bluetooth	k	hakios.thyme_bluetooth.c	
@@ -64,16 +64,26 @@ CA_PROF	arg	ca_prof	User space	u	HakiosMetalCA.m
 CA_VBL	arg	ca_vbl	User space	u	inject.c	CoreAnimation's frame clock from the display driver's refresh notifications
 CAENV	arg	caenv	User space	u	inject.c,inject_sb.c	CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
 CAM_AFTER	arg	cam_after	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_DUMP	arg	cam_dump	User space	k	hakios.thyme_camera.c	the first frame of the wide camera's real session, for xl camera
 CAM_FAKE	arg	cam_fake	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
 CAM_FAKE_FPS	arg	cam_fake_fps	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_FOCUS	arg	cam_focus	User space	k	hakios.thyme_umi_camera.c	
+CAM_FRAME_LINES	arg	cam_frame_lines	User space	k	hakios.thyme_umi_camera.c	
+CAM_FRAME_MIN	arg	cam_frame_min	User space	k	hakios.thyme_camera.c	
 CAM_FRAMES	arg	cam_frames	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
-CAM_GAIN	arg	cam_gain	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_FRONT_FRAME_MIN	arg	cam_front_frame_min	User space	k	hakios.thyme_camera.c	
+CAM_FRONT_HOLD	arg	cam_front_hold	User space	k	hakios.thyme_umi_camera.c	
+CAM_FRONT_LITE0	arg	cam_front_lite0	User space	k	hakios.thyme_umi_camera.c	
+CAM_GAIN	arg	cam_gain	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	
+CAM_GAIN2	arg	cam_gain2	User space	k	hakios.thyme_umi_camera.c	
 CAM_KEEP_MB	arg	cam_keep_mb	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
-CAM_MODE	arg	cam_mode	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_MODE	arg	cam_mode	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	
 CAM_PATTERN	arg	cam_pattern	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
-CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_REAL	arg	cam_real	User space	k	hakios.thyme_camera.c	the UMI modes the sessions run, whole -- the wide's mode 3 at 3008x2256 and the front's mode 1 at 2592x1940, not a centre crop
+CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	the S5K3T2 on CSIPHY 4 (DT cam-sensor@2) instead of the S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
 CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
-CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
+CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	
+CAM_SHUTTER2	arg	cam_shutter2	User space	k	hakios.thyme_umi_camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
 CPULOAD	arg	cpuload	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
@@ -82,12 +92,45 @@ DDR	arg	ddr	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the
 DDR_REST	arg	ddr_rest	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	DDR bandwidth vote left while the test rests (zero sends BCM_COMMIT)
 DDR_VOTE	arg	ddr_vote	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	initial DDR bandwidth vote in the command database (default 0x3fff)
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
+FASTRPC_ASSIGN	arg	fastrpc_assign	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH0	arg	fastrpc_attach0	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH_CLIENT	arg	fastrpc_attach_client	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH_DELAY	arg	fastrpc_attach_delay	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH_LATE	arg	fastrpc_attach_late	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH_MID	arg	fastrpc_attach_mid	User space	k	hakios.thyme_slpi.c	
+FASTRPC_ATTACH_TID	arg	fastrpc_attach_tid	User space	k	hakios.thyme_slpi.c	
+FASTRPC_BARE	arg	fastrpc_bare	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CALL	arg	fastrpc_call	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CLIENT	arg	fastrpc_client	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CLOSE	arg	fastrpc_close	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CREATE	arg	fastrpc_create	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CREATE_PD	arg	fastrpc_create_pd	User space	k	hakios.thyme_slpi.c	
+FASTRPC_CREATE_PROBE	arg	fastrpc_create_probe	User space	k	hakios.thyme_slpi.c	
+FASTRPC_DELAY	arg	fastrpc_delay	User space	k	hakios.thyme_slpi.c	
+FASTRPC_GROW_AFTER	arg	fastrpc_grow_after	User space	k	hakios.thyme_slpi.c	
+FASTRPC_GROW_KB	arg	fastrpc_grow_kb	User space	k	hakios.thyme_slpi.c	
+FASTRPC_HEAP_MB	arg	fastrpc_heap_mb	User space	k	hakios.thyme_slpi.c	
+FASTRPC_HEAP_SMEM	arg	fastrpc_heap_smem	User space	k	hakios.thyme_slpi.c	
+FASTRPC_LHANDLE	arg	fastrpc_lhandle	User space	k	hakios.thyme_slpi.c	
+FASTRPC_LISTENER1	arg	fastrpc_listener1	User space	k	hakios.thyme_slpi.c	
+FASTRPC_LISTENER_TID	arg	fastrpc_listener_tid	User space	k	hakios.thyme_slpi.c	
+FASTRPC_OPEN_AFTER	arg	fastrpc_open_after	User space	k	hakios.thyme_slpi.c	
+FASTRPC_OPEN_ASYNC	arg	fastrpc_open_async	User space	k	hakios.thyme_slpi.c	
+FASTRPC_OPEN_PD	arg	fastrpc_open_pd	User space	k	hakios.thyme_slpi.c	
+FASTRPC_OPEN_WAIT	arg	fastrpc_open_wait	User space	k	hakios.thyme_slpi.c	
+FASTRPC_PD	arg	fastrpc_pd	User space	k	hakios.thyme_slpi.c	
+FASTRPC_PHONE	arg	fastrpc_phone	User space	k	hakios.thyme_slpi.c	
+FASTRPC_RESTART	arg	fastrpc_restart	User space	k	hakios.thyme_slpi.c	
+FASTRPC_SMMU	arg	fastrpc_smmu	User space	k	hakios.thyme_slpi.c	
+FASTRPC_STATIC_OPEN	arg	fastrpc_static_open	User space	k	hakios.thyme_slpi.c	
+FASTRPC_TID	arg	fastrpc_tid	User space	k	hakios.thyme_slpi.c	
 FB_BEAM	arg	fb_beam	GPU and display	k	MiniIOMobileFramebuffer.cpp	frames written to the panel's memory whenever their beat comes, as before
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
 FB_DIFF	arg	fb_diff	GPU and display	k	MiniIOMobileFramebuffer.cpp	which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
 FB_FILTER	arg	fb_filter	GPU and display	k	MiniIOMobileFramebuffer.cpp	the picture is scaled to the panel nearest neighbour, as it once was
 FB_HZ	arg	fb_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp,hakios.thyme_display.c	
+FB_INTF	arg	fb_intf	GPU and display	k	MiniIOMobileFramebuffer.cpp	the registers of the display interface the panel is on, for a port
 FB_MEASURE	arg	fb_measure	GPU and display	k	MiniIOMobileFramebuffer.cpp	how often the panel is really refreshed
 FB_PRI	arg	fb_pri	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_QUEUE	arg	fb_queue	GPU and display	k	MiniIOMobileFramebuffer.cpp	
@@ -96,7 +139,7 @@ FBHEIGHT	arg	fbheight	GPU and display	k	MiniIOMobileFramebuffer.cpp
 FBSCALE	arg	fbscale	GPU and display	k	MiniIOMobileFramebuffer.cpp	the same 375 x 812 points drawn at two pixels a point instead of three
 FBSUBTYPE	arg	fbsubtype	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBTRACE	arg	fbtrace	GPU and display	k	MiniIOMobileFramebuffer.cpp	log the first N calls of every selector (default 3)
-FBWIDTH	arg	fbwidth	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBWIDTH	arg	fbwidth	GPU and display	ku	MiniIOMobileFramebuffer.cpp,inject_sb.c	
 GAMUT	arg	gamut	Loader	l	loader.c	
 GL	arg	gl	User space	u	inject.c,inject_sb.c	not even with a GPU; gl=1: also without one, by Mesa's software driver (slow; for working on eagl.c in QEMU)
 GLBLIT	arg	glblit	GPU and display	u	eagl.c	the surface's memory, as before
@@ -217,6 +260,7 @@ MODEM_WDA_OFF	arg	modem_wda_off	Cellular	k	hakios.mpss.c
 NET_DHCP	arg	net_dhcp	Network	k	hakios.net.c	every DHCP message's type, address, router and DNS options
 PANEL_DSI_PROBE	arg	panel_dsi_probe	GPU and display	k	hakios.thyme_display.c	sample the DSI controller's status and TE registers after the panel timing sequence
 PANEL_SEQ	arg	panel_seq	GPU and display	k	hakios.thyme_display.c	
+PANEL_TE_RATE	arg	panel_te_rate	GPU and display	k	hakios.thyme_display.c	count the edges of the panel's TE line (the device tree's platform-te-gpio, pin 66) for about a second
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block
 PRESS_POWER	arg	press_power	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the key's own are (hakios_touch_post):
 PRESS_POWER_MS	arg	press_power_ms	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
@@ -235,8 +279,21 @@ RETURN_CPU	arg	return_cpu	CPU, memory and boot	k	loader_return.c
 RETURN_PANIC	arg	return_panic	CPU, memory and boot	k	loader_return.c	
 ROOT_APFS	arg	root_apfs	User space	u	init.c	the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
 SERIAL	arg	serial	Loader	l	loader.c	
+SERVREG	arg	servreg	User space	k	hakios.thyme_slpi.c	
+SLPI	arg	slpi	User space	k	hakios.thyme_slpi.c	
+SLPI_AGAIN	arg	slpi_again	User space	k	hakios.thyme_slpi.c	
+SLPI_APR_WAIT	arg	slpi_apr_wait	User space	k	hakios.thyme_slpi.c	
+SLPI_DUMP_ITEM	arg	slpi_dump_item	User space	k	hakios.thyme_slpi.c	
+SLPI_KEEP	arg	slpi_keep	User space	k	hakios.thyme_slpi.c	
+SLPI_LISTEN	arg	slpi_listen	User space	k	hakios.thyme_slpi.c	
+SLPI_NEW	arg	slpi_new	User space	k	hakios.thyme_slpi.c	
+SLPI_PAUSE	arg	slpi_pause	User space	k	hakios.thyme_slpi.c	
+SLPI_RETURN	arg	slpi_return	User space	k	hakios.thyme_slpi.c	
+SLPI_STEP	arg	slpi_step	User space	k	hakios.thyme_slpi.c	
+SLPI_WAIT	arg	slpi_wait	User space	k	hakios.thyme_slpi.c	
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
 SMALL_CORES_AFTER	arg	small_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
+SNS	arg	sns	User space	k	hakios.thyme_slpi.c	
 SOC_CMD_DB	hex	soc_cmd_db	Cellular	k	hakios.mpss.c	
 SOC_GSI_BASE	hex	soc_gsi_base	Cellular	k	hakios.ipa.c	
 SOC_IMEM	hex	soc_imem	Cellular	k	hakios.mpss.c	

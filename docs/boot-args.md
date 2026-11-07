@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **379 arguments**: 308 read by the kernel, 14 by the loader, 67 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **436 arguments**: 365 read by the kernel, 14 by the loader, 68 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (78)
+## GPU and display (81)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -31,6 +31,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fb_diff` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DIFF` |  |
 | `fb_filter` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_FILTER` |  |
 | `fb_hz` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.thyme_display.c` | `CONFIG_FB_HZ` |  |
+| `fb_intf` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_INTF` |  |
 | `fb_measure` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_MEASURE` |  |
 | `fb_pri` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_PRI` |  |
 | `fb_queue` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_QUEUE` |  |
@@ -39,7 +40,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fbscale` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSCALE` |  |
 | `fbsubtype` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSUBTYPE` |  |
 | `fbtrace` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBTRACE` |  |
-| `fbwidth` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBWIDTH` |  |
+| `fbwidth` | KU | `MiniIOMobileFramebuffer.cpp`, `inject_sb.c` | `CONFIG_FBWIDTH` |  |
 | `glblit` | U | `eagl.c` | `CONFIG_GLBLIT` |  |
 | `glcensus` | U | `eagl.c` | `CONFIG_GLCENSUS` |  |
 | `glcopy` | U | `eagl.c` | `CONFIG_GLCOPY` |  |
@@ -76,9 +77,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `gpu_exact` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_EXACT` |  |
 | `gpu_keep` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_KEEP` |  |
 | `gpu_log` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_LOG` |  |
+| `hakios_kver` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
 | `metal` | KU | `HakiosMetal.m`, `MiniIOMobileFramebuffer.cpp`, `inject_sb.c` | `CONFIG_METAL` |  |
 | `panel_dsi_probe` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_DSI_PROBE` |  |
 | `panel_seq` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_SEQ` |  |
+| `panel_te_rate` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_TE_RATE` |  |
 | `rec_mb` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_MB` |  |
 | `rec_ring` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_RING` |  |
 | `rec_secs` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_SECS` |  |
@@ -218,11 +221,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `adsp_step` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_STEP` |  |
 | `adsp_umi` | K | `hakios.thyme_adsp.c`, `hakios.thyme_sound.c` | `CONFIG_ADSP_UMI` |  |
 | `adsp_wait` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_ADSP_WAIT` |  |
-| `battery` | KL | `hakios.adsp.c`, `hakios.battery.c`, `hakios.thyme_adsp.c`, `loader.c` | `CONFIG_BATTERY` |  |
+| `battery` | KL | `hakios.adsp.c`, `hakios.battery.c`, `hakios.thyme_adsp.c`, `hakios.thyme_slpi.c`, `loader.c` | `CONFIG_BATTERY` |  |
 | `battery_shared_pa` | K | `hakios.battery.c` |  | the loader (the address of its charger page) |
 | `battery_stop` | K | `hakios.battguard.c` | `CONFIG_BATTERY_STOP` |  |
 | `battery_stop_poll` | K | `hakios.battguard.c` | `CONFIG_BATTERY_STOP_POLL` |  |
-| `battmgr` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c` | `CONFIG_BATTMGR` |  |
+| `battmgr` | K | `hakios.adsp.c`, `hakios.thyme_adsp.c`, `hakios.thyme_slpi.c` | `CONFIG_BATTMGR` |  |
 | `mic` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC` |  |
 | `mic_adc` | K | `hakios.mic.c`, `hakios.thyme_mic.c` | `CONFIG_MIC_ADC` |  |
 | `mic_channels` | K | `hakios.thyme_mic.c` | `CONFIG_MIC_CHANNELS` |  |
@@ -264,13 +267,13 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_fake` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FAKE` |  |
 | `cam_fake_fps` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FAKE_FPS` |  |
 | `cam_frames` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_FRAMES` |  |
-| `cam_gain` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_GAIN` |  |
+| `cam_gain` | K | `hakios.camera.c`, `hakios.thyme_camera.c`, `hakios.thyme_umi_camera.c` | `CONFIG_CAM_GAIN` |  |
 | `cam_keep_mb` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_KEEP_MB` |  |
-| `cam_mode` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_MODE` |  |
+| `cam_mode` | K | `hakios.camera.c`, `hakios.thyme_camera.c`, `hakios.thyme_umi_camera.c` | `CONFIG_CAM_MODE` |  |
 | `cam_pattern` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_PATTERN` |  |
-| `cam_sensor` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SENSOR` |  |
+| `cam_sensor` | K | `hakios.camera.c`, `hakios.thyme_camera.c`, `hakios.thyme_umi_camera.c` | `CONFIG_CAM_SENSOR` |  |
 | `cam_settle` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SETTLE` |  |
-| `cam_shutter` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_SHUTTER` |  |
+| `cam_shutter` | K | `hakios.camera.c`, `hakios.thyme_camera.c`, `hakios.thyme_umi_camera.c` | `CONFIG_CAM_SHUTTER` |  |
 | `cam_vblank` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_VBLANK` |  |
 
 ## Touch and buttons (13)
@@ -383,12 +386,6 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `thermal_tm0` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM0` |  |
 | `thermal_tm1` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM1` |  |
 
-## Version (1)
-
-| Argument | Layer | Read by | Configuration | Set by |
-|---|---|---|---|---|
-| `hakios_kver` | K | `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
-
 ## CPU, memory and boot (17)
 
 | Argument | Layer | Read by | Configuration | Set by |
@@ -433,7 +430,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (34)
+## User space (89)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -443,7 +440,49 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ca_prof` | U | `HakiosMetalCA.m` | `CONFIG_CA_PROF` |  |
 | `ca_vbl` | U | `inject.c` | `CONFIG_CA_VBL` |  |
 | `caenv` | U | `inject.c`, `inject_sb.c` | `CONFIG_CAENV` |  |
+| `cam_dump` | K | `hakios.thyme_camera.c` | `CONFIG_CAM_DUMP` |  |
+| `cam_focus` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FOCUS` |  |
+| `cam_frame_lines` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FRAME_LINES` |  |
+| `cam_frame_min` | K | `hakios.thyme_camera.c` | `CONFIG_CAM_FRAME_MIN` |  |
+| `cam_front_frame_min` | K | `hakios.thyme_camera.c` | `CONFIG_CAM_FRONT_FRAME_MIN` |  |
+| `cam_front_hold` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FRONT_HOLD` |  |
+| `cam_front_lite0` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FRONT_LITE0` |  |
+| `cam_gain2` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_GAIN2` |  |
+| `cam_real` | K | `hakios.thyme_camera.c` | `CONFIG_CAM_REAL` |  |
+| `cam_shutter2` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_SHUTTER2` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
+| `fastrpc_assign` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ASSIGN` |  |
+| `fastrpc_attach0` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH0` |  |
+| `fastrpc_attach_client` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH_CLIENT` |  |
+| `fastrpc_attach_delay` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH_DELAY` |  |
+| `fastrpc_attach_late` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH_LATE` |  |
+| `fastrpc_attach_mid` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH_MID` |  |
+| `fastrpc_attach_tid` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_ATTACH_TID` |  |
+| `fastrpc_bare` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_BARE` |  |
+| `fastrpc_call` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CALL` |  |
+| `fastrpc_client` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CLIENT` |  |
+| `fastrpc_close` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CLOSE` |  |
+| `fastrpc_create` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE` |  |
+| `fastrpc_create_pd` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE_PD` |  |
+| `fastrpc_create_probe` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE_PROBE` |  |
+| `fastrpc_delay` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_DELAY` |  |
+| `fastrpc_grow_after` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_GROW_AFTER` |  |
+| `fastrpc_grow_kb` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_GROW_KB` |  |
+| `fastrpc_heap_mb` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_HEAP_MB` |  |
+| `fastrpc_heap_smem` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_HEAP_SMEM` |  |
+| `fastrpc_lhandle` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_LHANDLE` |  |
+| `fastrpc_listener1` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_LISTENER1` |  |
+| `fastrpc_listener_tid` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_LISTENER_TID` |  |
+| `fastrpc_open_after` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_OPEN_AFTER` |  |
+| `fastrpc_open_async` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_OPEN_ASYNC` |  |
+| `fastrpc_open_pd` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_OPEN_PD` |  |
+| `fastrpc_open_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_OPEN_WAIT` |  |
+| `fastrpc_pd` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_PD` |  |
+| `fastrpc_phone` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_PHONE` |  |
+| `fastrpc_restart` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_RESTART` |  |
+| `fastrpc_smmu` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_SMMU` |  |
+| `fastrpc_static_open` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_STATIC_OPEN` |  |
+| `fastrpc_tid` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_TID` |  |
 | `gl` | U | `inject.c`, `inject_sb.c` | `CONFIG_GL` |  |
 | `glcompile` | U | `inject.c` | `CONFIG_GLCOMPILE` |  |
 | `glno` | U | `inject.c` | `CONFIG_GLNO` |  |
@@ -464,6 +503,19 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `metal_watch` | U | `inject.c` | `CONFIG_METAL_WATCH` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
+| `servreg` | K | `hakios.thyme_slpi.c` | `CONFIG_SERVREG` |  |
+| `slpi` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI` |  |
+| `slpi_again` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_AGAIN` |  |
+| `slpi_apr_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_APR_WAIT` |  |
+| `slpi_dump_item` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_DUMP_ITEM` |  |
+| `slpi_keep` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_KEEP` |  |
+| `slpi_listen` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_LISTEN` |  |
+| `slpi_new` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_NEW` |  |
+| `slpi_pause` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_PAUSE` |  |
+| `slpi_return` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_RETURN` |  |
+| `slpi_step` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_STEP` |  |
+| `slpi_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_WAIT` |  |
+| `sns` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS` |  |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `tu_debug` | U | `HakiosMetalCA.m` | `CONFIG_TU_DEBUG` |  |
 | `ui_lite` | U | `inject_sb.c` | `CONFIG_UI_LITE` |  |
