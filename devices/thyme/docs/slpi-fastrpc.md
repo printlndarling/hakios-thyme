@@ -540,9 +540,15 @@ message ids as `msgid - 0x200 < 3` plus `msgid == 0x300` — so
 carrying that suite id and the registry protobuf in the payload, the target
 SUID being the registry sensor's (our `sns_ask("registry")` already asks for
 it). The protobuf field numbers of `sns_registry_data`/
-`sns_registry_write_req` are the next thing: they are in the same library's
-generated classes (their `set_*`/`_Internal` accessors read field numbers off
-the descriptor), readable with the same `llvm-objdump`.
+`sns_registry_write_req` are the next thing. The first is in: disassembling
+`sns_registry_data::MergePartialFromCodedStream` shows its parser accepting
+only tag `0x1a` (field 3, length-delimited) and creating
+`sns_registry_data_item` objects there — a group's data is a repeated field 3
+of items. The item's own fields (its name, type, version and data bytes, as
+the phone's registry JSON files write them) are the rest of that class's
+parsers; the same `llvm-objdump` pass over
+`sns_registry_data_item::MergePartialFromCodedStream` and the write/read
+request classes gives them.
 
 ## Risks and open questions
 
