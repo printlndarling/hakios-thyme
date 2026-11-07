@@ -755,7 +755,13 @@ Still open:
   not put `tree` in its index yet; the scene now dismisses the prompt and
   reopens the page, but its 70–80 s waits are shorter than the refresh, so a
   further attempt needs a longer wait (or the havoc/chariz sources removed
-  for the test). The apt path through the same repositories is PASS;
+  for the test). A fourth run waited 200 s after the prompt and reopened the
+  page at 460 s: Sileo's Featured page was by then empty (white) and no
+  install happened (`logs/020440-run.log`, `logs/sileo4-460.png`), so its own
+  refresh is not populating at all, where apt fetches the same repositories;
+  that points at Sileo's URL session/foundation networking rather than the
+  sources, and is the next thing to look at. The apt path through the same
+  repositories is PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 
