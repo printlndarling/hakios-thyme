@@ -1,9 +1,10 @@
-# The camera preview with the phone shaken by its own vibration motor: four
-# three-second haptics while the rear camera runs, then the front, so the
-# exposure's behaviour under a violent shake is in the log (few asks while the
-# picture moves, and the frame rate steady) without a hand on the phone.
+# The camera preview with the phone shaken by its own vibration motor: the
+# ringer's system vibration (4095) plays six times while the rear camera runs,
+# then six times on the front, so the exposure's behaviour under a violent
+# shake is in the log (few asks while the picture moves, and the frame rate
+# steady) without a hand on the phone.
 /redwood/bin/sound_test springboard
 /redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 15
-/redwood/bin/sound_test haptic 3 wait 2 haptic 3 wait 2 haptic 3 wait 2 haptic 3 wait 5
+/redwood/bin/sound_test system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 5
 /redwood/bin/rwtouch tap 0.886 0.871 wait 15
-/redwood/bin/sound_test haptic 3 wait 2 haptic 3 wait 2 haptic 3 wait 2 haptic 3 wait 5
+/redwood/bin/sound_test system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 5
