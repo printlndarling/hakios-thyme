@@ -408,6 +408,8 @@ umi_camera_stream_stop(void)
 	return frames?0:EIO;
 }
 
+extern uint64_t umi_camera_frame_ns(void);
+
 /* A centre crop of the frame in the retained buffer, RAW10 packed, as the
  * session's own ring expects it; the crop offsets stay on the Bayer phase.
  */
@@ -434,17 +436,28 @@ umi_camera_stream_copy(void *dst,unsigned width,unsigned height)
 }
 
 /* The frame for one read: the WM is sent to the other bank (it is writing the
- * one the last read armed), a sensor frame is allowed to finish, and that
- * earlier bank -- where the frame now is whole -- is copied out.
+ * one the last read armed), a whole frame is waited out, and that earlier bank
+ * -- where the frame now is whole -- is copied out.
+ *
+ * The wait is the mode's own frame time, HTS x VTS / PCLK from the module file,
+ * not a guessed number of milliseconds: mode 3 is 16032 x 2373 at 412.53 MHz,
+ * 92 ms, ten and a bit frames a second (the module file's "30" is its label, not
+ * its timing), and a 40 ms wait copied the bank while the WM was still writing
+ * it -- the preview tore across, a line of the next frame's picture, whenever
+ * the phone moved. A completion bit would be better still, but the bus block's
+ * bit stays set and a poll for it returned at once: the session then read the
+ * same bank a hundred times a second.
  */
 int
 umi_camera_stream_grab(void *dst,unsigned width,unsigned height)
 {
 	if(!ud.memory||!ud.running)return ENODEV;
 	unsigned old=ud.bank;
+	uint64_t frame_ns=umi_camera_frame_ns();
+	unsigned wait_ms=(unsigned)(frame_ns/NSEC_PER_MSEC)+(frame_ns?4:40);
 
 	umi_camera_stream_advance();
-	delay_for_interval(40,NSEC_PER_MSEC);
+	delay_for_interval(wait_ms,NSEC_PER_MSEC);
 	return copy_bank(dst,width,height,old);
 }
 

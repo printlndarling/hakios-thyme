@@ -52,6 +52,17 @@ static struct {
 	uint64_t rate;
 	unsigned mode;
 } um;
+
+/* The mode's frame time: the sensor's own HTS x VTS / PCLK (SMIA's timing),
+ * 92 ms for the wide's mode 3 and 90 for the front's mode 1 -- about eleven
+ * frames a second, whatever the ctab's "30" label says. The stream's reads pace
+ * themselves by it (hakios.thyme_camera_dma.c's grab).
+ */
+uint64_t
+umi_camera_frame_ns(void)
+{
+	return um.pixel_clock ? (uint64_t)um.frame_length * um.line_length * NSEC_PER_SEC / um.pixel_clock : 0;
+}
 /* A cam=5 cam_real session owns the sensor: it keeps uprobe's state across the
  * session, runs the module file's 1080p mode and copies frames on demand.
  */

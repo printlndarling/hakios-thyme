@@ -218,7 +218,21 @@ bool
 isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_stats *s, struct hakios_camera_command *c)
 {
 	double now = (double)f->exposure_lines * f->gain / f->gain_unity * isp->digital, ratio, want;
-	double target = 0.15 * WHITE, mean = s->mean[1] * isp->digital > 0.5 ? s->mean[1] * isp->digital : 0.5;
+	double target = 0.15 * WHITE;
+	/*
+	 * The mean is smoothed: a panning preview's moves from a bright wall to a dark fridge
+	 * and back within a frame or two, and an exposure that chased each frame flashed the
+	 * picture bright and dark as the phone turned (0.25 a frame is a fifth of a second).
+	 */
+	double measured = s->mean[1] * isp->digital > 0.5 ? s->mean[1] * isp->digital : 0.5;
+
+	if (isp->ae_frames == 0) {
+		isp->ae_mean = (float)measured;
+	} else {
+		isp->ae_mean = isp->ae_mean * 0.75f + (float)measured * 0.25f;
+	}
+	isp->ae_frames++;
+	double mean = isp->ae_mean;
 	double bright = s->bright * isp->digital;
 	uint32_t fast = f->frame_lines_min - f->margin, longest = isp->max_frame_lines ? isp->max_frame_lines : 2 * f->frame_lines_min;
 	uint32_t lines, gain, frame_lines = 0;
@@ -233,7 +247,9 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 		ratio = 0.9 * WHITE / bright > target / mean * 0.5 ? 0.9 * WHITE / bright : target / mean * 0.5;
 	}
 	ratio = ratio < 0.25 ? 0.25 : ratio > 4 ? 4 : ratio;
-	if (ratio > 0.94 && ratio < 1.06) {
+	/* (a tenth either way is under the noise of a dark frame's mean; the front's
+	 * exposure costs a stop and a start, so chasing a few per cent costs frames) */
+	if (ratio > 0.90 && ratio < 1.10) {
 		return false;
 	}
 	/*

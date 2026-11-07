@@ -3830,7 +3830,7 @@ fake_session(void)
 			return;
 		}
 		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (mode 3 whole), up to %u a second\n",
-		    ios_mode->width, ios_mode->height, fps);
+		    ios_mode->width, ios_mode->height, ios_mode->fps_milli / 1000);
 	} else {
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
 		    ios_mode->height, hw->chip, fps);
@@ -3842,16 +3842,12 @@ fake_session(void)
 		int p = -1;
 
 		/*
-		 * The UMI grab waits out the frame boundary itself (40 ms of the 66 the mode's
-		 * frame takes); waiting the whole 66 on top of it made the session nine frames
-		 * a second, and the preview (and the zoom the pinch follows with) nine.
+		 * The UMI grab waits out the frame boundary itself (36 ms, a frame's 33.3 and a
+		 * margin); a pause on top of it only made the session slower than the sensor.
 		 */
-		uint32_t pause = 1000 / fps;
-
-		if (real_source && pause > 45) {
-			pause -= 45;
+		if (!real_source) {
+			wait_ms(1000 / fps);
 		}
-		wait_ms(pause);
 		lck_mtx_lock(&ios_lock);
 		if (ios_ms() - ios_last_read > IDLE_MS) {
 			lck_mtx_unlock(&ios_lock);
