@@ -104,6 +104,7 @@ extern void umi_camera_ios_prepare(void);
 extern int umi_camera_ios_start(unsigned, unsigned);
 extern void umi_camera_ios_set_sensor(unsigned);
 extern void umi_camera_ios_set_focus(unsigned);
+extern uint32_t umi_camera_ios_focus(void);
 extern void umi_camera_ios_set_start_exposure(unsigned, unsigned);
 extern int umi_camera_ios_grab(void *, unsigned, unsigned);
 extern void umi_camera_ios_set_exposure(unsigned, unsigned);
@@ -4023,7 +4024,10 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
 	f.sensor = hw_index;
-	f.focus = af_position;
+	/* The UMI session's motor is its own: the capture stack's search follows the
+	 * position it wrote, and with NO_FOCUS it would not search at all.
+	 */
+	f.focus = real_source ? umi_camera_ios_focus() : af_position;
 	lck_mtx_unlock(&ios_lock);
 
 	error = uiomove((caddr_t)&f, (int)MIN(sizeof(f), (size_t)uio_resid(uio)), uio);

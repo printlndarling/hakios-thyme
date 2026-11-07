@@ -378,6 +378,14 @@ static bool uvcm_read_at(uint8_t address, uint8_t reg, uint8_t *value);
 
 static bool uvcm_read(uint8_t reg, uint8_t *value);
 
+static uint32_t uios_focus = VCM_OPTIMAL;      /* where the lens was last told to go */
+
+uint32_t
+umi_camera_ios_focus(void)
+{
+	return uios_focus;
+}
+
 static bool
 uvcm_position(uint32_t position)
 {
@@ -386,6 +394,9 @@ uvcm_position(uint32_t position)
 	    uput((data >> 8) & 0xff) && uput(data & 0xff);
 
 	ustop();
+	if (ok) {
+		uios_focus = position & 0xfff;
+	}
 	return ok;
 }
 
