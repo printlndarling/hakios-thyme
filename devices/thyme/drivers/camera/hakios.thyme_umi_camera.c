@@ -81,6 +81,7 @@ static uint32_t ustart_lines, ustart_gain;
  * order and slave address.
  */
 static bool ufront, ufront_lite0, ufront_from_session;
+static bool front_hold;         /* cam_front_hold=1: try SMIA's hold (0x0104) on the front, not the stream's register */
 static uint8_t uslave = 0x7a;
 static uint32_t umclk_cmd = 0x501c, umclk_cfg = 0x5020, umclk_branch = 0x5034;
 static struct {
@@ -1359,19 +1360,41 @@ umi_camera_ios_set_exposure(unsigned lines, unsigned gain, unsigned frame_lines)
 	}
 	um.frame_lines_now = vts;
 	if (ufront) {
-		/* The S5K3T2 takes the exposure only while it is not streaming, so the
-		 * change is made between a stop and a start (a frame's gap), with the
-		 * sensor given time to reach standby and the register read back.
-		 */
-		(void)usensor_write(0x0100, 0x0000);
-		ums(30);
-		uset_exposure(lines, gain, vts);
-		uint16_t rb = 0;
-		if (usensor_read(0x0202, &rb)) {
-			hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x, frame %u\n", lines, rb, gain, vts);
+		if (front_hold) {
+			/*
+			 * SMIA's own group hold (0x0104 bit 0), as the wide camera's sensor
+			 * takes it, instead of the module's stream register (0x0100): the
+			 * exposure changes between frames without a stop. The front takes it:
+			 * the run's readback reads the asked lines and the frames' brightness
+			 * follows the gain (8.50x, green 263; 6.97x, 217; 5.88x, 181; 5.31x,
+			 * 165) -- and the frames a stop's gap used to throw away are kept.
+			 */
+			(void)usensor_write(0x0104, 0x0001);
+			ums(1);
+			(void)usensor_write(0x0202, (uint16_t)lines);
+			(void)usensor_write(0x0204, (uint16_t)gain);
+			(void)usensor_write(0x0340, (uint16_t)vts);
+			ums(1);
+			(void)usensor_write(0x0104, 0x0000);
+			uint16_t rb = 0;
+			if (usensor_read(0x0202, &rb)) {
+				hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x, frame %u (held mid-stream)\n", lines, rb, gain, vts);
+			}
+		} else {
+			/* The S5K3T2 takes the exposure only while it is not streaming, so the
+			 * change is made between a stop and a start (a frame's gap), with the
+			 * sensor given time to reach standby and the register read back.
+			 */
+			(void)usensor_write(0x0100, 0x0000);
+			ums(30);
+			uset_exposure(lines, gain, vts);
+			uint16_t rb = 0;
+			if (usensor_read(0x0202, &rb)) {
+				hakios_tl("UMI camera: front exposure %u lines (reads %#x), gain %#x, frame %u\n", lines, rb, gain, vts);
+			}
+			ums(10);
+			(void)usensor_write(0x0100, 0x0100);
 		}
-		ums(10);
-		(void)usensor_write(0x0100, 0x0100);
 	} else {
 		hakios_tl("UMI camera: rear exposure %u lines, gain %#x, frame %u\n", lines, gain, vts);
 		uset_exposure(lines, gain, vts);
@@ -1504,10 +1527,15 @@ uprobe(unsigned stage)
 	 */
 	static const unsigned front_pins[4] = { 109, 98, 105, 106 };
 	char which[16] = "";
+	uint32_t hold_arg = 1;
 
 	if (!ufront_from_session) {
 		ufront = PE_parse_boot_argn("cam_sensor", which, sizeof(which)) && !strncmp(which, "front", 5);
 	}
+	/* (the SMIA hold, the default; cam_front_hold=0 for the module's stop and
+	 * start, which is what the first front sessions used)
+	 */
+	front_hold = !PE_parse_boot_argn("cam_front_hold", &hold_arg, sizeof(hold_arg)) || hold_arg != 0;
 	uint32_t lite0_arg = 0;
 	ufront_lite0 = ufront &&
 	    PE_parse_boot_argn("cam_front_lite0", &lite0_arg, sizeof(lite0_arg)) && lite0_arg != 0;
