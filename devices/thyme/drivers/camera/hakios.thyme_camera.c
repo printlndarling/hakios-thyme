@@ -3346,11 +3346,14 @@ capture_sensor(void)
  * frame is 92 ms, ten). The AE lengthens the frame again when the light needs
  * it -- the exposure's ceiling is the frame's length -- and the still averages
  * eight frames, enough light for the noise the shorter one costs. The front's
- * line is 43.8 us: its floor is 1600 lines (70 ms, fourteen a second) because
- * its small sensor's noise at the shorter frame's gain was what showed.
+ * line is 43.8 us: 1600 lines (70 ms, fourteen a second) kept its small
+ * sensor's noise down, but a preview that follows a moving hand needs frames
+ * sooner than that -- the phone read as a stream that had stopped -- so its
+ * floor is 1100 lines (48 ms, twenty a second), about a stop less light a
+ * frame and the gain's noise that goes with it, for the motion's smoothness.
  */
 #define UMI_FRAME_LINES_MIN     1000
-#define UMI_FRAME_LINES_MIN_FRONT 1600
+#define UMI_FRAME_LINES_MIN_FRONT 1100
 /* The floors are boot arguments too (cam_frame_min, cam_front_frame_min), so
  * the preview's frames and noise can be traded without a rebuild: a higher
  * floor is more light a frame (less gain's noise) and fewer frames a second.

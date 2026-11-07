@@ -1,0 +1,9 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# The camera used the way a hand uses it: the rear camera opens and settles,
+# the front is tapped in, a front photograph is taken, and the rear is tapped
+# back in. The second rear session is the one that used to come back soft --
+# its search found no peak in the travel and stopped at whichever position the
+# noise made look sharpest -- so this scene is the one that says whether the
+# flat travel now goes back to the position the first session settled on.
+/redwood/bin/sound_test springboard
+/redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 22 tap 0.352 0.067 wait 4 tap 0.886 0.871 wait 16 tap 0.5 0.86 wait 12 tap 0.886 0.871 wait 26

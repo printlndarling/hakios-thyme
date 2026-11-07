@@ -453,7 +453,21 @@ umi_camera_stream_grab(void *dst,unsigned width,unsigned height)
 {
 	if(!ud.memory||!ud.running)return ENODEV;
 	unsigned old=ud.bank;
+	/*
+	 * The wait covers the frame in the bank being copied, and that frame began
+	 * before the exposure this read was asked for started: when the capture
+	 * stack's AE makes the frame shorter (the room's light lets it), the bank
+	 * still holds a frame of the longer length, and waiting only the new one
+	 * copies it mid-write -- the tear across the picture, one frame's lines
+	 * under the next's, that the phone showed while it was moved through
+	 * changing light. The longer of this frame length and the last read's,
+	 * then; a length that grows costs nothing here, and the one after a
+	 * shrink runs at the new length.
+	 */
+	static uint64_t last_frame_ns;
 	uint64_t frame_ns=umi_camera_frame_ns();
+	if(frame_ns<last_frame_ns)frame_ns=last_frame_ns;
+	last_frame_ns=umi_camera_frame_ns();
 	unsigned wait_ms=(unsigned)(frame_ns/NSEC_PER_MSEC)+(frame_ns?4:40);
 
 	umi_camera_stream_advance();

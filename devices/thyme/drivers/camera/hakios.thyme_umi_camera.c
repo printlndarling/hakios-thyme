@@ -9,6 +9,7 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/hakios.input.h>
+#include <sys/hakios.camera.h>
 #include <kern/clock.h>
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
@@ -399,7 +400,12 @@ static uint32_t uios_focus = VCM_OPTIMAL;      /* where the lens was last told t
 uint32_t
 umi_camera_ios_focus(void)
 {
-	return uios_focus;
+	/* The front module has no lens motor: a position here would send the capture
+	 * stack's autofocus climbing the rear motor while the front is streaming,
+	 * where its writes are refused (the rear's supply is down) and every frame
+	 * costs a search over a lens that cannot move.
+	 */
+	return ufront ? HAKIOS_CAMERA_NO_FOCUS : uios_focus;
 }
 
 static bool
@@ -1320,6 +1326,7 @@ void
 umi_camera_ios_set_focus(unsigned position)
 {
 	if (position == 0xffffffffu) return;   /* the lens is fixed (or absent) */
+	if (ufront) return;                    /* (the front module has no motor) */
 	if (!uvcm_position(position & 0xfff)) {
 		hakios_tl("UMI camera: lens position %u not taken\n", position);
 	}

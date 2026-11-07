@@ -444,6 +444,15 @@ static const struct camera {
 	  { 1.015f, 1.0f }, 12, 1.18f, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } },        /* "Photo", "Video-30" */
 };
 
+/* Where each camera's focus last settled, by the kernel's sensor number. A
+ * switch stops this stream and starts the other, and the lens keeps its place;
+ * a stream's own search that finds no peak -- a dim or blank scene, whose
+ * gradient is all noise -- then has a known-good place to go back to instead
+ * of stopping at whichever position its noise made look sharpest, which left
+ * the picture soft until the next search.
+ */
+static unsigned af_home[2];
+
 struct stream {
 	CFArrayRef      formats;
 	CFDictionaryRef supported;
@@ -1146,9 +1155,13 @@ struct af {
 	unsigned        worse;          /* steps in a row less sharp than the sharpest */
 	uint32_t        start, best, fine_to;
 	float           best_sharpness;
+	float           min_sharpness;          /* (the sweep's least: a travel with no peak is not a focus) */
 	float           sharpness, level;       /* in focus: the middle's, to watch */
 	float           last_sharpness, last_level;
 	unsigned        unlike, steady, steps;
+	uint32_t        home;                   /* where a search last settled: a flat travel keeps it */
+	bool            have_home;
+	unsigned        risen;                  /* frames the scene has been sharper than the settled one */
 	bool            now;            /* asked for: no waiting for the picture to keep still */
 	bool            sweep;          /* ... and the whole travel measured */
 	float           sum_sharpness, sum_level;
@@ -1198,6 +1211,20 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 		return;
 	}
 	sharpness = isp_sharpness(f, raw, window[0], window[1], window[2], window[3], &level);
+	/*
+	 * A frame near black has no picture to focus by: the measure divides the
+	 * middle's gradient by its mean's square, and at a mean of nothing the
+	 * sensor's noise stands as the sharpest picture there can be -- the search
+	 * then "finds" a peak wherever it is and settles on it (a phone face
+	 * down, a hand over the lens; the run at 00:00 did exactly that, sharpness
+	 * 0.36 on an all-black frame). No measurement until there is light: the
+	 * state keeps its place and the next lit frame carries on.
+	 */
+	if (level < 12.0f) {
+		af->sum_sharpness = af->sum_level = 0;
+		af->measured = 0;
+		return;
+	}
 	af->sum_sharpness += sharpness;
 	af->sum_level += level;
 	if (++af->measured < needed) {
@@ -1213,12 +1240,34 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	switch (af->state) {
 	case AF_WATCH:
 		/* (the measure is divided by the mean's square: the exposure's swings do not move it) */
-		if (locked || (af->sharpness > 0 && sharpness > af->sharpness * 0.6f)) {
+		if (locked) {
 			af->unlike = 0;
 			return;
 		}
-		if (af->sharpness > 0 && ++af->unlike < 30) {
-			return;
+		/*
+		 * A scene much sharper than the one the lens settled on, without the
+		 * lens having moved, is another scene: the phone was pointed at
+		 * something with detail, and this focus is not known to serve it --
+		 * a blank wall at any position reads the same and the search parks
+		 * wherever its noise pointed, so the picture stayed soft after a
+		 * switch until the scene darkened again. Three frames in a row, so a
+		 * noisy frame in the dark is not a scene.
+		 */
+		if (af->sharpness > 0 && sharpness > af->sharpness * 1.5f) {
+			if (++af->risen < 3) {
+				return;
+			}
+			af->risen = 0;
+			af->unlike = 0;
+		} else {
+			af->risen = 0;
+			if (af->sharpness > 0 && sharpness > af->sharpness * 0.6f) {
+				af->unlike = 0;
+				return;
+			}
+			if (af->sharpness > 0 && ++af->unlike < 30) {
+				return;
+			}
 		}
 		af->state = AF_STEADY;
 		af->steady = 0;
@@ -1241,6 +1290,7 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			af->sweep = false;
 			af->state = AF_SWEEP;
 			af->best_sharpness = -1;
+			af->min_sharpness = 1e9f;
 			af->worse = 0;
 			af->steps = 0;
 			af->way = af->at - AF_NEAR < AF_FAR - af->at ? 1 : -1;
@@ -1289,6 +1339,7 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			 */
 			af->state = AF_SWEEP;
 			af->best_sharpness = -1;
+			af->min_sharpness = 1e9f;
 			af->worse = 0;
 			af->steps = 0;
 			af->way = af->at - AF_NEAR < AF_FAR - af->at ? 1 : -1;
@@ -1302,6 +1353,9 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	}
 	case AF_SWEEP:
 		say("focus: sweep: %u %.4f", af->at, sharpness);
+		if (sharpness < af->min_sharpness) {
+			af->min_sharpness = sharpness;
+		}
 		if (sharpness > af->best_sharpness) {
 			af->best = af->at;
 			af->best_sharpness = sharpness;
@@ -1311,6 +1365,22 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 		}
 		if (af->worse < 2 && (int)af->at + af->way * AF_STEP >= AF_NEAR && (int)af->at + af->way * AF_STEP <= AF_FAR) {
 			af_go(device, af, (uint32_t)((int)af->at + af->way * AF_STEP));
+			return;
+		}
+		/*
+		 * The travel's best within a fifth of its worst is no peak: a dim or
+		 * blank scene (its gradient is the sensor's noise at every position),
+		 * or one whose subject no position focuses. Stopping at whichever
+		 * place that noise made look sharpest left the picture soft, and the
+		 * watch could not tell (the scene that came after was sharper than it,
+		 * so nothing asked for another search): the last position a search
+		 * settled on is the better answer, and it is known to focus something.
+		 */
+		if (af->have_home && af->home != af->at && af->best_sharpness < af->min_sharpness * 1.2f) {
+			say("focus: no peak in the travel (%.4f to %.4f): back to %u", af->min_sharpness,
+			    af->best_sharpness, af->home);
+			af->state = AF_SETTLE;
+			af_go(device, af, af->home);
 			return;
 		}
 		af->state = AF_FINE_SEARCH;
@@ -1334,6 +1404,12 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 		af->sharpness = sharpness;
 		af->level = level;
 		af->unlike = 0;
+		af->risen = 0;
+		af->home = af->at;
+		af->have_home = true;
+		if (f->sensor >= 1 && f->sensor <= 2) {
+			af_home[f->sensor - 1] = af->at;        /* (the other stream's, after a switch) */
+		}
 		say("focus: the lens at %u after %u moves (sharpness %.3f)", af->at, af->steps, sharpness);
 		return;
 	}
@@ -1518,6 +1594,9 @@ worker(void *context)
 	bool switched = false;
 	float lux = -1, cct = -1;
 	struct af af = { 0 };
+
+	af.home = af_home[s->camera->sensor - 1];
+	af.have_home = af.home != 0;
 	/*
 	 * Non-blocking: a read that waits (the sensor's tables take seconds) would keep
 	 * this worker from noticing that its stream was stopped, and the graph waits for
