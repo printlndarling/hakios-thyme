@@ -694,7 +694,7 @@ No item moves to `PASS` from source inspection alone.
 | Wi-Fi Settings UI | PASS for radio, join recovery and discovery | The final regression shows active Wi-Fi, Safari traffic and two complete associations. Entering credentials through the Settings keyboard remains unvalidated because the test uses the local Git-ignored join file |
 | Bluetooth Settings/pairing UI | PASS for discovery, pairing, connection and audible A2DP | The footer renders `HakiOS Mi 10S`, devices are discovered, a headset connects and 3 Mbaud playback is clean. HFP, AVRCP controls and deliberate reconnect remain open |
 | Chinese UI and fonts | PASS | The automated Settings gate switched the primary language to 简体中文; the entire Language & Region page rendered in Chinese without tofu glyphs (`logs/thyme-zh-hans-final.png`) |
-| Rootless package manager (Sileo) | PARTIAL; offline install/remove and Sileo render PASS | The Procursus prefix grafted, dpkg installed/queried/removed tree 2.0.1 without missing file-list warnings, and Sileo rendered. Online repository install remains unverified; see below |
+| Rootless package manager (Sileo) | PARTIAL; offline and online repository installs PASS | The Procursus prefix grafted, dpkg installed/queried/removed tree 2.0.1 offline, and Sileo rendered. On 2026-11-08 apt fetched the Procursus index (`InRelease` 8,310 B, `Packages` 334 kB) and installed tree 2.0.1 from https://apt.procurs.us over the phone's own Wi-Fi, queried, listed and removed it, with Sileo launching (`logs/012326-run.log`). A longer interactive Sileo session and dependency repair remain |
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; passcode entry, secure storage and reboot persistence are not validated |
 | User data persistence | TODO | current root and private data are RAM-backed; the persistent-storage policy and guarded write path are not accepted |
@@ -735,17 +735,18 @@ prefix is tracked.
 
 Still open:
 
-- online repository installation through Sileo; a later run reached 5 GHz
-  association, accepted CCMP keys and advanced Sileo, but the loader console
-  did not retain the apt command output, so this is not counted as PASS;
-  The 2026-11-08 attempt with the 2026-11-04 JB system image
-  (`out/thyme-boot/system-jb.apfs`, `8de213311357…`) never completed the
-  Wi-Fi handshake — four handshake messages, no group-key change, zero
-  frames (`logs/011346-run.log`) — because that image predates the current
-  Wi-Fi stack, and the scene's delayed join (245 s) left too little of the
-  run for apt. The apt output itself is not lost: the demo job sends both
-  its stdout and its stderr to `/dev/console`, so a JB=1 system image built
-  from the current tree and fetched with `XL_FOLLOW` is all that remains;
+- online repository installation through Sileo: **PASS** on 2026-11-08 — the
+  current root (`df20bc6e`) with the 2026-11-04 JB system image joined
+  `192.168.0.109` and fetched `InRelease [8,310 B]` and `Packages [334 kB]`
+  from https://apt.procurs.us; `apt-get install -y tree` fetched
+  `tree 2.0.1 [43.0 kB]`, unpacked and set it up, `dpkg-query -W tree`
+  answered `tree 2.0.1`, `tree -L 1 /var/jb` ran, `dpkg -r tree` removed it
+  and the next query found nothing, and Sileo launched (`logs/012326-run.log`).
+  The image's dpkg warned that ellekit, the openssh packages, preferenceloader
+  and sileo have no file lists — the 2026-11-04 prefix predates
+  `jb-preinstall.py` — and the install is unaffected. The earlier attempt with
+  the 2026-11-04 *root* never completed the Wi-Fi handshake
+  (`logs/011346-run.log`), so the current root is what made the difference;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 
