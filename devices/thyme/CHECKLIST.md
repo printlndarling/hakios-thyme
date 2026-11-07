@@ -738,6 +738,14 @@ Still open:
 - online repository installation through Sileo; a later run reached 5 GHz
   association, accepted CCMP keys and advanced Sileo, but the loader console
   did not retain the apt command output, so this is not counted as PASS;
+  The 2026-11-08 attempt with the 2026-11-04 JB system image
+  (`out/thyme-boot/system-jb.apfs`, `8de213311357…`) never completed the
+  Wi-Fi handshake — four handshake messages, no group-key change, zero
+  frames (`logs/011346-run.log`) — because that image predates the current
+  Wi-Fi stack, and the scene's delayed join (245 s) left too little of the
+  run for apt. The apt output itself is not lost: the demo job sends both
+  its stdout and its stderr to `/dev/console`, so a JB=1 system image built
+  from the current tree and fetched with `XL_FOLLOW` is all that remains;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 
