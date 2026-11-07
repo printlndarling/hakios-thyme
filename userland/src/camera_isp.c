@@ -22,6 +22,8 @@ isp_init(struct isp *isp)
 {
 	memset(isp, 0, sizeof(*isp));
 	isp->wb[0] = isp->wb[1] = isp->wb[2] = 1;
+	isp->wb_state[0] = isp->wb_state[1] = 1;
+	isp->wb_bias[0] = isp->wb_bias[1] = 1;
 	isp->digital = 1;
 	isp->zoom = 1;
 	for (int i = 0; i < 3; i++) {
@@ -395,8 +397,12 @@ isp_awb(struct isp *isp, const struct isp_stats *s)
 	 */
 	float w = isp->wb_frames < 8 ? 0.35f : 0.1f;
 
-	isp->wb[0] = isp->wb[0] * (1 - w) + r * w;
-	isp->wb[2] = isp->wb[2] * (1 - w) + b * w;
+	isp->wb_state[0] = isp->wb_state[0] * (1 - w) + r * w;
+	isp->wb_state[1] = isp->wb_state[1] * (1 - w) + b * w;
+	/* (the camera's own calibration, applied after the smoothing so the scene's
+	 * estimate does not carry it into the next frame) */
+	isp->wb[0] = isp->wb_state[0] * isp->wb_bias[0];
+	isp->wb[2] = isp->wb_state[1] * isp->wb_bias[1];
 	if (isp->wb_frames < 1000) {
 		isp->wb_frames++;
 	}

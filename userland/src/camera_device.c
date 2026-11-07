@@ -429,12 +429,17 @@ static const struct camera {
 	const char      *name, *unique_id;
 	bool            turned;         /* its sensor the other way up from the iPhone's: the pictures turned half round */
 	double          focal_length, f_number, pixel_size, fov;
+	/* The camera's own white-balance calibration: the scene's estimate scaled
+	 * after it. The front's white came out 1.5 % short in red against the
+	 * Android camera's on the same walls; the back's is left alone.
+	 */
+	float           wb_bias[2];
 	int             formats[2][3];  /* sensor width, height, frames a second of "Photo" and of a video format */
 } cameras[2] = {
 	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
-	  { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },        /* "Photo", "Video-60" */
+	  { 1.0f, 1.0f }, { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },        /* "Photo", "Video-60" */
 	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", true, 2.87, 2.2, 1.0, 70.0,
-	  { { 3088, 2320, 30 }, { 3840, 2160, 30 } } },        /* "Photo", "Video-30" */
+	  { 1.015f, 1.0f }, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } },        /* "Photo", "Video-30" */
 };
 
 struct stream {
@@ -1536,6 +1541,8 @@ worker(void *context)
 		(void)write(device, &c, sizeof(c));
 	}
 	isp_init(&isp);
+	isp.wb_bias[0] = s->camera->wb_bias[0];
+	isp.wb_bias[1] = s->camera->wb_bias[1];
 	while (s->running && failures < 5) {
 		ssize_t n;
 
