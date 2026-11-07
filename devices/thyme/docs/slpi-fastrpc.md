@@ -480,6 +480,14 @@ its QDI timer client before the AP has done anything. The AP-side tunnel and
 the servreg registration are not what breaks the PD; the PD's own start at
 DSP boot is.
 
+The next step is inside the DSP's timer client. `llvm-objdump` over `slpi.b15`
+(in a wrapped ELF at `0x8A000000`, 474k instructions) does not show a
+reference to the message strings: no `immext(#0x8a14)`, no `#0x2f7a` and no
+literal 0x8A142F7A or 0x142F7A anywhere in the segment. The code addresses
+its data position-independently (through the GP register, or a loader-patched
+table), so following the call needs a Hexagon-aware tool (Ghidra's Hexagon
+module) or the QuRT `timer_client_user_init.c` source, not a flat objdump.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot
