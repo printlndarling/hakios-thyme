@@ -24,6 +24,7 @@ isp_init(struct isp *isp)
 	isp->wb[0] = isp->wb[1] = isp->wb[2] = 1;
 	isp->wb_state[0] = isp->wb_state[1] = 1;
 	isp->wb_bias[0] = isp->wb_bias[1] = 1;
+	isp->sat = 1;
 	isp->digital = 1;
 	isp->zoom = 1;
 	for (int i = 0; i < 3; i++) {
@@ -224,17 +225,27 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 	/*
 	 * The mean is smoothed: a panning preview's moves from a bright wall to a dark fridge
 	 * and back within a frame or two, and an exposure that chased each frame flashed the
-	 * picture bright and dark as the phone turned (0.25 a frame is a fifth of a second).
+	 * picture bright and dark as the phone turned (0.12 a frame is a third of a second).
 	 */
 	double measured = s->mean[1] * isp->digital > 0.5 ? s->mean[1] * isp->digital : 0.5;
 
 	if (isp->ae_frames == 0) {
 		isp->ae_mean = (float)measured;
 	} else {
-		isp->ae_mean = isp->ae_mean * 0.75f + (float)measured * 0.25f;
+		isp->ae_mean = isp->ae_mean * 0.88f + (float)measured * 0.12f;
 	}
 	isp->ae_frames++;
 	double mean = isp->ae_mean;
+	/*
+	 * A violent shake changes the frame's light faster than the smoothing can follow: the
+	 * exposure stops adjusting until the scene settles again (a metre's swing between a
+	 * window and a wall is not a light that the picture wants followed).
+	 */
+	if (isp->ae_prev_mean > 1 && fabsf((float)mean - isp->ae_prev_mean) > 0.15f * isp->ae_prev_mean) {
+		isp->ae_prev_mean = (float)mean;
+		return false;
+	}
+	isp->ae_prev_mean = (float)mean;
 	double bright = s->bright * isp->digital;
 	uint32_t fast = f->frame_lines_min - f->margin, longest = isp->max_frame_lines ? isp->max_frame_lines : 2 * f->frame_lines_min;
 	uint32_t lines, gain, frame_lines = 0;
@@ -242,6 +253,10 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 
 	if (isp->asked && (f->exposure_lines != isp->asked_lines || f->gain != isp->asked_gain)) {
 		return false;                   /* (the last change not in the frames yet) */
+	}
+	if (isp->ae_hold > 0) {
+		isp->ae_hold--;                 /* (the front's change stops and starts the sensor: let the frames come first) */
+		return false;
 	}
 	/* (the measured levels are the sensor's: digital gain is applied to the picture only) */
 	ratio = target / mean;
@@ -262,6 +277,13 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 	 * flicker. 0.4 damps it in four or five.
 	 */
 	want = now * pow(ratio, 0.4);
+	/* (one frame's difference is not the light either: the step is at most a fifth) */
+	if (want > now * 1.22) {
+		want = now * 1.22;
+	}
+	if (want < now * 0.82) {
+		want = now * 0.82;
+	}
 	if (want <= fast) {
 		lines = want < 4 ? 4 : (uint32_t)want;
 		gain = f->gain_unity;
@@ -290,6 +312,7 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 	isp->asked_gain = gain;
 	isp->asked_frame_lines = frame_lines;
 	isp->asked = true;
+	isp->ae_hold = isp->ae_hold_frames ? isp->ae_hold_frames : 8;
 	memset(c, 0, sizeof(*c));
 	c->command = HAKIOS_CAMERA_EXPOSURE;
 	c->a = lines;
@@ -432,8 +455,24 @@ crop(const struct isp *isp, const struct hakios_camera_frame *f, uint32_t width,
 void
 isp_set_ccm(struct isp *isp, const float m[9])
 {
-	for (int i = 0; i < 9; i++) {
-		isp->ccm[i / 3][i % 3] = m[i];
+	/*
+	 * The camera's matrix, then the colours' saturation: the front module's
+	 * tuning has no colour matrix at all (its cc12 and cc13 are the identity),
+	 * and its pictures looked grey beside the Android camera's. `sat` (1 for the
+	 * wide camera) pulls a colour away from its luma and leaves white where it is.
+	 */
+	static const float luma[3] = { 0.299f, 0.587f, 0.114f };
+	float s = isp->sat, a = 1 - s;
+
+	for (int c = 0; c < 3; c++) {
+		for (int j = 0; j < 3; j++) {
+			float sum = 0;
+
+			for (int k = 0; k < 3; k++) {
+				sum += (luma[k] * a + (c == k ? s : 0)) * m[k * 3 + j];
+			}
+			isp->ccm[c][j] = sum;
+		}
 	}
 }
 

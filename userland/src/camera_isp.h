@@ -82,7 +82,11 @@ struct isp {
 	uint32_t        asked_lines, asked_gain, asked_frame_lines;     /* what AE asked for last */
 	bool            asked;
 	float           ae_mean;                /* the measured green mean, smoothed: a panning preview's moves not chased */
+	float           ae_prev_mean;           /* the one before: a scene moving faster than the smoothing holds the exposure */
 	unsigned        ae_frames;
+	unsigned        ae_hold;                /* frames still to wait after the last ask (the front's costs a stop and a start) */
+	unsigned        ae_hold_frames;
+	float           sat;                    /* the colours' saturation: the front's tuning has no matrix, and looked grey */
 	uint32_t        max_frame_lines;        /* the longest frame AE may ask for (0: twice the shortest) */
 	struct isp_tuning *tuning;              /* isp_load_tuning()'s, or none */
 };

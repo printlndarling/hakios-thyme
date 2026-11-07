@@ -3345,9 +3345,12 @@ capture_sensor(void)
  * 38.84 us line is 39 ms, twenty-six frames a second (the mode's own 2373-line
  * frame is 92 ms, ten). The AE lengthens the frame again when the light needs
  * it -- the exposure's ceiling is the frame's length -- and the still averages
- * eight frames, enough light for the noise the shorter one costs.
+ * eight frames, enough light for the noise the shorter one costs. The front's
+ * line is 43.8 us: its floor is 1600 lines (70 ms, fourteen a second) because
+ * its small sensor's noise at the shorter frame's gain was what showed.
  */
 #define UMI_FRAME_LINES_MIN     1000
+#define UMI_FRAME_LINES_MIN_FRONT 1600
 #define GAIN_UNITY              (hw->gain_unity)
 #define GAIN_MAX                (hw->gain_max)
 #define FRAME_LINES_MAX         0xfff0
@@ -3401,7 +3404,7 @@ exposure_limits(uint32_t *lines, uint32_t *gain, uint32_t *frame_lines)
 {
 	/* (the UMI path's sensor takes shorter frames than the module's mode sets:
 	 * the capture stack's AE asks for one just long enough for the exposure) */
-	uint32_t shortest = real_source ? UMI_FRAME_LINES_MIN : ios_mode->frame_length;
+	uint32_t shortest = real_source ? (hw_index == 2 ? UMI_FRAME_LINES_MIN_FRONT : UMI_FRAME_LINES_MIN) : ios_mode->frame_length;
 
 	*gain = *gain < GAIN_UNITY ? GAIN_UNITY : *gain > GAIN_MAX ? GAIN_MAX : *gain;
 	*lines = *lines < 4 ? 4 : *lines > FRAME_LINES_MAX - EXPOSURE_MARGIN ? FRAME_LINES_MAX - EXPOSURE_MARGIN : *lines;
@@ -4060,7 +4063,7 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 	f.frame_lines = place[b].frame_lines;
 	/* (the mode's own frame, or the shorter one the UMI path's AE may ask for:
 	 * the frame length sets the frame rate as well as the exposure's ceiling) */
-	f.frame_lines_min = real_source ? UMI_FRAME_LINES_MIN : ios_mode->frame_length;
+	f.frame_lines_min = real_source ? (hw_index == 2 ? UMI_FRAME_LINES_MIN_FRONT : UMI_FRAME_LINES_MIN) : ios_mode->frame_length;
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
 	f.sensor = hw_index;
