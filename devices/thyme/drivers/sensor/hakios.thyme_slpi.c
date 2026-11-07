@@ -570,7 +570,7 @@ show_words(const char *prefix, const struct smp2p *words)
 static void
 show_crash_reason(void)
 {
-	char text[81];
+	char text[257];
 	uint32_t size = 0, at = smem_item(ITEM_CRASH_REASON, &size);
 
 	if (at == 0 || size == 0) {
@@ -2634,9 +2634,12 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 
 #define SNS_OUR_PORT            0x100u
 #define SNS_REG_PORT            0x10fu          /* the AP's Sensor Registry service, as the mainline sns-reg serves it */
+#define SERVREG_OUR_PORT        0x101u          /* where the tms/servreg notifier's answers arrive */
+#define SERVREG_NOTIF_SERVICE   66u             /* QRTR service 0x42: tms/servreg, the protection-domain state notifier */
 
 static void sns_input(const uint8_t *data, uint32_t length);
 static void sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
+static void servreg_input(const uint8_t *data, uint32_t length);
 
 static void
 qrtr_input(const uint8_t *data, uint32_t length)
@@ -2698,6 +2701,10 @@ qrtr_input(const uint8_t *data, uint32_t length)
 	}
 	if (header.type == QRTR_DATA && header.to_port == SNS_REG_PORT) {
 		sns_reg_input(header.from_node, header.from_port, data + at, header.size);
+		return;
+	}
+	if (header.type == QRTR_DATA && header.to_port == SERVREG_OUR_PORT) {
+		servreg_input(data + at, header.size);
 		return;
 	}
 	printf("slpi: qrtr: a datagram of %u bytes from node %u port %u to our port %u: nobody here listens there\n", header.size,
@@ -3150,6 +3157,185 @@ sns_start(void)
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
+}
+
+/* ---- servreg: asking the DSP's tms/servreg notifier to start the sensor PD --------------------------- */
+
+/*
+ * The phone's kernel registers a "service location" client for the sensors PD before it attaches
+ * (downstream adsprpc.c: SENSORS_PDR_SLPI_SERVICE_LOCATION_CLIENT_NAME, service "tms/servreg").
+ * Without that registration our FastRPC attach starts a protection domain whose QDI devices do
+ * not exist: the sensor process dies at qdi_open("/dev/timers"). The notifier's protocol is the
+ * mainline pdr_interface one: QMI message 0x20 (REGISTER_LISTENER_REQ) with TLV 0x01 = enable
+ * and TLV 0x02 = the service path, answered with a result and the current PD state.
+ */
+
+static uint32_t servreg_txn = 1;
+static bool servreg_answered;
+static uint16_t servreg_result = 0xffff, servreg_error = 0xffff;
+static uint32_t servreg_state = 0xffffffff;
+static bool servreg_have_state;
+
+static const char *
+servreg_state_name(uint32_t state)
+{
+	switch (state) {
+	case 0x1fffffffu: return "UP";
+	case 0x0fffffffu: return "DOWN";
+	case 0x2fffffffu: return "EARLY DOWN";
+	case 0x7fffffffu: return "UNINIT";
+	case 0x1u: return "LOCATOR ERROR";
+	default: return "?";
+	}
+}
+
+static bool
+servreg_server(uint32_t *node, uint32_t *port)
+{
+	for (unsigned i = 0; i < sizeof(qrtr_servers) / sizeof(qrtr_servers[0]); i++) {
+		if (qrtr_servers[i].there && qrtr_servers[i].service == SERVREG_NOTIF_SERVICE) {
+			*node = qrtr_servers[i].node;
+			*port = qrtr_servers[i].port;
+			return true;
+		}
+	}
+	return false;
+}
+
+static int
+servreg_register(const char *path)
+{
+	uint8_t msg[128], *p = msg;
+	uint32_t node = 0, port = 0, txn = servreg_txn++, path_length, qmi_length;
+
+	if (!servreg_server(&node, &port)) {
+		printf("slpi: servreg: the notifier service %u is not in the DSP's list\n", SERVREG_NOTIF_SERVICE);
+		return ENOENT;
+	}
+	*p++ = 0;                               /* a QMI request */
+	*p++ = (uint8_t)(txn & 0xff);
+	*p++ = (uint8_t)(txn >> 8);
+	*p++ = 0x20;                            /* SERVREG_REGISTER_LISTENER_REQ */
+	*p++ = 0;
+	*p++ = 0;                               /* the QMI length, filled below */
+	*p++ = 0;
+	*p++ = 0x01;                            /* TLV 0x01: enable */
+	*p++ = 1;
+	*p++ = 0;
+	*p++ = 1;
+	path_length = (uint32_t)strlen(path) + 1;
+	if (path_length > 64) {
+		return EINVAL;
+	}
+	*p++ = 0x02;                            /* TLV 0x02: the service path, NUL included */
+	*p++ = (uint8_t)(path_length & 0xff);
+	*p++ = (uint8_t)(path_length >> 8);
+	memcpy(p, path, path_length);
+	p += path_length;
+	qmi_length = (uint32_t)(p - msg) - 7;
+	msg[5] = (uint8_t)(qmi_length & 0xff);
+	msg[6] = (uint8_t)(qmi_length >> 8);
+	printf("slpi: servreg: > register listener for \"%s\" to node %u port %u (%u bytes)\n", path, node, port,
+	    (uint32_t)(p - msg));
+	return qrtr_out_packet(QRTR_DATA, SERVREG_OUR_PORT, node, port, msg, (uint32_t)(p - msg));
+}
+
+/* Dump one shared-memory item as text: the DSP's own log and trace buffers live in items like this. */
+static void
+dump_smem_item(uint32_t id)
+{
+	uint32_t size = 0, at = smem_item(id, &size);
+	char line[100];
+	unsigned n = 0;
+
+	if (at == 0 || size == 0) {
+		printf("slpi: item %u: not there\n", id);
+		return;
+	}
+	if (size > 8192) {
+		size = 8192;
+	}
+	printf("slpi: item %u, %u bytes, as text:\n", id, size);
+	line[0] = 0;
+	for (uint32_t i = 0; i < size; i++) {
+		char c = 0;
+
+		smem_peek(at + i, &c, 1);
+		if (c == '\n' || n >= 88) {
+			line[n] = 0;
+			if (n >= 2) {
+				printf("slpi: item %u | %s\n", id, line);
+			}
+			n = 0;
+			continue;
+		}
+		line[n++] = (c >= 0x20 && c <= 0x7e) ? c : '.';
+	}
+	if (n >= 2) {
+		line[n] = 0;
+		printf("slpi: item %u | %s\n", id, line);
+	}
+}
+
+static void
+servreg_input(const uint8_t *data, uint32_t length)
+{
+	uint16_t message, qmi_length;
+	uint32_t at;
+
+	if (length < 7) {
+		return;
+	}
+	message = (uint16_t)(data[3] | data[4] << 8);
+	qmi_length = (uint16_t)(data[5] | data[6] << 8);
+	if (qmi_length > length - 7) {
+		qmi_length = (uint16_t)(length - 7);
+	}
+	at = 7;
+	while (at + 3 <= 7 + qmi_length) {
+		uint8_t type = data[at];
+		uint16_t l = (uint16_t)(data[at + 1] | data[at + 2] << 8);
+
+		at += 3;
+		if (at + l > 7 + qmi_length) {
+			break;
+		}
+		if (type == 0x02 && l >= 4) {
+			servreg_result = (uint16_t)(data[at] | data[at + 1] << 8);
+			servreg_error = (uint16_t)(data[at + 2] | data[at + 3] << 8);
+			printf("slpi: servreg: < QMI %u: result %u, error %u\n", message, servreg_result, servreg_error);
+		} else if (type == 0x10 && l >= 4) {
+			servreg_state = (uint32_t)(data[at] | data[at + 1] << 8 | data[at + 2] << 16 | data[at + 3] << 24);
+			servreg_have_state = true;
+			printf("slpi: servreg: < state %#x (%s)\n", servreg_state, servreg_state_name(servreg_state));
+		}
+		at += l;
+	}
+	servreg_answered = true;
+}
+
+static void
+servreg_start(void)
+{
+	uint32_t node = 0, port = 0;
+
+	if (!servreg_server(&node, &port)) {
+		printf("slpi: servreg: no tms/servreg notifier among the DSP's services\n");
+		return;
+	}
+	{
+		struct qrtr_control lookup = { .command = QRTR_NEW_LOOKUP, .words = { SERVREG_NOTIF_SERVICE, 1, 0 } };
+
+		qrtr_out_packet(QRTR_NEW_LOOKUP, SERVREG_OUR_PORT, qrtr_peer, QRTR_CONTROL, &lookup, sizeof(lookup));
+		sleep_ms(50);
+	}
+	servreg_register("msm/slpi/sensor_pd");
+	for (unsigned attempt = 0; attempt < 30 && !servreg_answered; attempt++) {
+		sleep_ms(100);
+	}
+	printf("slpi: servreg: %s%s%s\n", servreg_answered ? "answered" : "no answer",
+	    servreg_have_state ? "" : " without a state",
+	    servreg_result != 0xffff ? "" : " and without a result");
 }
 
 /* ---- the AP's Sensor Registry service (0x10f), as mainline's sns-reg serves it ----------------------- */
@@ -5893,9 +6079,11 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
-	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0;
+	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0, servreg_on = 0, dump_item = 0;
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
+	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
+	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
 	PE_parse_boot_argn("fastrpc_call", &fastrpc_call, sizeof(fastrpc_call));
 	PE_parse_boot_argn("fastrpc_pd", &fastrpc_pd, sizeof(fastrpc_pd));
@@ -5950,6 +6138,12 @@ step_qrtr(void)
 			printf("slpi: %u: service %u (instance %u) at node %u port %u\n", step, qrtr_servers[i].service,
 			    qrtr_servers[i].instance, qrtr_servers[i].node, qrtr_servers[i].port);
 		}
+	}
+	if (dump_item != 0) {
+		dump_smem_item(dump_item);
+	}
+	if (servreg_on) {
+		servreg_start();
 	}
 	if (fastrpc_smmu) {
 		fastrpc_smmu_look();

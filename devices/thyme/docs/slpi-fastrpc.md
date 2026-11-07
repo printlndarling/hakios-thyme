@@ -412,6 +412,74 @@ is what makes that `qdi_open` fail in the PD the AP starts (a PD attribute or
 a resource the Android kernel supplies at PD creation), and the disassembly is
 now the way to answer it.
 
+## The service-location registration (servreg)
+
+Android's kernel registers a **service-location client** for the sensors PD
+before it attaches: downstream `adsprpc.c` sets
+`SENSORS_PDR_SLPI_SERVICE_LOCATION_CLIENT_NAME` (`"sensors_pdr_sdsprpc"`) for
+the service `"tms/servreg"` whenever `FASTRPC_IOC_INIT_ATTACH_SNS` runs. The
+SLPI advertises that notifier as QRTR service **66 (0x42)** at node 9 port 3
+(`qrtr: a service: 66 (0x42), version 1, instance 90`); the locator (service
+64) is not advertised. The downstream attach message's one input buffer is the
+caller's **tgid** (`ra[0].buf.pv = &tgid`), not a client id; our driver sends
+the client id there.
+
+The QDI failures fit a PD spawned without the sensors configuration: the
+watchdog, island manager, power manager and timer QDI opens all fail
+(`qdi_open("/dev/timers")`, `dog_qdi_init failed`) — a generic user PD has no
+QDI devices. The fix is the registration the phone's kernel does: QMI message
+`0x20` (`SERVREG_REGISTER_LISTENER_REQ`) with TLV `0x01` = enable and TLV
+`0x02` = the service path, answered with a result and the PD state (mainline
+`pdr_interface.c` / `qcom_pdr_msg.c`; state values `0x1fffffff` UP,
+`0x0fffffff` DOWN, `0x2fffffff` EARLY DOWN, `0x7fffffff` UNINIT).
+
+The driver now implements it: boot argument `servreg=1` sends a QRTR
+`NEW_LOOKUP` for service 66 on port `0x101`, then the register-listener
+request for `msm/slpi/sensor_pd` (the path in the firmware's servreg table,
+next to `tms/servreg`), and prints the answer. It runs in step 10 before the
+FastRPC chain, so the same boot can attach afterwards and the DSP's last words
+show whether the QDI devices came with the PD. The image must carry
+`fw/slpi.mdt` and `slpi.b00..b20` (`SLPI=1 userland/build.sh`); the default
+wirelessfull scene does not, and step 2 stops without them.
+
+The 7.9 MB of firmware does not fit the loader's 64 MiB payload area next to
+the daily scene: kernel 16.2 MB + `root-slpifull.apfs` 51.2 MB made a 67.4 MB
+payload, the loader's stage failed and left its USB endpoint unresponsive
+(`logs/` run of 09:23). A test scene built without the audio firmware fits:
+`cd userland && REST=1 BLUETOOTH=1 GL=1 SLPI=1 RC_JOBS=rc.jobs.wirelessfull bash build.sh`
+and copy `root.apfs` to `out/thyme-boot/root-slpitest.apfs` (the audio
+firmware is only needed when the kernel's `adsp=1` path runs before the root
+is mounted).
+
+The first registration answered (`logs/093621-run.log`): the notifier replied
+QMI 0x20 with result 0, error 0 and `state 0x1fffffff (UP)`, so the DSP's
+servreg considers `msm/slpi/sensor_pd` up. The sensor process's last words
+changed with it: the timer client's error is now **0x89**, where every boot
+without the registration reported 0x88 (the crash item is written by this
+boot's process, so it is new). The FastRPC chain was skipped in that run
+(`fastrpc_smmu` was unset, and the chain runs only after the SMMU bypass), so
+the next measurement runs the attach after the registration.
+
+With the registration in place the full chain runs: SMMU bypass,
+`INIT_ATTACH_SNS`, `remotectl_open`, register and `init2` all answer 0 and
+`next2` waits (`logs/094147-run.log`, `logs/094812-run.log`). The crash item
+still reads `TMR_CLNT_1:0x89`; its whole 256 bytes hold only the watchdog
+line (`USER-PD DOG detects stalled initialization`), so the item adds no
+error detail. Whether 0x88/0x89 is an error code or the QDI handle the timer
+client received (the TMS proxy may open one more handle in the PD, shifting
+the number by one) is the open question. The driver can dump any SMEM item
+as text (`slpi_dump_item=N`); item 473 (12 KB) turns out to be binary state,
+not the DSP's console, so the DSP's own log is not in these items
+(`logs/100002-run.log`).
+
+A control boot with neither the attach nor the registration
+(`logs/095517-run.log`) settles who starts the sensor process: item 424 is
+not in the table at step 1, and by step 10 it holds `TMR_CLNT_1:0x89` again.
+The sensor process therefore starts on its own when the DSP boots and fails
+its QDI timer client before the AP has done anything. The AP-side tunnel and
+the servreg registration are not what breaks the PD; the PD's own start at
+DSP boot is.
+
 ## Risks and open questions
 
 - The DSP's sensor process has not started a nested call in 150 s of a boot

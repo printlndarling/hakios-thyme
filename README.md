@@ -29,7 +29,7 @@ build, not merely compiled.
 | Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
-| Camera | **PARTIAL** | both cameras stream into `/dev/hakios-camera` with `cam=5 cam_real=1` (in the daily boot args, so the Camera icon is always there). The S5KHMX runs 1920×1080 through CSIPHY 3, CSID480 and IFE-lite as a live preview at up to 15 fps (two DMA banks, one frame per read: no frozen first frame), with the capture stack's auto exposure (the SMIA group hold is bit 0 of 0x0104) and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings); the shutter takes 12 MP stills scaled from the preview, and the wide lens motor (DW9800 at 0x0c, VAF from ldoc9 through the UMI RPMh path) is powered and takes the stack's focus positions. The front S5K3T2 runs the module's 2592×1940 mode through CSIPHY 4 and CSID-lite 1 (the CSID's PHY select is a 3-bit field: CSIPHY 4 is input 4) with its own tuning, verified in the cam=7 path; its exposure path in the app is still being brought up. A full-resolution still path remains |
+| Camera | **PARTIAL** | both cameras stream into `/dev/hakios-camera` with `cam=5 cam_real=1` (in the daily boot args, so the Camera icon is always there). The S5KHMX runs 1920×1080 through CSIPHY 3, CSID480 and IFE-lite as a live preview at up to 15 fps (two DMA banks, one frame per read: no frozen first frame), with the capture stack's auto exposure (the SMIA group hold is bit 0 of 0x0104) and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings); the shutter takes 12 MP stills scaled from the preview, and the wide lens motor (DW9800 at 0x0c, VAF from ldoc9 through the UMI RPMh path) is powered and takes the stack's focus positions. The front S5K3T2 runs the module's 2592×1940 mode through CSIPHY 4 and CSID-lite 1 (the CSID's PHY select is a 3-bit field: CSIPHY 4 is input 4) with its own tuning, verified in the cam=7 path; in the app its exposure is applied between a stop and a start (2024 lines at the 64x ceiling, read back `0x7e8`), and a 150 s session shows a real, if noisy, scene instead of a black frame (`logs/front-lit-210.png`). The grey-world/neutral-cell blend fixed the early green cast. The wide lens's distant-scene sharpness check waits for daylight. A full-resolution still path remains |
 | Sensors (accelerometer, ALS, proximity) | **IN PROGRESS** | the SLPI sensor core now loads its signed firmware, comes out of reset and exposes its QRTR services; the SNS client and a HID sensor service are being brought up. No sensor reaches iOS yet |
 | Cellular (modem, SIM, calls/data) | **FAIL** | the MPSS/telephony stack is not implemented |
 | Persistent storage | **TODO** | the root and user data are RAM-backed; a guarded persistent-storage design is not accepted yet |
@@ -47,9 +47,11 @@ build, not merely compiled.
    `/dev/hakios-camera` (`cam=5 cam_real=1`) at 15 fps, with exposure/gain from
    the capture stack and the phone's own colour matrices and lens shading; the
    S5K3T2 front camera streams 2592×1940 through CSIPHY 4 and CSID-lite 1, and
-   the app switches between them. The next pieces are auto white balance (the
-   tuning file's reference lights are zero), still capture and the front's own
-   colour tuning.
+   the app switches between them; the front's exposure applies between a stop
+   and a start, and a dim-room session now shows a real scene. Auto white
+   balance blends the neutral cells with grey world, the shutter takes stills,
+   and both sensors load their own tuning. The next pieces are the wide lens's
+   autofocus verified on a lit distant scene and a full-resolution still path.
 3. **Cellular** — the largest remaining block: MPSS, QMI and the telephony
    stack.
 4. **Persistent storage and a standalone installer** — designed around a

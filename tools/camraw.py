@@ -88,6 +88,12 @@ def main():
         if base + frame_bytes > len(data):
             break
         lines = [unpack_raw10(data[base + y * stride:base + (y + 1) * stride], width) for y in range(height)]
+        # a frame with no light sits at the sensor's black level (often 64) and looks
+        # uniform; its statistics say so before the normalised picture (which would be
+        # flat white) is believed
+        total = sum(map(sum, lines))
+        print(f'camraw.py: frame {n}: min {min(map(min, lines))}, mean {total // (width * height)}, '
+              f'max {max(map(max, lines))} (10-bit)')
         png(f'{sys.argv[2]}-{n}-raw.png', width, height, [[v >> 2 for v in line] for line in lines], 1)
         # one pixel a 2x2 cell
         offsets = {0: ((0, 0), (0, 1), (1, 0), (1, 1)), 1: ((0, 1), (0, 0), (1, 1), (1, 0)),
