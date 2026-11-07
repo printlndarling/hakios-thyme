@@ -3351,6 +3351,11 @@ capture_sensor(void)
  */
 #define UMI_FRAME_LINES_MIN     1000
 #define UMI_FRAME_LINES_MIN_FRONT 1600
+/* The floors are boot arguments too (cam_frame_min, cam_front_frame_min), so
+ * the preview's frames and noise can be traded without a rebuild: a higher
+ * floor is more light a frame (less gain's noise) and fewer frames a second.
+ */
+static uint32_t frame_min_rear = UMI_FRAME_LINES_MIN, frame_min_front = UMI_FRAME_LINES_MIN_FRONT;
 #define GAIN_UNITY              (hw->gain_unity)
 #define GAIN_MAX                (hw->gain_max)
 #define FRAME_LINES_MAX         0xfff0
@@ -3404,7 +3409,13 @@ exposure_limits(uint32_t *lines, uint32_t *gain, uint32_t *frame_lines)
 {
 	/* (the UMI path's sensor takes shorter frames than the module's mode sets:
 	 * the capture stack's AE asks for one just long enough for the exposure) */
-	uint32_t shortest = real_source ? (hw_index == 2 ? UMI_FRAME_LINES_MIN_FRONT : UMI_FRAME_LINES_MIN) : ios_mode->frame_length;
+	uint32_t floor = hw_index == 2 ? frame_min_front : frame_min_rear;
+	uint32_t shortest;
+
+	if (floor > ios_mode->frame_length) {
+		floor = ios_mode->frame_length;
+	}
+	shortest = real_source ? floor : ios_mode->frame_length;
 
 	*gain = *gain < GAIN_UNITY ? GAIN_UNITY : *gain > GAIN_MAX ? GAIN_MAX : *gain;
 	*lines = *lines < 4 ? 4 : *lines > FRAME_LINES_MAX - EXPOSURE_MARGIN ? FRAME_LINES_MAX - EXPOSURE_MARGIN : *lines;
@@ -4063,7 +4074,11 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 	f.frame_lines = place[b].frame_lines;
 	/* (the mode's own frame, or the shorter one the UMI path's AE may ask for:
 	 * the frame length sets the frame rate as well as the exposure's ceiling) */
-	f.frame_lines_min = real_source ? (hw_index == 2 ? UMI_FRAME_LINES_MIN_FRONT : UMI_FRAME_LINES_MIN) : ios_mode->frame_length;
+	{
+		uint32_t floor = hw_index == 2 ? frame_min_front : frame_min_rear;
+
+		f.frame_lines_min = real_source ? (floor > ios_mode->frame_length ? ios_mode->frame_length : floor) : ios_mode->frame_length;
+	}
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
 	f.sensor = hw_index;
@@ -4622,6 +4637,14 @@ hakios_camera_init(void)
 	}
 	level = level > 7 ? 7 : level;
 	uint32_t fake_n = 0, real_n = 0;
+	uint32_t floor_n = 0;
+
+	if (PE_parse_boot_argn("cam_frame_min", &floor_n, sizeof(floor_n)) && floor_n >= 200) {
+		frame_min_rear = floor_n;
+	}
+	if (PE_parse_boot_argn("cam_front_frame_min", &floor_n, sizeof(floor_n)) && floor_n >= 200) {
+		frame_min_front = floor_n;
+	}
 
 	fake = level == 5 && PE_parse_boot_argn("cam_fake", &fake_n, sizeof(fake_n)) && fake_n != 0;
 	/* cam_real=1: the same /dev/hakios-camera and sessions, but the frames are
