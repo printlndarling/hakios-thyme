@@ -9,6 +9,12 @@
  * which `ipsw dyld a2s <cache> <address>` turns back into names.
  */
 #include <dispatch/dispatch.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <objc/message.h>
@@ -103,6 +109,50 @@ watched_resume_task(id self, SEL cmd)
 	    url != NULL ? url : "?");
 	say(line, (size_t)(n > 0 ? n : 0));
 	resume_task(self, cmd);
+	/*
+	 * What became of it, ten seconds on. Sileo's Featured page stayed empty while
+	 * its session tasks were started, and neither a completion nor an error was
+	 * said anywhere; the task's state (0 running, 1 suspended, 2 cancelling,
+	 * 3 completed), its HTTP status and its error name the layer that stops, and
+	 * a diagnostic that never fires on this queue says the queue is the stop.
+	 */
+	/* (this file is C: a block does not retain an id it captures, and the task is
+	 * gone ten seconds later unless it is held here.)
+	 */
+	id (*keep_it)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+	void (*drop_it)(id, SEL) = (void (*)(id, SEL))objc_msgSend;
+	id keep = keep_it(self, sel_registerName("retain"));
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+		id task = keep;
+		id (*get)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+		long (*integer)(id, SEL) = (long (*)(id, SEL))objc_msgSend;
+		BOOL (*responds)(id, SEL, SEL) = (BOOL (*)(id, SEL, SEL))objc_msgSend;
+		const char *(*string)(id, SEL) = (const char *(*)(id, SEL))objc_msgSend;
+		long state = integer(task, sel_registerName("state"));
+		id error = get(task, sel_registerName("error"));
+		id response = get(task, sel_registerName("response"));
+		long status = -1;
+		char errbuf[200] = "none";
+		char late[600];
+		int m;
+
+		if (response != NULL &&
+		    responds(response, sel_registerName("respondsToSelector:"), sel_registerName("statusCode"))) {
+			status = integer(response, sel_registerName("statusCode"));
+		}
+		if (error != NULL) {
+			id text = get(error, sel_registerName("localizedDescription"));
+			const char *words = text != NULL ? string(text, sel_registerName("UTF8String")) : NULL;
+
+			if (words != NULL) {
+				snprintf(errbuf, sizeof(errbuf), "%s", words);
+			}
+		}
+		m = snprintf(late, sizeof(late), "hakios: %s: task after 10 s: state %ld, status %ld, error %s (%p)\n",
+		    who, state, status, errbuf, task);
+		say(late, (size_t)(m > 0 ? m : 0));
+		drop_it(keep, sel_registerName("release"));
+	});
 }
 
 /*
@@ -364,6 +414,74 @@ hakios_app_init(void)
 	}
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
+		/*
+		 * Whether the process may use the network at all. Sileo's URL session
+		 * says "offline" for every task while apt, from the same Wi-Fi, fetches
+		 * the same repositories: a raw socket here tells a denied process (an
+		 * error not 0) from a path CFNetwork judges unsatisfied (0, connected).
+		 */
+		{
+			int sock = socket(AF_INET, SOCK_STREAM, 0);
+			struct sockaddr_in address = { 0 };
+			int connected = -1, error = 0;
+			char words[200];
+			int k;
+
+			address.sin_family = AF_INET;
+			address.sin_port = htons(443);
+			address.sin_addr.s_addr = htonl(0x01010101UL);
+			if (sock >= 0) {
+				connected = connect(sock, (struct sockaddr *)&address, sizeof(address));
+				error = errno;
+				close(sock);
+			}
+			k = snprintf(words, sizeof(words), "hakios: %s: socket to 1.1.1.1:443: fd %d, connect %d, errno %d\n",
+			    who, sock, connected, error);
+			say(words, (size_t)(k > 0 ? k : 0));
+			/* (and the names it will ask for, and the gateway next door: a name
+			 * that resolves and a port that answers or refuses says the process's
+			 * DNS and routing work, whatever CFNetwork makes of the path.) */
+			{
+				struct addrinfo hints = { 0 }, *found = NULL;
+				int gai;
+
+				hints.ai_family = AF_INET;
+				hints.ai_socktype = SOCK_STREAM;
+				gai = getaddrinfo("apt.procurs.us", "443", &hints, &found);
+				if (found != NULL) {
+					freeaddrinfo(found);
+				}
+				k = snprintf(words, sizeof(words), "hakios: %s: getaddrinfo apt.procurs.us: %d (%s)\n",
+				    who, gai, gai_strerror(gai));
+				say(words, (size_t)(k > 0 ? k : 0));
+			}
+			{
+				struct sockaddr_in gateway = { 0 };
+				struct pollfd wait = { 0 };
+				socklen_t width = sizeof(error);
+				int gsocket = socket(AF_INET, SOCK_STREAM, 0), answer = -1, then = 0;
+
+				gateway.sin_family = AF_INET;
+				gateway.sin_port = htons(80);
+				gateway.sin_addr.s_addr = htonl(0xc0a80001UL);
+				if (gsocket >= 0) {
+					(void)fcntl(gsocket, F_SETFL, O_NONBLOCK);
+					answer = connect(gsocket, (struct sockaddr *)&gateway, sizeof(gateway));
+					then = errno;
+					if (answer < 0 && then == EINPROGRESS) {
+						wait.fd = gsocket;
+						wait.events = POLLOUT;
+						answer = poll(&wait, 1, 2000) > 0 ? 0 : -1;
+						then = 0;
+						(void)getsockopt(gsocket, SOL_SOCKET, SO_ERROR, &then, &width);
+					}
+					close(gsocket);
+				}
+				k = snprintf(words, sizeof(words), "hakios: %s: gateway 192.168.0.1:80: socket %d, connect %d, errno %d\n",
+				    who, gsocket, answer, then);
+				say(words, (size_t)(k > 0 ? k : 0));
+			}
+		}
 	}
 	watch("UIApplication", "beginBackgroundTaskWithExpirationHandler:", (IMP)watched_begin_task, &begin_task);
 	/*

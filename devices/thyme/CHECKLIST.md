@@ -747,21 +747,17 @@ Still open:
   `jb-preinstall.py` — and the install is unaffected. The earlier attempt with
   the 2026-11-04 *root* never completed the Wi-Fi handshake
   (`logs/011346-run.log`), so the current root is what made the difference;
-- Sileo's own install flow: on 2026-11-08 the package page answered
-  "Couldn't find the package tree in the repositories you currently have
-  installed" at 178 s after launch (`logs/014318-run.log`,
-  `logs/015237-run.log`, `logs/sileo210.png`), with the notification prompt
-  dismissed and the page reopened — Sileo's own three-repository refresh had
-  not put `tree` in its index yet; the scene now dismisses the prompt and
-  reopens the page, but its 70–80 s waits are shorter than the refresh, so a
-  further attempt needs a longer wait (or the havoc/chariz sources removed
-  for the test). A fourth run waited 200 s after the prompt and reopened the
-  page at 460 s: Sileo's Featured page was by then empty (white) and no
-  install happened (`logs/020440-run.log`, `logs/sileo4-460.png`), so its own
-  refresh is not populating at all, where apt fetches the same repositories;
-  that points at Sileo's URL session/foundation networking rather than the
-  sources, and is the next thing to look at. The apt path through the same
-  repositories is PASS;
+- Sileo's own install flow: the first four attempts were made with a scene
+  that never joined the Wi-Fi (`net_test waitaddr` alone: "NO address after
+  60 s", apt "Could not resolve"), and Sileo's URL tasks answered
+  `NSURLErrorNotConnectedToInternet` — correctly (`logs/013503-run.log` …
+  `logs/025856-run.log`). With the join added the tasks return **status 200**
+  (`logs/031850-run.log`, `logs/032907-run.log`: `getaddrinfo apt.procurs.us`
+  0, gateway 192.168.0.1:80 connected, 21 tasks `status 200, error none`), the
+  tree page loads from the Procursus repository and GET changes the button to
+  QUEUE (`logs/sileoA-380.png`). What is still open is only the scripted taps
+  into the queue's Confirm; the apt path through the same repositories is
+  PASS;
 - Sileo on-line repository refresh and a longer interactive session;
 - dependency repair after installing a package that needs additional packages.
 

@@ -7,14 +7,18 @@
 # GET puts it in the queue, Confirm installs it. At the end, what dpkg has to say about it.
 /redwood/bin/sound_test springboard
 /var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test wait 120 joinfile /redwood/fw/network
+/redwood/bin/net_test joinfile /redwood/fw/network
 /redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
 /var/jb/usr/bin/apt-get update
 /redwood/bin/rwtouch wait 25 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 6 tap 0.29 0.585 wait 2
-/redwood/bin/rwtouch wait 200
+/redwood/bin/rwtouch wait 25 tap 0.29 0.585 wait 3
+/redwood/bin/rwtouch wait 40
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 12 tap 0.32 0.59 wait 3 tap 0.5 0.826 wait 6
+/redwood/bin/rwtouch wait 10 tap 0.29 0.585 wait 3
+/redwood/bin/rwtouch tap 0.86 0.367 wait 8
+/redwood/bin/rwtouch tap 0.5 0.826 wait 6
 /redwood/bin/rwtouch tap 0.86 0.303 wait 5 tap 0.2 0.862 wait 6 tap 0.5 0.85 wait 45
 /var/jb/bin/cat /var/jb/var/log/apt/term.log
 /var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n tree
