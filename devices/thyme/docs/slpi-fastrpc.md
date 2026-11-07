@@ -527,10 +527,22 @@ messages `SNS_REGISTRY_READ_REQ`/`WRITE_REQ`/`READ_EVENT`/`WRITE_EVENT` and
 complete (%s)`), so the AP **uploads** the groups over the SNS client service
 (QRTR 400) and the DSP keeps them. Populating the sns therefore means sending
 those groups ourselves; the message IDs and protobuf field numbers are the
-next thing to take from the phone's `libsnsapi.so`/`sensors.qti` (an arm64
-disassembly; REA's providers are not configured here) or from the DSP's IDL
-tables (Hexagon). The registry files themselves are already readable and can
+next thing to take from the phone's `libsnsapi.so`/`sensors.qti` or from the
+DSP's IDL tables. The registry files themselves are already readable and can
 travel in the scene.
+
+The first of those is in: `llvm-objdump` of `libsnsapi.so`'s
+`sns_registry_msgid_IsValid` (the generated enum checker) shows the four
+message ids as `msgid - 0x200 < 3` plus `msgid == 0x300` — so
+`sns_registry_read_req`/`read_event`/`write_req` are 0x200/0x201/0x202 and
+`write_event` is 0x300. They travel the way the SUID request does: a QMI
+`SNS_CLIENT_REQ` (message 0x20) to QRTR service 400, the protobuf's field 2
+carrying that suite id and the registry protobuf in the payload, the target
+SUID being the registry sensor's (our `sns_ask("registry")` already asks for
+it). The protobuf field numbers of `sns_registry_data`/
+`sns_registry_write_req` are the next thing: they are in the same library's
+generated classes (their `set_*`/`_Internal` accessors read field numbers off
+the descriptor), readable with the same `llvm-objdump`.
 
 ## Risks and open questions
 
