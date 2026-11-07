@@ -19,12 +19,12 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 | 启动到 SpringBoard | **PASS** | launchd、backboardd、SpringBoard 以及设置/界面栈在冷启动 RAM 运行中到达主屏幕 |
 | 90 Hz 显示与界面帧率 | **PASS** | 1080 x 2340 面板时序被接受；CoreAnimation 跟随面板以 90 fps 绘制（连续四个 5 秒窗口 452、451、451、451 帧，中位帧间隔 11.1 ms） |
 | CPU / 调频 | **PASS** | 7 个 CPU 启动；三个 EPSS 域分别达到 1804 / 2419 / 3187 MHz |
-| GPU（Mesa/FD650 OpenGL） | **PASS** | 硬件 `hakios-gl` 帧，使用中不回落 `softpipe`；标准无线回归中 735 帧 |
+| GPU（Mesa/FD650 OpenGL） | **PASS** | 硬件 `hakios-gl` 帧，使用中不回落 `softpipe`；标准无线回归中 110 帧 |
 | Metal | **PARTIAL / 阻塞** | `hakios-metal` 可构建、探测通过，但第一个 render pass 仍会卡死，因此 Metal/CoreAnimation 保持关闭。上游的 Metal-on-Vulkan/Turnip 路径已合并，但仍是可选且未在 THYME 上验证 |
 | 触摸、按键、手势 | **PASS** | FTS521 触摸、按键、点击/拖动/手势；`errors=0` |
 | 亮度 | **PARTIAL** | DSI DCS 亮度命令被确认；自动亮度依赖环境光传感器 |
 | Wi-Fi（QCA6390） | **PASS** | 扫描、2.4/5 GHz WPA2 关联、四次握手、DHCP、DNS/TLS/Safari；关闭/打开恢复 |
-| 蓝牙（QCA6390，3 Mbaud） | **PASS**（发现、配对、连接、A2DP）；HFP/SCO、AVRCP、麦克风和自动重连仍未验证 | H4 传输、85 次 LE report、无传输故障；QCA responder 先于 `bluetoothd` 启动 |
+| 蓝牙（QCA6390，3 Mbaud） | **PASS**（发现、配对、连接、A2DP）；HFP/SCO、AVRCP、麦克风和自动重连仍未验证 | H4 传输、560 次 LE report、无传输故障；QCA responder 先于 `bluetoothd` 启动 |
 | 音频 | 扬声器和麦克风 **PASS**；振动 **PARTIAL** | 扬声器/麦克风通路有 1 kHz 声学/录音验证；振动线圈和 BEMF 已验证，iOS 触感反馈尚未 |
 | 电池、充电、温控 | **PASS** | 电量/电流/充电状态；30 分钟充电保持；温控降频和有序返回 |
 | 相机 | **PARTIAL** | S5KHMX 上电/模式、CSID/IFE 探测通过；手电筒端到端可用；合成帧可到 AVFoundation；后置相机实际拍照仍失败 |
@@ -46,17 +46,17 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 4. **持久化存储与独立安装器** —— 采用受保护的写入路径和从 flash RAM 启动的
    设计；在明确的授权与恢复门禁完成前不碰 Android 分区。
 
-## 已验证的 RAM 基线（2026-11-05）
+## 已验证的 RAM 基线（2026-11-07）
 
 | 产物 | SHA-256 |
 |---|---|
-| `hakios-kernel` | `97fcecd0be88ffae68ae52faeee51969cb289d9da58357e4c019992be4214610` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `b7e0f382b240add0356c954259a28a7383ca653f58e5b471f6f331f3cfba2cf4` |
+| `hakios-kernel` | `ab427cc33a55985186406aba1325e9a6093f56e1e0b45ce72c13106ffe01c120` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `8f4271d57985795e3e2b1b2783b01daa4fd44bbede203de4b2b3d0a46cb14acb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-标准冷启动门禁是 `logs/114117-run.log`：两次 Wi-Fi 关联与 DHCP
-`192.168.0.102`、Safari TLS、85 次 LE report（15 个有名称）、735 个
+标准冷启动门禁是 `logs/230840-run.log`：两次 Wi-Fi 关联与 DHCP
+`192.168.0.109`、Safari TLS、560 次 LE report（126 个有名称）、110 个
 `hakios-gl` 帧、零 H4 故障、无 panic。90 Hz 界面检查是
 `logs/115200-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
 校验副本；`devices/thyme/ram-regress.sh` 会拒绝不一致的字节，除非显式指定
