@@ -1275,9 +1275,12 @@ umi_camera_ios_start(unsigned width, unsigned height)
 	uios_on = true;
 	/* The stream's first frame; the read that follows copies it. */
 	ums(80);
-	/* A room's first exposure until the program asks for its own. */
-	uset_exposure(1100, 1024);
-	hakios_tl("UMI camera: iOS session armed at %ux%u (the %ux%u sensor's centre crop)\n",
+	/*
+	 * (The exposure the session was asked to start with is the one uprobe() applied
+	 * before stream-on; a default written here would be a frame or two the capture
+	 * stack's header does not know, and its AE measured the wrong light.)
+	 */
+	hakios_tl("UMI camera: iOS session armed at %ux%u (the %ux%u sensor frame)\n",
 	    width, height, um.width, um.height);
 	return 0;
 }

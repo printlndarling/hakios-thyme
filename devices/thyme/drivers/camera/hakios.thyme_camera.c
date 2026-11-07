@@ -91,6 +91,7 @@
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
+#include <sys/vnode.h>
 #include <miscfs/devfs/devfs.h>
 #include <sys/hakios.audio.h>
 #include <sys/hakios.camera.h>
@@ -1118,15 +1119,15 @@ static const struct ctab_mode fake_mode = {
     .width = 1280, .height = 720, .lanes = 4, .pixel_clock = 9000000,
     .line_length = 800, .frame_length = 750, .fps_milli = 15000, .data_type = 0x2b,
 };
-/* cam_real: the UMI modes the sessions run, whole -- the wide's mode 5 at
- * 1920x1080 and the front's mode 1 at 2592x1940, not a centre crop.
+/* cam_real: the UMI modes the sessions run, whole -- the wide's mode 3 at
+ * 3008x2256 and the front's mode 1 at 2592x1940, not a centre crop.
  */
 static const struct ctab_mode real_modes[2] = {
-	/* The wide's session runs the sensor's mode 3 (3008x2256) and hands up its centre
-	 * 2592x1940: the same size as the front's stream, 2.4 times the pixels of the old
-	 * 1920x1080 crop, so a photograph made from it carries real detail when zoomed.
+	/* The wide's session runs the sensor's mode 3 whole: a photograph's source is every
+	 * pixel the sensor gives (the front's stream stays 2592x1940), so zooming into it
+	 * shows what the sensor resolved rather than an enlargement of a centre crop.
 	 */
-	{ .width = 2592, .height = 1940, .x = 208, .y = 158, .lanes = 3, .cphy = 1, .settle = 19,
+	{ .width = 3008, .height = 2256, .x = 0, .y = 0, .lanes = 3, .cphy = 1, .settle = 19,
 	  .pixel_clock = 512179200, .line_length = 16032, .frame_length = 2373, .fps_milli = 30000, .data_type = 0x2b },
 	{ .width = 2592, .height = 1940, .lanes = 4, .cphy = 0, .settle = 19,
 	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 30130, .data_type = 0x2b },
@@ -3730,8 +3731,8 @@ ios_session(void)
  *
  * cam_real=1 (with cam=5) uses the same device, sessions and mode, but the
  * frames are the S5KHMX's own: a cam=5 session starts the UMI capture (stage 8,
- * 1920x1080 through CSIPHY 3) and every ring place gets a centre crop of the
- * latest frame in the sensor's RAW10 Bayer order.
+ * the module file's mode 3, 3008x2256 through CSIPHY 3) and every ring place
+ * gets the frame whole in RAW10 Bayer order.
  */
 
 /* the bars' linear reflectance, R, G, B in thousandths */
@@ -3828,7 +3829,7 @@ fake_session(void)
 			ring_free();
 			return;
 		}
-		say("camera: the frames for iOS: the S5KHMX's own, %ux%u centre crop of mode 5, up to %u a second\n",
+		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (mode 3 whole), up to %u a second\n",
 		    ios_mode->width, ios_mode->height, fps);
 	} else {
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
@@ -3840,7 +3841,17 @@ fake_session(void)
 	while (ios_open && ios_switch_to == 0) {
 		int p = -1;
 
-		wait_ms(1000 / fps);
+		/*
+		 * The UMI grab waits out the frame boundary itself (40 ms of the 66 the mode's
+		 * frame takes); waiting the whole 66 on top of it made the session nine frames
+		 * a second, and the preview (and the zoom the pinch follows with) nine.
+		 */
+		uint32_t pause = 1000 / fps;
+
+		if (real_source && pause > 45) {
+			pause -= 45;
+		}
+		wait_ms(pause);
 		lck_mtx_lock(&ios_lock);
 		if (ios_ms() - ios_last_read > IDLE_MS) {
 			lck_mtx_unlock(&ios_lock);
@@ -3873,9 +3884,21 @@ fake_session(void)
 			ios_writes_late++;
 			continue;
 		}
+		uint32_t given_lines = ios_now.lines, given_gain = ios_now.gain;
+
 		if (real_source) {
 			uint8_t *at = (uint8_t *)(ring + (uint64_t)p * ring_place_bytes);
 
+			/*
+			 * The bank this read copies was being written before this read's exposure
+			 * write reached the sensor, so the frame in it carries the exposure written
+			 * last, not the one about to be written. Report that one: the capture stack's
+			 * AE waits for a frame whose header names the exposure it asked for before it
+			 * measures, and a header one frame ahead of the pixels made it hunt (bright
+			 * and dark frames alternating, the photograph never settling).
+			 */
+			given_lines = last_lines;
+			given_gain = last_gain;
 			if (lines != last_lines || gain != last_gain) {
 				umi_camera_ios_set_exposure(lines, gain);
 				last_lines = lines;
@@ -3900,8 +3923,8 @@ fake_session(void)
 		place[p].state = PLACE_READY;
 		place[p].sequence = ++ios_frames_done;
 		place[p].time = mach_absolute_time();
-		place[p].exposure_lines = ios_now.lines;
-		place[p].gain = ios_now.gain;
+		place[p].exposure_lines = given_lines;
+		place[p].gain = given_gain;
 		place[p].frame_lines = ios_now.frame_lines;
 		lck_mtx_unlock(&ios_lock);
 		wakeup(&ios_frames_done);
@@ -3950,11 +3973,13 @@ camdev_close(__unused dev_t dev, __unused int flags, __unused int type, __unused
 }
 
 static int
-camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 {
 	struct hakios_camera_frame f;
 	uint64_t since = ios_ms();
 	int b = -1, error = 0;
+	/* (A stream stopping joins its worker: a read that will not wait lets it stop at once.) */
+	bool nonblock = (ioflag & IO_NDELAY) != 0;
 	vm_offset_t at = 0;             /* the place's address and the frame's size, taken under the lock with the place */
 	uint32_t frame_bytes = 0;
 
@@ -3977,6 +4002,10 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		}
 		if (b >= 0) {
 			break;
+		}
+		if (nonblock) {
+			lck_mtx_unlock(&ios_lock);
+			return EAGAIN;
 		}
 		if (ios_ms() - since > (ios_streaming ? 3000u : 15000u)) {      /* (the sensor's tables take seconds) */
 			lck_mtx_unlock(&ios_lock);

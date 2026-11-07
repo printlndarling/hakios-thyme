@@ -1201,12 +1201,12 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	af->sum_sharpness = af->sum_level = 0;
 	af->measured = 0;
 	if (af->state == AF_SWEEP || af->state == AF_CLIMB || af->state == AF_FINE_SEARCH) {
-		say("focus: at %u: sharpness %.1f, level %.1f", af->at, sharpness, level);
+		say("focus: at %u: sharpness %.4f, level %.1f", af->at, sharpness, level);
 	}
 	switch (af->state) {
 	case AF_WATCH:
-		if (locked || (af->sharpness > 0 && sharpness > af->sharpness * 0.6f && level > af->level * 0.7f &&
-		    level < af->level * 1.4f)) {
+		/* (the measure is divided by the mean's square: the exposure's swings do not move it) */
+		if (locked || (af->sharpness > 0 && sharpness > af->sharpness * 0.6f)) {
 			af->unlike = 0;
 			return;
 		}
@@ -1271,6 +1271,21 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			af->way = -af->way;
 			af->worse = 0;
 			af_go(device, af, (uint32_t)next);
+			return;
+		}
+		if (af->best == af->start && af->turned) {
+			/*
+			 * Neither way about where the lens started was sharper: the scene is
+			 * outside its neighbourhood (the module sits near 343; a room's
+			 * subject at 2 m is near 1200). The whole travel, then -- the start's
+			 * climb alone would leave the photograph out of focus.
+			 */
+			af->state = AF_SWEEP;
+			af->best_sharpness = -1;
+			af->worse = 0;
+			af->steps = 0;
+			af->way = af->at - AF_NEAR < AF_FAR - af->at ? 1 : -1;
+			af_go(device, af, af->way > 0 ? AF_NEAR : AF_FAR);
 			return;
 		}
 		af->state = AF_FINE_SEARCH;
@@ -1492,12 +1507,29 @@ worker(void *context)
 	bool switched = false;
 	float lux = -1, cct = -1;
 	struct af af = { 0 };
-	int device = open(HAKIOS_CAMERA_DEVICE, O_RDWR), failures = 0;
+	/*
+	 * Non-blocking: a read that waits (the sensor's tables take seconds) would keep
+	 * this worker from noticing that its stream was stopped, and the graph waits for
+	 * the worker when it switches cameras -- seconds of a frozen preview.
+	 */
+	int device = open(HAKIOS_CAMERA_DEVICE, O_RDWR | O_NONBLOCK), failures = 0;
 
 	pthread_setname_np("hakios-camera");
 	if (device < 0) {
 		say("no %s (%s): no frames", HAKIOS_CAMERA_DEVICE, strerror(errno));
 		return NULL;
+	}
+	/*
+	 * This stream's camera before the first frame. Without the word, the kernel's
+	 * first session is the sensor it was last on -- the other camera after a switch:
+	 * its power-up and two frames just to tell this stream which one it must have,
+	 * then another power-up for this one. The switch is the difference between one
+	 * camera powering up and two.
+	 */
+	{
+		struct hakios_camera_command c = { .command = HAKIOS_CAMERA_SENSOR, .a = s->camera->sensor, .b = ~0u };
+
+		(void)write(device, &c, sizeof(c));
 	}
 	isp_init(&isp);
 	while (s->running && failures < 5) {
@@ -1506,16 +1538,23 @@ worker(void *context)
 		if (buffer == NULL) {
 			n = read(device, &head, sizeof(head));
 			if (n != (ssize_t)sizeof(head)) {
-				failures += n < 0 && errno == EAGAIN ? 0 : 1;
+				if (n < 0 && errno == EAGAIN) {
+					usleep(10000);
+					continue;
+				}
 				if (n < 0 && errno == EIO) {
 					say("the kernel's camera has had a fault: no frames");
 					break;
 				}
+				failures++;
 				continue;
+			}
+			if (!s->running) {
+				break;
 			}
 			if (head.sensor != s->camera->sensor) {
 				/* another camera's frames (the kernel's last sensor): changed, and the next ones are this one's */
-				if (!switched) {
+				if (!switched && s->running) {
 					struct hakios_camera_command c = { .command = HAKIOS_CAMERA_SENSOR, .a = s->camera->sensor, .b = ~0u };
 
 					switched = true;
@@ -1531,12 +1570,19 @@ worker(void *context)
 		}
 		n = read(device, buffer, bytes);
 		if (n != (ssize_t)bytes) {
+			if (n < 0 && errno == EAGAIN) {
+				usleep(10000);
+				continue;
+			}
 			if (n < 0 && errno == EIO) {
 				say("the kernel's camera has had a fault: no more frames");
 				break;
 			}
-			failures += n < 0 && errno == EAGAIN ? 0 : 1;
+			failures++;
 			continue;
+		}
+		if (!s->running) {
+			break;
 		}
 		failures = 0;
 
@@ -1561,6 +1607,14 @@ worker(void *context)
 		isp.zoom = s->zoom;
 		isp.turned = s->camera->turned;
 		if (isp_ae(&isp, f, &st, &c)) {
+			/*
+			 * The frame's own exposure, and the levels it made, beside the ask: the
+			 * one trace that says whether the loop's answer was about the frame it
+			 * measured (a header a frame ahead of the pixels made it ring).
+			 */
+			say("ae: frame %llu: exposure %.2f ms gain %.2fx, green %.0f bright %.0f -> %u lines gain %#x",
+			    f->sequence, f->exposure_lines * (double)f->line_ns / 1e6, (double)f->gain / f->gain_unity,
+			    st.mean[1], st.bright, c.a, c.b);
 			(void)write(device, &c, sizeof(c));
 		}
 		if (s->af_now) {
@@ -1572,11 +1626,14 @@ worker(void *context)
 		}
 		if (s->frames == 1 && s->camera->sensor == 1 && !s->af_locked) {
 			/* The lens starts at the module's position; one hunt at the start,
-			 * whether or not the capture stack has asked for a focus yet.
+			 * whether or not the capture stack has asked for a focus yet. A climb
+			 * about where it is, not the whole travel: the photograph is sharp
+			 * a second sooner, and the preview is not dragged through the blur
+			 * of every position on the way to the near end.
 			 */
 			af.state = AF_STEADY;
 			af.now = true;
-			af.sweep = true;
+			af.sweep = false;
 		}
 		af_frame(device, &af, f, raw, s->af_window, s->af_locked);
 		s->frames++;

@@ -236,7 +236,14 @@ isp_ae(struct isp *isp, const struct hakios_camera_frame *f, const struct isp_st
 	if (ratio > 0.94 && ratio < 1.06) {
 		return false;
 	}
-	want = now * pow(ratio, 0.7);
+	/*
+	 * A little under halfway (in logarithms) to the exposure the frame asks for. The
+	 * full step rang: a frame's exposure reaches this measurement one frame after the
+	 * header names it, and a step of 0.7 against that delay gives a second-order loop
+	 * whose ringing took fifteen frames to die -- the preview's bright and dark
+	 * flicker. 0.4 damps it in four or five.
+	 */
+	want = now * pow(ratio, 0.4);
 	if (want <= fast) {
 		lines = want < 4 ? 4 : (uint32_t)want;
 		gain = f->gain_unity;
