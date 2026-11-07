@@ -21,12 +21,12 @@ build, not merely compiled.
 | Boot to SpringBoard | **PASS** | launchd, backboardd, SpringBoard and the settings/UI stack reach the home screen from a cold RAM boot |
 | Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median), but the display controller the firmware leaves behind refreshes the panel about 60 times a second: the DSI command-DMA status count is 118 transitions a second with `fb_hz=60` or `90` and with either panel timing, so 90 fps into it judders. The daily default is now a self-consistent 60 Hz, verified by a 32-minute soak (`logs/035725-run.log`); true 90 Hz needs the controller refresh reprogrammed |
 | CPU / DVFS | **PASS** | 7 CPUs start; all three EPSS domains reach 1804 / 2419 / 3187 MHz |
-| GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 735 frames in the canonical wireless run |
+| GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 111 frames in the latest wireless run |
 | Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
 | Touch, keys, gestures | **PASS** | FTS521 touch, buttons, tap/drag/gesture handling; `errors=0` |
 | Brightness | **PARTIAL** | DSI DCS brightness is acknowledged; automatic brightness waits for the ambient-light sensor path |
 | Wi-Fi (QCA6390) | **PASS** | scan, 2.4/5 GHz WPA2 join, four-way handshake, DHCP, DNS/TLS/Safari; power off/on recovery; the link stays up across display sleep (200 fetched before and after a 25 s screen-off, same address) |
-| Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
+| Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 171 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
 | Camera | **PARTIAL** | both cameras stream into `/dev/hakios-camera` with `cam=5 cam_real=1` (in the daily boot args, so the Camera icon is always there). The S5KHMX runs the module's mode 3 whole — 3008×2256 through CSIPHY 3, CSID480 and IFE-lite — at ten to twenty-five frames a second: the mode's own 92 ms frame, or the shorter one the capture stack's AE asks for when the light allows (39 ms at the shortest; two DMA banks, one frame per read: no frozen first frame and no torn one), with the capture stack's auto exposure and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings); the shutter renders 12 MP stills from eight averaged raw frames. A frame's header names the exposure its pixels were made with, so the AE settles from 8× to the room's gain in about five frames instead of ringing bright and dark; a stream asks the kernel for its own sensor before its first frame, so a rear↔front handover powers one sensor, not two (1.7–2.4 s measured, about a third of it the kernel's power-up and the rest the capture graph's reconfiguration). The wide lens's motor is an **AKM AK7377** at I2C 0x18 (the module file's `umi_ak7377_s5khmx`; its position is register 0x00, twelve bits); at stream start the capture stack's contrast autofocus climbs about the module's position and, when that neighbourhood is flat, measures the whole travel — the fridge's QA label is legible in the photograph, beside the Android crop (`logs/label-compare-af3.jpg`). The front S5K3T2 runs the module's 2592×1940 mode through CSIPHY 4 and CSID-lite 1 (the CSID's PHY select is a 3-bit field: CSIPHY 4 is input 4) with its own tuning, verified in the cam=7 path; in the app its exposure is applied between a stop and a start (2024 lines at the 64x ceiling, read back `0x7e8`), and a 150 s session shows a real, if noisy, scene instead of a black frame (`logs/front-lit-210.png`). The grey-world/neutral-cell blend and a 1.5% red calibration bring the front's white to the Android camera's on the same walls. A full-resolution (108 MP) still path remains |
@@ -62,18 +62,19 @@ build, not merely compiled.
    guarded write path and RAM-boot-from-flash, without touching Android until
    an explicit authorization and recovery gate exists.
 
-## Verified RAM baseline (5 November 2026)
+## Verified RAM baseline (7 November 2026)
 
 | Artifact | SHA-256 |
 |---|---|
-| `hakios-kernel` | `97fcecd0be88ffae68ae52faeee51969cb289d9da58357e4c019992be4214610` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `b7e0f382b240add0356c954259a28a7383ca653f58e5b471f6f331f3cfba2cf4` |
+| `hakios-kernel` | `570e3e7f8f6fa738703c26b9aad4fed65d61b8286d415577f2912b09ad2be1a1` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `48e8bc06940d0a02dc77d78e74f9c5179ca74c5dc3bd56121a5762627414ee11` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/114117-run.log`: two Wi-Fi joins with
-DHCP `192.168.0.102`, Safari TLS, 85 LE reports (15 named), 735 `hakios-gl`
-frames, zero H4 faults and no panic. The 90 fps pacing check is
+The canonical cold-boot gate is `logs/185154-run.log`: two Wi-Fi joins with
+DHCP `192.168.0.110`, Safari TLS, 171 LE reports (36 named), 111 `hakios-gl`
+frames (the scene's screens are mostly still), zero H4 faults and no panic.
+The 90 fps pacing check is
 `logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
 `devices/thyme/ram-baseline.conf` is the machine-checked
 copy of these hashes; `devices/thyme/ram-regress.sh` refuses other bytes unless
