@@ -1,0 +1,9 @@
+# The Wi-Fi link across a display sleep: join and prove the network, turn the
+# screen off with the side button, turn it on again, then prove the network
+# once more -- if the station stayed associated and its address survived, the
+# fetches after the wake answer as the first one did.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 10
+/redwood/bin/net_test fetch https://www.apple.com/library/test/success.html wait 10
+/redwood/bin/rwtouch wait 5 button lock wait 25 button lock wait 20
+/redwood/bin/net_test show waitaddr en0 10 fetch https://www.apple.com/library/test/success.html wait 5

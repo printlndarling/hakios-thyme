@@ -25,7 +25,7 @@ build, not merely compiled.
 | Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
 | Touch, keys, gestures | **PASS** | FTS521 touch, buttons, tap/drag/gesture handling; `errors=0` |
 | Brightness | **PARTIAL** | DSI DCS brightness is acknowledged; automatic brightness waits for the ambient-light sensor path |
-| Wi-Fi (QCA6390) | **PASS** | scan, 2.4/5 GHz WPA2 join, four-way handshake, DHCP, DNS/TLS/Safari; power off/on recovery |
+| Wi-Fi (QCA6390) | **PASS** | scan, 2.4/5 GHz WPA2 join, four-way handshake, DHCP, DNS/TLS/Safari; power off/on recovery; the link stays up across display sleep (200 fetched before and after a 25 s screen-off, same address) |
 | Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 85 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
 | Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
 | Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
