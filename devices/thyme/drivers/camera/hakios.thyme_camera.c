@@ -2142,6 +2142,14 @@ extern lck_mtx_t hakios_smmu_lock;
 static vm_offset_t frames, smmu_second, smmu_context, page_tables;
 static vm_offset_t keep;                /* memory in one piece, taken at boot (hakios_camera_init()) */
 static uint64_t keep_bytes;
+int hakios_camera_picture_staged;       /* a picture the program made: the host's to take, and not the ring's (or the UMI stream's) to replace */
+/* The piece has two parts: the stream's frames first, a picture the program made after them,
+ * so that handing the host a photograph does not overwrite the frames it was made from.
+ */
+static vm_offset_t ring_keep;
+static uint64_t ring_keep_bytes;
+static vm_offset_t picture_keep;
+static uint64_t picture_keep_bytes;
 static uint64_t frames_bytes;
 static uint32_t smmu_match = ~0u, smmu_context_n, smmu_old_smr, smmu_old_s2cr, smmu_pages_size, smmu_pages;
 static bool smmu_on;
@@ -2153,8 +2161,8 @@ frames_alloc(uint32_t width, uint32_t height, uint32_t stride, uint32_t source)
 	uint32_t frame_bytes = stride * height;
 
 	frames_bytes = round_page(CAM_HEADER_BYTES + (uint64_t)CAM_FRAMES * frame_bytes);
-	if (keep != 0 && keep_bytes >= frames_bytes) {
-		frames = keep;                  /* (the piece taken at boot: hakios_camera_init()) */
+	if (ring_keep != 0 && ring_keep_bytes >= frames_bytes) {
+		frames = ring_keep;             /* (the first part of the piece taken at boot: hakios_camera_init()) */
 		bzero((void *)frames, CAM_HEADER_BYTES);
 	} else if (kmem_alloc_contig(kernel_map, &frames, frames_bytes, PAGE_MASK, 0, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
 	    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
@@ -2176,11 +2184,14 @@ frames_alloc(uint32_t width, uint32_t height, uint32_t stride, uint32_t source)
 		__asm__ volatile ("dc civac, %0" : : "r" (line));
 	}
 	__asm__ volatile ("dsb sy");
-	loader_recording[0] = kvtophys(frames);
-	loader_recording[1] = frames_bytes;
-	loader_recording[2] = (uint64_t)frames;
+	/* (a picture from the program outlives a later session's ring: the host asked for it) */
+	if (!hakios_camera_picture_staged) {
+		loader_recording[0] = kvtophys(frames);
+		loader_recording[1] = frames_bytes;
+		loader_recording[2] = (uint64_t)frames;
+	}
 	say("camera: %llu KB of memory for %u frames at %#llx, handed to the loader for the host\n", frames_bytes >> 10, CAM_FRAMES,
-	    loader_recording[0]);
+	    kvtophys(frames));
 	return true;
 }
 
@@ -4062,7 +4073,7 @@ keep_picture(const struct hakios_camera_command *c, struct uio *uio)
 	if (c->bytes == 0 || c->d < 1 || c->d > 3 || (uint64_t)c->c * c->b > (uint64_t)c->bytes * 2) {
 		return EINVAL;
 	}
-	if (keep == 0 || keep_bytes < want) {
+	if (picture_keep == 0 || picture_keep_bytes < want) {
 		return ENOSPC;                  /* (the piece is made when the device is, while there is memory in one piece) */
 	}
 	/*
@@ -4070,7 +4081,7 @@ keep_picture(const struct hakios_camera_command *c, struct uio *uio)
 	 * two writers would interleave one picture's header with the other's data in `keep'.
 	 */
 	lck_mtx_lock(&keep_lock);
-	h = (struct cam_header *)keep;
+	h = (struct cam_header *)picture_keep;
 	bzero(h, CAM_HEADER_BYTES);
 	memcpy(h->magic, "RWCAM001", 8);
 	h->width = c->a;
@@ -4081,15 +4092,16 @@ keep_picture(const struct hakios_camera_command *c, struct uio *uio)
 	h->frame_bytes = c->bytes;
 	h->source = 2;
 	strlcpy(h->sensor, "iOS", sizeof(h->sensor));
-	int error = uiomove((caddr_t)(keep + CAM_HEADER_BYTES), (int)MIN((uint64_t)c->bytes, (uint64_t)uio_resid(uio)), uio);
+	int error = uiomove((caddr_t)(picture_keep + CAM_HEADER_BYTES), (int)MIN((uint64_t)c->bytes, (uint64_t)uio_resid(uio)), uio);
 	h->frames = error == 0 ? 1 : 0;
-	for (vm_offset_t line = keep; line < keep + want; line += 64) {
+	for (vm_offset_t line = picture_keep; line < picture_keep + want; line += 64) {
 		__asm__ volatile ("dc cvac, %0" : : "r" (line));
 	}
 	__asm__ volatile ("dsb sy");
-	loader_recording[0] = kvtophys(keep);
+	loader_recording[0] = kvtophys(picture_keep);
 	loader_recording[1] = want;
-	loader_recording[2] = (uint64_t)keep;
+	loader_recording[2] = (uint64_t)picture_keep;
+	hakios_camera_picture_staged = 1;
 	lck_mtx_unlock(&keep_lock);
 	say("camera: a picture from iOS for the host: %ux%u, format %u, %u bytes\n", c->a, c->b, c->d, c->bytes);
 	return error;
@@ -4104,9 +4116,9 @@ dump_frame(const void *at, uint32_t width, uint32_t height, uint32_t stride)
 	uint64_t bytes = (uint64_t)stride * height;
 	uint64_t want = round_page(CAM_HEADER_BYTES + bytes);
 
-	if (!keep || keep_bytes < want) return;
+	if (!picture_keep || picture_keep_bytes < want) return;
 	lck_mtx_lock(&keep_lock);
-	struct cam_header *h = (struct cam_header *)keep;
+	struct cam_header *h = (struct cam_header *)picture_keep;
 
 	bzero(h, CAM_HEADER_BYTES);
 	memcpy(h->magic, "RWCAM001", 8);
@@ -4119,14 +4131,14 @@ dump_frame(const void *at, uint32_t width, uint32_t height, uint32_t stride)
 	h->frame_bytes = (uint32_t)bytes;
 	h->source = 2;
 	strlcpy(h->sensor, "iOS", sizeof(h->sensor));
-	memcpy((void *)(keep + CAM_HEADER_BYTES), at, (size_t)bytes);
-	for (vm_offset_t line = keep; line < keep + want; line += 64) {
+	memcpy((void *)(picture_keep + CAM_HEADER_BYTES), at, (size_t)bytes);
+	for (vm_offset_t line = picture_keep; line < picture_keep + want; line += 64) {
 		__asm__ volatile ("dc cvac, %0" : : "r" (line));
 	}
 	__asm__ volatile ("dsb sy");
-	loader_recording[0] = kvtophys(keep);
+	loader_recording[0] = kvtophys(picture_keep);
 	loader_recording[1] = want;
-	loader_recording[2] = (uint64_t)keep;
+	loader_recording[2] = (uint64_t)picture_keep;
 	lck_mtx_unlock(&keep_lock);
 	say("camera: cam_dump: the %ux%u frame the stack read\n", width, height);
 }
@@ -4585,15 +4597,21 @@ hakios_camera_init(void)
 		 * or two frames of cam=3 and cam=4 up to 12 MB each), taken now, while the system's memory still
 		 * is in large pieces.
 		 */
-		uint32_t keep_mb = 24;
+		uint32_t keep_mb = 48;
 
 		(void)PE_parse_boot_argn("cam_keep_mb", &keep_mb, sizeof(keep_mb));
-		keep_bytes = (uint64_t)(keep_mb > 64 ? 64 : keep_mb) << 20;
+		keep_bytes = (uint64_t)(keep_mb > 96 ? 96 : keep_mb) << 20;
 		if (keep_bytes != 0 && kmem_alloc_contig(kernel_map, &keep, keep_bytes, PAGE_MASK, 0, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
 		    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
 			printf("camera: no memory in one piece for a picture for the host (%u MB)\n", keep_mb);
 			keep = 0;
 			keep_bytes = 0;
+		}
+		if (keep != 0) {
+			ring_keep = keep;
+			ring_keep_bytes = keep_bytes / 2;
+			picture_keep = keep + ring_keep_bytes;
+			picture_keep_bytes = keep_bytes - ring_keep_bytes;
 		}
 	}
 	if (kernel_thread_start(camera_thread, NULL, &thread) == KERN_SUCCESS) {

@@ -1,0 +1,5 @@
+# One photograph of the whole sensor, front camera, for the host (xl camera):
+# the app opened on the rear, switched to the front, exposed and focused for
+# 25 s, then the shutter.
+/redwood/bin/sound_test springboard
+/redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 20 tap 0.886 0.871 wait 25 tap 0.5 0.85 wait 5

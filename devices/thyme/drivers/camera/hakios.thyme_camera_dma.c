@@ -14,6 +14,7 @@
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern uint64_t kvtophys(vm_offset_t);
 extern uint64_t loader_recording[3];
+extern int hakios_camera_picture_staged;
 extern lck_mtx_t hakios_smmu_lock;
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 int umi_camera_tpg(vm_offset_t, vm_offset_t);
@@ -402,7 +403,8 @@ umi_camera_stream_stop(void)
 	hakios_tl("UMI camera stream: buffer guards=%u fault=%u changed=%u varied=%u frames=%u first=%02x %02x %02x %02x\n",
 	    guards,faulted,changed,varied,frames,frame[0],frame[1],frame[2],frame[3]);
 	dcache(ud.memory,4096);
-	loader_recording[0]=kvtophys(ud.memory);loader_recording[1]=ud.size;loader_recording[2]=ud.memory;
+	/* (a picture the program made for the host outlives this session's buffer) */
+	if(!hakios_camera_picture_staged){loader_recording[0]=kvtophys(ud.memory);loader_recording[1]=ud.size;loader_recording[2]=ud.memory;}
 	return frames?0:EIO;
 }
 

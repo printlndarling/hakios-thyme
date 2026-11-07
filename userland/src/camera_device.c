@@ -982,9 +982,11 @@ frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const
 	return m;
 }
 
+static void send_picture(int device, CVPixelBufferRef pb);
+
 static void
 deliver(struct stream *s, struct output *out, const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw,
-    CFDictionaryRef metadata)
+    CFDictionaryRef metadata, int host_device)
 {
 	CVPixelBufferRef pb = output_buffer(out);
 	uint32_t pf, width, height;
@@ -1033,6 +1035,10 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		CFRelease(m);
 	}
 
+	if (job.still && host_device >= 0) {
+		/* (the same buffer the graph is about to be given, sent whole to the host) */
+		send_picture(host_device, pb);
+	}
 	CMTime pts = CMClockMakeHostTimeFromSystemUnits(f->time);
 
 	((pixel_buffer_handler)out->handler)(pb, pts);
@@ -1328,6 +1334,146 @@ load_tuning(struct isp *isp, uint32_t sensor)
 	}
 }
 
+/*
+ * The photograph for the host: the same NV12 (or BGRA) the graph was given, sent whole
+ * to /dev/hakios-camera's keep buffer, which "xl camera" then writes out -- the only way
+ * to look at what Camera.app really made of the sensor's frame outside the phone.
+ */
+static void
+send_picture(int device, CVPixelBufferRef pb)
+{
+	struct hakios_camera_command *c;
+	uint32_t w, h, pf;
+	size_t bytes = 0;
+	uint8_t *buf = NULL;
+
+	if (device < 0 || pb == NULL) {
+		return;
+	}
+	pf = CVPixelBufferGetPixelFormatType(pb);
+	w = (uint32_t)CVPixelBufferGetWidth(pb);
+	h = (uint32_t)CVPixelBufferGetHeight(pb);
+	if (w < 64 || h < 64) {
+		return;
+	}
+	CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+	if ((pf == PF_420F || pf == PF_420V) && CVPixelBufferIsPlanar(pb) && CVPixelBufferGetPlaneCount(pb) >= 2) {
+		size_t y_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
+		const uint8_t *y = CVPixelBufferGetBaseAddressOfPlane(pb, 0), *uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1);
+
+		bytes = (size_t)w * h * 3 / 2;
+		buf = malloc(sizeof(*c) + bytes);
+		if (buf != NULL && y != NULL && uv != NULL) {
+			for (uint32_t r = 0; r < h; r++) {
+				memcpy(buf + sizeof(*c) + (size_t)r * w, y + r * y_stride, w);
+			}
+			for (uint32_t r = 0; r < h / 2; r++) {
+				memcpy(buf + sizeof(*c) + (size_t)w * h + (size_t)r * w, uv + r * uv_stride, w);
+			}
+		} else {
+			free(buf);
+			buf = NULL;
+		}
+	} else if (pf == PF_BGRA) {
+		size_t stride = CVPixelBufferGetBytesPerRow(pb);
+		const uint8_t *base = CVPixelBufferGetBaseAddress(pb);
+
+		bytes = (size_t)w * h * 4;
+		buf = malloc(sizeof(*c) + bytes);
+		if (buf != NULL && base != NULL) {
+			for (uint32_t r = 0; r < h; r++) {
+				memcpy(buf + sizeof(*c) + (size_t)r * w * 4, base + r * stride, (size_t)w * 4);
+			}
+		} else {
+			free(buf);
+			buf = NULL;
+		}
+	}
+	CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+	if (buf == NULL) {
+		return;
+	}
+	c = (struct hakios_camera_command *)buf;
+	c->command = HAKIOS_CAMERA_KEEP;
+	c->bytes = (uint32_t)bytes;
+	c->a = w;
+	c->b = h;
+	c->c = pf == PF_BGRA ? w * 4 : w;
+	c->d = pf == PF_BGRA ? 3 : 2;
+	if (write(device, buf, sizeof(*c) + bytes) != (ssize_t)(sizeof(*c) + bytes)) {
+		say("the photograph for the host was not taken (%s)", strerror(errno));
+	} else {
+		say("the photograph %ux%u is the host's (xl camera)", w, h);
+	}
+	free(buf);
+}
+
+/*
+ * The photograph's noise: a dark room needs 64x of analog gain, and one frame at that gain is
+ * mostly noise. The still is made of STILL_FRAMES frames summed in the sensor's own 10-bit
+ * values and divided -- half the noise for four frames, and the details the noise hides stand
+ * out again. (Android's night shot does the same, with alignment; this one trusts the phone to
+ * be still for the third of a second it takes.)
+ */
+#define STILL_FRAMES    4
+static uint8_t *still_acc;              /* uint16_t a pixel, summed */
+static uint8_t *still_packed;           /* the mean, RAW10 as the sensor gave it */
+static uint32_t still_w, still_h, still_stride;
+static unsigned still_n;
+
+static bool
+still_accumulate(const struct hakios_camera_frame *f, const uint8_t *raw)
+{
+	uint32_t w = f->width, h = f->height, stride = f->stride;
+
+	if (still_acc == NULL || still_w != w || still_h != h || still_stride != stride) {
+		free(still_acc);
+		free(still_packed);
+		still_acc = calloc((size_t)w * h, sizeof(uint16_t));
+		still_packed = malloc((size_t)stride * h);
+		still_w = w;
+		still_h = h;
+		still_stride = stride;
+		still_n = 0;
+		if (still_acc == NULL || still_packed == NULL) {
+			return false;
+		}
+	}
+	for (uint32_t y = 0; y < h; y++) {
+		const uint8_t *s = raw + (size_t)y * stride;
+		uint16_t *a = (uint16_t *)still_acc + (size_t)y * w;
+
+		for (uint32_t x = 0; x < w; x += 4) {
+			const uint8_t *g = s + (x >> 2) * 5;
+
+			for (int i = 0; i < 4 && x + i < w; i++) {
+				a[x + i] = (uint16_t)(a[x + i] + (g[i] << 2 | (g[4] >> (i * 2) & 3)));
+			}
+		}
+	}
+	if (++still_n < STILL_FRAMES) {
+		return false;
+	}
+	for (uint32_t y = 0; y < h; y++) {
+		const uint16_t *a = (const uint16_t *)still_acc + (size_t)y * w;
+		uint8_t *o = still_packed + (size_t)y * stride;
+
+		for (uint32_t x = 0; x < w; x += 4) {
+			uint8_t *g = o + (x >> 2) * 5;
+			uint16_t v[4];
+
+			for (int i = 0; i < 4; i++) {
+				v[i] = x + i < w ? (uint16_t)((a[x + i] + STILL_FRAMES / 2) / STILL_FRAMES) : 0;
+				g[i] = (uint8_t)(v[i] >> 2);
+			}
+			g[4] = (uint8_t)((v[0] & 3) | (v[1] & 3) << 2 | (v[2] & 3) << 4 | (v[3] & 3) << 6);
+		}
+	}
+	still_n = 0;
+	say("the photograph's %u frames averaged", STILL_FRAMES);
+	return true;
+}
+
 static void *
 worker(void *context)
 {
@@ -1448,6 +1594,12 @@ worker(void *context)
 			s->metadata = CFRetain(metadata);
 			pthread_mutex_unlock(&s->metadata_lock);
 		}
+		bool still_ready = false;
+
+		if (s->graph_running && s->stills_wanted > 0) {
+			/* (a photograph: the frames are summed first, and it is made of their mean) */
+			still_ready = still_accumulate(f, raw);
+		}
 		pthread_mutex_lock(&s->lock);
 		for (int i = 0; s->graph_running && i < OUTPUTS; i++) {
 			struct output *out = &s->out[i];
@@ -1462,10 +1614,10 @@ worker(void *context)
 			if (out->handler == NULL || out->config == NULL || !(out->enabled || i == 0)) {
 				continue;
 			}
-			if (still && s->stills_wanted == 0) {
+			if (still && (s->stills_wanted == 0 || !still_ready)) {
 				continue;
 			}
-			deliver(s, out, &isp, f, raw, metadata);
+			deliver(s, out, &isp, f, still ? still_packed : raw, metadata, device);
 			if (still) {
 				s->stills_wanted--;
 				say("the photograph is given (%llu so far)", (unsigned long long)++s->stills_given);
