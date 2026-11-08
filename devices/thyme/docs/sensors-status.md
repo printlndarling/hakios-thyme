@@ -65,6 +65,12 @@ used as the reference on the same hardware and firmware).
    tunnel (1) or send the registry groups as `SNS_REGISTRY_WRITE_REQ` (the
    protobuf layout is in `slpi-fastrpc.md`); the write needs the registry
    service's SUID, which its lookup cannot answer while the registry is empty.
+   To see what the phone's own reverse calls carry, `sscrpcd sensorspd`
+   restarted under an init-followed `strace -e ioctl` shows its FastRPC traffic
+   as the `_IOC(0x52, ...)` ioctls (1, 6, 8, 0xC) at once; strace shows only
+   the ioctl pointer, so the invoke buffers (and the file paths inside them)
+   need a small ptrace reader — the tool to build if the tunnel stays silent.
+
 3. **Get the DSP's own log**: `sns_diag_fw_log` exists in the SNS diag sensor
    (`diag_sensor`); the HAL's `get_qmi_debug_flag` (in `/vendor/lib64/libssc.so`)
    reads `persist.vendor.sensors.debug.ssc_qmi_debug`, and setting it true does
