@@ -1036,10 +1036,11 @@ the request as QMI 0x20 to service 400, the SUID placeholder 0xab, a
 sensor), and TLV 0x10 as **length 0x0001, value 0x01**. The driver had put
 its client byte in TLV 0x10's length high byte (length 0x0101 — refused with
 result 1/error 1). The request now matches the phone byte for byte
-(`logs/212720-run.log`: result 0/error 0), but no SUID event follows and the
-process still dies about 5 s later on any request, valid or refused. What the
-client manager starts on that first request — and the registry the process
-reads once at PD start, before the listener exists — is the next question.
+(`logs/212720-run.log`: result 0/error 0), but no SUID event follows, and the
+lookup itself still takes the process down (a config addressed to a known SUID
+does not — below). What the client manager starts on that first request — and
+the registry the process reads once at PD start, before the listener exists —
+is the next question.
 
 The same capture also holds the DSP's answers: the real SUIDs — the
 accelerometer's is `0x1fbb6afc01727ea6`/`0x9a418d19f8d7ba44`.
