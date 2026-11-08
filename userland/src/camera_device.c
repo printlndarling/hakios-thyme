@@ -1576,6 +1576,13 @@ still_accumulate(const struct hakios_camera_frame *f, const uint8_t *raw)
 		}
 	}
 	still_n = 0;
+	/*
+	 * The sums are the next photograph's to start from zero: left here, the second
+	 * shot of a scene adds onto the first one's total and goes out at twice the
+	 * light -- its whites clip channel by channel and the picture turns pink (the
+	 * preview, which never averages, was right all along).
+	 */
+	memset(still_acc, 0, (size_t)still_w * still_h * sizeof(uint16_t));
 	say("the photograph's %u frames averaged", STILL_FRAMES);
 	return true;
 }
