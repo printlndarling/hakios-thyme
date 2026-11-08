@@ -813,7 +813,10 @@ falls from B/G 1.174 to 1.095 (`logs/lit-rear.png` against `logs/cl-rear.png`,
 `logs/132746-run.log`), while the white-walled scenes are unchanged (front still R/G
 1.008, B/G 0.994, `logs/133327-run.log`). The whites in that view still read warm — they
 clip at the 28x gain the dim room needs, which the white balance cannot undo; the
-exposure's highlight headroom is the next piece there. Android's own HAL, on the same scene,
+exposure's highlight headroom is the next piece there. That pink was in the end the still
+path's, not the white balance's (the still capture row has it): the frame sums were not
+cleared between shots, so the second photograph went out at twice the light and clipped.
+Android's own HAL, on the same scene,
 reports its white balance: `CamX ... Applying Stats Update. AWB Gain(R:1.867, G:1.000,
 B:1.971) CCT(4761). AEC Gain(11.0) ExpTime(20 ms)` (`adb logcat`, `logs/android-rear-1420.jpg`).
 Ours in that room were R 1.86, B 1.88, CCT about 5300 — the same white balance, so the
