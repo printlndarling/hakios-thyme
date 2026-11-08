@@ -26,6 +26,15 @@ struct isp_stats {
 	 */
 	double          grey[2], neutral[2];
 	uint32_t        grey_cells, neutral_cells;
+	/*
+	 * The white patch: a 16 x 16 histogram of a cell's colour, R/G across and B/G up, each
+	 * covering 0.5 to 1.5, weighted by the cell's green. The brightest bin close to grey --
+	 * the light a white surface is under -- is the scene's white point where the room has a
+	 * large coloured wall the grey average follows. Its 3 x 3 neighbourhood is taken whole.
+	 */
+	double          chroma[16][16];
+	double          cluster[2];
+	uint32_t        cluster_valid;
 };
 
 /*

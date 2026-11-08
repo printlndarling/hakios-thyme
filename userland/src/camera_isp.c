@@ -170,6 +170,19 @@ isp_measure(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 					cb *= gains[2];
 				}
 				/*
+				 * The white patch's histogram: the cell's colour, R/G across and B/G up, each
+				 * weighted by its green. A room's white furniture and lit walls land together in
+				 * one bin; a coloured wall the size of a room in another.
+				 */
+				{
+					float u = cr / cg, v = cb / cg;
+					int bu = (int)((u - 0.5f) * 16.0f), bv = (int)((v - 0.5f) * 16.0f);
+
+					if (bu >= 0 && bu < 16 && bv >= 0 && bv < 16) {
+						s->chroma[bu][bv] += cg;
+					}
+				}
+				/*
 				 * Each cell's colour, not its light: summed, a lamp or a screen in the picture -- tens of
 				 * times brighter than the room it is in -- would have the white balance to itself, and
 				 * the room would be left the colour of its light.
@@ -202,6 +215,57 @@ isp_measure(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 	for (int c = 0; c < 2; c++) {
 		s->grey[c] = s->grey_cells ? grey[c] / s->grey_cells : 0;
 		s->neutral[c] = s->neutral_cells ? neutral[c] / s->neutral_cells : 0;
+	}
+	/*
+	 * The white patch: the histogram's brightest bin that is near grey, its 3 x 3 neighbourhood
+	 * taken as one, and a mild preference for the warm side -- this sensor's whites are red over
+	 * blue under every light from a candle up, so a colour on the other side of grey is a
+	 * painted wall or a coloured object, not the light.
+	 */
+	{
+		double best = 0, total = 0;
+		int best_x = -1, best_y = -1;
+
+		for (int y = 0; y < 16; y++) {
+			for (int x = 0; x < 16; x++) {
+				double w = s->chroma[x][y];
+				float u = 0.5f + (x + 0.5f) / 16.0f, v = 0.5f + (y + 0.5f) / 16.0f;
+				float off = fabsf(u - 1) + fabsf(v - 1);
+				float warm = (u + 0.2f) / (v + 0.2f);
+
+				total += w;
+				if (w <= 0) {
+					continue;
+				}
+				warm = warm < 0.3f ? 0.3f : warm > 3 ? 3 : warm;
+				if (w / (off + 0.08) * warm > best) {
+					best = w / (off + 0.08) * warm;
+					best_x = x;
+					best_y = y;
+				}
+			}
+		}
+		s->cluster_valid = 0;
+		if (best_x >= 0) {
+			int x0 = best_x > 0 ? best_x - 1 : 0, x1 = best_x < 15 ? best_x + 1 : 15;
+			int y0 = best_y > 0 ? best_y - 1 : 0, y1 = best_y < 15 ? best_y + 1 : 15;
+			double sum = 0, su = 0, sv = 0;
+
+			for (int y = y0; y <= y1; y++) {
+				for (int x = x0; x <= x1; x++) {
+					double w = s->chroma[x][y];
+
+					su += (0.5 + (x + 0.5) / 16.0) * w;
+					sv += (0.5 + (y + 0.5) / 16.0) * w;
+					sum += w;
+				}
+			}
+			if (sum > total * 0.002) {
+				s->cluster[0] = su / sum;
+				s->cluster[1] = sv / sum;
+				s->cluster_valid = 1;
+			}
+		}
 	}
 	for (int i = 63, above = 0; i >= 0; i--) {
 		above += s->hist[i];
@@ -395,7 +459,18 @@ isp_awb(struct isp *isp, const struct isp_stats *s)
 	} else {
 		return;
 	}
+	/*
+	 * The white patch, when the frame has one: the brightest region near grey is the light a
+	 * white surface is under. In a room whose largest coloured surface is a painted wall, the
+	 * average is that wall's colour and the whites come out its opposite (a cyan wall made the
+	 * fridge pink); the patch is the better witness.
+	 */
+	if (s->cluster_valid && s->cluster[0] > 0.25 && s->cluster[1] > 0.25) {
+		float cr = (float)(1 / s->cluster[0]), cb = (float)(1 / s->cluster[1]);
 
+		r = 0.7f * cr + 0.3f * r;
+		b = 0.7f * cb + 0.3f * b;
+	}
 	/*
 	 * Onto the line of the reference lights: a scene's own colours pull grey world off it -- a pink
 	 * screen, a green wall -- and off it is what shows as green or magenta, while along it is a
