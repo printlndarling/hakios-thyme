@@ -2764,6 +2764,23 @@ static const uint8_t sns_gyro_suid[16] = {
 	0xa0, 0x72, 0xf9, 0x69, 0x89, 0xc4, 0xd3, 0x97,
 };
 static uint32_t sns_gyro_direct;         /* boot-arg sns_gyro_direct: configure the gyroscope by that SUID */
+
+/*
+ * The registry service itself, addressed by the data type's name as its SUID: the
+ * phone's SUID events show that a sensor whose attributes carry its name yields the
+ * name as the 128-bit SUID (ambient_light is the bytes "amsTCS3701ALS___").
+ */
+static const uint8_t sns_registry_suid[16] = {
+	'r', 'e', 'g', 'i', 's', 't', 'r', 'y', 0, 0, 0, 0, 0, 0, 0, 0,
+};
+/* The observed SUIDs pad a short name with underscores (ambient_light is "amsTCS3701ALS___"). */
+static const uint8_t sns_registry_suid_us[16] = {
+	'r', 'e', 'g', 'i', 's', 't', 'r', 'y', '_', '_', '_', '_', '_', '_', '_', '_',
+};
+static const uint8_t sns_registry_suid_sns[16] = {
+	's', 'n', 's', '_', 'r', 'e', 'g', 'i', 's', 't', 'r', 'y', '_', '_', '_', '_',
+};
+static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 
@@ -3176,6 +3193,21 @@ sns_ask(const char *type)
 }
 
 static void
+sns_registry_read(const char *group, const uint8_t suid[16])
+{
+	uint8_t inner[64];
+	uint8_t *p = inner;
+	char shown[17];
+
+	memcpy(shown, suid, 16);
+	shown[16] = 0;
+	p = sns_bytes(p, 1, group, (uint32_t)strlen(group));
+	printf("slpi: sns: asking the registry (SUID \"%s\") for group \"%s\"\n", shown, group);
+	/* 0x200 is the registry suite's read_req, and the SUID selects which service gets it */
+	sns_qmi_send(0x200, suid, inner, (uint32_t)(p - inner));
+}
+
+static void
 sns_start(void)
 {
 	uint32_t node = 0, port = 0;
@@ -3196,6 +3228,11 @@ sns_start(void)
 	 * without any request had no protection-domain failure at all).
 	 */
 	sns_client_byte = 1;
+	if (sns_registry_probe) {
+		sns_registry_read("sns_cm", sns_registry_suid);
+		sns_registry_read("sns_cm", sns_registry_suid_us);
+		sns_registry_read("sns_cm", sns_registry_suid_sns);
+	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
 		sns_have_suid = true;
@@ -6454,6 +6491,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
+	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
