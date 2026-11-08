@@ -514,10 +514,19 @@ made to answer as the phone does, 1 domain for `tms/pdr_enabled`
 (`logs/162943-run.log`) — and the sensor process's crash item is unchanged:
 `TMR_CLNT_1:0x89 ... USER-PD DOG detects stalled initialization`, with the
 SNS service 400 acking the SUID request (QMI result 0) and sending no SUID
-event. The locator is therefore not the missing piece: the stall is the PD's
-own timer client, and the SUID lookup's silence points at the registry the
-sns may expect (`sns_reg_config` and the persist registry on the phone) as
-the next question.
+event. The locator is therefore not the missing piece by itself — but where the TMS
+lives is. The phone's map puts `tms/pdr_enabled` on the modem's domain, and
+with the modem down the sensor process's timer client stalled every boot
+(`TMR_CLNT_1:0x89 ... USER-PD DOG detects stalled initialization`). Answered
+with `msm/slpi/root_pd` **first** and the modem's domain second, the timer
+client comes up: `logs/193010-run.log` has no `TMR_CLNT` item at all and ends
+with `THE SENSOR DSP STAYS ON while the system runs`. The failure then moves
+one step on: the sensor PD's own `servreg_monitor.c:537` times out waiting
+for the AP to acknowledge `msm/slpi/sensor_pd`
+(`Servreg ack timedout:msm/slpi/sensor_pd:State:0xfffffff`), and the SNS SUID
+request is still answered with a QMI result and no event. Serving the DSP's
+listener registration on the AP's notifier (service 66) with the domain's
+state is the next piece.
 
 The registry's shape is known now: on the phone it is one JSON file per group
 under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
