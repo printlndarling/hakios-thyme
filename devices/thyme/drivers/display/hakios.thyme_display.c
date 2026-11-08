@@ -35,6 +35,8 @@ extern void loader_log_putc(char c);
 
 #define DSI_CTRL                   0x0004
 #define DSI_STATUS                 0x0008
+#define DSI_CMD_DMA_CTRL           0x0038
+#define DSI_CMD_DMA_CTRL_LOW_POWER (1u << 26)   /* the device tree's dsi_lp_mode for the timing switch */
 #define DSI_COMMAND_MODE_DMA_CTRL  0x003c
 #define DSI_DMA_CMD_LENGTH         0x004c
 #define DSI_TRIG_CTRL              0x0084
@@ -178,10 +180,12 @@ permille_to_level(int permille)
  * payload four bytes each, least significant byte first. The controller's DMA
  * and trigger state is restored whether the transfer finishes or not.
  */
+static bool dsi_lp_command;      /* the panel's timing switch is a dsi_lp_mode command set */
+
 static bool
 dsi_send_words(const uint32_t *words, unsigned count)
 {
-	uint32_t old_dma_ctrl, old_trig;
+	uint32_t old_dma_ctrl, old_trig, old_cmd_dma = 0;
 	bool done = false;
 
 	if (count == 0 || count > 9) {
@@ -209,6 +213,10 @@ dsi_send_words(const uint32_t *words, unsigned count)
 
 	old_dma_ctrl = rd(dsi0, DSI_COMMAND_MODE_DMA_CTRL);
 	old_trig = rd(dsi0, DSI_TRIG_CTRL);
+	if (dsi_lp_command) {
+		old_cmd_dma = rd(dsi0, DSI_CMD_DMA_CTRL);
+		wr(dsi0, DSI_CMD_DMA_CTRL, old_cmd_dma | DSI_CMD_DMA_CTRL_LOW_POWER);
+	}
 	wr(dsi0, DSI_INT_CTRL,
 	    (rd(dsi0, DSI_INT_CTRL) & ~DSI_INT_CMD_DMA_DONE_MASK) | DSI_INT_CMD_DMA_DONE);
 	if ((old_trig & 0xfu) != 0x4u) {
@@ -237,6 +245,9 @@ dsi_send_words(const uint32_t *words, unsigned count)
 	wr(dsi0, DSI_COMMAND_MODE_DMA_CTRL, old_dma_ctrl);
 	if ((old_trig & 0xfu) != 0x4u) {
 		wr(dsi0, DSI_TRIG_CTRL, old_trig);
+	}
+	if (dsi_lp_command) {
+		wr(dsi0, DSI_CMD_DMA_CTRL, old_cmd_dma);
 	}
 	return done;
 }
@@ -304,6 +315,12 @@ send_backlight(uint32_t level)
 static const uint8_t panel_page_f0[] = {
 	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00,
 };
+static const uint8_t panel_page_f0_3[] = {
+	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x03,
+};
+static const uint8_t panel_bb[] = {
+	0xbb, 0x11, 0x00, 0x0e, 0x5a, 0x00, 0x10, 0x4f,
+};
 static const uint8_t panel_b4_60[] = {
 	0xb4, 0xcb, 0xbb, 0xbb, 0xaa, 0x99, 0x77, 0x66, 0x00, 0x00,
 	0x00, 0xb4, 0xd0, 0xd0, 0xd0, 0xd0, 0xd0, 0x86, 0x86, 0x3c,
@@ -316,23 +333,37 @@ static const uint8_t panel_b4_90[] = {
 };
 
 static bool
-send_panel_timing(uint32_t hz, uint32_t sequence)
+send_panel_timing_cmd(uint32_t hz, uint32_t sequence)
 {
 	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
 	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
 	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
+	uint8_t c1[3] = { 0xc1, 0x00, (uint8_t)(hz >= 90 ? 0x4b : 0x50) };
 	uint8_t elvss[2] = { 0xb5, 0x84 };        /* the vendor's normal-operation value, after every 2f/26 */
 
 	if (sequence >= 2) {
 		return true;
 	}
 	if (sequence == 0) {
+		/* the device tree's timing-switch-command, verbatim: F0 page 0, B4, C1, F0 page 3, BB */
 		tell("display: THYME panel timing: F0 page\n");
 		if (!dsi_send_long(panel_page_f0, sizeof(panel_page_f0))) {
 			return false;
 		}
 		tell("display: THYME panel timing: B4 table\n");
 		if (!dsi_send_long(b4, 30)) {
+			return false;
+		}
+		tell("display: THYME panel timing: c1 %#x\n", c1[2]);
+		if (!dsi_send_long(c1, sizeof(c1))) {
+			return false;
+		}
+		tell("display: THYME panel timing: F0 page 3\n");
+		if (!dsi_send_long(panel_page_f0_3, sizeof(panel_page_f0_3))) {
+			return false;
+		}
+		tell("display: THYME panel timing: bb\n");
+		if (!dsi_send_long(panel_bb, sizeof(panel_bb))) {
 			return false;
 		}
 	}
@@ -347,6 +378,18 @@ send_panel_timing(uint32_t hz, uint32_t sequence)
 	/* every vendor nolp sequence ends 2f/26/b5; try the same latch after the switch */
 	tell("display: THYME panel timing: b5 %#x\n", elvss[1]);
 	return dsi_send_short(elvss, sizeof(elvss));
+}
+
+static bool
+send_panel_timing(uint32_t hz, uint32_t sequence)
+{
+	bool ok;
+
+	/* the device tree marks the timing-switch command as "dsi_lp_mode" */
+	dsi_lp_command = true;
+	ok = send_panel_timing_cmd(hz, sequence);
+	dsi_lp_command = false;
+	return ok;
 }
 
 SYSCTL_DECL(_kern_hakios);
@@ -530,6 +573,7 @@ hakios_brightness_init(void)
 
 	brightness_ready = true;
 	uint32_t fb_hz = 0;
+	/* the thyme panel's hardware is 90 Hz at most (the device tree's 0x78 entry is not this panel's) */
 	if (PE_parse_boot_argn("fb_hz", &fb_hz, sizeof(fb_hz)) && (fb_hz == 60 || fb_hz == 90)) {
 		uint32_t sequence = 0;
 		(void)PE_parse_boot_argn("panel_seq", &sequence, sizeof(sequence));
@@ -544,8 +588,8 @@ hakios_brightness_init(void)
 			}
 			switched = send_panel_timing(fb_hz, sequence);
 		}
-		if (switched && fb_hz == 90) {
-			hakios_panel_refresh_hz = 90;
+		if (switched && fb_hz >= 90) {
+			hakios_panel_refresh_hz = (int)fb_hz;
 			if (&hakios_fb_publish_refresh != NULL) {
 				hakios_fb_publish_refresh();
 			}
