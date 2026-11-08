@@ -40,10 +40,12 @@ used as the reference on the same hardware and firmware).
 - **The reverse FastRPC tunnel never receives a call**: no `apps_std` request
   (the DSP's file service) arrives in any ordering tried — the default chain,
   `fastrpc_early=1` (listener at the DSP's boot), the dual PD-0/PD-2 listeners
-  (`fastrpc_phone=4`), the late attach on its own client, the restart ordering,
-  or the phone's own daemon order (`fastrpc_phone=2/3/6`). So the sensor
-  process's registry read of `/vendor/etc/sensors/sns_reg_config` and the
-  persist files (both served in the scene) never reaches the AP.
+  (`fastrpc_phone=4`) with a direct-SUID config as well (`logs/225533-run.log`:
+  both listeners wait, the config is accepted, not one reverse call), the late
+  attach on its own client, the restart ordering, or the phone's own daemon
+  order (`fastrpc_phone=2/3/6`). So the sensor process's registry read of
+  `/vendor/etc/sensors/sns_reg_config` and the persist files (both served in
+  the scene) never reaches the AP.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
   per-processor info and needs the registry group `sns_cm`) evidently never
   comes up: the stream cannot start. Its strings name the missing group and the
