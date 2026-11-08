@@ -4138,7 +4138,8 @@ static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
 {
 	uint8_t nested[2048];
-	uint32_t sizes[4] = { 0, 0, 0, sizeof(nested) }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
+	/* the phone's first next2 input is {context 0, result -1, 0, 0}: no call before it */
+	uint32_t sizes[4] = { 0, 0xffffffffu, 0, 0 }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
 	const void *sources[4];
 
 	lengths[0] = sizeof(sizes);
