@@ -71,6 +71,20 @@ used as the reference on the same hardware and firmware).
    the ioctl pointer, so the invoke buffers (and the file paths inside them)
    need a small ptrace reader — the tool to build if the tunnel stays silent.
 
+   **The attach's payload is a process id, not a client id**: the phone's
+   `drivers/char/adsprpc.c` `fastrpc_init_process()` sends, for
+   `FASTRPC_INIT_ATTACH_SENSORS`, one 4-byte buffer holding the calling
+   process's **tgid** on handle `FASTRPC_STATIC_HANDLE_PROCESS_GROUP`, sc
+   `REMOTE_SCALARS_MAKE(0, 1, 0)` (0x10000). Our chain's payload
+   (`fastrpc_client`, default 0) has been 0; the DSP's process-group handle is
+   the one the reverse calls are addressed to, so a nonzero pgid
+   (`fastrpc_client=1`) is the difference under test now.
+   Also: the phone allocates its remote heap from the reserved `sdsp_region`
+   DMA pool; SCM-assigning a generic kernel heap (the first attempt got only
+   16 KB) stalled the scene at the SCM call and the loader restarted the phone —
+   that experiment was reverted and must not be repeated with ordinary heap
+   memory.
+
 3. **Get the DSP's own log**: `sns_diag_fw_log` exists in the SNS diag sensor
    (`diag_sensor`); the HAL's `get_qmi_debug_flag` (in `/vendor/lib64/libssc.so`)
    reads `persist.vendor.sensors.debug.ssc_qmi_debug`, and setting it true does
