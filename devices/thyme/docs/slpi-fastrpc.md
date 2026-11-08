@@ -579,6 +579,20 @@ reverse tunnel, before the listener exists) is the next question; the
 `fastrpc_early=1` order brings the listener up at the DSP's boot instead of
 after the QRTR listen.
 
+The same capture also holds the DSP's answers: the `sns_suid_event`s carry
+real SUIDs — the accelerometer's is
+`0x1fbb6afc01727ea6`/`0x9a418d19f8d7ba44` (high/low), the value the phone's
+DSP reports to each HAL instance. With `sns_accel_direct=1` the driver sends
+the accelerometer's `SNS_STD_SENSOR_CONFIG` (513) to that SUID without any
+lookup: the DSP **accepts it** (result 0/error 0, `logs/221040-run.log`) and,
+for the first time on this path, the sensor process does **not** crash — the
+whole run has no `TMR_CLNT`, no `irq115`, no item 424. The SUID lookups
+(message 512) are what start the service the registry cannot answer and take
+the DSP down; a config to a known SUID does not. No `SNS_STD_SENSOR_EVENT`
+(1025) follows the config yet, though, and the reverse tunnel still receives
+no request, so the stream itself — likely the client manager's instance and
+its registry group — is the next piece.
+
 The registry's shape is known now: on the phone it is one JSON file per group
 under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
 `ak0991x_0`, `bmp285_0`, `<sensor>.<item>`, each

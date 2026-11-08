@@ -1041,6 +1041,17 @@ process still dies about 5 s later on any request, valid or refused. What the
 client manager starts on that first request — and the registry the process
 reads once at PD start, before the listener exists — is the next question.
 
+The same capture also holds the DSP's answers: the real SUIDs — the
+accelerometer's is `0x1fbb6afc01727ea6`/`0x9a418d19f8d7ba44`.
+Sending `SNS_STD_SENSOR_CONFIG` (513) to that SUID directly, with no lookup,
+is **accepted** (result 0/error 0) and the sensor process **does not crash**
+for the whole run (`logs/221040-run.log`: no `TMR_CLNT`, no `irq115`, no item
+424). It is the SUID lookup (512) that starts the service the missing
+registry cannot answer and takes the DSP down. No `SNS_STD_SENSOR_EVENT`
+(1025) follows the config yet and the reverse tunnel still receives no
+request, so the stream — the client manager's instance and its registry
+group — is the next piece.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the

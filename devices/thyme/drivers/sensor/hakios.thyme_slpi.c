@@ -2744,6 +2744,19 @@ qrtr_input(const uint8_t *data, uint32_t length)
 
 static uint8_t sns_suid[16];
 static bool sns_have_suid, sns_have_registry;
+
+/*
+ * The accelerometer's SUID as the phone's own DSP reports it to
+ * android.hardware.sensors@1.0-service (root strace of the HAL: the sns_suid_event
+ * for the lookup "accel", low 0x9a418d19f8d7ba44, high 0x1fbb6afc01727ea6). With
+ * fastrpc's reverse tunnel still silent, this lets the config be sent without the
+ * lookup the registry cannot answer.
+ */
+static const uint8_t sns_accel_suid[16] = {
+	0x44, 0xba, 0xd7, 0xf8, 0x19, 0x8d, 0x41, 0x9a,
+	0xa6, 0x7e, 0x72, 0x01, 0xfc, 0x6a, 0xbb, 0x1f,
+};
+static uint32_t sns_accel_direct;        /* boot-arg sns_accel_direct: configure the accelerometer by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 
@@ -3176,11 +3189,18 @@ sns_start(void)
 	 * without any request had no protection-domain failure at all).
 	 */
 	sns_client_byte = 1;
-	/* the sensor process may still be initialising at three seconds: ask again for a while */
-	for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid); attempt++) {
-		sns_ask("registry");
-		sns_ask("accel");
-		sleep_ms(2000);
+	if (sns_accel_direct) {
+		memcpy(sns_suid, sns_accel_suid, sizeof(sns_suid));
+		sns_have_suid = true;
+		printf("slpi: sns: the accelerometer is configured by the SUID the phone's DSP reports\n");
+		sns_config();
+	} else {
+		/* the sensor process may still be initialising at three seconds: ask again for a while */
+		for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid); attempt++) {
+			sns_ask("registry");
+			sns_ask("accel");
+			sleep_ms(2000);
+		}
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
@@ -3268,6 +3288,31 @@ servreg_register(const char *path)
 }
 
 /* Dump one shared-memory item as text: the DSP's own log and trace buffers live in items like this. */
+static void
+dump_smem_hex(uint32_t id)
+{
+	uint32_t size = 0, at = smem_item(id, &size);
+
+	if (at == 0 || size == 0) {
+		printf("slpi: item %u: not there\n", id);
+		return;
+	}
+	if (size > 512) {
+		size = 512;
+	}
+	printf("slpi: item %u, %u bytes, as hex:\n", id, size);
+	for (uint32_t row = 0; row < size; row += 16) {
+		printf("slpi: item %u | %04x:", id, row);
+		for (uint32_t i = 0; i < 16 && row + i < size; i++) {
+			uint8_t byte = 0;
+
+			smem_peek(at + row + i, &byte, 1);
+			printf(" %02x", byte);
+		}
+		printf("\n");
+	}
+}
+
 static void
 dump_smem_item(uint32_t id)
 {
@@ -6396,11 +6441,13 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
-	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0, servreg_on = 0, dump_item = 0;
+	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0, servreg_on = 0, dump_item = 0, dump_hex = 0;
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
+	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
+	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
 	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
 	PE_parse_boot_argn("fastrpc_call", &fastrpc_call, sizeof(fastrpc_call));
 	PE_parse_boot_argn("fastrpc_pd", &fastrpc_pd, sizeof(fastrpc_pd));
@@ -6501,6 +6548,10 @@ step_qrtr(void)
 	if (dump_item != 0) {
 		/* again, now that the SNS client has run: the DSP's own words about it */
 		dump_smem_item(dump_item);
+	}
+	if (dump_hex != 0) {
+		/* the crash item holds more than its first line: registers and a stack, as bytes */
+		dump_smem_hex(dump_hex);
 	}
 	return qrtr_hellos != 0;
 }
