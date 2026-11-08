@@ -477,11 +477,25 @@ set (`465dfe6`), and the daily scene requests 90 Hz again (`8befdf8`).
 The cold gate `logs/005313-run.log` (kernel `9b48a381`) shows every step accepted,
 `panel timing 90 Hz seq=0 (ok), framebuffer rate 90 Hz`, two Wi-Fi joins with DHCP
 `192.168.0.114`, Safari, the Bluetooth page and `hakios-gl` frames; the frame
-intervals cluster at the 11 ms beat. The push-rate count has not been repeated
-since the LP fix — the gate does not run `panel_te_rate` — and the panel's own
-scan is still unreadable on THYME, so whether the panel itself now scans at 90 is
-not yet proven by the hardware; the user's check of scrolling feel at this
-default is the deciding evidence.
+intervals cluster at the 11 ms beat.
+
+The sequence was then corrected to the panel's own node (`60c369b`). The live
+device tree carries several 42 02 0a panels; the one this phone runs (J2,
+panel-id `0x4a32`) has timing@0 60 Hz and timing@1 90 Hz, and its
+timing-switch-command is F0 page 0, the mode's B4 table, `2f`, `26` — the C1,
+F0 page 3 and BB writes belong to the J1S nodes and are gone, as is the `b5`
+latch. A run with it (`logs/014057-run.log`, kernel `c329d30a`) logs every step
+accepted, `panel timing 90 Hz seq=0 (ok), framebuffer rate 90 Hz`, and returns
+cleanly; the full gate on the same kernel and source (`logs/014626-run.log`,
+source `60c369b`) repeats the two Wi-Fi joins with DHCP, Safari, the Bluetooth
+page and the accepted switch, with no panic.
+
+The panel's TE pad is not a readout: with the loader's own TE-on (`35 00` is in
+its init) and a whole-second edge count (`panel_te_probe=1`), pin 66 reads 0
+edges, so the pad does not carry the pulse on this board. The vendor's disp-rate
+GPIO (pin 50, which its driver holds high) hung the kernel when driven from the
+probe and stays opt-in. The panel's own scan rate therefore remains unmeasured
+by us; the user's check of scrolling feel is the deciding evidence.
 
 A 32-minute soak on the then-current 60 Hz default (`logs/035725-run.log`, 2026-11-06)
 passed: no panic or watchdog reset; a steady 20 frames a second idle with

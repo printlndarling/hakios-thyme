@@ -19,7 +19,7 @@ build, not merely compiled.
 | Area | Status | What is verified |
 |---|---|---|
 | Boot to SpringBoard | **PASS** | launchd, backboardd, SpringBoard and the settings/UI stack reach the home screen from a cold RAM boot |
-| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median). The daily scene now requests 90 Hz (`fb_hz=90`): the device tree's whole timing-switch sequence (F0 page 0, B4, C1, F0 page 3, BB, 2f, 26) is accepted in the LP mode the tree asks for, and the framebuffer announces the rate. The panel's own scan rate is still not readable on THYME (the TE pin is not routed and the INTF block is unsafe), and the single push-rate measurement (~59 a second) predates the LP-mode fix, so a genuine 90 Hz panel refresh is not yet proven |
+| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median). The daily scene now requests 90 Hz (`fb_hz=90`): this panel's own timing-switch sequence (F0 page 0, its B4 table, 2f, 26) is accepted in the LP mode the tree asks for, and the framebuffer announces the rate. The panel's own scan rate is still not readable on THYME (the TE pin is not routed and the INTF block is unsafe), and the single push-rate measurement (~59 a second) predates the LP-mode fix, so a genuine 90 Hz panel refresh is not yet proven |
 | CPU / DVFS | **PASS** | 7 CPUs start; all three EPSS domains reach 1804 / 2419 / 3187 MHz |
 | GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 110 frames in the latest wireless run |
 | Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
@@ -70,22 +70,23 @@ build, not merely compiled.
 
 | Artifact | SHA-256 |
 |---|---|
-| `hakios-kernel` | `9b48a3817bcfbea5503e0a94ba2b27e4cbf97e3b5a1aae208e03f14a575b5a15` |
+| `hakios-kernel` | `c329d30a6f7930ee5e6f06addc4914b98483c4b02570e202372eaec47adbaf1f` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/005313-run.log`: two Wi-Fi joins with
+The canonical cold-boot gate is `logs/014626-run.log`: two Wi-Fi joins with
 DHCP `192.168.0.114`, Safari opened, the Settings/Bluetooth screen showing the
 phone discoverable as "HakiOS Mi 10S" while it scans, `hakios-gl` frames, and
 no panic (`logs/wirelessregress-wifi.png`, `logs/wirelessregress-bt.png`).
-The daily scene now paces at the panel's 90 Hz (`fb_hz=90`): the device tree's
-whole timing-switch sequence (F0 page 0, B4, C1, F0 page 3, BB, 2f, 26) is sent
-in the LP mode the tree asks for, the framebuffer announces the accepted rate,
-and the frame intervals cluster at the 11 ms beat. The kernel is also the
-servreg-ack build (`8befdf8`): the notifier's state indications are answered,
-its protection-domain-failure reports are read, and the SNS client's request
-bytes match the phone's HAL; the sensor stream itself is still open
+The daily scene now paces at the panel's 90 Hz (`fb_hz=90`): this panel's own
+timing-switch sequence (F0 page 0, its B4 table, 2f, 26 — the J2 node's, not
+the J1S nodes' longer one) is sent in the LP mode the tree asks for, the
+framebuffer announces the accepted rate, and the frame intervals cluster at
+the 11 ms beat. The kernel is also the servreg-ack build (`8befdf8`): the
+notifier's state indications are answered, its protection-domain-failure
+reports are read, and the SNS client's request bytes match the phone's HAL;
+the sensor stream itself is still open
 (`devices/thyme/docs/sensors-status.md`). The earlier gate,
 `logs/184735-run.log`, remains the reference for the camera-focus, pacing,
 still-accumulator and locator build (`938bed9`).
