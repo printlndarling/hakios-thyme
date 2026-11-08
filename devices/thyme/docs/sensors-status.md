@@ -69,9 +69,10 @@ being the first client of that boot) and not a transport artefact.
    as an open. The first boot after the phone is reachable again runs the
    kernel-only sensor scene (`sns=1 servreg=1 fastrpc_smmu=2 fastrpc_call=9
    fastrpc_pd=2 sns_accel_direct=1 sns_raw=1 slpi_listen=30`) and looks for
-   "the DSP asks for handle ... sc ... with N bytes of inputs". The phone's
-   next2 input buffer is `{0, -1, 0, 0}`; ours is `{0, 0, 0, 2048}` and is the
-   next difference if the call still does not answer.
+   "the DSP asks for handle ... sc ... with N bytes of inputs". The next2
+   input buffer now matches the phone's `{0, -1, 0, 0}` too (`c548ece`); the
+   build with both changes is ready, and nothing else differs in the listener
+   call the spy showed.
 2. **Populate the registry**: the DSP reads `/vendor/etc/sensors/sns_reg_config`
    (the string is in its own image; `registry config file '%s' is not present`
    is its own log) and decodes the groups. Either serve that read through the
