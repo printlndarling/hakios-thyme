@@ -528,6 +528,29 @@ request is still answered with a QMI result and no event. Serving the DSP's
 listener registration on the AP's notifier (service 66) with the domain's
 state is the next piece.
 
+The ack is in, and it is the mainline one: when the notifier sends
+`SERVREG_STATE_UPDATED_IND` (0x22, TLV 0x01 state, 0x02 path, 0x03
+transaction id), the driver answers `SERVREG_SET_ACK_REQ` (0x23) with TLV 0x01
+the indication's path and TLV 0x02 its transaction id
+(`drivers/soc/qcom/pdr_interface.c`'s `pdr_send_indack_msg`, message ids from
+`pdr_internal.h`). The DSP acknowledges every one with result 0/error 0, and
+the "Servreg ack timedout" is gone: in `logs/200251-run.log` the notifier
+reports down/up (txn 2-5) as the sensor PD restarts and the DSP's last words
+change to `EX:kernel:0x0:sns_sig_remote_:0x2061:PC=0xb01c1f2c`
+(`logs/200251-run.log`). The listener registration also answers the
+protection-domain-failure request (PFR, 0x24: TLV 0x01 service, 0x02 reason)
+now, so the failure's own words are in the log: the sensor process dies in
+`irq115:0x1072 ... sns_err_handler.c:180:Crash`, and the crash PC is a
+`memcmp` whose first pointer is NULL in the SNS signal path (the remote
+processor-state signal, `sns_sig_remote_proc_state`). The registry files
+from the phone (`/mnt/vendor/persist/sensors/registry`, 189 files) now travel
+in the scene, but the reverse tunnel never opens them: the process still
+reads its registry before the listener is ready. `fastrpc_restart=1`, the
+ordering that restarts the PD with the listener waiting, crashes the fresh
+process at once in `frpck_1_2:0x5b` (`logs/201811-run.log`), so the next
+question is what the SNS signal path compares when it receives the remote
+processor-state interrupt.
+
 The registry's shape is known now: on the phone it is one JSON file per group
 under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
 `ak0991x_0`, `bmp285_0`, `<sensor>.<item>`, each

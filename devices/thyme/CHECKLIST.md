@@ -1007,6 +1007,23 @@ request's QMI with result 0; the sensor process's crash item still reads
 is the PD's own timer client, and the SUID lookup is accepted but silent — the
 registry it may need is the next question.
 
+The ack was the timer client's missing half. The AP now answers the notifier's
+state-updated indication (0x22) with mainline's `SERVREG_SET_ACK_REQ` (0x23:
+TLV 0x01 the path, TLV 0x02 the indication's transaction id), and the DSP
+accepts every one (result 0, error 0). The timeout is gone: in
+`logs/200251-run.log` the notifier reports the domain down and up (txn 2-5) as
+the sensor PD restarts, and the DSP's last words changed from
+`servreg_monitor.c:537:Servreg ack timedout:...` to
+`EX:kernel:0x0:sns_sig_remote_:0x2061:PC=0xb01c1f2c` — a `memcmp` whose first
+pointer is NULL, in the SNS remote-processor-state signal path. The
+protection-domain-failure request (0x24) is answered too, so the reason is
+read: the sensor process dies at `irq115:0x1072 ...
+sns_err_handler.c:180:Crash`. The phone's persist registry (189 files) now
+travels in the scene, but the process never opens it; the restart ordering
+(`fastrpc_restart=1`) makes the fresh process crash immediately in
+`frpck_1_2:0x5b` (`logs/201811-run.log`). What the SNS signal path compares
+when the remote-processor-state interrupt arrives is the next question.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the

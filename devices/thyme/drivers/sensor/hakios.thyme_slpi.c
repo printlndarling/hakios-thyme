@@ -2657,7 +2657,7 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 
 static void sns_input(const uint8_t *data, uint32_t length);
 static void sns_reg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
-static void servreg_input(const uint8_t *data, uint32_t length);
+static void servreg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
 static void servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length);
 
 static void
@@ -2727,7 +2727,7 @@ qrtr_input(const uint8_t *data, uint32_t length)
 		return;
 	}
 	if (header.type == QRTR_DATA && header.to_port == SERVREG_OUR_PORT) {
-		servreg_input(data + at, header.size);
+		servreg_input(header.from_node, header.from_port, data + at, header.size);
 		return;
 	}
 	printf("slpi: qrtr: a datagram of %u bytes from node %u port %u to our port %u: nobody here listens there\n", header.size,
@@ -3301,7 +3301,7 @@ dump_smem_item(uint32_t id)
 }
 
 static void
-servreg_input(const uint8_t *data, uint32_t length)
+servreg_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t length)
 {
 	uint16_t message, qmi_length;
 	uint32_t at;
@@ -3315,6 +3315,78 @@ servreg_input(const uint8_t *data, uint32_t length)
 		qmi_length = (uint16_t)(length - 7);
 	}
 	at = 7;
+	if (message == 0x22) {
+		/*
+		 * The state-updated indication. Its publisher keeps a pending-ack list --
+		 * the firmware's strings say 'servreg_get_pending_acks()' and 'QMI ACK RX
+		 * from' -- and times out when the listener does not answer ('Servreg ack
+		 * timedout: msm/slpi/sensor_pd: State: 0xfffffff'). The answer is
+		 * SERVREG_SET_ACK_REQ, message 0x23, TLV 0x01 the service path as a QMI
+		 * string and TLV 0x02 the indication's own transaction id (mainline: 
+		 * drivers/soc/qcom/qcom_pdr_msg.c, pdr_interface.c's pdr_send_indack_msg).
+		 */
+		const uint8_t *path = 0;
+		uint32_t path_length = 0;
+		uint16_t ack_txn = 0;
+		bool have_txn = false;
+
+		for (uint32_t w = 7; w + 3 <= 7 + qmi_length; ) {
+			uint8_t ty = data[w];
+			uint16_t ln = (uint16_t)(data[w + 1] | data[w + 2] << 8);
+
+			w += 3;
+			if (w + ln > 7 + qmi_length) {
+				break;
+			}
+			if (ty == 0x02) {
+				path = data + w;
+				path_length = ln;
+			} else if (ty == 0x03 && ln >= 2) {
+				ack_txn = (uint16_t)(data[w] | data[w + 1] << 8);
+				have_txn = true;
+			}
+			w += ln;
+		}
+		if (path != 0 && path_length > 0 && path_length < 64 && have_txn) {
+			uint8_t ack[96], *q = ack;
+			char shown[65];
+			uint16_t ack_length;
+
+			memcpy(shown, path, path_length);
+			shown[path_length] = 0;
+			*q++ = 0;
+			*q++ = (uint8_t)(servreg_txn & 0xff);
+			*q++ = (uint8_t)(servreg_txn >> 8);
+			servreg_txn++;
+			*q++ = 0x23;
+			*q++ = 0;
+			*q++ = 0;
+			*q++ = 0;
+			*q++ = 0x01;
+			*q++ = (uint8_t)(path_length & 0xff);
+			*q++ = (uint8_t)(path_length >> 8);
+			memcpy(q, path, path_length);
+			q += path_length;
+			*q++ = 0x02;
+			*q++ = 2;
+			*q++ = 0;
+			*q++ = (uint8_t)(ack_txn & 0xff);
+			*q++ = (uint8_t)(ack_txn >> 8);
+			ack_length = (uint16_t)(q - ack - 7);
+			ack[5] = (uint8_t)(ack_length & 0xff);
+			ack[6] = (uint8_t)(ack_length >> 8);
+			printf("slpi: servreg: > ack \"%s\" txn %u to node %u port %u (%u bytes)\n", shown, ack_txn,
+			    node, port, (uint32_t)(q - ack));
+			qrtr_out_packet(QRTR_DATA, SERVREG_OUR_PORT, node, port, ack, (uint32_t)(q - ack));
+		} else {
+			printf("slpi: servreg: the state indication has no path or transaction id to ack\n");
+		}
+	}
+	printf("slpi: servreg: < QMI %u, %u bytes:", message, length);
+	for (uint32_t i = 0; i < length && i < 48; i++) {
+		printf(" %02x", data[i]);
+	}
+	printf("\n");
 	while (at + 3 <= 7 + qmi_length) {
 		uint8_t type = data[at];
 		uint16_t l = (uint16_t)(data[at + 1] | data[at + 2] << 8);
@@ -3493,7 +3565,53 @@ servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t le
 	txn = (uint16_t)(data[1] | data[2] << 8);
 	msg = (uint16_t)(data[3] | data[4] << 8);
 	if (msg == SERVREG_LOC_PFR) {
-		printf("slpi: servreg-loc: a protection domain's failure, from node %u port %u\n", node, port);
+		/*
+		 * SERVREG_LOC_PFR_REQ (0x24): TLV 0x01 the failing service's path, TLV 0x02 the
+		 * reason (mainline's servreg_loc_pfr_req). The DSP's monitor expects the answer;
+		 * without one it reports the same failure again.
+		 */
+		char service[65] = { 0 }, reason[65] = { 0 };
+		uint16_t service_length = 0, reason_length = 0;
+		uint8_t *answer = out;
+
+		for (at = 7; at + 3 <= length;) {
+			uint8_t type = data[at];
+			uint16_t l = (uint16_t)(data[at + 1] | data[at + 2] << 8);
+			uint32_t n;
+
+			at += 3;
+			if (at + l > length) {
+				break;
+			}
+			if (type == 0x01) {
+				n = l < sizeof(service) - 1 ? l : sizeof(service) - 1;
+				memcpy(service, data + at, n);
+				service_length = (uint16_t)n;
+			} else if (type == 0x02) {
+				n = l < sizeof(reason) - 1 ? l : sizeof(reason) - 1;
+				memcpy(reason, data + at, n);
+				reason_length = (uint16_t)n;
+			}
+			at += l;
+		}
+		service[service_length] = 0;
+		reason[reason_length] = 0;
+		printf("slpi: servreg-loc: the protection domain \"%s\" failed: \"%s\", from node %u port %u\n", service,
+		    reason, node, port);
+		*answer++ = 2;                  /* a response */
+		*answer++ = (uint8_t)(txn & 0xff);
+		*answer++ = (uint8_t)(txn >> 8);
+		*answer++ = SERVREG_LOC_PFR;
+		*answer++ = 0;
+		*answer++ = 7;
+		*answer++ = 0;
+		*answer++ = 0x02;               /* TLV 2: the result, success */
+		*answer++ = 4;
+		*answer++ = 0;
+		*answer++ = 0;
+		*answer++ = 0;
+		*answer++ = 0;
+		qrtr_out_packet(QRTR_DATA, SERVREG_LOC_PORT, node, port, out, (uint32_t)(answer - out));
 		return;
 	}
 	if (msg != SERVREG_LOC_GET_DOMAIN_LIST) {
