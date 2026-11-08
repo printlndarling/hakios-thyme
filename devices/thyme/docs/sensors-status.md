@@ -29,6 +29,12 @@ used as the reference on the same hardware and firmware).
   process does **not** crash (no `TMR_CLNT`, no `irq115`, no item 424,
   `logs/221040-run.log`, `logs/221918-run.log`).
 
+The SNS client response carries TLV 0x10 (eight bytes) and TLV 0x11 (four):
+the phone's HAL gets a nonzero 0x10 (0x1d, 0x1e, …) and 0x11 = 0, while every
+answer here has 0x10 = 0 and 0x11 = 5. Changing the QRTR source port (0x100 to
+0x1e42) changes neither, so 0x10 is the DSP's own client/instance number (0
+being the first client of that boot) and not a transport artefact.
+
 ## Not working yet
 
 - **No sensor data**: no `SNS_STD_SENSOR_EVENT` (1025) follows the accepted
