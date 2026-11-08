@@ -70,16 +70,16 @@ build, not merely compiled.
 
 | Artifact | SHA-256 |
 |---|---|
-| `hakios-kernel` | `9488e22872819a11cd329972b4b61bd2379c03b68718dd5434e4e4ff202ce089` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `b25eb0d9923fd25c679ddffe97455358d54ae87c29b40e62c35814999f53ee1b` |
+| `hakios-kernel` | `2625783145f30664b7c1933df98e1b105995c6a4d199a7b5e77250112269b7a8` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/152546-run.log`: two Wi-Fi joins with
-DHCP `192.168.0.114`, Safari TLS, 241 LE reports (46 named), 111 `hakios-gl`
+The canonical cold-boot gate is `logs/184735-run.log`: two Wi-Fi joins with
+DHCP `192.168.0.114`, Safari TLS, 696 LE reports (153 named), 111 `hakios-gl`
 frames (the scene's screens are mostly still), zero H4 faults and no panic.
-The kernel and the root are the camera-focus, pacing and still-accumulator
-build (`af48b95`).
+The kernel and the root are the camera-focus, pacing, still-accumulator and
+locator build (`938bed9`, with the panel-timing attempt reverted).
 The 90 fps pacing check is
 `logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
 `devices/thyme/ram-baseline.conf` is the machine-checked
