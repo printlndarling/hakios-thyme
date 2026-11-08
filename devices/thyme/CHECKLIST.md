@@ -488,7 +488,12 @@ latch. A run with it (`logs/014057-run.log`, kernel `c329d30a`) logs every step
 accepted, `panel timing 90 Hz seq=0 (ok), framebuffer rate 90 Hz`, and returns
 cleanly; the full gate on the same kernel and source (`logs/014626-run.log`,
 source `60c369b`) repeats the two Wi-Fi joins with DHCP, Safari, the Bluetooth
-page and the accepted switch, with no panic.
+page and the accepted switch, with no panic. A 21-minute soak on the 90 Hz
+daily scene (`logs/021747-run.log`, 1250 s, same kernel) passed: no panic, the
+hottest core 65.4 °C with the rows unchanged, the idle scene's 20 frames a
+second with 0 swaps waited for the one before, 0 given up and 0 too late for
+the next scan, and an ordered teardown (the audio DSP stopped and TrustZone
+shut it down); `backboardd`'s SIGSEGV is the return's known one.
 
 The panel's TE pad is not a readout: with the loader's own TE-on (`35 00` is in
 its init) and a whole-second edge count (`panel_te_probe=1`), pin 66 reads 0

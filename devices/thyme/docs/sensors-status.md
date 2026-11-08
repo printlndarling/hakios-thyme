@@ -43,15 +43,20 @@ being the first client of that boot) and not a transport artefact.
   attributes from the registry, which is empty here, and the sensor process
   crashes (`irq115`, then `EX:kernel:...sns_sig_remote_...`). A config to a
   known SUID does not.
-- **The reverse FastRPC tunnel never receives a call**: no `apps_std` request
-  (the DSP's file service) arrives in any ordering tried — the default chain,
-  `fastrpc_early=1` (listener at the DSP's boot), the dual PD-0/PD-2 listeners
-  (`fastrpc_phone=4`) with a direct-SUID config as well (`logs/225533-run.log`:
-  both listeners wait, the config is accepted, not one reverse call), the late
-  attach on its own client, the restart ordering, or the phone's own daemon
-  order (`fastrpc_phone=2/3/6`). So the sensor process's registry read of
-  `/vendor/etc/sensors/sns_reg_config` and the persist files (both served in
-  the scene) never reaches the AP.
+- **The reverse FastRPC tunnel never receives a call — the listener's scalar
+  was wrong** (found 9 November with `ioctlspy`, a small ptrace tool that reads
+  the ioctl buffers strace cannot): sscrpcd's listener calls are INIT flags=3,
+  INVOKE handle 3 sc `0x03000000` (init2), INVOKE handle 0 sc `0x20200` with
+  `[22, 0xff]` and `"adsp_default_listener"`, INVOKE the returned handle sc 0
+  (register), then INVOKE handle 3 sc **`0x04020200`** (next2) with a 16-byte
+  input `{0, -1, 0, 0}`. The driver sent next2 sc `0x040202`, which decodes as
+  method 0 with four inputs — an *open*, not the listener — so the DSP never
+  queued a reverse call in any ordering tried (the default chain,
+  `fastrpc_early=1`, the dual PD-0/PD-2 listeners, the late attach, the
+  restart, the phone orders `fastrpc_phone=2/3/6`). Register is sc 0, not
+  `0x300`. Both are corrected (`52c4a77`); the boot that would test them did
+  not complete (the phone went off USB and needed a physical restart), so the
+  corrected listener is **not yet verified on the phone**.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
   per-processor info and needs the registry group `sns_cm`) evidently never
   comes up: the stream cannot start. Its strings name the missing group and the
@@ -59,12 +64,14 @@ being the first client of that boot) and not a transport artefact.
 
 ## The next pieces, in order
 
-1. **Make the reverse tunnel work**: the DSP's `apps_std` calls must reach the
-   listener's `next2`. The phone's userspace opens `adsp_default_listener`,
-   which attaches the sensors PD and then calls `adsp_listener_init2` and starts
-   `next2`; the register (`sc 0`) comes after. Our chain registers first, then
-   init2, then next2 — matching the phone's *order* of init2/next2/register is
-   the one untried difference.
+1. **Verify the corrected listener**: with next2 now `0x04020200` and register
+   sc 0 (`52c4a77`), the DSP should answer the listener instead of treating it
+   as an open. The first boot after the phone is reachable again runs the
+   kernel-only sensor scene (`sns=1 servreg=1 fastrpc_smmu=2 fastrpc_call=9
+   fastrpc_pd=2 sns_accel_direct=1 sns_raw=1 slpi_listen=30`) and looks for
+   "the DSP asks for handle ... sc ... with N bytes of inputs". The phone's
+   next2 input buffer is `{0, -1, 0, 0}`; ours is `{0, 0, 0, 2048}` and is the
+   next difference if the call still does not answer.
 2. **Populate the registry**: the DSP reads `/vendor/etc/sensors/sns_reg_config`
    (the string is in its own image; `registry config file '%s' is not present`
    is its own log) and decodes the groups. Either serve that read through the
