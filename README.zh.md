@@ -55,13 +55,13 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 | 产物 | SHA-256 |
 |---|---|
 | `hakios-kernel` | `9488e22872819a11cd329972b4b61bd2379c03b68718dd5434e4e4ff202ce089` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `2b961f37628edfb0fcf1691563f58589eab9628e82c7ec22d1390b29a9a2e2f8` |
+| `out/thyme-boot/root-wirelessfull.apfs` | `c0682fb8fa48e849c47e697c2ff4b553247bf3dde1a2fba5bb9a7079897008fb` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-标准冷启动门禁是 `logs/001145-run.log`：两次 Wi-Fi 关联与 DHCP
-`192.168.0.109`、Safari TLS、563 次 LE report（128 个有名称）、110 个
-`hakios-gl` 帧、零 H4 故障、无 panic；内核与 root 是相机对焦和帧节奏那版（`17237ab`）。90 Hz 界面检查是
+标准冷启动门禁是 `logs/111026-run.log`：两次 Wi-Fi 关联与 DHCP
+`192.168.0.112`、Safari TLS、512 次 LE report（115 个有名称）、113 个
+`hakios-gl` 帧、零 H4 故障、无 panic；内核与 root 是相机对焦和帧节奏那版（`85fc396`）。90 Hz 界面检查是
 `logs/115200-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
 校验副本；`devices/thyme/ram-regress.sh` 会拒绝不一致的字节，除非显式指定
 新候选。
