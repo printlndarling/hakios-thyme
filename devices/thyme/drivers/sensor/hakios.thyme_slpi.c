@@ -5629,7 +5629,8 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
+			/* sc 0, as the phone's register is (ioctlspy) */
+			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0, physical, size, 5000,
 			    "adsp_default_listener_register");
 			if (ready && fastrpc_close) {
 				/*
