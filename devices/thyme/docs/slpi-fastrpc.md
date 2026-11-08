@@ -506,15 +506,18 @@ firmware's JSONs on the phone (`/vendor/firmware_mnt/image/slpir.jsn`,
 
 The driver serves it (`slpi=… servreg_loc_advertise/servreg_loc_input`). In the
 boot the DSP's node 9 port 13 asked for `tms/pdr_enabled` and
-`tms/pddump_disabled` (answered, 0 domains — the JSONs map only
-`tms/servreg`), so the locator is reachable and the wire format is accepted;
-the sensor process's crash item still reads `TMR_CLNT_1:0x89 ...
-USER-PD DOG detects stalled initialization`, and the SNS service 400 acked
-the SUID request (QMI result 0) without sending a SUID event
-(`logs/200444-run.log`). The locator is therefore not the missing piece: the
-stall is the PD's own timer client, and the SUID lookup's silence points at
-the registry the sns may expect (`sns_reg_config` and the persist registry on
-the phone) as the next question.
+`tms/pddump_disabled`. The phone's own map, pulled with su
+(`/vendor/firmware_mnt/image/sdx55m/modemr.jsn`), lists `tms/pdr_enabled` for
+`mdm/modem/root_pd` instance 165 and nothing for `tms/pddump_disabled`; the
+locator answered 0 domains for both at first (`logs/200444-run.log`) and,
+made to answer as the phone does, 1 domain for `tms/pdr_enabled`
+(`logs/162943-run.log`) — and the sensor process's crash item is unchanged:
+`TMR_CLNT_1:0x89 ... USER-PD DOG detects stalled initialization`, with the
+SNS service 400 acking the SUID request (QMI result 0) and sending no SUID
+event. The locator is therefore not the missing piece: the stall is the PD's
+own timer client, and the SUID lookup's silence points at the registry the
+sns may expect (`sns_reg_config` and the persist registry on the phone) as
+the next question.
 
 The registry's shape is known now: on the phone it is one JSON file per group
 under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
