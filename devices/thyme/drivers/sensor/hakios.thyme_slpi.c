@@ -2850,10 +2850,9 @@ sns_request(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint32
 	pm_length = (uint32_t)(q - pm);
 	q = body;
 	if (payload != NULL && payload_length != 0) {
+		/* the phone's body is this one field and nothing else (strace, see sns_ask) */
 		q = sns_bytes(q, 2, payload, payload_length);
 	}
-	q = sns_varint(q, 0x18);        /* is_passive = 0 */
-	q = sns_varint(q, 0);
 	body_length = (uint32_t)(q - body);
 	p = sns_bytes(p, 1, suid_bytes, suid_length);
 	p = sns_fixed32(p, 2, msg_id);
@@ -2893,15 +2892,19 @@ sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint3
 	*p++ = (uint8_t)(proto_length >> 8);
 	memcpy(p, proto, proto_length);
 	p += proto_length;
-	*p++ = 0x10;                    /* TLV 0x10: the required byte */
+	/*
+	 * TLV 0x10, one byte, value 1: the phone's HAL sends type 0x10, length 0x0001,
+	 * value 0x01. The old writer put the value in the length's high byte, so every
+	 * request it made was either length 1/value 0 or a malformed 0x0101.
+	 */
+	*p++ = 0x10;
 	*p++ = 1;
-	*p++ = sns_client_byte;
 	*p++ = 0;
+	*p++ = 1;
 	qmi_length = (uint32_t)(p - qmi);
 	qmi[5] = (uint8_t)((qmi_length - 7) & 0xff);
 	qmi[6] = (uint8_t)((qmi_length - 7) >> 8);
-	printf("slpi: sns: > QMI %u, %u bytes, to node %u port %u, TLV 0x10=%u\n", msg_id, qmi_length, node, port,
-	    sns_client_byte);
+	printf("slpi: sns: > QMI %u, %u bytes, to node %u port %u, TLV 0x10=1\n", msg_id, qmi_length, node, port);
 	return qrtr_out_packet(QRTR_DATA, SNS_OUR_PORT, node, port, qmi, qmi_length);
 }
 
@@ -3138,12 +3141,17 @@ sns_ask(const char *type)
 	uint8_t inner[32], suid[16];
 	uint8_t *p = inner;
 
+	/*
+	 * The phone's HAL sends, per strace of android.hardware.sensors@1.0-service:
+	 * the SUID is all 0xab for a lookup, field 2 is 1, and field 3 is 0 for the
+	 * registry but 1 for every sensor. The bytes here are that request.
+	 */
 	memset(suid, 0xab, sizeof(suid));
 	p = sns_bytes(p, 1, type, (uint32_t)strlen(type));
-	p = sns_varint(p, 0x10);        /* unkfield_2 = 1 */
+	p = sns_varint(p, 0x10);        /* field 2 = 1, as the phone sends it */
 	p = sns_varint(p, 1);
-	p = sns_varint(p, 0x18);        /* unkfield_3 = 0 */
-	p = sns_varint(p, 0);
+	p = sns_varint(p, 0x18);        /* field 3: 0 for the registry, 1 for a sensor */
+	p = sns_varint(p, strcmp(type, "registry") == 0 ? 0 : 1);
 	sns_qmi_send(SNS_MSG_SUID_REQ, suid, inner, (uint32_t)(p - inner));
 }
 
@@ -3161,22 +3169,18 @@ sns_start(void)
 		qrtr_out_packet(QRTR_NEW_LOOKUP, SNS_OUR_PORT, node, QRTR_CONTROL, &lookup, sizeof(lookup));
 		sleep_ms(50);
 	}
-	{
-		static const uint8_t variants[] = { 0, 1, 2, 0xff };
-
-		for (unsigned v = 0; v < sizeof(variants); v++) {
-			sns_client_byte = variants[v];
-			sns_ask("registry");
-			sns_ask("accel");
-			sleep_ms(200);
-		}
-		sns_client_byte = 0;
-	}
+	/*
+	 * TLV 0x10 is 1 in every request the phone's HAL sends (strace of
+	 * android.hardware.sensors@1.0-service): the earlier 0 came from a guess, and the
+	 * failed variant sweeps are what broke the sensor process's initialization (a boot
+	 * without any request had no protection-domain failure at all).
+	 */
+	sns_client_byte = 1;
 	/* the sensor process may still be initialising at three seconds: ask again for a while */
-	for (unsigned attempt = 0; attempt < 40 && !(sns_have_registry && sns_have_suid); attempt++) {
+	for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid); attempt++) {
 		sns_ask("registry");
 		sns_ask("accel");
-		sleep_ms(500);
+		sleep_ms(2000);
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
@@ -4014,6 +4018,7 @@ static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it
 static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
+static uint32_t fastrpc_early;           /* boot-arg fastrpc_early: the listener as the link opens, not after the QRTR listen */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
 static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the default listener's control handle after registering */
 static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
@@ -5592,15 +5597,23 @@ fastrpc_first_calls(uint32_t stage)
 					} else {
 						fastrpc_listener_poll(physical, shared_offset, shared, packet, reply);
 					}
+					uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
+
 					sleep_ms(200);
 					memset(packet, 0, 4096);
 					lengths[0] = 4;
-					sources[0] = &client;
+					sources[0] = &abuf;
 					size = fastrpc_build(packet, physical, physical, 1, lengths, sources);
 					if (shared) {
 						fastrpc_smem_put(shared_offset, packet, size);
 					}
-					fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS (late)");
+					/*
+					 * The next2 that is now outstanding belongs to client 0, and the DSP serves no
+					 * control call behind it on that client; the attach therefore takes a session of
+					 * its own (fastrpc_attach_client) when one is asked for.
+					 */
+					fastrpc_call(fastrpc_attach_client, 1, 0x10000, 0x102, physical, size, 2000,
+					    "INIT_ATTACH_SNS (late)");
 				} else if (stage >= 9) {
 					fastrpc_listener_start();
 				} else {
@@ -6420,12 +6433,34 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
 	PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
 	PE_parse_boot_argn("fastrpc_create_probe", &fastrpc_create_probe, sizeof(fastrpc_create_probe));
+	PE_parse_boot_argn("fastrpc_early", &fastrpc_early, sizeof(fastrpc_early));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
 	announce("listen to QRTR on the channel: the DSP's hello (answered from the link's thread), and the services it tells of");
 	if (sns_on) {
 		sns_reg_advertise();
 	}
 	servreg_loc_advertise();
+	if (fastrpc_early) {
+		/*
+		 * The sensor process starts with the DSP and reads its registry once, when its PD
+		 * starts: step 10's order (after this listen) is too late for it, so the listener is
+		 * brought up here, as the FastRPC channel opens.
+		 */
+		for (unsigned ms = 0; ms < 5000 && !glink.channel[CHANNEL_FASTRPC].open; ms++) {
+			sleep_ms(1);
+		}
+		printf("slpi: %u: FastRPC early: the channel is %s; the listener comes before the listen\n", step,
+		    glink.channel[CHANNEL_FASTRPC].open ? "open" : "NOT OPEN");
+		if (fastrpc_smmu) {
+			fastrpc_smmu_look();
+		}
+		if (fastrpc_smmu >= 2) {
+			fastrpc_smmu_bypass();
+		}
+		if (fastrpc_call && fastrpc_smmu >= 2) {
+			fastrpc_first_calls(fastrpc_call);
+		}
+	}
 	for (unsigned ms = 0; ms < listen_seconds * 1000; ms++) {
 		sleep_ms(1);
 	}
@@ -6457,11 +6492,15 @@ step_qrtr(void)
 	if (fastrpc_smmu >= 2) {
 		fastrpc_smmu_bypass();
 	}
-	if (fastrpc_call && fastrpc_smmu >= 2) {
+	if (fastrpc_call && fastrpc_smmu >= 2 && (!fastrpc_early || fastrpc_listener_count == 0)) {
 		fastrpc_first_calls(fastrpc_call);
 	}
 	if (sns_on) {
 		sns_start();
+	}
+	if (dump_item != 0) {
+		/* again, now that the SNS client has run: the DSP's own words about it */
+		dump_smem_item(dump_item);
 	}
 	return qrtr_hellos != 0;
 }

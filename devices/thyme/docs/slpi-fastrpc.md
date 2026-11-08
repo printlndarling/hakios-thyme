@@ -551,6 +551,34 @@ process at once in `frpck_1_2:0x5b` (`logs/201811-run.log`), so the next
 question is what the SNS signal path compares when it receives the remote
 processor-state interrupt.
 
+A control boot answers where that crash comes from: with the servreg
+registration and the FastRPC listener but no SNS request at all (`sns=0`), the
+whole run has **no protection-domain failure** — no `TMR_CLNT`, no `irq115`,
+no item 424, and the DSP stays up to the end (`logs/204756-run.log`). The SNS
+client is therefore what destabilizes the sensor process. Its first request
+sweep sent the invalid client bytes 1, 2 and 0xff, each answered result
+1/error 1, before settling on the byte the phone's sensh sends (0); the sweep
+is gone and only 0 is sent now. The run that follows measures whether the
+process stays up and whether the SUID event finally arrives.
+
+The phone's own request was then read off the wire: strace of
+`android.hardware.sensors@1.0-service` on the running Android (root, strace
+from /system/bin) shows every SNS client request as the phone sends it —
+QMI 0x20 to service 400, TLV 0x01 the SSC array around the protobuf, a
+`sns_suid_req` of `{name, 1, 0|1}` (field 3 is 0 for the registry and 1 for
+every sensor), the SUID placeholder 0xab (the same guess the driver made),
+and **TLV 0x10 of one byte, value 1**. The driver's TLV 0x10 had the value in
+the length's high byte, so it sent either length 1/value 0 or a malformed
+0x0101; the DSP refused the latter (result 1/error 1) and accepted the former
+but stayed silent. The request now matches the phone byte for byte (65 bytes
+for `registry`) and the DSP answers result 0/error 0 — but no SUID event
+follows and the sensor process still dies ~5 s later, on *any* request, valid
+or refused. The client manager is what the first request starts, and what it
+lacks (the registry the sensor process reads once at PD start through the
+reverse tunnel, before the listener exists) is the next question; the
+`fastrpc_early=1` order brings the listener up at the DSP's boot instead of
+after the QRTR listen.
+
 The registry's shape is known now: on the phone it is one JSON file per group
 under `/mnt/vendor/persist/sensors/registry/registry/` (189 files —
 `ak0991x_0`, `bmp285_0`, `<sensor>.<item>`, each

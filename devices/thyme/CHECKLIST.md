@@ -1024,6 +1024,23 @@ travels in the scene, but the process never opens it; the restart ordering
 `frpck_1_2:0x5b` (`logs/201811-run.log`). What the SNS signal path compares
 when the remote-processor-state interrupt arrives is the next question.
 
+A control boot with no SNS request at all (`sns=0`) has **no
+protection-domain failure** for the whole run — no `TMR_CLNT`, no `irq115`,
+no item 424, the DSP up to the end (`logs/204756-run.log`). The SNS client is
+therefore what destabilizes the sensor process.
+
+The phone's own bytes were then read off the wire: a root strace of
+`android.hardware.sensors@1.0-service` (strace exists at /system/bin) shows
+the request as QMI 0x20 to service 400, the SUID placeholder 0xab, a
+`sns_suid_req` of `{name, 1, 0|1}` (field 3 = 0 for registry, 1 for every
+sensor), and TLV 0x10 as **length 0x0001, value 0x01**. The driver had put
+its client byte in TLV 0x10's length high byte (length 0x0101 — refused with
+result 1/error 1). The request now matches the phone byte for byte
+(`logs/212720-run.log`: result 0/error 0), but no SUID event follows and the
+process still dies about 5 s later on any request, valid or refused. What the
+client manager starts on that first request — and the registry the process
+reads once at PD start, before the listener exists — is the next question.
+
 ## Later product work
 
 - [x] Integrate the phone's extracted UFSDxe/DiskIoDxe/PartitionDxe into the
