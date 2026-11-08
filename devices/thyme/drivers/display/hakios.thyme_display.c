@@ -306,20 +306,14 @@ send_backlight(uint32_t level)
 }
 
 /*
- * The panel's own timing switch, from the live device tree's
- * qcom,mdss_dsi_j2s_mp_42_02_0a_dsc_cmd node: the vendor page F0, the B4
- * timing table for the mode, then DCS 0x2f (the rate) and 0x26. The
- * framebuffer must make frames at the same rate (fb_hz=90); switching only
- * the panel would leave a 90 Hz scan behind 60 Hz content.
+ * The panel's own timing switch, from the live device tree's J2 panel node
+ * (timing@0 60 Hz, timing@1 90 Hz): the vendor page F0, the B4 timing table
+ * for the mode, then DCS 0x2f (the rate) and 0x26. The framebuffer must make
+ * frames at the same rate (fb_hz=90); switching only the panel would leave a
+ * 90 Hz scan behind 60 Hz content.
  */
 static const uint8_t panel_page_f0[] = {
 	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00,
-};
-static const uint8_t panel_page_f0_3[] = {
-	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x03,
-};
-static const uint8_t panel_bb[] = {
-	0xbb, 0x11, 0x00, 0x0e, 0x5a, 0x00, 0x10, 0x4f,
 };
 static const uint8_t panel_b4_60[] = {
 	0xb4, 0xcb, 0xbb, 0xbb, 0xaa, 0x99, 0x77, 0x66, 0x00, 0x00,
@@ -338,14 +332,17 @@ send_panel_timing_cmd(uint32_t hz, uint32_t sequence)
 	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
 	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
 	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
-	uint8_t c1[3] = { 0xc1, 0x00, (uint8_t)(hz >= 90 ? 0x4b : 0x50) };
-	uint8_t elvss[2] = { 0xb5, 0x84 };        /* the vendor's normal-operation value, after every 2f/26 */
 
 	if (sequence >= 2) {
 		return true;
 	}
 	if (sequence == 0) {
-		/* the device tree's timing-switch-command, verbatim: F0 page 0, B4, C1, F0 page 3, BB */
+		/*
+		 * The live device tree's timing-switch-command for this panel (J2,
+		 * panel-id 0x4a32: timing@0 60 Hz, timing@1 90 Hz), verbatim:
+		 * F0 page 0, the mode's B4 table, 2f, 26. The J1S nodes carry a
+		 * longer sequence (C1, F0 page 3, BB); that is another panel's.
+		 */
 		tell("display: THYME panel timing: F0 page\n");
 		if (!dsi_send_long(panel_page_f0, sizeof(panel_page_f0))) {
 			return false;
@@ -354,30 +351,13 @@ send_panel_timing_cmd(uint32_t hz, uint32_t sequence)
 		if (!dsi_send_long(b4, 30)) {
 			return false;
 		}
-		tell("display: THYME panel timing: c1 %#x\n", c1[2]);
-		if (!dsi_send_long(c1, sizeof(c1))) {
-			return false;
-		}
-		tell("display: THYME panel timing: F0 page 3\n");
-		if (!dsi_send_long(panel_page_f0_3, sizeof(panel_page_f0_3))) {
-			return false;
-		}
-		tell("display: THYME panel timing: bb\n");
-		if (!dsi_send_long(panel_bb, sizeof(panel_bb))) {
-			return false;
-		}
 	}
 	tell("display: THYME panel timing: 2f %#x\n", rate[1]);
 	if (!dsi_send_short(rate, sizeof(rate))) {
 		return false;
 	}
 	tell("display: THYME panel timing: 26 %#x\n", mode[1]);
-	if (!dsi_send_short(mode, sizeof(mode))) {
-		return false;
-	}
-	/* every vendor nolp sequence ends 2f/26/b5; try the same latch after the switch */
-	tell("display: THYME panel timing: b5 %#x\n", elvss[1]);
-	return dsi_send_short(elvss, sizeof(elvss));
+	return dsi_send_short(mode, sizeof(mode));
 }
 
 static bool
@@ -406,6 +386,92 @@ SYSCTL_DECL(_kern_hakios);
  * refresh rate: neither the DSI status bits nor the INTF frame counter (not readable on THYME)
  * show it. A pin that never moves reads 0 edges.
  */
+/*
+ * panel_te_probe=1: count the edges of the panel's TE line itself. TE is the
+ * panel's own "I am about to scan" pulse, so its rate is the panel's real
+ * refresh rate — the only direct readout on THYME (the INTF block is unsafe
+ * and the DSI status bits say nothing about the scan). The device tree's
+ * platform-te-gpio is pin 66; the pad's IO register bit 0 is the level
+ * whatever function the pin is muxed to. DCS 0x35 (set tear on) is sent
+ * first because the panel may only drive TE once asked.
+ */
+static void
+panel_te_count(const char *label)
+{
+	vm_offset_t tlmm = ml_io_map(0x0f100000, 0x100000);
+	uint64_t began = 0, now = 0;
+	unsigned edges = 0;
+	uint32_t previous;
+
+	if (tlmm == 0) {
+		tell("display: TE %s: TLMM is not mapped\n", label);
+		return;
+	}
+	previous = rd(tlmm, 0x1000 * 66 + 4) & 1u;
+	absolutetime_to_nanoseconds(mach_absolute_time(), &began);
+	do {
+		for (unsigned n = 0; n < 20000; n++) {
+			uint32_t level = rd(tlmm, 0x1000 * 66 + 4) & 1u;
+
+			if (level != previous) {
+				edges++;
+				previous = level;
+			}
+		}
+		absolutetime_to_nanoseconds(mach_absolute_time(), &now);
+	} while (now - began < NSEC_PER_SEC);
+	tell("display: TE %s: pin 66 config %#x, %u edges in %llu ms\n",
+	    label, rd(tlmm, 0x1000 * 66), edges, (now - began) / NSEC_PER_MSEC);
+}
+
+static void
+panel_te_probe(void)
+{
+	uint8_t te_on[2] = { 0x35, 0x00 };
+	uint8_t te_on_both[2] = { 0x35, 0x02 };
+	uint32_t dcs = 0, rate_gpio = 0;
+	vm_offset_t tlmm;
+
+	/* the read-only count: what the TE line does as the loader left it */
+	panel_te_count("default");
+	tlmm = ml_io_map(0x0f100000, 0x100000);
+	if (tlmm != 0) {
+		tell("display: TE probe: pin 50 (disp-rate) config %#x, level %u\n",
+		    rd(tlmm, 0x1000 * 50), rd(tlmm, 0x1000 * 50 + 4) & 1u);
+	}
+	/*
+	 * Both steps below change panel or pad state and are opt-in: a run that
+	 * also re-muxed pin 66 hung the kernel (2026-11-09), so each is isolated
+	 * and tested on its own.
+	 */
+	if (PE_parse_boot_argn("panel_te_dcs", &dcs, sizeof(dcs)) && dcs) {
+		if (dsi_send_short(te_on, sizeof(te_on))) {
+			delay_for_interval(20, NSEC_PER_MSEC);
+			panel_te_count("after 0x35 00");
+		}
+		if (dsi_send_short(te_on_both, sizeof(te_on_both))) {
+			delay_for_interval(20, NSEC_PER_MSEC);
+			panel_te_count("after 0x35 02");
+		}
+	}
+	/*
+	 * The vendor display driver holds GPIO 50 (mi,mdss-dsi-panel-disp-rate-gpio)
+	 * high as an output for the whole session; the loader leaves it
+	 * unconfigured and low. Raise it and see whether the panel starts
+	 * scanning the way the DSI switch asked.
+	 */
+	if (PE_parse_boot_argn("panel_rate_gpio", &rate_gpio, sizeof(rate_gpio)) && rate_gpio && tlmm != 0) {
+		uint32_t config = rd(tlmm, 0x1000 * 50);
+
+		wr(tlmm, 0x1000 * 50, (config & ~0x3cu) | (1u << 9) | (7u << 6));
+		wr(tlmm, 0x1000 * 50 + 4, 2u);
+		delay_for_interval(20, NSEC_PER_MSEC);
+		tell("display: TE probe: pin 50 now config %#x, level %u\n",
+		    rd(tlmm, 0x1000 * 50), rd(tlmm, 0x1000 * 50 + 4) & 1u);
+		panel_te_count("after disp-rate gpio high");
+	}
+}
+
 static void
 panel_te_rate(void)
 {
@@ -614,6 +680,10 @@ hakios_brightness_init(void)
 	if (PE_parse_boot_argn("panel_dsi_probe", &dsi_probe_enabled, sizeof(dsi_probe_enabled)) &&
 	    dsi_probe_enabled) {
 		dsi_probe();
+	}
+	uint32_t te_probe_enabled = 0;
+	if (PE_parse_boot_argn("panel_te_probe", &te_probe_enabled, sizeof(te_probe_enabled)) && te_probe_enabled) {
+		panel_te_probe();
 	}
 	uint32_t te_rate_enabled = 0;
 	if (PE_parse_boot_argn("panel_te_rate", &te_rate_enabled, sizeof(te_rate_enabled)) && te_rate_enabled) {
