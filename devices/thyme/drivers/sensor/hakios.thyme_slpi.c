@@ -3451,6 +3451,21 @@ static const struct {
 	{ "msm/cdsp/root_pd", 76 },             /* cdspr.jsn */
 };
 
+/*
+ * The other service the sensor DSP asks the locator about. The phone's maps
+ * hold "tms/pdr_enabled" for the modem's domain (sdx55m/modemr.jsn, instance
+ * 165) and no entry for "tms/pddump_disabled"; answering the first with the
+ * modem's domain is what the phone's pd-mapper does, and the DSP's timer
+ * service registers against it -- with the empty answer it asked again and
+ * again, and the sensor process's timer client (TMR_CLNT_1:0x89) stalled.
+ */
+static const struct {
+	const char *domain;
+	uint32_t instance;
+} servreg_loc_modem[] = {
+	{ "mdm/modem/root_pd", 165 },           /* sdx55m/modemr.jsn */
+};
+
 static void
 servreg_loc_advertise(void)
 {
@@ -3469,7 +3484,7 @@ servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t le
 {
 	uint8_t out[512], name[64];
 	uint16_t txn, msg;
-	uint32_t at, total = 0;
+	uint32_t at;
 
 	if (length < 7) {
 		return;
@@ -3501,8 +3516,18 @@ servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t le
 		}
 		at += l;
 	}
+	const struct {
+		const char *domain;
+		uint32_t instance;
+	} *list = NULL;
+	uint32_t total = 0;
+
 	if (strcmp(name, "tms/servreg") == 0) {
+		list = servreg_loc_domains;
 		total = (uint32_t)(sizeof(servreg_loc_domains) / sizeof(servreg_loc_domains[0]));
+	} else if (strcmp(name, "tms/pdr_enabled") == 0) {
+		list = servreg_loc_modem;
+		total = 1;
 	}
 	{
 		uint8_t *p = out;
@@ -3539,12 +3564,12 @@ servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t le
 			p += 2;
 			*p++ = (uint8_t)total;
 			for (uint32_t i = 0; i < total; i++) {
-				size_t n = strlen(servreg_loc_domains[i].domain);
-				uint32_t instance = servreg_loc_domains[i].instance;
+				size_t n = strlen(list[i].domain);
+				uint32_t instance = list[i].instance;
 				uint32_t data_word = 0;
 
 				*p++ = (uint8_t)n;
-				memcpy(p, servreg_loc_domains[i].domain, n);
+				memcpy(p, list[i].domain, n);
 				p += n;
 				memcpy(p, &instance, 4);
 				p += 4;
