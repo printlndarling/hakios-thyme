@@ -2783,6 +2783,7 @@ static const uint8_t sns_registry_suid_sns[16] = {
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
+static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
 
 static bool
 sns_server(uint32_t *node, uint32_t *port)
@@ -3097,6 +3098,13 @@ sns_event(const uint8_t *data, uint32_t length)
 				} else {
 					break;
 				}
+			}
+			if (sns_raw && payload != NULL) {
+				printf("slpi: sns: event %u, %u bytes:", msg_id, payload_length);
+				for (uint32_t i = 0; i < payload_length && i < 48; i++) {
+					printf(" %02x", payload[i]);
+				}
+				printf("\n");
 			}
 			if (msg_id == SNS_MSG_SUID_EVENT && payload != NULL) {
 				sns_suid_event(payload, payload_length);
@@ -6492,6 +6500,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
+	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
