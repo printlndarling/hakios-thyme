@@ -3463,6 +3463,7 @@ static const struct {
 	const char *domain;
 	uint32_t instance;
 } servreg_loc_modem[] = {
+	{ "msm/slpi/root_pd", 90 },             /* (the SLPI root PD as a TMS of its own: the experiment) */
 	{ "mdm/modem/root_pd", 165 },           /* sdx55m/modemr.jsn */
 };
 
@@ -3527,7 +3528,7 @@ servreg_loc_input(uint32_t node, uint32_t port, const uint8_t *data, uint32_t le
 		total = (uint32_t)(sizeof(servreg_loc_domains) / sizeof(servreg_loc_domains[0]));
 	} else if (strcmp(name, "tms/pdr_enabled") == 0) {
 		list = servreg_loc_modem;
-		total = 1;
+		total = (uint32_t)(sizeof(servreg_loc_modem) / sizeof(servreg_loc_modem[0]));
 	}
 	{
 		uint8_t *p = out;
