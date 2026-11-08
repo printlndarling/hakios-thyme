@@ -75,11 +75,16 @@ build, not merely compiled.
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/184735-run.log`: two Wi-Fi joins with
-DHCP `192.168.0.114`, Safari TLS, 696 LE reports (153 named), 111 `hakios-gl`
-frames (the scene's screens are mostly still), zero H4 faults and no panic.
-The kernel and the root are the camera-focus, pacing, still-accumulator and
-locator build (`938bed9`, with the panel-timing attempt reverted).
+The canonical cold-boot gate is `logs/224421-run.log`: two Wi-Fi joins with
+DHCP `192.168.0.114`, Safari opened, the Settings/Bluetooth screen showing the
+phone discoverable as "HakiOS Mi 10S" while it scans, `hakios-gl` frames, and
+no panic (`logs/wirelessregress-wifi.png`, `logs/wirelessregress-bt.png`).
+The kernel is the servreg-ack build (`82ae6716`): the notifier's state
+indications are answered, its protection-domain-failure reports are read, and
+the SNS client's request bytes match the phone's HAL; the sensor stream itself
+is still open (`devices/thyme/docs/sensors-status.md`). The earlier gate,
+`logs/184735-run.log`, remains the reference for the camera-focus, pacing,
+still-accumulator and locator build (`938bed9`).
 The 90 fps pacing check is
 `logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
 `devices/thyme/ram-baseline.conf` is the machine-checked

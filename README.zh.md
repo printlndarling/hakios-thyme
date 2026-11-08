@@ -54,15 +54,20 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 
 | 产物 | SHA-256 |
 |---|---|
-| `hakios-kernel` | `2625783145f30664b7c1933df98e1b105995c6a4d199a7b5e77250112269b7a8` |
+| `hakios-kernel` | `bcc297c78379a28bbf044067bba32f6b42a9bd11c8ddf78629789cfbea044d61` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-标准冷启动门禁是 `logs/184735-run.log`：两次 Wi-Fi 关联与 DHCP
-`192.168.0.114`、Safari TLS、696 次 LE report（153 个有名称）、111 个
-`hakios-gl` 帧、零 H4 故障、无 panic；内核与 root 是相机对焦、帧节奏、拍照累加器与 locator 那版（`938bed9`，面板时序尝试已回退）。90 Hz 界面检查是
-`logs/115200-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
+标准冷启动门禁是 `logs/224421-run.log`：两次 Wi-Fi 关联与 DHCP
+`192.168.0.114`、Safari 打开、设置里的蓝牙页显示本机以 "HakiOS Mi 10S"
+可被发现并正在扫描、`hakios-gl` 帧、无 panic
+（`logs/wirelessregress-wifi.png`、`logs/wirelessregress-bt.png`）。内核是
+servreg 应答那版（`82ae6716`）：确认通知器的状态指示、读取保护域失败原因、
+SNS 客户端请求字节与手机 HAL 完全一致；传感器数据流仍未打通
+（`devices/thyme/docs/sensors-status.md`）。更早的门禁
+`logs/184735-run.log` 仍是相机对焦、帧节奏、拍照累加器与 locator 那版
+（`938bed9`）的参考。90 Hz 界面检查是 `logs/115200-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
 校验副本；`devices/thyme/ram-regress.sh` 会拒绝不一致的字节，除非显式指定
 新候选。
 
