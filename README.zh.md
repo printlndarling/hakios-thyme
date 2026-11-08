@@ -17,7 +17,7 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 | 项目 | 状态 | 已验证内容 |
 |---|---|---|
 | 启动到 SpringBoard | **PASS** | launchd、backboardd、SpringBoard 以及设置/界面栈在冷启动 RAM 运行中到达主屏幕 |
-| 90 Hz 显示与界面帧率 | **PASS** | 1080 x 2340 面板时序被接受；CoreAnimation 跟随面板以 90 fps 绘制（连续四个 5 秒窗口 452、451、451、451 帧，中位帧间隔 11.1 ms） |
+| 显示与界面帧节奏 | **PARTIAL** | 1080 x 2340 面板时序被接受，CoreAnimation 在需要时以 90 fps 绘制（连续四个 5 秒窗口 452、451、451、451 帧，中位帧间隔 11.1 ms）。日常场景现在请求 90 Hz（`fb_hz=90`）：设备树完整的 timing-switch 序列（F0 page 0、B4、C1、F0 page 3、BB、2f、26）按设备树要求以 LP 模式被接受，帧缓冲重新公布速率。面板自身的扫描率在 THYME 上仍无法回读（TE 引脚未路由、INTF 块不安全读取），且唯一一次推送率测量（约 59 次/秒）早于 LP 修复，所以真正的 90 Hz 面板刷新尚未被证实 |
 | CPU / 调频 | **PASS** | 7 个 CPU 启动；三个 EPSS 域分别达到 1804 / 2419 / 3187 MHz |
 | GPU（Mesa/FD650 OpenGL） | **PASS** | 硬件 `hakios-gl` 帧，使用中不回落 `softpipe`；标准无线回归中 110 帧 |
 | Metal | **PARTIAL / 阻塞** | `hakios-metal` 可构建、探测通过，但第一个 render pass 仍会卡死，因此 Metal/CoreAnimation 保持关闭。上游的 Metal-on-Vulkan/Turnip 路径已合并，但仍是可选且未在 THYME 上验证 |
@@ -50,24 +50,28 @@ xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内�
 4. **持久化存储与独立安装器** —— 采用受保护的写入路径和从 flash RAM 启动的
    设计；在明确的授权与恢复门禁完成前不碰 Android 分区。
 
-## 已验证的 RAM 基线（2026-11-08）
+## 已验证的 RAM 基线（2026-11-09）
 
 | 产物 | SHA-256 |
 |---|---|
-| `hakios-kernel` | `bcc297c78379a28bbf044067bba32f6b42a9bd11c8ddf78629789cfbea044d61` |
+| `hakios-kernel` | `9b48a3817bcfbea5503e0a94ba2b27e4cbf97e3b5a1aae208e03f14a575b5a15` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-标准冷启动门禁是 `logs/224421-run.log`：两次 Wi-Fi 关联与 DHCP
+标准冷启动门禁是 `logs/005313-run.log`：两次 Wi-Fi 关联与 DHCP
 `192.168.0.114`、Safari 打开、设置里的蓝牙页显示本机以 "HakiOS Mi 10S"
 可被发现并正在扫描、`hakios-gl` 帧、无 panic
-（`logs/wirelessregress-wifi.png`、`logs/wirelessregress-bt.png`）。内核是
-servreg 应答那版（`82ae6716`）：确认通知器的状态指示、读取保护域失败原因、
+（`logs/wirelessregress-wifi.png`、`logs/wirelessregress-bt.png`）。日常场景
+现在向面板请求 90 Hz（`fb_hz=90`）：设备树完整的 timing-switch 序列
+（F0 page 0、B4、C1、F0 page 3、BB、2f、26）按设备树要求以 LP 模式发送，
+帧缓冲重新公布被接受的速率，帧间隔落在 11 ms 节拍上。内核同时是
+servreg 应答那版（`8befdf8`）：确认通知器的状态指示、读取保护域失败原因、
 SNS 客户端请求字节与手机 HAL 完全一致；传感器数据流仍未打通
 （`devices/thyme/docs/sensors-status.md`）。更早的门禁
 `logs/184735-run.log` 仍是相机对焦、帧节奏、拍照累加器与 locator 那版
-（`938bed9`）的参考。90 Hz 界面检查是 `logs/115200-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
+（`938bed9`）的参考。90 fps 帧节奏检查是 `logs/115200-run.log`，
+60 Hz 长跑是 `logs/035725-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
 校验副本；`devices/thyme/ram-regress.sh` 会拒绝不一致的字节，除非显式指定
 新候选。
 

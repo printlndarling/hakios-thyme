@@ -19,7 +19,7 @@ build, not merely compiled.
 | Area | Status | What is verified |
 |---|---|---|
 | Boot to SpringBoard | **PASS** | launchd, backboardd, SpringBoard and the settings/UI stack reach the home screen from a cold RAM boot |
-| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median), but the display controller the firmware leaves behind refreshes the panel about 60 times a second: the DSI command-DMA status count is 118 transitions a second with `fb_hz=60` or `90` and with either panel timing, so 90 fps into it judders. The daily default is now a self-consistent 60 Hz, verified by a 32-minute soak (`logs/035725-run.log`); true 90 Hz needs the controller refresh reprogrammed |
+| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median). The daily scene now requests 90 Hz (`fb_hz=90`): the device tree's whole timing-switch sequence (F0 page 0, B4, C1, F0 page 3, BB, 2f, 26) is accepted in the LP mode the tree asks for, and the framebuffer announces the rate. The panel's own scan rate is still not readable on THYME (the TE pin is not routed and the INTF block is unsafe), and the single push-rate measurement (~59 a second) predates the LP-mode fix, so a genuine 90 Hz panel refresh is not yet proven |
 | CPU / DVFS | **PASS** | 7 CPUs start; all three EPSS domains reach 1804 / 2419 / 3187 MHz |
 | GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 110 frames in the latest wireless run |
 | Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
@@ -66,23 +66,27 @@ build, not merely compiled.
    guarded write path and RAM-boot-from-flash, without touching Android until
    an explicit authorization and recovery gate exists.
 
-## Verified RAM baseline (8 November 2026)
+## Verified RAM baseline (9 November 2026)
 
 | Artifact | SHA-256 |
 |---|---|
-| `hakios-kernel` | `2625783145f30664b7c1933df98e1b105995c6a4d199a7b5e77250112269b7a8` |
+| `hakios-kernel` | `9b48a3817bcfbea5503e0a94ba2b27e4cbf97e3b5a1aae208e03f14a575b5a15` |
 | `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
 | `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
 | `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
 
-The canonical cold-boot gate is `logs/224421-run.log`: two Wi-Fi joins with
+The canonical cold-boot gate is `logs/005313-run.log`: two Wi-Fi joins with
 DHCP `192.168.0.114`, Safari opened, the Settings/Bluetooth screen showing the
 phone discoverable as "HakiOS Mi 10S" while it scans, `hakios-gl` frames, and
 no panic (`logs/wirelessregress-wifi.png`, `logs/wirelessregress-bt.png`).
-The kernel is the servreg-ack build (`82ae6716`): the notifier's state
-indications are answered, its protection-domain-failure reports are read, and
-the SNS client's request bytes match the phone's HAL; the sensor stream itself
-is still open (`devices/thyme/docs/sensors-status.md`). The earlier gate,
+The daily scene now paces at the panel's 90 Hz (`fb_hz=90`): the device tree's
+whole timing-switch sequence (F0 page 0, B4, C1, F0 page 3, BB, 2f, 26) is sent
+in the LP mode the tree asks for, the framebuffer announces the accepted rate,
+and the frame intervals cluster at the 11 ms beat. The kernel is also the
+servreg-ack build (`8befdf8`): the notifier's state indications are answered,
+its protection-domain-failure reports are read, and the SNS client's request
+bytes match the phone's HAL; the sensor stream itself is still open
+(`devices/thyme/docs/sensors-status.md`). The earlier gate,
 `logs/184735-run.log`, remains the reference for the camera-focus, pacing,
 still-accumulator and locator build (`938bed9`).
 The 90 fps pacing check is

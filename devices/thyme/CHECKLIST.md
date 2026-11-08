@@ -466,7 +466,24 @@ way to see the count and what TE it waits for. Sending the vendor's `b5 84`
 after `2f`/`26` changes nothing either (119 a second, `logs/025552-run.log`):
 the switch is accepted but does not move the push.
 
-A 32-minute soak on the 60 Hz default (`logs/035725-run.log`, 2026-11-06)
+### The LP-mode switch and the 90 Hz daily default (2026-11-09)
+
+The device tree marks the timing-switch command `dsi_lp_mode`, and the command-DMA
+control that carries it is `DSI_CMD_DMA_CTRL` at `0x38`, not the `0x3c` the driver
+had been writing; bit 26 is the LP bit. The switch now sends the tree's whole
+sequence — F0 page 0, B4, C1, F0 page 3, BB, then `2f`/`26`/`b5` — with that bit
+set (`465dfe6`), and the daily scene requests 90 Hz again (`8befdf8`).
+
+The cold gate `logs/005313-run.log` (kernel `9b48a381`) shows every step accepted,
+`panel timing 90 Hz seq=0 (ok), framebuffer rate 90 Hz`, two Wi-Fi joins with DHCP
+`192.168.0.114`, Safari, the Bluetooth page and `hakios-gl` frames; the frame
+intervals cluster at the 11 ms beat. The push-rate count has not been repeated
+since the LP fix — the gate does not run `panel_te_rate` — and the panel's own
+scan is still unreadable on THYME, so whether the panel itself now scans at 90 is
+not yet proven by the hardware; the user's check of scrolling feel at this
+default is the deciding evidence.
+
+A 32-minute soak on the then-current 60 Hz default (`logs/035725-run.log`, 2026-11-06)
 passed: no panic or watchdog reset; a steady 20 frames a second idle with
 every swap on a beat and none dropped; the GPU at 631-635 us a submission,
 98 MB of buffers kept and none made; the hottest core 70.5 C with the rows
