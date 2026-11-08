@@ -2757,6 +2757,13 @@ static const uint8_t sns_accel_suid[16] = {
 	0xa6, 0x7e, 0x72, 0x01, 0xfc, 0x6a, 0xbb, 0x1f,
 };
 static uint32_t sns_accel_direct;        /* boot-arg sns_accel_direct: configure the accelerometer by that SUID */
+
+/* The gyroscope's SUID from the same capture (high 0x97d3c48969f972a0, low 0xb9418a10491511c1). */
+static const uint8_t sns_gyro_suid[16] = {
+	0xc1, 0x11, 0x15, 0x49, 0x10, 0x8a, 0x41, 0xb9,
+	0xa0, 0x72, 0xf9, 0x69, 0x89, 0xc4, 0xd3, 0x97,
+};
+static uint32_t sns_gyro_direct;         /* boot-arg sns_gyro_direct: configure the gyroscope by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 
@@ -3189,10 +3196,11 @@ sns_start(void)
 	 * without any request had no protection-domain failure at all).
 	 */
 	sns_client_byte = 1;
-	if (sns_accel_direct) {
-		memcpy(sns_suid, sns_accel_suid, sizeof(sns_suid));
+	if (sns_accel_direct || sns_gyro_direct) {
+		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
 		sns_have_suid = true;
-		printf("slpi: sns: the accelerometer is configured by the SUID the phone's DSP reports\n");
+		printf("slpi: sns: the %s is configured by the SUID the phone's DSP reports\n",
+		    sns_gyro_direct ? "gyroscope" : "accelerometer");
 		sns_config();
 	} else {
 		/* the sensor process may still be initialising at three seconds: ask again for a while */
@@ -6445,6 +6453,7 @@ step_qrtr(void)
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
+	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
