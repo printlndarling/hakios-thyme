@@ -577,6 +577,16 @@ process from starting a nested call.
   (which it did without a listener) nor asked. The listener may be registered
   in the wrong PD for the DSP's file daemon — `fastrpc_pd` now selects it —
   or the process may be blocked in a request made before registration.
+  Hexagon disassembly of `slpi.b15` (the segment at 0x8A000000,
+  `tools/hexagon-wrap.py`) names the modules behind the crash item: the
+  timer client's own strings sit at 0x8A142F4C-0x8A143060 —
+  `timer_client_user_init.c`, `TMR_CLNT_%u`, `/dev/timers`,
+  `timer_client_user_init: qdi_open failed`, `CreateWorkerThread failed`,
+  and beside them the user-timer client's `UTMR_CLNT_%u` and `/dev/utimers`;
+  the crash text itself is at 0x8A139104 (`USER-PD DOG detects stalled
+  initialization, triage with IMAGE OWNER`). The strings are reached through
+  the firmware's own tables (no 32-bit pointer to either address exists), so
+  the init call that blocks is the next thing to read in the disassembly.
 - The `apps_std` wire method IDs and argument layouts come from the DSP-side
   `libapps_std_skel.so`; they may differ from the ADSP reference on this
   firmware. The open `hexagonrpcd` definitions are the starting point.
