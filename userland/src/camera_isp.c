@@ -737,20 +737,29 @@ nv12_pair(const uint8_t *rgb0, const uint8_t *rgb1, uint32_t width, uint8_t *y0,
 	}
 }
 
+static void sharpen_rgb_row(uint8_t *row, uint32_t width, uint8_t *tmp, int strength);
+
 void
 isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, uint8_t *y, size_t y_stride,
     uint8_t *uv, size_t uv_stride, uint32_t width, uint32_t height, uint32_t first_row, uint32_t end_row, bool video_range)
 {
 	uint8_t line[2][3 * 8192];
+	uint8_t lift_row[3 * 8192];
+	int lift = isp->zoom > 1.15f ? (int)((isp->zoom - 1) * 8) : 0;
 
 	if (width > 8192) {
 		return;
 	}
+	lift = lift > 12 ? 12 : lift;
 	for (uint32_t row = first_row & ~1u; row < end_row && row < height; row += 2) {
 		bool second = row + 1 < height;
 
 		render_line(isp, f, raw, width, height, row, line[0]);
 		render_line(isp, f, raw, width, height, second ? row + 1 : row, line[1]);
+		if (lift > 0) {
+			sharpen_rgb_row(line[0], width, lift_row, lift);
+			sharpen_rgb_row(line[1], width, lift_row, lift);
+		}
 		nv12_pair(line[0], line[1], width, y + (size_t)row * y_stride, second ? y + (size_t)(row + 1) * y_stride : NULL,
 		    uv + (size_t)(row / 2) * uv_stride, video_range);
 	}
@@ -903,16 +912,17 @@ demosaic_row(const struct isp *isp, const struct hakios_camera_frame *f, const u
  * frame, so the lift costs nothing but the loop; the preview keeps its own path.
  */
 static void
-sharpen_rgb_row(uint8_t *row, uint32_t width, uint8_t *tmp)
+sharpen_rgb_row(uint8_t *row, uint32_t width, uint8_t *tmp, int strength)
 {
-	if (width < 3) {
+	if (width < 3 || strength <= 0) {
 		return;
 	}
+	strength = strength > 32 ? 32 : strength;
 	memcpy(tmp, row, 3 * (size_t)width);
 	for (uint32_t x = 1; x + 1 < width; x++) {
 		for (int c = 0; c < 3; c++) {
 			int mid = tmp[3 * x + c], left = tmp[3 * (x - 1) + c], right = tmp[3 * (x + 1) + c];
-			int v = mid + (mid - (left + right) / 2) * 3 / 4;
+			int v = mid + (mid - (left + right) / 2) * strength / 8;
 
 			row[3 * x + c] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
 		}
@@ -1003,9 +1013,13 @@ isp_render_still_nv12(const struct isp *isp, const struct hakios_camera_frame *f
 		}
 		bool second = row + 1 < height;
 
-		sharpen_rgb_row(out[0], width, sharp);
+		/* (a magnified picture is an upscaled crop: the lift rises with the zoom) */
+		int lift = 6 + (int)((isp->zoom > 1 ? isp->zoom - 1 : 0) * 6);
+
+		lift = lift > 16 ? 16 : lift;
+		sharpen_rgb_row(out[0], width, sharp, lift);
 		if (second) {
-			sharpen_rgb_row(out[1], width, sharp);
+			sharpen_rgb_row(out[1], width, sharp, lift);
 		}
 		nv12_pair(out[0], out[1], width, y + (size_t)row * y_stride, second ? y + (size_t)(row + 1) * y_stride : NULL,
 		    uv + (size_t)(row / 2) * uv_stride, video_range);

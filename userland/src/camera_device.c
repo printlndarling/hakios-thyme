@@ -436,12 +436,13 @@ static const struct camera {
 	float           wb_bias[2];
 	unsigned        ae_hold_frames; /* frames between the exposure's adjustments (the front's cost a stop and a start) */
 	float           sat;            /* the colours' saturation (the front's tuning has no matrix of its own) */
+	unsigned        frame_lines_max; /* the longest frame the AE may ask for (0: twice the shortest) */
 	int             formats[2][3];  /* sensor width, height, frames a second of "Photo" and of a video format */
 } cameras[2] = {
 	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
-	  { 1.0f, 1.0f }, 10, 1.0f, { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },        /* "Photo", "Video-60" */
+	  { 1.0f, 1.0f }, 10, 1.0f, 0, { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },     /* "Photo", "Video-60" */
 	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", true, 2.87, 2.2, 1.0, 70.0,
-	  { 1.015f, 1.0f }, 12, 1.18f, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } },        /* "Photo", "Video-30" */
+	  { 1.015f, 1.0f }, 12, 1.18f, 1200, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } }, /* "Photo", "Video-30" */
 };
 
 /* Where each camera's focus last settled, by the kernel's sensor number. A
@@ -1632,6 +1633,7 @@ worker(void *context)
 	isp.wb_bias[0] = s->camera->wb_bias[0];
 	isp.wb_bias[1] = s->camera->wb_bias[1];
 	isp.ae_hold_frames = s->camera->ae_hold_frames;
+	isp.max_frame_lines = s->camera->frame_lines_max;
 	isp.sat = s->camera->sat;
 	while (s->running && failures < 5) {
 		ssize_t n;
