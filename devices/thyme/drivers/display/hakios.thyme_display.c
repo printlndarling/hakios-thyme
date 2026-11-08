@@ -314,28 +314,6 @@ static const uint8_t panel_b4_90[] = {
 	0x00, 0x60, 0xb8, 0xb8, 0xb8, 0xb8, 0xb8, 0xc8, 0xc8, 0xd8,
 	0xd8, 0xe8, 0xe8, 0xf8, 0xf8, 0x48, 0x48, 0x48, 0x48, 0x0a,
 };
-/*
- * The vendor's own timing-switch sequence, from the phone's dtbo
- * (dtbo_a, "xiaomi 42 02 0a cmd mode dsc dsi panel", the 60 Hz and 120 Hz
- * timings): F0 page 0, the B4 table, C1, F0 page 3, BB, then 2F and 26. The
- * B4, 2F and 26 writes alone (what this sent) leave the panel on its 60 Hz
- * scan -- the DSI status counted 119 command-DMA transitions a second with
- * "90 Hz" selected (logs/173158-run.log) -- because C1, page 3 and BB are
- * where the panel's timing generator is told to change. The panel has two
- * timings, 60 and 120 Hz (0x3c and 0x78); there is no 90.
- */
-static const uint8_t panel_page_f3[] = {
-	0xf0, 0x55, 0xaa, 0x52, 0x08, 0x03,
-};
-static const uint8_t panel_c1_60[] = {
-	0xc1, 0x00, 0x50,
-};
-static const uint8_t panel_c1_120[] = {
-	0xc1, 0x00, 0x4b,
-};
-static const uint8_t panel_bb[] = {
-	0xbb, 0x11, 0x00, 0x0e, 0x5a, 0x00, 0x10, 0x4f,
-};
 
 static bool
 send_panel_timing(uint32_t hz, uint32_t sequence)
@@ -343,6 +321,7 @@ send_panel_timing(uint32_t hz, uint32_t sequence)
 	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
 	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
 	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
+	uint8_t elvss[2] = { 0xb5, 0x84 };        /* the vendor's normal-operation value, after every 2f/26 */
 
 	if (sequence >= 2) {
 		return true;
@@ -356,25 +335,18 @@ send_panel_timing(uint32_t hz, uint32_t sequence)
 		if (!dsi_send_long(b4, 30)) {
 			return false;
 		}
-		tell("display: THYME panel timing: c1 %#x\n", (hz >= 90 ? panel_c1_120 : panel_c1_60)[2]);
-		if (!dsi_send_long(hz >= 90 ? panel_c1_120 : panel_c1_60, 3)) {
-			return false;
-		}
-		tell("display: THYME panel timing: F0 page 3\n");
-		if (!dsi_send_long(panel_page_f3, sizeof(panel_page_f3))) {
-			return false;
-		}
-		tell("display: THYME panel timing: bb\n");
-		if (!dsi_send_long(panel_bb, sizeof(panel_bb))) {
-			return false;
-		}
 	}
 	tell("display: THYME panel timing: 2f %#x\n", rate[1]);
 	if (!dsi_send_short(rate, sizeof(rate))) {
 		return false;
 	}
 	tell("display: THYME panel timing: 26 %#x\n", mode[1]);
-	return dsi_send_short(mode, sizeof(mode));
+	if (!dsi_send_short(mode, sizeof(mode))) {
+		return false;
+	}
+	/* every vendor nolp sequence ends 2f/26/b5; try the same latch after the switch */
+	tell("display: THYME panel timing: b5 %#x\n", elvss[1]);
+	return dsi_send_short(elvss, sizeof(elvss));
 }
 
 SYSCTL_DECL(_kern_hakios);
