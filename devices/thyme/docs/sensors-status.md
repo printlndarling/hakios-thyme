@@ -66,9 +66,11 @@ used as the reference on the same hardware and firmware).
    protobuf layout is in `slpi-fastrpc.md`); the write needs the registry
    service's SUID, which its lookup cannot answer while the registry is empty.
 3. **Get the DSP's own log**: `sns_diag_fw_log` exists in the SNS diag sensor
-   (`diag_sensor`); the HAL keeps it off (`support_qmi_debug: false`). If the
-   diag sensor can be configured, its events carry the firmware's log lines,
-   which would name the client manager's failure outright.
+   (`diag_sensor`); the HAL's `get_qmi_debug_flag` (in `/vendor/lib64/libssc.so`)
+   reads `persist.vendor.sensors.debug.ssc_qmi_debug`, and setting it true does
+   not change the HAL's traffic at all (the same 65 lookups and 32 disables,
+   `init_sensors.strace` from the 23:28 restart): on this firmware the flag is
+   a libssc logging switch, not a way to reach the DSP diag sensor.
 
 The registry was also probed directly (`sns_registry_probe=1`): a read_req for
 `sns_cm` addressed to the SUIDs the name would produce in the three spellings
