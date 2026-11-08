@@ -67,3 +67,10 @@ used as the reference on the same hardware and firmware).
    (`diag_sensor`); the HAL keeps it off (`support_qmi_debug: false`). If the
    diag sensor can be configured, its events carry the firmware's log lines,
    which would name the client manager's failure outright.
+
+The registry was also probed directly (`sns_registry_probe=1`): a read_req for
+`sns_cm` addressed to the SUIDs the name would produce in the three spellings
+the observed SUIDs use (`registry` NUL-padded, and `registry________` /
+`sns_registry____` with underscores) is answered result 0 by the transport but
+produces no read_event (`logs/223806-run.log`), so the SNS client service ACKs
+any SUID and the probe cannot prove which spelling (if any) is the registry's.
