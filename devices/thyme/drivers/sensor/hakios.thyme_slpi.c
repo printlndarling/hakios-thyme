@@ -4098,7 +4098,14 @@ static uint32_t fastrpc_service = 3;     /* the listener's handle: the fixed one
 static uint32_t fastrpc_lhandle;         /* 0: the fixed 3; 1: the handle remotectl_open returned; else that value */
 static uint32_t fastrpc_listener1;       /* boot-arg fastrpc_listener1: the modern adsp_listener1 interface (methods 5 and 6) */
 static uint32_t fastrpc_init2_sc = 0x03000000;
-static uint32_t fastrpc_next2_sc = 0x040202;
+/*
+ * The phone's listener (read off sscrpcd's INVOKE with ioctlspy, 9 November):
+ * handle 3, sc 0x04020200 = REMOTE_SCALARS_MAKE(4, 2, 2) -- method 4, two
+ * inputs and two outputs. The old value, 0x040202, decodes as method 0 with
+ * four inputs: the DSP dispatched the listener call as an open, which is why
+ * no reverse call ever came back.
+ */
+static uint32_t fastrpc_next2_sc = 0x04020200;
 static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
@@ -5233,7 +5240,8 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+	/* the phone registers with sc 0 (ioctlspy), not with output buffers */
+	fastrpc_call(fastrpc_client, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (phone)");
 	if (fastrpc_phone == 2) {
 		/* everything is registered first, then the thread waits: the DSP serves no control call
 		 * behind an outstanding next2, so this order is the one that always completes. */
@@ -5293,7 +5301,7 @@ fastrpc_dual_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, handle, 0, 0x300, physical, size, 5000, "adsp_default_listener_register (root)")) {
+	if (!fastrpc_call(1, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (root)")) {
 		fastrpc_pd = saved;
 		return;
 	}
@@ -5346,7 +5354,7 @@ fastrpc_heap_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(2, handle, 0, 0x302, physical, size, 5000, "adsp_default_listener_register (heap)")) {
+	if (!fastrpc_call(2, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (heap)")) {
 		fastrpc_pd = saved_pd;
 		fastrpc_client = saved_client;
 		return;
@@ -5501,7 +5509,7 @@ fastrpc_first_calls(uint32_t stage)
 				if (shared) {
 					fastrpc_smem_put(shared_offset, packet, size);
 				}
-				fastrpc_call(fastrpc_client, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
+				fastrpc_call(fastrpc_client, dl, 0, 0, physical, size, 5000, "adsp_default_listener_register");
 			}
 			{
 				uint32_t ac = fastrpc_attach_client;
