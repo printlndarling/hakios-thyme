@@ -4509,9 +4509,56 @@ static const struct {
 	{ 31, 1, 1, 24, 0 },    /* stat */
 };
 
+/*
+ * The out buffers' lengths follow the input buffers in a listener call's blob
+ * (listener_android.c: unpack_in_bufs, then unpack_out_lens). The served
+ * function writes into buffers of exactly those lengths, and the reply packs
+ * them back; the DSP rejects a reply whose out buffers differ.
+ */
+static int
+fastrpc_out_lens(uint32_t sc, const uint8_t *blob, uint32_t length, uint32_t *lens, uint32_t max)
+{
+	uint32_t count = (sc >> 16) & 0xff, outs = (sc >> 8) & 0xff, at = 0, align = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t size, skip;
+
+		if (at + 4 > length) {
+			return -1;
+		}
+		memcpy(&size, blob + at, 4);
+		at += 4;
+		align = (align + 4) & 7;
+		if (size == 0) {
+			continue;
+		}
+		skip = align ? 8 - align : 0;
+		at += skip;
+		align = (align + skip) & 7;
+		if (at + size > length) {
+			return -1;
+		}
+		at += size;
+		align = (align + size) & 7;
+	}
+	if (outs > max) {
+		outs = max;
+	}
+	for (uint32_t i = 0; i < outs; i++) {
+		uint32_t len = 0;
+
+		if (at + 4 <= length) {
+			memcpy(&len, blob + at, 4);
+			at += 4;
+		}
+		lens[i] = len;
+	}
+	return (int)outs;
+}
+
 static int32_t
 fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *out,
-    uint32_t max_out, uint32_t *out_count)
+    uint32_t max_out, uint32_t *out_count, const uint32_t *call_out_lens)
 {
 	struct fastrpc_io in[8];
 	uint32_t method = (sc >> 24) & 0x1f, def = 0, want, sizes[16];
@@ -4573,8 +4620,13 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		if (i == 0 && fastrpc_apps_std[def].out_numbers) {
 			size = 4 * fastrpc_apps_std[def].out_numbers;
 		} else {
-			size = sizes[fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers +
-			    (fastrpc_apps_std[def].out_numbers ? i - 1 : i)];
+			uint32_t which = (fastrpc_apps_std[def].out_numbers ? i - 1 : i);
+
+			size = sizes[fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers + which];
+			/* the call's own out buffer length wins: the DSP checks the reply against it */
+			if (call_out_lens != NULL && call_out_lens[which] != 0) {
+				size = call_out_lens[which];
+			}
 		}
 		if (size > FASTRPC_OUT_LIMIT) {
 			size = FASTRPC_OUT_LIMIT;
@@ -4966,8 +5018,15 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 				sleep_ms(1);
 			}
 			memset(out, 0, sizeof(out));
-			served = fastrpc_serve(numbers[1], numbers[2], nested,
-			    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count);
+			{
+				uint32_t call_out_lens[8] = { 0 };
+
+				(void)fastrpc_out_lens(numbers[2], nested,
+				    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), call_out_lens, 8);
+				served = fastrpc_serve(numbers[1], numbers[2], nested,
+				    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count,
+				    call_out_lens);
+			}
 			/*
 			 * The reply rides the next next2's inputs (the mainline listener model).
 			 * A separate reply call (the phone's INVOKE_FD sc 0x05010200, 12-byte
