@@ -5242,7 +5242,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
 	/* the phone registers with sc 0 (ioctlspy), not with output buffers */
-	fastrpc_call(fastrpc_client, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (phone)");
+	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
 	if (fastrpc_phone == 2) {
 		/* everything is registered first, then the thread waits: the DSP serves no control call
 		 * behind an outstanding next2, so this order is the one that always completes. */
@@ -5302,7 +5302,7 @@ fastrpc_dual_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (root)")) {
+	if (!fastrpc_call(1, handle, 0, 0x300, physical, size, 5000, "adsp_default_listener_register (root)")) {
 		fastrpc_pd = saved;
 		return;
 	}
@@ -5355,7 +5355,7 @@ fastrpc_heap_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(2, handle, 0, 0, physical, size, 5000, "adsp_default_listener_register (heap)")) {
+	if (!fastrpc_call(2, handle, 0, 0x302, physical, size, 5000, "adsp_default_listener_register (heap)")) {
 		fastrpc_pd = saved_pd;
 		fastrpc_client = saved_client;
 		return;
@@ -5510,7 +5510,7 @@ fastrpc_first_calls(uint32_t stage)
 				if (shared) {
 					fastrpc_smem_put(shared_offset, packet, size);
 				}
-				fastrpc_call(fastrpc_client, dl, 0, 0, physical, size, 5000, "adsp_default_listener_register");
+				fastrpc_call(fastrpc_client, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
 			}
 			{
 				uint32_t ac = fastrpc_attach_client;
@@ -5630,7 +5630,7 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
 			/* sc 0, as the phone's register is (ioctlspy) */
-			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0, physical, size, 5000,
+			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
 			    "adsp_default_listener_register");
 			if (ready && fastrpc_close) {
 				/*
