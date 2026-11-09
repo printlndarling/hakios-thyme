@@ -4968,6 +4968,12 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			memset(out, 0, sizeof(out));
 			served = fastrpc_serve(numbers[1], numbers[2], nested,
 			    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count);
+			/*
+			 * The reply rides the next next2's inputs (the mainline listener model).
+			 * A separate reply call (the phone's INVOKE_FD sc 0x05010200, 12-byte
+			 * context input and 4-byte result input) was tried on 9 November and
+			 * took the DSP down at the first call; the folded form stays.
+			 */
 			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 1024) : 0;
 			if (served != 0) {
 				printf("slpi: fastrpc: the call is answered with %#x\n", (uint32_t)served);
