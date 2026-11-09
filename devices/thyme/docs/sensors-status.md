@@ -125,6 +125,18 @@ being the first client of that boot) and not a transport artefact.
    `init_sensors.strace` from the 23:28 restart): on this firmware the flag is
    a libssc logging switch, not a way to reach the DSP diag sensor.
 
+**The steps ran on the kernel's start thread** (found 21:45): with
+`slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
+so any step that never returns hangs the whole boot at the Apple logo — the
+loader's USB service dies with it and no log can be read. The steps now run on
+a kernel thread, and `slpi_delay=S` holds them back S seconds so the system
+starts first and the loader's live log can show the steps up to a stall
+(`663644a`). The first threaded test still ended at the logo, so the stall is
+more likely hard (an SMC into TrustZone, or a lock) than a sleeping wait; the
+delayed form is the next probe, on the driver at `246232e` — the last state
+whose sensor runs completed (`logs/221040-run.log`, `logs/221918-run.log`) —
+so a regression from the later edits can be told apart from the phone's state.
+
 The registry was also probed directly (`sns_registry_probe=1`): a read_req for
 `sns_cm` addressed to the SUIDs the name would produce in the three spellings
 the observed SUIDs use (`registry` NUL-padded, and `registry________` /
