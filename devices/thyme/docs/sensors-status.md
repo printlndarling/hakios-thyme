@@ -163,6 +163,20 @@ stand (`0d3e0c4a`). The out buffers now take their lengths from the call
 DSP's retry of `fread` lies in the reply's *content* semantics, not its
 framing.
 
+**A sharper observation** (logs, 10 November): the DSP's every `fread` asks
+for `fd 1` — the first open's fd — while each new `fopen_with_env` from this
+driver returns a growing fd (7, 8, 9...) that no `fread` ever names. Two
+readings fit: either the DSP rejects the fopen replies and keeps reading the
+one handle it accepted first, or `1` is its own file slot and the opens are
+its retries for another reason. The firmware's strings for this path are
+`fopen failed file=%s error=%i, retrying` and
+`sns_registry_osa.c:fread failed error=%i` (`sns_registry_osa.c`, file offsets
+0x6887df and 0x6888fc in the SLPI image), so the failing step is one of the
+two and its error code would say which — that code only exists in the DSP's
+log, which is why the diag path or the disassembly of that function is the
+next step. The `fread` served against fd 1 does return the file's bytes
+(`THYME\n`), four times over.
+
 **Qualcomm's official listener source settles the model** (fetched 10
 November, `qualcomm/fastrpc`, `src/listener_android.c`): the classic listener
 replies **through the next `next2` call** —
