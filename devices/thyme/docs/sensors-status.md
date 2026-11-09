@@ -168,11 +168,29 @@ outstanding next2's, which changed the answer from `0x80000434` (EBADPARM) to
 the opened listener handle (837...), which changed it again to `0x80000414`
 (invalid format). The error follows the *handle* and the *context*, so the
 DSP firmware validates the method-5 reply against state this AP does not yet
-reproduce. The next real step is the DSP side: the SLPI firmware's FastRPC
-kernel (the `sns_err_handler`/`sns_sig_remote` neighbourhood, or the
-`adsprpc`-equivalent inside `slpi.b*`) has to be read with REA to see what it
-checks before accepting a reply. Blind variations cost a build and a boot
-each and stop here.
+reproduce.
+
+**Qualcomm's official listener source settles the model** (fetched 10
+November, `qualcomm/fastrpc`, `src/listener_android.c`): the classic listener
+replies **through the next `next2` call** —
+
+```
+sc = 0xffffffff;
+if (result != 0) outBufsLen = 0;
+adsp_listener_next2(ctx, result, outBufs, outBufsLen,
+                    &ctx, &handle, &sc, inBufs, inBufsLen, &inBufsLenReq);
+```
+
+— which is the folded form this driver already sends. The difference is the
+*outBufs* buffer: the served call's output buffers are the ones **the DSP
+reserved inside the same argument blob** (the bytes after the input buffers,
+`sizes` from `unpack_out_lens`); the served function writes into them and
+`pack_out_bufs` encodes them for the reply. This driver allocates fresh output
+buffers instead and encodes those, so the DSP's requested out-buffer lengths
+and the reply's contents never line up and it re-issues the call. The next
+piece is therefore clear: decode the out-buffer lengths from the call blob,
+write the served data into the call's own out region, and reply with
+`(ctx, result, outBufs = that region, outBufsLen)` on the next next2.
 
 **The steps ran on the kernel's start thread** (found 21:45): with
 `slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
