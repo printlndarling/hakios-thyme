@@ -38,84 +38,46 @@ being the first client of that boot) and not a transport artefact.
 ## Not working yet
 
 - **No sensor data**: no `SNS_STD_SENSOR_EVENT` (1025) follows the accepted
-  config. The stream is not created.
-- **The SUID lookup (512) takes the DSP down**: its service reads the sensor
-  attributes from the registry, which is empty here, and the sensor process
-  crashes (`irq115`, then `EX:kernel:...sns_sig_remote_...`). A config to a
-  known SUID does not.
-- **The reverse FastRPC tunnel never receives a call — the listener's scalar
-  was wrong** (found 9 November with `ioctlspy`, a small ptrace tool that reads
-  the ioctl buffers strace cannot): sscrpcd's listener calls are INIT flags=3,
-  INVOKE handle 3 sc `0x03000000` (init2), INVOKE handle 0 sc `0x20200` with
-  `[22, 0xff]` and `"adsp_default_listener"`, INVOKE the returned handle sc 0
-  (register), then INVOKE handle 3 sc **`0x04020200`** (next2) with a 16-byte
-  input `{0, -1, 0, 0}`. The driver sent next2 sc `0x040202`, which decodes as
-  method 0 with four inputs — an *open*, not the listener — so the DSP never
-  queued a reverse call in any ordering tried (the default chain,
-  `fastrpc_early=1`, the dual PD-0/PD-2 listeners, the late attach, the
-  restart, the phone orders `fastrpc_phone=2/3/6`). Register is sc 0, not
-  `0x300`.
-
-  **The corrected call hangs the phone** (9 November evening): with next2 sc
-  `0x04020200` and the phone's `{0,-1,0,0}` input (`52c4a77`, `c548ece`), every
-  boot that runs the chain — stage 6, 8 or 9, kernel-only or with the scene —
-  stops at the Apple logo and the loader's USB dies with it (the hung kernel
-  takes the AP's USB service away; a power cycle is the only recovery). The
-  daily scene without sensor arguments boots fine on the same kernel, so the
-  crash is the first real method-4 listener call. The register's sc 0 was
-  tried too (with its context kept) and also hung at stage 6, so it went back
-  to `0x300` (`1e0e007`); the phone's sc 0 does not suit this session. Next:
-  isolate with stage 5 (attach + open only) and stage 7, on a fresh phone,
-  before trying next2 again. The earlier successful SNS runs' arguments
-  (`slpi_step=10 slpi_keep=1`) are back in the test scripts.
-
-  **Stage 5 hangs too** (21:21, a clean boot): with only INIT_ATTACH_SNS and
-  the open, the phone still left USB right after the loader came up. The
-  crash is therefore not the next2 call alone — the SLPI bring-up (or the
-  attach) itself fails in the current state. The next run must be **stage 0
-  (`sns=1 servreg=1`, no FastRPC chain)** to tell a DSP-state problem from an
-  attach problem; if that hangs as well, the DSP firmware side needs a fresh
-  look before any chain experiments.
+  config, and the sensor process's registry build is not finished, so no
+  stream is created. Everything below it now works (the tunnel, the module
+  open, the file reads and closes), and the remaining step is the DSP's own
+  reason for re-reading the platform file without accepting the end of it.
+- **The registry read does not terminate**: the DSP's `sns_registry_osa`
+  opens `/sys/devices/soc0/hw_platform` once (fd 100, accepted), reads it
+  repeatedly with `fread(100, 512)`, and never treats the served `bEOF` as
+  the end; its own strings for the failing step are `fopen failed file=%s
+  error=%i, retrying` and `sns_registry_osa.c:fread failed error=%i`
+  (file offsets 0x6887df and 0x6888fc in the concatenated SLPI image). What
+  it checks is inside the DSP firmware; `slpi-re-plan.md` records how far the
+  disassembly route has got (LLVM Hexagon tools work; the GP-relative xrefs
+  need a QDSP6-specific tool or emulation, because only 62 r25-relative
+  references exist in the whole image and no consistent base fits them).
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
-  per-processor info and needs the registry group `sns_cm`) evidently never
-  comes up: the stream cannot start. Its strings name the missing group and the
-  heap it would allocate.
+  per-processor info and needs the registry group `sns_cm`) therefore never
+  comes up: the stream cannot start. Its strings name the missing group and
+  the heap it would allocate.
 
 ## The next pieces, in order
 
-1. **Verify the corrected listener**: with next2 now `0x04020200` and register
-   sc 0 (`52c4a77`), the DSP should answer the listener instead of treating it
-   as an open. The first boot after the phone is reachable again runs the
-   kernel-only sensor scene (`sns=1 servreg=1 fastrpc_smmu=2 fastrpc_call=9
-   fastrpc_pd=2 sns_accel_direct=1 sns_raw=1 slpi_listen=30`) and looks for
-   "the DSP asks for handle ... sc ... with N bytes of inputs". The next2
-   input buffer now matches the phone's `{0, -1, 0, 0}` too (`c548ece`); the
-   build with both changes is ready, and nothing else differs in the listener
-   call the spy showed.
-2. **Populate the registry**: the DSP reads `/vendor/etc/sensors/sns_reg_config`
-   (the string is in its own image; `registry config file '%s' is not present`
-   is its own log) and decodes the groups. Either serve that read through the
-   tunnel (1) or send the registry groups as `SNS_REGISTRY_WRITE_REQ` (the
-   protobuf layout is in `slpi-fastrpc.md`); the write needs the registry
-   service's SUID, which its lookup cannot answer while the registry is empty.
-   To see what the phone's own reverse calls carry, `sscrpcd sensorspd`
-   restarted under an init-followed `strace -e ioctl` shows its FastRPC traffic
-   as the `_IOC(0x52, ...)` ioctls (1, 6, 8, 0xC) at once; strace shows only
-   the ioctl pointer, so the invoke buffers (and the file paths inside them)
-   need a small ptrace reader — the tool to build if the tunnel stays silent.
-
-   **The attach's payload is a process id, not a client id**: the phone's
+1. **See the DSP's side**: the registry OSA's error code is the only thing that
+   says which check fails (fopen or fread), and it exists only in the DSP's
+   log. The SLPI announces no diag service of its own
+   (`logs/221040-run.log`, `logs/221918-run.log`: services 15, 24, 43, 51, 66,
+   400), so this is either an ADSP-diag client or the disassembly work in
+   `slpi-re-plan.md`.
+2. **Finish the registry serving**: with the read terminating, the DSP goes on
+   to `/vendor/etc/sensors/sns_reg_config` (the string is in its own image:
+   `registry config file '%s' is not present`) and the rest of the soc0
+   values; the driver maps and serves all of them from the scene and the
+   built-in soc0 table.
+3. **The attach's payload is a process id, not a client id**: the phone's
    `drivers/char/adsprpc.c` `fastrpc_init_process()` sends, for
    `FASTRPC_INIT_ATTACH_SENSORS`, one 4-byte buffer holding the calling
    process's **tgid** on handle `FASTRPC_STATIC_HANDLE_PROCESS_GROUP`, sc
-   `REMOTE_SCALARS_MAKE(0, 1, 0)` (0x10000). Our chain's payload
-   (`fastrpc_client`, default 0) has been 0; the DSP's process-group handle is
-   the one the reverse calls are addressed to, so a nonzero pgid
-   (`fastrpc_client=1`) is the difference under test now.
-   Also: the phone allocates its remote heap from the reserved `sdsp_region`
-   DMA pool; SCM-assigning a generic kernel heap (the first attempt got only
-   16 KB) stalled the scene at the SCM call and the loader restarted the phone —
-   that experiment was reverted and must not be repeated with ordinary heap
+   `REMOTE_SCALARS_MAKE(0, 1, 0)` (0x10000); the driver's payload
+   (`fastrpc_client`) is a boot argument. The phone allocates its remote heap
+   from the reserved `sdsp_region` DMA pool; SCM-assigning a generic kernel
+   heap stalled the scene once and must not be repeated with ordinary heap
    memory.
 
 3. **Get the DSP's own log**: `sns_diag_fw_log` exists in the SNS diag sensor
