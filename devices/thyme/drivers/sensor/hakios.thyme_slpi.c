@@ -4949,6 +4949,13 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 	}
 	physical = SMEM_PHYS + offset;
 	while (fastrpc_listener_wanted) {
+		/*
+		 * {ctx, result, the previous outputs' length, the input buffer's
+		 * length}: the phone's zeros are its initial call, where it fetches the
+		 * inputs with get_in_bufs2 on demand; this driver hands the DSP a full
+		 * nested buffer every time, and a zero there stops the inputs from
+		 * arriving (the decode then finds no arguments).
+		 */
 		sizes[0] = rctx;
 		sizes[1] = result_code;
 		sizes[2] = returned_length;

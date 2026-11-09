@@ -144,31 +144,24 @@ re-opens and re-reads: the file-op reply layout (fread's numbers, the module
 handle) still needs to match what its apps_std expects — the next piece
 (`ffc5d99`).
 
-The phone's own listener reply was captured too (ioctlspy with the 4-argument
-dump): it answers with its own `INVOKE_FD`, handle 3, sc `0x05010200`, a
-12-byte input `{context+1, 0, 4096}`, a 4-byte input `{the call's input size}`,
-and the served buffers as outputs; its next2 then stays `{0, -1, 0, 0}`. Sending
-that reply from the driver was tried (`0x05010200`):
+The phone's `INVOKE_FD` at sc `0x05010200` was taken for a reply at first; the
+**IDL settles it** (`qualcomm/fastrpc`, `idl/adsp_listener1.idl`): method 5 is
+`get_in_bufs2(ctx, offset, bufs, bufsLenReq)` — the listener fetching more of
+a call's input bytes when its own buffer is too small — not a reply at all.
+The phone captured earlier was doing exactly that, which is why sending
+method-5 calls from here answered EBADPARM across every argument layout
+(the +1 context, the out sizes, the opened handle: `0x80000434` →
+`0x8000040E` → `0x80000414` as those changed). **Replies are only ever folded
+into the next `next2`'s prevbufs**, which this driver already does.
 
-- with the call's own context and the served buffers as extra args, the DSP
-  went down at the first call and the phone reset;
-- with `context+1` it answers `0x80000434` (AEE_EBADPARM) instead of crashing,
-  and the DSP retries the call — the same answer with the out args at 8/512
-  bytes, at 0/0 bytes, and with only the two inputs. The encoding it insists
-  on is not yet right (the packet fits: 12+4 bytes of inputs plus a 4 KB packet
-  bound), so the folded reply stays (`4fd3b9b`).
-
-The next attempt should vary the reply's *handle* (the open's handle,
-837..., rather than the static 3) and the message's client/tid, since the
-DSP's validation rejects the call before looking at the served data.
-
-Tried after that (10 November, 00:00-00:15): the reply's context equal to the
-outstanding next2's, which changed the answer from `0x80000434` (EBADPARM) to
-`0x8000040E` (unsupported) — the DSP now recognises the call; and the reply on
-the opened listener handle (837...), which changed it again to `0x80000414`
-(invalid format). The error follows the *handle* and the *context*, so the
-DSP firmware validates the method-5 reply against state this AP does not yet
-reproduce.
+The scalars of that next2 are `{ctx, result, the previous outputs' length, the
+input buffer's length}`: a run that set the last two to 0 (copying the phone's
+initial `{0,-1,0,0}`) stopped the DSP from delivering the calls at all —
+`apps_std ... the arguments do not decode` — so the driver's original values
+stand (`0d3e0c4a`). The out buffers now take their lengths from the call
+(`ce18bf6`); for every call tried they matched the previous sizes, so the
+DSP's retry of `fread` lies in the reply's *content* semantics, not its
+framing.
 
 **Qualcomm's official listener source settles the model** (fetched 10
 November, `qualcomm/fastrpc`, `src/listener_android.c`): the classic listener
