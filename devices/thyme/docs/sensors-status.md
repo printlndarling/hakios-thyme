@@ -148,10 +148,19 @@ The phone's own listener reply was captured too (ioctlspy with the 4-argument
 dump): it answers with its own `INVOKE_FD`, handle 3, sc `0x05010200`, a
 12-byte input `{context+1, 0, 4096}`, a 4-byte input `{the call's input size}`,
 and the served buffers as outputs; its next2 then stays `{0, -1, 0, 0}`. Sending
-that reply from the driver was tried (`0x05010200`) and **took the DSP down at
-the first call** — the boot froze exactly where the listen ends and the phone
-reset — so the folded reply stays (`4fd3b9b`). The separate form needs the
-reply's output sizes and fd list matched before another attempt.
+that reply from the driver was tried (`0x05010200`):
+
+- with the call's own context and the served buffers as extra args, the DSP
+  went down at the first call and the phone reset;
+- with `context+1` it answers `0x80000434` (AEE_EBADPARM) instead of crashing,
+  and the DSP retries the call — the same answer with the out args at 8/512
+  bytes, at 0/0 bytes, and with only the two inputs. The encoding it insists
+  on is not yet right (the packet fits: 12+4 bytes of inputs plus a 4 KB packet
+  bound), so the folded reply stays (`4fd3b9b`).
+
+The next attempt should vary the reply's *handle* (the open's handle,
+837..., rather than the static 3) and the message's client/tid, since the
+DSP's validation rejects the call before looking at the served data.
 
 **The steps ran on the kernel's start thread** (found 21:45): with
 `slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
