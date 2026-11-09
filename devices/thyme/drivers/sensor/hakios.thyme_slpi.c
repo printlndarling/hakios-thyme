@@ -5537,6 +5537,15 @@ fastrpc_first_calls(uint32_t stage)
 	uint32_t handles[2] = { 0, 0 };
 	uint8_t error[256];
 
+	/*
+	 * A run whose DSP never answered QRTR (the hello) cannot say anything
+	 * about the FastRPC chain: skip it and name the reason, so a later log is
+	 * not read as a chain result when the DSP was not up at all.
+	 */
+	if (qrtr_hellos == 0) {
+		printf("slpi: fastrpc: the DSP never said hello over QRTR; the chain is skipped\n");
+		return;
+	}
 	if (shared) {
 		printf("slpi: fastrpc: stage %u: asking for a 4 KB packet in the shared memory\n", stage);
 		buf = fastrpc_smem_buffer(&shared_offset);
