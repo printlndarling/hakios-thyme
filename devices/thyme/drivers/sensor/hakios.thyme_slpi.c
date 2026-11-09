@@ -4106,6 +4106,7 @@ static uint32_t fastrpc_init2_sc = 0x03000000;
  * the DSP never queued a reverse call.
  */
 static uint32_t fastrpc_next2_sc = 0x04020200;
+static uint32_t fastrpc_debug;           /* boot-arg fastrpc_debug: print each reverse call's decoded arguments */
 static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
@@ -4538,6 +4539,22 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	if (fastrpc_decode(sc, blob, length, in, 8) < 0 || in[0].size < 4) {
 		printf("slpi: fastrpc: apps_std %u: the arguments do not decode\n", method);
 		return result;
+	}
+	if (fastrpc_debug) {
+		printf("slpi: fastrpc: apps_std %u decode: sc %#x, in[0] %u bytes:", method, sc, in[0].size);
+		for (uint32_t i = 0; i < 8 && 4 * i + 4 <= in[0].size; i++) {
+			uint32_t v;
+
+			memcpy(&v, in[0].data + 4 * i, 4);
+			printf(" %u", v);
+		}
+		printf("; buffers:");
+		for (uint32_t i = 1; i < 8; i++) {
+			if (in[i].size != 0) {
+				printf(" in[%u]=%u", i, in[i].size);
+			}
+		}
+		printf("\n");
 	}
 	memset(sizes, 0, sizeof(sizes));
 	for (uint32_t i = 0; i < fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers +
@@ -6578,6 +6595,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_smmu", &fastrpc_smmu, sizeof(fastrpc_smmu));
 	PE_parse_boot_argn("fastrpc_call", &fastrpc_call, sizeof(fastrpc_call));
 	PE_parse_boot_argn("fastrpc_pd", &fastrpc_pd, sizeof(fastrpc_pd));
+	PE_parse_boot_argn("fastrpc_debug", &fastrpc_debug, sizeof(fastrpc_debug));
 	PE_parse_boot_argn("fastrpc_lhandle", &fastrpc_lhandle, sizeof(fastrpc_lhandle));
 	PE_parse_boot_argn("fastrpc_attach_late", &fastrpc_attach_late, sizeof(fastrpc_attach_late));
 	PE_parse_boot_argn("fastrpc_restart", &fastrpc_restart, sizeof(fastrpc_restart));
