@@ -54,9 +54,20 @@ being the first client of that boot) and not a transport artefact.
   queued a reverse call in any ordering tried (the default chain,
   `fastrpc_early=1`, the dual PD-0/PD-2 listeners, the late attach, the
   restart, the phone orders `fastrpc_phone=2/3/6`). Register is sc 0, not
-  `0x300`. Both are corrected (`52c4a77`); the boot that would test them did
-  not complete (the phone went off USB and needed a physical restart), so the
-  corrected listener is **not yet verified on the phone**.
+  `0x300`.
+
+  **The corrected call hangs the phone** (9 November evening): with next2 sc
+  `0x04020200` and the phone's `{0,-1,0,0}` input (`52c4a77`, `c548ece`), every
+  boot that runs the chain — stage 6, 8 or 9, kernel-only or with the scene —
+  stops at the Apple logo and the loader's USB dies with it (the hung kernel
+  takes the AP's USB service away; a power cycle is the only recovery). The
+  daily scene without sensor arguments boots fine on the same kernel, so the
+  crash is the first real method-4 listener call. The register's sc 0 was
+  tried too (with its context kept) and also hung at stage 6, so it went back
+  to `0x300` (`1e0e007`); the phone's sc 0 does not suit this session. Next:
+  isolate with stage 5 (attach + open only) and stage 7, on a fresh phone,
+  before trying next2 again. The earlier successful SNS runs' arguments
+  (`slpi_step=10 slpi_keep=1`) are back in the test scripts.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
   per-processor info and needs the registry group `sns_cm`) evidently never
   comes up: the stream cannot start. Its strings name the missing group and the
