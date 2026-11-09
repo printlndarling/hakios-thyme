@@ -80,6 +80,7 @@ static LCK_GRP_DECLARE(slpi_lock_group, "hakios-slpi");
 #define HAKIOS_SOC_BASE        0x00400000ul    /* where the loader says the phone's peripherals begin */
 
 static uint32_t last_step, pause_ms = 2200, listen_seconds = 3;
+static uint32_t slpi_delay;              /* boot-arg slpi_delay: seconds to let the system start before the steps */
 static uint32_t step;                   /* the one being performed */
 static uint32_t new_from;               /* the first of the steps that have not been seen to work: they wait */
 static char last_write[96] = "nothing written";
@@ -4098,14 +4099,7 @@ static uint32_t fastrpc_service = 3;     /* the listener's handle: the fixed one
 static uint32_t fastrpc_lhandle;         /* 0: the fixed 3; 1: the handle remotectl_open returned; else that value */
 static uint32_t fastrpc_listener1;       /* boot-arg fastrpc_listener1: the modern adsp_listener1 interface (methods 5 and 6) */
 static uint32_t fastrpc_init2_sc = 0x03000000;
-/*
- * The phone's listener (read off sscrpcd's INVOKE with ioctlspy, 9 November):
- * handle 3, sc 0x04020200 = REMOTE_SCALARS_MAKE(4, 2, 2) -- method 4, two
- * inputs and two outputs. The old value, 0x040202, decodes as method 0 with
- * four inputs: the DSP dispatched the listener call as an open, which is why
- * no reverse call ever came back.
- */
-static uint32_t fastrpc_next2_sc = 0x04020200;
+static uint32_t fastrpc_next2_sc = 0x040202;
 static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
@@ -4138,8 +4132,7 @@ static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
 {
 	uint8_t nested[2048];
-	/* the phone's first next2 input is {context 0, result -1, 0, 0}: no call before it */
-	uint32_t sizes[4] = { 0, 0xffffffffu, 0, 0 }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
+	uint32_t sizes[4] = { 0, 0, 0, sizeof(nested) }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
 	const void *sources[4];
 
 	lengths[0] = sizeof(sizes);
@@ -5241,8 +5234,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	/* the phone registers with sc 0 (ioctlspy), not with output buffers */
-	fastrpc_call(fastrpc_client, handle, 0x300, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
 	if (fastrpc_phone == 2) {
 		/* everything is registered first, then the thread waits: the DSP serves no control call
 		 * behind an outstanding next2, so this order is the one that always completes. */
@@ -5302,7 +5294,7 @@ fastrpc_dual_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(1, handle, 0x300, 0x300, physical, size, 5000, "adsp_default_listener_register (root)")) {
+	if (!fastrpc_call(1, handle, 0, 0x300, physical, size, 5000, "adsp_default_listener_register (root)")) {
 		fastrpc_pd = saved;
 		return;
 	}
@@ -5355,7 +5347,7 @@ fastrpc_heap_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	if (!fastrpc_call(2, handle, 0x300, 0x302, physical, size, 5000, "adsp_default_listener_register (heap)")) {
+	if (!fastrpc_call(2, handle, 0, 0x302, physical, size, 5000, "adsp_default_listener_register (heap)")) {
 		fastrpc_pd = saved_pd;
 		fastrpc_client = saved_client;
 		return;
@@ -5510,7 +5502,7 @@ fastrpc_first_calls(uint32_t stage)
 				if (shared) {
 					fastrpc_smem_put(shared_offset, packet, size);
 				}
-				fastrpc_call(fastrpc_client, dl, 0x300, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
+				fastrpc_call(fastrpc_client, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
 			}
 			{
 				uint32_t ac = fastrpc_attach_client;
@@ -5629,12 +5621,7 @@ fastrpc_first_calls(uint32_t stage)
 			if (shared) {
 				fastrpc_smem_put(shared_offset, packet, size);
 			}
-			/*
-			 * sc 0x300, not the phone's sc 0: the sc-0 form hung the boot at
-			 * stage 6 even with the context restored, so the form that boots
-			 * stands until the next2 question is settled.
-			 */
-			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0x300, 0x300 | fastrpc_pd, physical, size, 5000,
+			ready = fastrpc_call(fastrpc_client, fastrpc_listener, 0, 0x300 | fastrpc_pd, physical, size, 5000,
 			    "adsp_default_listener_register");
 			if (ready && fastrpc_close) {
 				/*
@@ -6748,6 +6735,37 @@ run_steps(void)
 	printf("slpi: over after step %u; %s\n", done, last_write);
 }
 
+/*
+ * The steps with slpi_step=N do not run on the kernel's start thread: a step
+ * that never returns (an SMC into TrustZone, a wait the DSP never answers)
+ * used to hang the whole boot at the Apple logo, with the loader's USB gone
+ * and no log to read. On a thread of their own they may hang; the system
+ * still starts, and the kernel's log says which step it was.
+ */
+static void
+step_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	/*
+	 * slpi_delay=S: let the system start first. The loader fetches this log
+	 * every few seconds while the kernel runs, so a step that hangs leaves
+	 * the steps up to it in the .live file — the only way to see where a
+	 * hard stall happens.
+	 */
+	for (unsigned ms = 0; ms < slpi_delay * 1000; ms += 200) {
+		sleep_ms(200);
+	}
+	if (slpi_delay != 0) {
+		printf("slpi: the steps begin %u s after the kernel, on their thread\n", slpi_delay);
+	}
+	run_steps();
+	if (option("slpi_return")) {
+		printf("slpi: back to the loader (slpi_return)\n");
+		loader_return();
+	}
+	printf("slpi: the steps' thread is done (last step %u, %s)\n", step, last_write);
+	thread_terminate(current_thread());
+}
+
 static void
 whole_thread(__unused void *parameter, __unused wait_result_t result)
 {
@@ -6810,12 +6828,14 @@ hakios_slpi_init(void)
 	new_from = last_step;
 	PE_parse_boot_argn("slpi_new", &new_from, sizeof(new_from));
 	PE_parse_boot_argn("slpi_pause", &pause_ms, sizeof(pause_ms));
-	printf("slpi: steps up to %u; those from %u on are new and wait %u ms after each announcement\n", last_step, new_from,
-	    pause_ms);
-	run_steps();
-	if (option("slpi_return")) {
-		printf("slpi: back to the loader (slpi_return)\n");
-		loader_return();
+	PE_parse_boot_argn("slpi_delay", &slpi_delay, sizeof(slpi_delay));
+	printf("slpi: steps up to %u; those from %u on are new and wait %u ms after each announcement; they run on a thread\n",
+	    last_step, new_from, pause_ms);
+	if (kernel_thread_start(step_thread, NULL, &thread) != KERN_SUCCESS) {
+		printf("slpi: no thread: the steps run here, and a hang takes the boot with it\n");
+		run_steps();
+	} else {
+		thread_deallocate(thread);
 	}
 	printf("slpi: the system goes on starting\n");
 }
