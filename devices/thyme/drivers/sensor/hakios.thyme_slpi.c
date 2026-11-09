@@ -4218,7 +4218,8 @@ struct fastrpc_dir_slot {
 
 static struct fastrpc_file_slot fastrpc_files[FASTRPC_FILE_SLOTS];
 static struct fastrpc_dir_slot fastrpc_dirs[FASTRPC_DIR_SLOTS];
-static uint32_t fastrpc_next_fd = 1;
+/* Qualcomm's apps_std_imp.c starts its file handles at APPS_FD_BASE = 100 */
+static uint32_t fastrpc_next_fd = 100;
 
 /* The DSP's paths, to the copies in the root image that userland/build.sh puts there from fw-sensors/. */
 static const char *
