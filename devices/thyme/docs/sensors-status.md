@@ -125,6 +125,25 @@ being the first client of that boot) and not a transport artefact.
    `init_sensors.strace` from the 23:28 restart): on this firmware the flag is
    a libssc logging switch, not a way to reach the DSP diag sensor.
 
+**The reverse tunnel works** (22:36): with the steps on their own thread,
+`slpi_delay=40` and the corrected next2 (`sc 0x04020200`, input `{0,-1,0,0}`),
+the DSP queues its first reverse calls and the log shows them end to end:
+
+```
+[client 1 pd 2] the DSP asks for handle 0 sc 0x20200 (41 bytes: "apps_std")
+apps_std: the DSP opened its module; handle 1
+[client 1 pd 2] the DSP asks for handle -1 sc 0x13050100 (110 bytes:
+  "ADSP_LIBRARY_PATH", "/sys/devices/soc0/hw_platform")
+apps_std: opened /fw/sensors/soc0/hw_platform (6 bytes) as 1
+[client 1 pd 2] the DSP asks for handle -1 sc 0x4010200 (24 bytes: fread)
+```
+
+The soc0 values are device constants read off Android and carried in the
+driver (`hw_platform=THYME`, `soc_id=356`, `revision=2.1`, ...). The DSP
+re-opens and re-reads: the file-op reply layout (fread's numbers, the module
+handle) still needs to match what its apps_std expects — the next piece
+(`ffc5d99`).
+
 **The steps ran on the kernel's start thread** (found 21:45): with
 `slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
 so any step that never returns hangs the whole boot at the Apple logo — the
