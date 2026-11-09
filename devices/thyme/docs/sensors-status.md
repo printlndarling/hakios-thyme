@@ -144,6 +144,15 @@ re-opens and re-reads: the file-op reply layout (fread's numbers, the module
 handle) still needs to match what its apps_std expects — the next piece
 (`ffc5d99`).
 
+The phone's own listener reply was captured too (ioctlspy with the 4-argument
+dump): it answers with its own `INVOKE_FD`, handle 3, sc `0x05010200`, a
+12-byte input `{context+1, 0, 4096}`, a 4-byte input `{the call's input size}`,
+and the served buffers as outputs; its next2 then stays `{0, -1, 0, 0}`. Sending
+that reply from the driver was tried (`0x05010200`) and **took the DSP down at
+the first call** — the boot froze exactly where the listen ends and the phone
+reset — so the folded reply stays (`4fd3b9b`). The separate form needs the
+reply's output sizes and fd list matched before another attempt.
+
 **The steps ran on the kernel's start thread** (found 21:45): with
 `slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
 so any step that never returns hangs the whole boot at the Apple logo — the
