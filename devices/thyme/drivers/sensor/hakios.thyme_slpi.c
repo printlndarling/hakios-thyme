@@ -4496,7 +4496,7 @@ fastrpc_encode(const struct fastrpc_io *io, uint32_t count, uint8_t *blob, uint3
 static const struct {
 	uint8_t method, in_numbers, in_buffers, out_numbers, out_buffers;
 } fastrpc_apps_std[] = {
-	{ 0, 0, 2, 2, 0 },      /* open: the DSP asks for its apps_std module on handle 0 */
+	{ 0, 0, 2, 2, 1 },      /* open: apps_remotectl.open, out {handle, nErr} + the dlerror buffer */
 	{ 1, 1, 0, 1, 1 },      /* freopen */
 	{ 2, 8, 0, 0, 0 },      /* fflush */
 	{ 3, 1, 0, 0, 0 },      /* fclose */
@@ -4656,6 +4656,10 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		}
 		numbers[0] = 1;
 		numbers[1] = 0;
+		/* apps_remotectl.open's third out is the dlerror string: an empty one, NUL-terminated */
+		if (out_count > 1 && out[1].data != NULL && out[1].size != 0) {
+			((char *)out[1].data)[0] = 0;
+		}
 		printf("slpi: fastrpc: apps_std: the DSP opened its module; handle 1\n");
 		result = 0;
 		break;
