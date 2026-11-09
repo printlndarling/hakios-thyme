@@ -68,6 +68,14 @@ being the first client of that boot) and not a transport artefact.
   isolate with stage 5 (attach + open only) and stage 7, on a fresh phone,
   before trying next2 again. The earlier successful SNS runs' arguments
   (`slpi_step=10 slpi_keep=1`) are back in the test scripts.
+
+  **Stage 5 hangs too** (21:21, a clean boot): with only INIT_ATTACH_SNS and
+  the open, the phone still left USB right after the loader came up. The
+  crash is therefore not the next2 call alone — the SLPI bring-up (or the
+  attach) itself fails in the current state. The next run must be **stage 0
+  (`sns=1 servreg=1`, no FastRPC chain)** to tell a DSP-state problem from an
+  attach problem; if that hangs as well, the DSP firmware side needs a fresh
+  look before any chain experiments.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
   per-processor info and needs the registry group `sns_cm`) evidently never
   comes up: the stream cannot start. Its strings name the missing group and the
