@@ -162,6 +162,18 @@ The next attempt should vary the reply's *handle* (the open's handle,
 837..., rather than the static 3) and the message's client/tid, since the
 DSP's validation rejects the call before looking at the served data.
 
+Tried after that (10 November, 00:00-00:15): the reply's context equal to the
+outstanding next2's, which changed the answer from `0x80000434` (EBADPARM) to
+`0x8000040E` (unsupported) — the DSP now recognises the call; and the reply on
+the opened listener handle (837...), which changed it again to `0x80000414`
+(invalid format). The error follows the *handle* and the *context*, so the
+DSP firmware validates the method-5 reply against state this AP does not yet
+reproduce. The next real step is the DSP side: the SLPI firmware's FastRPC
+kernel (the `sns_err_handler`/`sns_sig_remote` neighbourhood, or the
+`adsprpc`-equivalent inside `slpi.b*`) has to be read with REA to see what it
+checks before accepting a reply. Blind variations cost a build and a boot
+each and stop here.
+
 **The steps ran on the kernel's start thread** (found 21:45): with
 `slpi_step=N`, `run_steps()` was called synchronously from the driver's init,
 so any step that never returns hangs the whole boot at the Apple logo — the
