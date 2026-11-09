@@ -49,4 +49,8 @@ The DSP's own log through diag (`sns_diag_fw_log`) would say why the read is
 retried without any disassembly; `sensors-status.md` records that the HAL's
 `ssc_qmi_debug` property is only a logging switch, so the diag path needs its
 own client (QSHPD subscription over QRTR) — also a project, but a smaller one
-than reading the firmware.
+than reading the firmware. One fact from the service lists (10 November): the
+SLPI announces only 15, 24, 43, 51, 66 and 400 over QRTR
+(`logs/221040-run.log`, `logs/221918-run.log`) — **no diag service** — so a
+diag client would have to reach the ADSP's diag stack, not the SLPI's own,
+which makes the firmware route the more direct one of the two.
