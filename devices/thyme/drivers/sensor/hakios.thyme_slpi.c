@@ -4099,7 +4099,13 @@ static uint32_t fastrpc_service = 3;     /* the listener's handle: the fixed one
 static uint32_t fastrpc_lhandle;         /* 0: the fixed 3; 1: the handle remotectl_open returned; else that value */
 static uint32_t fastrpc_listener1;       /* boot-arg fastrpc_listener1: the modern adsp_listener1 interface (methods 5 and 6) */
 static uint32_t fastrpc_init2_sc = 0x03000000;
-static uint32_t fastrpc_next2_sc = 0x040202;
+/*
+ * The phone's listener (read off sscrpcd's INVOKE with ioctlspy): handle 3,
+ * sc 0x04020200 = REMOTE_SCALARS_MAKE(4, 2, 2) -- method 4, two inputs and two
+ * outputs. The old 0x040202 decodes as method 0 with four inputs (an open), so
+ * the DSP never queued a reverse call.
+ */
+static uint32_t fastrpc_next2_sc = 0x04020200;
 static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
@@ -4132,7 +4138,8 @@ static void
 fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet, uint8_t *reply)
 {
 	uint8_t nested[2048];
-	uint32_t sizes[4] = { 0, 0, 0, sizeof(nested) }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
+	/* the phone's first next2 input is {context 0, result -1, 0, 0}: no call before it */
+	uint32_t sizes[4] = { 0, 0xffffffffu, 0, 0 }, numbers[4] = { 0, 0, 0, 0 }, lengths[4], size;
 	const void *sources[4];
 
 	lengths[0] = sizeof(sizes);
@@ -4244,6 +4251,47 @@ fastrpc_path(const char *name, char *to, size_t length)
 			snprintf(to, length, "%s%s", map[i].to, name + n);
 			return to;
 		}
+	}
+	return NULL;
+}
+
+/*
+ * /sys/devices/soc0's values on this phone, read off Android (9 November):
+ * the DSP's registry config reads them through apps_std, and a scene built
+ * without a soc0 copy must still answer. The driver maps /sys/devices/soc0/
+ * to /fw/sensors/soc0/ and falls back here when that file is not there.
+ */
+static const struct {
+	const char *name, *value;
+} fastrpc_soc0[] = {
+	{ "hw_platform", "THYME\n" },
+	{ "platform_subtype", "Unknown\n" },
+	{ "platform_subtype_id", "0\n" },
+	{ "platform_version", "589824\n" },
+	{ "soc_id", "356\n" },
+	{ "revision", "2.1\n" },
+	{ "machine", "SM8250\n" },
+	{ "family", "Snapdragon\n" },
+};
+
+static uint8_t *
+fastrpc_soc0_read(const char *name, uint32_t *size)
+{
+	for (unsigned i = 0; i < sizeof(fastrpc_soc0) / sizeof(fastrpc_soc0[0]); i++) {
+		size_t length;
+
+		if (strcmp(name, fastrpc_soc0[i].name) != 0) {
+			continue;
+		}
+		length = strlen(fastrpc_soc0[i].value);
+		uint8_t *data = kalloc_data(length + 1, Z_WAITOK | Z_ZERO);
+
+		if (data == NULL) {
+			return NULL;
+		}
+		memcpy(data, fastrpc_soc0[i].value, length);
+		*size = (uint32_t)length;
+		return data;
 	}
 	return NULL;
 }
@@ -4447,6 +4495,7 @@ fastrpc_encode(const struct fastrpc_io *io, uint32_t count, uint8_t *blob, uint3
 static const struct {
 	uint8_t method, in_numbers, in_buffers, out_numbers, out_buffers;
 } fastrpc_apps_std[] = {
+	{ 0, 0, 2, 2, 0 },      /* open: the DSP asks for its apps_std module on handle 0 */
 	{ 1, 1, 0, 1, 1 },      /* freopen */
 	{ 2, 8, 0, 0, 0 },      /* fflush */
 	{ 3, 1, 0, 0, 0 },      /* fclose */
@@ -4469,7 +4518,13 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	uint32_t *numbers = NULL;
 
 	*out_count = 0;
-	if (handle != 1) {
+	/*
+	 * The DSP's own apps_std calls carry handle -1 (and its module open
+	 * handle 0); the first reverse calls read off the phone ask for
+	 * "/sys/devices/soc0/hw_platform" through fopen_with_env on -1. Serve
+	 * those as apps_std too; anything else keeps the EBADPARM answer.
+	 */
+	if (handle != 0 && handle != 1 && handle != 0xffffffffu) {
 		printf("slpi: fastrpc: a call for handle %u is not served\n", handle);
 		return result;
 	}
@@ -4525,6 +4580,17 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	}
 
 	switch (method) {
+	case 0: {                          /* open: hand the DSP the static apps_std handle */
+		if (numbers == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		numbers[0] = 1;
+		numbers[1] = 0;
+		printf("slpi: fastrpc: apps_std: the DSP opened its module; handle 1\n");
+		result = 0;
+		break;
+	}
 	case 19: {                         /* fopen_with_env */
 		const char *name = NULL, *mode;
 		char path[160];
@@ -4553,7 +4619,11 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 				snprintf(path, sizeof(path), "/fw/sensors/%s", name);
 			}
 		}
-		data = fastrpc_root_read(path, FASTRPC_FILE_LIMIT, &file_size);
+		if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
+			data = fastrpc_soc0_read(path + sizeof("/fw/sensors/soc0/") - 1, &file_size);
+		} else {
+			data = fastrpc_root_read(path, FASTRPC_FILE_LIMIT, &file_size);
+		}
 		if (data == NULL) {
 			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
 			result = (int32_t)AEE_EFAILED;
