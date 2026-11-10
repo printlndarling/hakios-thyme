@@ -94,6 +94,34 @@ being the first client of that boot) and not a transport artefact.
   service's memory without reaching the client manager. A write that adds the
   persist file's "owner" as a string item (194 bytes) is not answered at all;
   the 169-byte one without it is the accepted form.
+- **All 189 group files parse, and one boot sends 188 of them** (10
+  November): the uploader had three faults. The item parser's `"type":"`,
+  `"ver":"` and `"data":"` needles end with the value's *opening quote*, and
+  the code stepped one byte past it, so `sns_json_string` rejected every item
+  and every file failed to parse (the earlier "0 of 189"). The image keeps a
+  file's bytes with no terminator, so the scanner then ran past the file's
+  last `}` into whatever the image holds next and could assemble a group of
+  several kilobytes; `sns_request` copied that payload through `body[64]` and
+  an output buffer of 512 bytes on the stack, and the write smashed the
+  sender's stack canary (panic `Kernel stack memory corruption detected`,
+  `logs/140749-run.log`). The parser now reads a NUL-terminated copy bounded
+  by the file's size, `sns_request` counts what it will write before writing
+  it, and `sns_qmi_send` takes its buffers from the heap when a group needs
+  more than the stack ones; `hakios_image_file`'s path buffer takes the
+  nested names (192 bytes). One boot now sends **188 of 189** groups — the
+  one left is `sensors_registry`, an empty file — without a panic
+  (`logs/142126-run.log`), and every write is answered **result 5**, as the
+  client request and the config are. The bytes themselves are right:
+  `tools/qrtrprobe2.c` (a freestanding probe built from the same encoders)
+  sends the same read and write requests to the phone's DSP on Android and
+  gets **result 0** for the group `ak0991x_0`, for an int-only group
+  and for a name the DSP has never seen (`hakios_test_group`) — so a fully
+  started DSP creates groups from this exact wire form. What our boot lacks
+  is the registry sensor's own instance state; the phone's DSP also answers
+  `tools/qrtrprobe2.c`'s read of `lsm6dso_0`, while our boot never sees a
+  read event. The registry's persist directory, read through the reverse
+  file API, and the client manager it feeds are the two candidates for the
+  next step.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range

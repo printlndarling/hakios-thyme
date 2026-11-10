@@ -48,7 +48,7 @@ static LCK_GRP_DECLARE(image_lck_grp, "hakios_image");
 static LCK_MTX_DECLARE(image_lock, &image_lck_grp);    /* kept[]: the drivers start beside each other */
 static struct {
 	int       disk;
-	char      path[96];
+	char      path[192];    /* a nested name: the registry groups' paths run to ~105 characters */
 	uint8_t  *data;
 	uint64_t  size;
 } kept[64];
@@ -62,7 +62,7 @@ apfs_file(int disk, const uint8_t *base, uint64_t length, const char *dir, const
 	struct apfs_vol *vol = NULL;
 	struct apfs_inode ino;
 	struct apfs_cfile cf;
-	char path[96];
+	char path[192];
 	uint64_t id = 0, fsize = 0, off = 0;
 	uint8_t dt = 0, *data = NULL;
 	uint32_t i;

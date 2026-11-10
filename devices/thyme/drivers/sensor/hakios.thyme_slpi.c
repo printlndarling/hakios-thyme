@@ -2896,11 +2896,12 @@ sns_read_varint(const uint8_t **at, const uint8_t *end)
 }
 
 static uint32_t
-sns_request(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint32_t payload_length, uint8_t *out)
+sns_request(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint32_t payload_length, uint8_t *out,
+    uint32_t capacity)
 {
-	uint8_t suid_bytes[32], pm[16], body[64];
+	uint8_t suid_bytes[32], pm[16], varint[16];
 	uint8_t *p = out, *q;
-	uint32_t suid_length, pm_length, body_length;
+	uint32_t suid_length, pm_length, inner = 0;
 	uint64_t low, high;
 
 	memcpy(&low, suid, 8);
@@ -2915,33 +2916,75 @@ sns_request(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint32
 	q = sns_varint(q, 0x10);        /* delivery_type = 0 */
 	q = sns_varint(q, 0);
 	pm_length = (uint32_t)(q - pm);
-	q = body;
+	/*
+	 * The body is one nested message (field 2) holding the payload; a registry
+	 * group runs to several kilobytes, so it is written straight into `out`
+	 * rather than through a fixed buffer, and the room it needs is counted
+	 * before a byte goes out (the old body[64] and out of 512 bytes were the
+	 * stack that a group's write smashed, 10 November).
+	 */
 	if (payload != NULL && payload_length != 0) {
-		/* the phone's body is this one field and nothing else (strace, see sns_ask) */
-		q = sns_bytes(q, 2, payload, payload_length);
+		q = sns_varint(varint, payload_length);
+		inner = (uint32_t)(q - varint) + 1 + payload_length;   /* field 2's key, its length, the bytes */
 	}
-	body_length = (uint32_t)(q - body);
+	if (64 + suid_length + pm_length + inner > capacity) {
+		return 0;
+	}
 	p = sns_bytes(p, 1, suid_bytes, suid_length);
 	p = sns_fixed32(p, 2, msg_id);
 	p = sns_bytes(p, 3, pm, pm_length);
-	p = sns_bytes(p, 4, body, body_length);
+	p = sns_key(p, 4, 2);
+	p = sns_varint(p, inner);
+	if (inner != 0) {
+		p = sns_key(p, 2, 2);
+		p = sns_varint(p, payload_length);
+		memcpy(p, payload, payload_length);
+		p += payload_length;
+	}
 	return (uint32_t)(p - out);
 }
 
 static int
 sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint32_t payload_length)
 {
-	uint8_t proto[512], qmi[600];
-	uint32_t proto_length, qmi_length, node, port;
+	uint8_t proto_stack[512], qmi_stack[600];
+	uint8_t *proto = proto_stack, *qmi = qmi_stack;
+	uint32_t proto_length, qmi_length, node, port, capacity;
+	bool heap = false;
 	uint8_t *p;
+	int error;
 
 	if (!sns_server(&node, &port)) {
 		printf("slpi: sns: the SNS client service (%u) is not in the DSP's list\n", SNS_SERVICE);
 		return ENOENT;
 	}
-	proto_length = sns_request(msg_id, suid, payload, payload_length, proto);
-	if (proto_length + 32 > sizeof(qmi)) {
-		return EINVAL;
+	/*
+	 * A registry group's write is kilobytes: it gets its buffers from the heap,
+	 * while the small requests keep the stack ones (a 16 KiB kernel stack has no
+	 * room for both at a group's size). sns_request says how much it needs.
+	 */
+	if (payload_length > 65535) {
+		return EMSGSIZE;
+	}
+	capacity = payload_length + 96;
+	if (capacity > sizeof(proto_stack)) {
+		proto = kalloc_data(capacity, Z_WAITOK | Z_ZERO);
+		qmi = kalloc_data(capacity + 32, Z_WAITOK | Z_ZERO);
+		if (proto == NULL || qmi == NULL) {
+			if (proto != NULL) {
+				kfree_data(proto, capacity);
+			}
+			if (qmi != NULL) {
+				kfree_data(qmi, capacity + 32);
+			}
+			return ENOMEM;
+		}
+		heap = true;
+	}
+	proto_length = sns_request(msg_id, suid, payload, payload_length, proto, capacity);
+	if (proto_length == 0 || proto_length + 32 > (heap ? capacity + 32 : sizeof(qmi_stack))) {
+		error = EINVAL;
+		goto out;
 	}
 	p = qmi;
 	*p++ = 0;                       /* request */
@@ -2972,7 +3015,13 @@ sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint3
 	qmi[5] = (uint8_t)((qmi_length - 7) & 0xff);
 	qmi[6] = (uint8_t)((qmi_length - 7) >> 8);
 	printf("slpi: sns: > QMI %u, %u bytes, to node %u port %u, TLV 0x10=1\n", msg_id, qmi_length, node, port);
-	return qrtr_out_packet(QRTR_DATA, SNS_OUR_PORT, node, port, qmi, qmi_length);
+	error = qrtr_out_packet(QRTR_DATA, SNS_OUR_PORT, node, port, qmi, qmi_length);
+out:
+	if (heap) {
+		kfree_data(proto, capacity);
+		kfree_data(qmi, capacity + 32);
+	}
+	return error;
 }
 
 static void
@@ -3385,13 +3434,14 @@ sns_registry_item_parse(struct sns_reg_group *group, const char *at)
 		return NULL;
 	}
 	p += 2;
-	if ((p = sns_strstr(p, "\"type\":\"")) == NULL || (p = sns_json_string(p + 8, type, sizeof(type))) == NULL) {
+	/* the needle ends with the value's opening quote: step to it, not past it */
+	if ((p = sns_strstr(p, "\"type\":\"")) == NULL || (p = sns_json_string(p + 7, type, sizeof(type))) == NULL) {
 		return NULL;
 	}
-	if ((p = sns_strstr(p, "\"ver\":\"")) == NULL || (p = sns_json_string(p + 7, ver, sizeof(ver))) == NULL) {
+	if ((p = sns_strstr(p, "\"ver\":\"")) == NULL || (p = sns_json_string(p + 6, ver, sizeof(ver))) == NULL) {
 		return NULL;
 	}
-	if ((p = sns_strstr(p, "\"data\":\"")) == NULL || (p = sns_json_string(p + 8, data, sizeof(data))) == NULL) {
+	if ((p = sns_strstr(p, "\"data\":\"")) == NULL || (p = sns_json_string(p + 7, data, sizeof(data))) == NULL) {
 		return NULL;
 	}
 	q = sns_bytes(q, 1, name, (uint32_t)strlen(name));
@@ -3437,7 +3487,7 @@ static int
 sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[16])
 {
 	struct sns_reg_group *group;
-	uint8_t *payload, *s;
+	uint8_t *payload, *text, *s;
 	const char *at;
 	char owner[96];
 	int result = -1;
@@ -3447,16 +3497,28 @@ sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[1
 	}
 	group = kalloc_data(sizeof(*group), Z_WAITOK | Z_ZERO);
 	payload = kalloc_data(8192, Z_WAITOK | Z_ZERO);
-	if (group == NULL || payload == NULL) {
+	/*
+	 * The image keeps a file's bytes as they are, with no terminator: read as a
+	 * C string, the parser ran past the last '}' into whatever follows in the
+	 * image and could add items from it (a group of several kilobytes, whose
+	 * write then overflowed the sender's stack, 10 November). The copy ends the
+	 * parse at the file's own last byte.
+	 */
+	text = kalloc_data((vm_size_t)size + 1, Z_WAITOK | Z_ZERO);
+	if (group == NULL || payload == NULL || text == NULL) {
 		if (group != NULL) {
 			kfree_data(group, sizeof(*group));
 		}
 		if (payload != NULL) {
 			kfree_data(payload, 8192);
 		}
+		if (text != NULL) {
+			kfree_data(text, (vm_size_t)size + 1);
+		}
 		return -2;
 	}
-	at = (const char *)file;
+	memcpy(text, file, size);
+	at = (const char *)text;
 	at = strchr(at, '"');
 	if (at == NULL || (at = sns_json_string(at, group->name, sizeof(group->name))) == NULL || group->name[0] == 0) {
 		goto done;
@@ -3484,6 +3546,7 @@ sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[1
 done:
 	kfree_data(group, sizeof(*group));
 	kfree_data(payload, 8192);
+	kfree_data(text, (vm_size_t)size + 1);
 	return result;
 }
 
@@ -3491,13 +3554,30 @@ done:
 static int
 sns_registry_image(const char *name, const uint8_t suid[16])
 {
+	static int said;
 	uint64_t size = 0;
 	const uint8_t *file = hakios_image_file("fw", name, &size, NULL);
 
-	if (file == NULL || size == 0 || size > 65535) {
+	if (file == NULL) {
+		if (said++ < 2) {
+			printf("slpi: sns: %s: no such file in the image\n", name);
+		}
 		return -1;
 	}
-	return sns_registry_parse_send(file, (uint32_t)size, suid);
+	if (size == 0 || size > 65535) {
+		if (said++ < 2) {
+			printf("slpi: sns: %s: %llu bytes, not a group file\n", name, size);
+		}
+		return -1;
+	}
+	{
+		int result = sns_registry_parse_send(file, (uint32_t)size, suid);
+
+		if (result != 0 && said++ < 2) {
+			printf("slpi: sns: %s: %llu bytes, the parse failed\n", name, size);
+		}
+		return result;
+	}
 }
 
 /*
