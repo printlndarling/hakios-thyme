@@ -210,3 +210,38 @@ ext-sdx55m driver's own sequence — which lines it drives, with what pin config
 the status handshake before the PCIe link — is in the vendor kernel image like the clock
 tables were, and is the next thing to read out; blind GPIO writes would be as unwise as the
 blind reads were.
+
+### The vendor esoc driver's power-on sequence, read out of its code (2026-11-10)
+
+With the live kernel's `_text` and the pulled `boot_a` Image, `sdx55m_setup_hw`,
+`mdm4x_do_first_power_on` and the ops tables were disassembled (llvm-mc over the bytes at
+symbol-offset). The driver's GPIO table (12 sixteen-byte entries, each the DT property name
+and the byte offset in its state struct) reads:
+
+| property | struct offset |
+|---|---|
+| qcom,ap2mdm-errfatal-gpio | 0x24 |
+| qcom,mdm2ap-status-gpio | 0x14 |
+| qcom,ap2mdm-status-gpio | 0x2c |
+| qcom,mdm2ap-pblrdy-gpio | 0x04 |
+| qcom,ap2mdm-wakeup-gpio | 0x28 |
+| qcom,ap2mdm-chnlrdy-gpio | 0x00 |
+| qcom,mdm2ap-wakeup-gpio | 0x10 |
+| qcom,ap2mdm-vddmin-gpio | 0x20 |
+| qcom,mdm2ap-vddmin-gpio | 0x18 |
+| qcom,ap2mdm-pmic-pwr-en-gpio | 0x30 |
+| qcom,mdm-link-detect-gpio | 0x1c |
+| (0x0d) | (unnamed) |
+
+`mdm4x_do_first_power_on` (once, when the clink's flag is clear): calls the PON ops'
+`toggle_soft_reset(mdm, 0)`, sleeps 150 ms, sets the **pblrdy** line (struct+4) to output
+high, polls the **ap2mdm-wakeup** line (struct+40) up to 20 times at 5-6 ms, sleeps 200 ms,
+and queues `esoc_clink_queue_request(1)` — the POWER_ON request engine. `sdx55m_setup_hw`
+requires four of these lines non-negative (ap2mdm-errfatal, mdm2ap-status, ap2mdm-status,
+mdm2ap-pblrdy) or its probe fails. **The phone's own DT defines only the errfatal pair and
+the status pair** — no pblrdy, wakeup, chnlrdy, vddmin or pmic-pwr-en — so the ext-sdx55m
+driver as read cannot be the whole story on this phone; Android's dmesg instead shows
+`subsys-restart: Changing subsys fw_name to esoc0`, the MHI Sahara load of `sdx55m/sbl1.mbn`
+and the modem's SSCTL service coming up. The next thing to read is that path (`mdm_probe`,
+the esoc clink request engine, and what `subsys-restart` does with `esoc0`), not to drive
+the lines the DT does not have.
