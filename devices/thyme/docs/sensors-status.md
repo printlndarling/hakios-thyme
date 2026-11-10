@@ -133,34 +133,31 @@ being the first client of that boot) and not a transport artefact.
   first message's reply carries is rejected at the QMI layer, the 1-byte one
   is accepted and still silent, so a write cannot yet be confirmed by reading
   the group back.
-- **What still gates every request is the client service's own readiness**,
-  not the message contents: the write is answered result 0 in one boot
-  (`logs/124920-run.log`, then still under 0x201) and result 5 in most, with
-  the same bytes, the same 35–40 s after the sensor process starts and the
-  same two `apps_std` calls served (`logs/154557-run.log` against
-  `logs/124920-run.log`). It is not a matter of waiting longer: a fresh boot
-  answered 5 to 45 repeats over 90 s (`logs/165607-run.log`, no upload), so
-  the sensor process never reaches the state the earlier boot had. The
-  registry's persist directory, read through the reverse file API, and the
-  client manager it feeds remain the two candidates for the difference.
-- **The registry sensor's answer varies boot to boot** (10 November, the
-  same evening): with the write alone (`sns_registry_write=1`, no upload) one
-  boot is healthy — the sensor process opens its `apps_std` module and reads
-  `hw_platform` as in `logs/124920-run.log` — and the identical 169-byte
-  `sns_cm` write is answered **result 5** where that earlier boot answered
-  **0** (same bytes, same 35 s after the FastRPC attach,
-  `logs/154557-run.log`). Repeating the write every 2 s for ten seconds
-  (`sns_write_tries=5`) does not catch a later window (`logs/161511-run.log`).
-  The register is also not steady about the sensor process itself: the same
-  binary and flags leave it serving file calls in one boot
-  (`logs/154557-run.log`) and silent in the next; a second kernel in the same
-  loader session is not worth reading (`xl run` warns the second one "died at
-  once") and the clean runs in between need `xl reboot` back to Android first.
-  What the DSP has that the phone has and this boot lacks is still the open
-  question — the phone's registry accepts the same read and write, including a
-  group name it has never seen (`tools/qrtrprobe2.c` on Android), so the wire
-  is settled and only the sensor process's own registry initialization is
-  left.
+- **The client manager never comes up in any HakiOS boot logged today** (10
+  November): message 1 (the phone's first per-sensor request) and the config
+  are answered **result 5** in every run, including the ones whose sensor
+  process served its `apps_std` calls (`logs/154557-run.log`,
+  `logs/165607-run.log`). The write's own ACK is not a readiness signal
+  either: the same 169-byte `sns_cm` write was answered 0 in some boots and 5
+  in others inside the same half-hour (`logs/123830-run.log` all 5,
+  `logs/124346-run.log` and `logs/124920-run.log` 0), and waiting does not
+  change it — 45 repeats over 90 s never left 5 in a fresh boot
+  (`logs/165607-run.log`). The sensor process is equally unsteady: the same
+  binary and flags serve the `hw_platform` read in one boot and no call at
+  all in the next, and a second kernel in the same loader session is not
+  worth reading (`xl run` warns it "died at once"; `xl reboot` first). What
+  makes the DSP's framework finish its initialization is still the open
+  question; the registry's persist directory through the reverse file API and
+  the client manager's own heap/timer setup are the two candidates, and the
+  DSP's log (QSH/diag) is what would name the step it stops at.
+- **The wire is settled** (10 November): on Android the phone's DSP takes the
+  same read and write bytes this driver builds, for the group
+  `ak0991x_0`, for an int-only group and for a name it has never
+  seen (`tools/qrtrprobe2.c`); its first message returns a type-4 event
+  carrying the SUID, and a following request can carry the 1-byte client id
+  from that reply in TLV 0x10 (8 bytes is rejected at the QMI layer). The
+  registry's `read_event` still does not come back to the probe on Android
+  either, so a write cannot yet be confirmed by reading the group back.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
