@@ -48,6 +48,7 @@
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
+#include <sys/errno.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 
@@ -103,6 +104,8 @@ wr(vm_offset_t address, uint32_t value)
 #define ARB_MAX_CHANNELS        512
 #define OBSERVER_COMMAND        0x00
 #define OBSERVER_STATUS         0x08
+#define OBSERVER_WDATA0         0x10
+#define OBSERVER_WDATA1         0x14
 #define OBSERVER_DATA0          0x18
 #define OBSERVER_DATA1          0x1c
 #define STATUS_DONE             0x1
@@ -113,6 +116,18 @@ wr(vm_offset_t address, uint32_t value)
 #define READ_TIMEOUT_US         2000
 
 static vm_offset_t arb_core, arb_observer;
+
+static bool
+pmic_mapped(void)
+{
+	if (arb_core == 0) {
+		arb_core = ml_io_map(ARB_CORE_PHYS, ARB_CORE_SIZE);
+	}
+	if (arb_observer == 0) {
+		arb_observer = ml_io_map(ARB_OBSERVER_PHYS, ARB_OBSERVER_SIZE);
+	}
+	return arb_core != 0 && arb_observer != 0;
+}
 
 /* Read `count` (1 to 8) registers of the peripheral at channel `channel`, from register `reg`; NULL, or what went wrong. */
 static const char *
@@ -148,11 +163,53 @@ spmi_read(uint32_t channel, uint8_t reg, uint8_t *bytes, uint32_t count)
 	return NULL;
 }
 
+/* Write `count` (1 to 8) registers of the peripheral at channel `channel`; NULL, or what went wrong. */
+static const char *
+spmi_write(uint32_t channel, uint8_t reg, const uint8_t *bytes, uint32_t count)
+{
+	vm_offset_t ch = arb_observer + 0x10000UL * ARB_SYSTEM + 0x80UL * channel;
+	uint64_t start = mach_absolute_time(), now, interval;
+	uint32_t status, data[2] = { 0, 0 };
+
+	for (uint32_t i = 0; i < count; i++) {
+		data[i / 4] |= (uint32_t)bytes[i] << (8 * (i % 4));
+	}
+	nanoseconds_to_absolutetime(READ_TIMEOUT_US * (uint64_t)NSEC_PER_USEC, &interval);
+	hakios_spmi_lock();
+	wr(ch + OBSERVER_WDATA0, data[0]);
+	if (count > 4) {
+		wr(ch + OBSERVER_WDATA1, data[1]);
+	}
+	wr(ch + OBSERVER_COMMAND, (uint32_t)reg << 4 | (count - 1)); /* bit 27 clear: a write */
+	do {
+		status = rd(ch + OBSERVER_STATUS);
+		now = mach_absolute_time();
+	} while (!(status & STATUS_DONE) && now - start < interval);
+	hakios_spmi_unlock();
+
+	if (!(status & STATUS_DONE)) {
+		return "no answer";
+	} else if (status & STATUS_DENIED) {
+		return "denied";
+	} else if (status & STATUS_FAILURE) {
+		return "failed";
+	} else if (status & STATUS_DROPPED) {
+		return "dropped";
+	}
+	return NULL;
+}
+
 /* ---- the inventory --------------------------------------------------------------------------------------- */
 
 #define REG_TYPE                0x04
 #define RTC_TYPE                0x07
 #define RTC_SUBTYPE_WRITE       0x01
+#define PON_TYPE                0x01
+#define PON_SUBTYPE             0x01
+#define PON_REG_FIRST           0x60
+#define PON_REG_COUNT           0x10
+#define PON_MODEM_PWR_OFF       0x62
+#define PON_MODEM_PWR_OFF_CTL   0x63
 #define RTC_REG_READ            0x48
 
 static int64_t rtc_seconds_value = -1;
@@ -206,20 +263,90 @@ clock_report(uint32_t channel)
 	    (long long)kernel_seconds - (long long)second);
 }
 
+/*
+ * The power-on block's registers 0x60-0x6f, read-only. The modem power-off pair
+ * is 0x62/0x63: the vendor's qpnp_pon_modem_pwr_off (which the Mi 10S's esoc
+ * stack calls before it wakes its SDX55M) writes 0x63 = 0 and then 0x62 = the
+ * value, and the 0x80/0xa5 arm-and-fire pair lands on 0x63/0x64. Nothing here
+ * writes them -- they make the supplies; this only says what they hold.
+ */
+static void
+pon_report(uint32_t channel)
+{
+	for (unsigned base = PON_REG_FIRST; base < PON_REG_FIRST + PON_REG_COUNT; base += 8) {
+		uint8_t b[8];
+		const char *problem = spmi_read(channel, (uint8_t)base, b, 8);
+
+		if (problem != NULL) {
+			say("pmic: pon 0x%02x: %s\n", base, problem);
+			continue;
+		}
+		say("pmic: pon 0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x\n", base, b[0], b[1], b[2], b[3], b[4], b[5],
+		    b[6], b[7]);
+	}
+}
+
+/*
+ * The vendor's qpnp_pon_modem_pwr_off(1): clear the PON block's modem power-off
+ * control (0x63), a short pause, then set the modem power-off bit (0x62). Its
+ * ext-sdx55m first-power-on and power-down both call it with the same value --
+ * it is the modem's power cycle, after which the AP raises AP2MDM_STATUS. Only
+ * those two registers are written.
+ * Returns 0, or a negative errno.
+ */
+int
+hakios_pmic_pon_modem_reset(void)
+{
+	uint32_t channels;
+	uint8_t value;
+	const char *problem;
+
+	if (!pmic_mapped()) {
+		return -ENODEV;
+	}
+	channels = rd(arb_core + ARB_FEATURES) & 0x7ff;
+	if (channels == 0 || channels > ARB_MAX_CHANNELS) {
+		channels = ARB_MAX_CHANNELS;
+	}
+	for (uint32_t n = 0; n < channels; n++) {
+		uint8_t is[2];
+
+		if (rd(arb_core + ARB_CHANNEL(n)) == 0) {
+			continue;
+		}
+		if (spmi_read(n, REG_TYPE, is, 2) != NULL || is[0] != PON_TYPE || is[1] != PON_SUBTYPE) {
+			continue;
+		}
+		value = 0;
+		problem = spmi_write(n, PON_MODEM_PWR_OFF_CTL, &value, 1);
+		if (problem != NULL) {
+			say("pmic: the modem's power-off control: %s\n", problem);
+			return -EIO;
+		}
+		delay(2000);
+		value = 1;
+		problem = spmi_write(n, PON_MODEM_PWR_OFF, &value, 1);
+		if (problem != NULL) {
+			say("pmic: the modem's power-off bit: %s\n", problem);
+			return -EIO;
+		}
+		return 0;
+	}
+	return -ENODEV;
+}
+
 static bool list_all = true;
 
 static void
 pmic_run(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 {
 	bool list = list_all;
-	uint32_t version, channels, found = 0, rtc_channel = 0;
-	bool rtc_found = false;
+	uint32_t version, channels, found = 0, rtc_channel = 0, pon_channel = 0;
+	bool rtc_found = false, pon_found = false;
 	uint16_t ppids[ARB_MAX_CHANNELS];
 	uint16_t channel_of[ARB_MAX_CHANNELS];
 
-	arb_core = ml_io_map(ARB_CORE_PHYS, ARB_CORE_SIZE);
-	arb_observer = ml_io_map(ARB_OBSERVER_PHYS, ARB_OBSERVER_SIZE);
-	if (arb_core == 0 || arb_observer == 0) {
+	if (!pmic_mapped()) {
 		say("pmic: could not map the PMIC arbiter\n");
 		goto out;
 	}
@@ -276,12 +403,24 @@ pmic_run(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 			say("pmic: the real-time clock is slave %u 0x%02x00 (type %#x, subtype %#x)\n", ppids[i] >> 8, ppids[i] & 0xff,
 			    is[0], is[1]);
 		}
+		if (problem == NULL && is[0] == PON_TYPE && is[1] == PON_SUBTYPE && !pon_found) {
+			pon_found = true;
+			pon_channel = channel_of[i];
+			say("pmic: the power-on block is slave %u 0x%02x00 (type %#x, subtype %#x)\n", ppids[i] >> 8, ppids[i] & 0xff,
+			    is[0], is[1]);
+		}
 	}
 	if (rtc_found) {
 		clock_report(rtc_channel);
 	} else {
 		say("pmic: none of the %u blocks says it is a real-time clock (type %#x, subtype %#x): none read\n", found, RTC_TYPE,
 		    RTC_SUBTYPE_WRITE);
+	}
+	if (pon_found) {
+		pon_report(pon_channel);
+	} else {
+		say("pmic: none of the %u blocks says it is a power-on block (type %#x, subtype %#x): none read\n", found, PON_TYPE,
+		    PON_SUBTYPE);
 	}
 out:
 	return;
