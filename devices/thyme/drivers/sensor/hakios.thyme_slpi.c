@@ -2808,6 +2808,7 @@ static const uint8_t sns_registry_suid_real[16] = {
 };
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static uint32_t sns_registry_write;      /* boot-arg sns_registry_write: write the sns_cm group to the registry */
+static uint32_t sns_write_tries = 1;     /* boot-arg sns_write_tries: how many times, 2 s apart (the registry comes up late) */
 static uint32_t sns_registry_upload;     /* boot-arg sns_registry_upload: send every registry group file to the registry */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
@@ -3686,9 +3687,19 @@ sns_start(void)
 		}
 	}
 	if (sns_registry_write) {
-		sns_registry_write_cm(sns_registry_suid_real);
-		/* give the registry time to store the group before a client asks for it */
-		sleep_ms(2000);
+		/*
+		 * The registry sensor's instance comes up some seconds after the
+		 * sensor process starts, and how many is not the same run to run: a
+		 * write sent before that is answered result 5 (no resources) and one
+		 * after it result 0 (logs/124920-run.log against logs/154557-run.log,
+		 * same bytes, same 35 s after the start). Repeating the write every
+		 * 2 s rides that out; the last one that matters is the one the client
+		 * manager reads, and a repeat of an already-stored group is harmless.
+		 */
+		for (uint32_t i = 0; i < (sns_write_tries != 0 ? sns_write_tries : 1); i++) {
+			sns_registry_write_cm(sns_registry_suid_real);
+			sleep_ms(2000);
+		}
 	}
 	if (sns_registry_upload) {
 		sns_registry_upload_all(sns_registry_suid_real);
@@ -7247,6 +7258,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));
+	PE_parse_boot_argn("sns_write_tries", &sns_write_tries, sizeof(sns_write_tries));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));

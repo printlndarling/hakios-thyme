@@ -122,6 +122,24 @@ being the first client of that boot) and not a transport artefact.
   read event. The registry's persist directory, read through the reverse
   file API, and the client manager it feeds are the two candidates for the
   next step.
+- **The registry sensor's answer varies boot to boot** (10 November, the
+  same evening): with the write alone (`sns_registry_write=1`, no upload) one
+  boot is healthy — the sensor process opens its `apps_std` module and reads
+  `hw_platform` as in `logs/124920-run.log` — and the identical 169-byte
+  `sns_cm` write is answered **result 5** where that earlier boot answered
+  **0** (same bytes, same 35 s after the FastRPC attach,
+  `logs/154557-run.log`). Repeating the write every 2 s for ten seconds
+  (`sns_write_tries=5`) does not catch a later window (`logs/161511-run.log`).
+  The register is also not steady about the sensor process itself: the same
+  binary and flags leave it serving file calls in one boot
+  (`logs/154557-run.log`) and silent in the next; a second kernel in the same
+  loader session is not worth reading (`xl run` warns the second one "died at
+  once") and the clean runs in between need `xl reboot` back to Android first.
+  What the DSP has that the phone has and this boot lacks is still the open
+  question — the phone's registry accepts the same read and write, including a
+  group name it has never seen (`tools/qrtrprobe2.c` on Android), so the wire
+  is settled and only the sensor process's own registry initialization is
+  left.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
