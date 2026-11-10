@@ -484,6 +484,61 @@ show_global(void)
 	}
 }
 
+/*
+ * The printable text inside the partition's large items: the SLPI's logging
+ * ring lives in one of them (QSH/diag), and when the sensor process stalls its
+ * init it is the only place that says where. slpi_smem_dump=1 asks for it
+ * after the SNS part; the DMA is byte-wise, so each item is capped and only a
+ * few of the largest are read.
+ */
+static void
+smem_strings(uint32_t partition, uint32_t cacheline, bool global)
+{
+	static struct smem_item found[512];
+	struct smem_partition header;
+	uint32_t size = 0, at_most = global ? 512 : 256;
+	unsigned count, shown = 0;
+
+	if (partition == 0 || !smem_peek(partition, &header, sizeof(header))) {
+		return;
+	}
+	count = smem_items(partition, cacheline, found, at_most);
+	for (unsigned i = 0; i < count && i < at_most && shown < 4; i++) {
+		uint32_t limit;
+		char run[97];
+		int len = 0;
+
+		if (found[i].size < 0x8000) {
+			continue;
+		}
+		shown++;
+		limit = found[i].size > (128u << 10) ? (128u << 10) : found[i].size;
+		printf("slpi: %u:   item %u (%u bytes), the text in its first %u bytes:\n", step, found[i].item, found[i].size, limit);
+		for (uint32_t k = 0; k < limit; k++) {
+			uint8_t c;
+
+			if (!smem_peek(found[i].offset + k, &c, 1)) {
+				break;
+			}
+			if (c >= 0x20 && c < 0x7f) {
+				if (len < (int)sizeof(run) - 1) {
+					run[len++] = (char)c;
+				}
+			} else {
+				if (len >= 8) {
+					run[len] = 0;
+					printf("slpi: %u:     \"%s\"\n", step, run);
+				}
+				len = 0;
+			}
+		}
+		if (len >= 8) {
+			run[len] = 0;
+			printf("slpi: %u:     \"%s\"\n", step, run);
+		}
+	}
+}
+
 /* ---- SMP2P ---------------------------------------------------------------------------------------- */
 
 struct smp2p {
@@ -2809,6 +2864,7 @@ static const uint8_t sns_registry_suid_real[16] = {
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static uint32_t sns_registry_write;      /* boot-arg sns_registry_write: write the sns_cm group to the registry */
 static uint32_t sns_write_tries = 1;     /* boot-arg sns_write_tries: how many times, 2 s apart (the registry comes up late) */
+static uint32_t slpi_smem_dump;          /* boot-arg slpi_smem_dump: list the shared-memory items and their text after the SNS part */
 static uint32_t sns_registry_upload;     /* boot-arg sns_registry_upload: send every registry group file to the registry */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
@@ -3743,6 +3799,23 @@ sns_start(void)
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
+	if (slpi_smem_dump) {
+		uint32_t cacheline = 0, partition_size = 0;
+		uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
+
+		printf("slpi: sns: the shared memory after the sensor messages (slpi_smem_dump):\n");
+		show_partition();
+		show_global();
+		smem_strings(partition, cacheline, false);
+		{
+			uint32_t global_cacheline = 0, global_size = 0;
+			uint32_t global = smem_partition(SMEM_GLOBAL, SMEM_GLOBAL, &global_cacheline, &global_size);
+
+			if (global != 0) {
+				smem_strings(global, global_cacheline, true);
+			}
+		}
+	}
 }
 
 /* ---- servreg: asking the DSP's tms/servreg notifier to start the sensor PD --------------------------- */
@@ -7267,6 +7340,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));
 	PE_parse_boot_argn("sns_write_tries", &sns_write_tries, sizeof(sns_write_tries));
+	PE_parse_boot_argn("slpi_smem_dump", &slpi_smem_dump, sizeof(slpi_smem_dump));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));

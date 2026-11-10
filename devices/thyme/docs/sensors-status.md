@@ -150,6 +150,16 @@ being the first client of that boot) and not a transport artefact.
   question; the registry's persist directory through the reverse file API and
   the client manager's own heap/timer setup are the two candidates, and the
   DSP's log (QSH/diag) is what would name the step it stops at.
+- **The DSP's log is not plainly in the shared memory** (10 November, later):
+  `slpi_smem_dump=1` lists every item after the SNS part and prints the
+  printable runs of each large one (`logs/173648-run.log`). Our partition
+  holds 10 items (430, 479, 478, 481, 480, 608, 613, 611, 621, 623; the
+  queues 479/480 are 16 KB each), the global one 23 (the largest are 470,
+  79 at 40 KB and 426 at 80 KB), and neither 79 nor 426 holds a single run of
+  eight printable characters, so whatever the DSP writes about its own
+  startup is not a text ring there. Getting it would need the diag/QSH
+  channel (the DSP offers none of its GLINK channels by that name) or its
+  DDR; the SMEM path is closed.
 - **The wire is settled** (10 November): on Android the phone's DSP takes the
   same read and write bytes this driver builds, for the group
   `ak0991x_0`, for an int-only group and for a name it has never
