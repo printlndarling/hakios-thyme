@@ -5825,6 +5825,10 @@ fastrpc_first_calls(uint32_t stage)
 				fastrpc_pd_call(ac, 0x10000, 0x102, physical, shared_offset, shared, packet, abuf,
 				    "INIT_ATTACH_SNS (mid)");
 			}
+			/* the sensors PD exists now: the loader's heap, if it left one, can be handed over */
+			if (fastrpc_heap_memory != 0) {
+				fastrpc_offer_heap(physical, shared_offset, shared, packet);
+			}
 		}
 		if (fastrpc_create) {
 			uint64_t heap_physical = 0;
