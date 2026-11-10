@@ -592,3 +592,28 @@ Android actually uses: a stage-1 context of the apps SMMU with page tables
 of ours -- the machinery `radio_space_on()` in drivers/wifi/hakios.wifi.c
 already uses for the radio's stream (0x1c01) -- giving the modem an IOVA
 from the DT's `qcom,iommu-dma-addr-pool` that translates to the image.
+
+### What the probes after that settled, and what is still open (2026-11-11)
+
+Three more runs narrowed it. A stage-1 context of the apps SMMU with page
+tables of ours -- the Android path, the machinery `radio_space_on()` in
+drivers/wifi/hakios.wifi.c uses for the radio -- maps IOVA 0x20000000 (the
+DT's `qcom,iommu-dma-addr-pool`) to the image and sends the endpoint's two
+possible streams through it: the BHI answer is unchanged (0xef120700), so a
+translated IOVA is no better than a bypassed physical address or the SLPI
+heap. A type-2 S2CR on the endpoint's stream, with the SMMU's global fault
+register cleared just before the doorbell, leaves SGFSR at 0 -- whether that
+type is this SMMU's bypass or a fault whose record we did not reach. And
+shortening the post-PMIC-reset pauses to the vendor's own scale (150 ms to
+AP2MDM_STATUS, then milliseconds) changed nothing either.
+
+So the PBL answers the doorbell, records the image address and size it was
+given, and refuses with 0xef120700 whatever memory, translation or timing
+precedes it; the image is byte-perfect. What remains is a validation inside
+the PBL: its own secure-boot check of the SBL, or a BHI protocol detail
+(the BHI reports version 1.2 and BHI_NUMSEG 3; the SBL ELF has 17 program
+headers, 14 of them loadable, so NUMSEG is not the ELF's segment count).
+Both need a working reference -- the vendor kernel's own MHI debug log from
+a successful SBL load would do -- which this phone's Android no longer
+offers (no debugfs, no way to restart the modem from userspace). The open
+question and every register-level fact above are here for the next attempt.

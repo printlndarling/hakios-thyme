@@ -589,6 +589,215 @@ mhi_peek(void)
 
 extern lck_mtx_t hakios_smmu_lock;
 
+/* ---- a stage-1 context of the apps SMMU for the modem, with our tables ----
+ *
+ * The same machinery drivers/wifi/hakios.wifi.c uses for the radio's stream
+ * (radio_space_on): take the lowest context no match register uses and that
+ * is switched off, build two levels of page tables in kernel memory, program
+ * the context (CBAR stage 1, 39-bit, 4K pages, cached walks) and send the
+ * stream through it. The address the device is given is from the DT's
+ * qcom,iommu-dma-addr-pool (0x20000000), as Linux's MHI gets its IOVAs.
+ */
+#define SMMU_BASE        0x15000000u
+#define SMMU_PTE_ADDRESS 0x0000fffffffff000ull
+#define SMMU_PTE         (3ull | 1ull << 6 | 2ull << 8 | 1ull << 10 | 1ull << 11)
+#define SMMU_CBAR(n)     (4 * (n))                    /* in the second register page */
+#define SMMU_CBAR_STAGE_1 (1u << 16 | 3u << 8 | 0xfu << 12)
+#define SMMU_CBA2R(n)    (0x800 + 4 * (n))
+#define SMMU_CB_SCTLR    0x00
+#define SMMU_CB_TCR2     0x10
+#define SMMU_CB_TTBR0    0x20
+#define SMMU_CB_TTBR1    0x28
+#define SMMU_CB_TCR      0x30
+#define SMMU_CB_MAIR0    0x38
+#define SMMU_CB_MAIR1    0x3c
+#define SMMU_CB_FSR      0x58
+#define SMMU_CB_TLBIASID 0x610
+#define SMMU_CB_TLBSYNC  0x7f0
+#define SMMU_CB_TLBSTATUS 0x7f4
+#define SMMU_SCTLR_ON    (1u << 0 | 1u << 1 | 1u << 2 | 1u << 5 | 1u << 8 | 1u << 12)
+#define SMMU_TCR_39_BITS (25u | 1u << 8 | 1u << 10 | 3u << 12 | 1u << 23)
+#define SMMU_TCR2_VAL    (1u | 1u << 4 | 7u << 15)
+#define SMMU_MAIR0_VAL   0xf404ff44
+
+#define SMMU_IOVA        0x20000000ull   /* the DT's iommu-dma-addr-pool */
+
+static struct {
+	vm_offset_t tables;              /* the root, then the levels it needs */
+	uint32_t count;
+	uint32_t context;
+	bool on;
+} modem_space;
+
+static vm_offset_t smmu_va;
+
+static uint64_t *
+smmu_table(uint32_t n)
+{
+	return (uint64_t *)(modem_space.tables + 4096 * n);
+}
+
+static uint64_t *
+smmu_next(uint64_t *entry)
+{
+	if (*entry & 1) {
+		for (uint32_t i = 0; i < modem_space.count; i++) {
+			if (kvtophys((vm_offset_t)smmu_table(i)) == (*entry & SMMU_PTE_ADDRESS)) {
+				return smmu_table(i);
+			}
+		}
+		return NULL;
+	}
+	if (modem_space.count == 4) {
+		return NULL;
+	}
+	uint64_t *table = smmu_table(modem_space.count++);
+
+	*entry = kvtophys((vm_offset_t)table) | 3;
+	return table;
+}
+
+/* Our memory at `physical` behind the modem's addresses from SMMU_IOVA on. */
+static bool
+smmu_enter(vm_offset_t buffer, size_t size)
+{
+	if (modem_space.tables == 0) {
+		if (kmem_alloc(kernel_map, &modem_space.tables, 4 * 4096, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
+		    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+			return false;
+		}
+		modem_space.count = 1;
+	}
+	for (uint64_t offset = 0; offset < size; offset += 0x1000) {
+		uint64_t at = SMMU_IOVA + offset;
+		uint64_t *level2 = smmu_next(&smmu_table(0)[at >> 30 & 0x1ff]);
+		uint64_t *level3 = level2 == NULL ? NULL : smmu_next(&level2[at >> 21 & 0x1ff]);
+
+		if (level3 == NULL) {
+			hakios_tl("pcie2: SMMU: no page table left for %#llx\n", at);
+			return false;
+		}
+		level3[at >> 12 & 0x1ff] = kvtophys(buffer + offset) | SMMU_PTE;
+	}
+	for (vm_offset_t line = modem_space.tables; line < modem_space.tables + 4 * 4096; line += 64) {
+		__asm__ volatile("dc civac, %0" : : "r"(line));
+	}
+	__asm__ volatile("dsb sy" ::: "memory");
+	return true;
+}
+
+/*
+ * The context and the two streams (the BDF-to-SID table's offset and the DT's
+ * full SID), programmed and verified; returns the IOVA the device is to use,
+ * or 0. Called with the image in memory that stays put.
+ */
+static uint64_t
+modem_smmu_map(vm_offset_t buffer, size_t size)
+{
+	volatile uint32_t *regs;
+	uint32_t scr0, idr0, idr1, matches, contexts, wide, page, pages, n, c, made = 0;
+	uint8_t used[256];
+	uint64_t root;
+
+	if (smmu_va == 0) {
+		smmu_va = ml_io_map(SMMU_BASE, 0x100000);
+	}
+	if (smmu_va == 0) {
+		hakios_tl("pcie2: SMMU: cannot map the block\n");
+		return 0;
+	}
+	regs = (volatile uint32_t *)smmu_va;
+	scr0 = regs[0x000 / 4];
+	idr0 = regs[0x020 / 4];
+	idr1 = regs[0x024 / 4];
+	matches = idr0 & 0xff;
+	contexts = idr1 & 0xff;
+	wide = scr0 & (1u << 3);
+	page = (idr1 & (1u << 31)) ? 0x10000 : 0x1000;
+	pages = 2u << ((idr1 >> 28) & 7);
+
+	memset(used, 0, sizeof(used));
+	for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+		uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
+		uint32_t valid = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+
+		if (valid) {
+			used[s2cr & 0xff] = 1;
+		}
+	}
+	for (c = 0; c < contexts; c++) {
+		volatile uint32_t *cb = (volatile uint32_t *)(smmu_va + (pages + c) * page);
+
+		if (!used[c] && !(cb[SMMU_CB_SCTLR / 4] & 1)) {
+			break;
+		}
+	}
+	if (c == contexts) {
+		hakios_tl("pcie2: SMMU: no free context\n");
+		return 0;
+	}
+	if (!smmu_enter(buffer, size)) {
+		return 0;
+	}
+
+	lck_mtx_lock(&hakios_smmu_lock);
+	{
+		volatile uint32_t *second = (volatile uint32_t *)(smmu_va + page);
+		volatile uint32_t *cb = (volatile uint32_t *)(smmu_va + (pages + c) * page);
+
+		root = kvtophys(modem_space.tables) | (uint64_t)c << 48;
+		second[SMMU_CBA2R(c) / 4] = 1;                      /* 64-bit addresses */
+		second[SMMU_CBAR(c) / 4] = SMMU_CBAR_STAGE_1;
+		cb[SMMU_CB_SCTLR / 4] = 0;
+		cb[SMMU_CB_TCR2 / 4] = SMMU_TCR2_VAL;
+		cb[SMMU_CB_TCR / 4] = SMMU_TCR_39_BITS;
+		cb[SMMU_CB_TTBR0 / 4] = (uint32_t)root;
+		cb[SMMU_CB_TTBR0 / 4 + 1] = (uint32_t)(root >> 32);
+		cb[SMMU_CB_TTBR1 / 4] = 0;
+		cb[SMMU_CB_TTBR1 / 4 + 1] = 0;
+		cb[SMMU_CB_MAIR0 / 4] = SMMU_MAIR0_VAL;
+		cb[SMMU_CB_MAIR1 / 4] = 0;
+		cb[SMMU_CB_FSR / 4] = 0xc00001fe;
+		cb[SMMU_CB_TLBIASID / 4] = c;
+		cb[SMMU_CB_TLBSYNC / 4] = 1;
+		for (unsigned ms = 0; ms < 100 && (cb[SMMU_CB_TLBSTATUS / 4] & 1); ms++) {
+			delay(1000);
+		}
+		__asm__ volatile("dsb sy" ::: "memory");
+		cb[SMMU_CB_SCTLR / 4] = SMMU_SCTLR_ON;
+
+		/* two free match registers: the table's offset (1) and the DT SID */
+		{
+			static const uint32_t streams[] = { 1, 0x1d01 };
+
+			for (uint32_t s = 0; s < 2; s++) {
+				for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+					uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
+					uint32_t valid = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+
+					if (valid) {
+						continue;
+					}
+					regs[(0x800 + 4 * n) / 4] = wide ? streams[s] : ((1u << 31) | streams[s]);
+					regs[(0xc00 + 4 * n) / 4] = wide ? ((1u << 10) | c) : c;
+					made++;
+					break;
+				}
+			}
+		}
+		__asm__ volatile("dsb sy" ::: "memory");
+		hakios_tl("pcie2: SMMU: context %u (page %#x, %u pages) tables %#llx, SCTLR %#x, streams %u\n", c, page,
+		    pages, (unsigned long long)modem_space.tables, cb[SMMU_CB_SCTLR / 4], made);
+	}
+	lck_mtx_unlock(&hakios_smmu_lock);
+	if (made != 2) {
+		hakios_tl("pcie2: SMMU: %u of 2 streams programmed\n", made);
+	}
+	modem_space.context = c;
+	modem_space.on = true;
+	return SMMU_IOVA;
+}
+
 /*
  * The modem's streams in the apps SMMU. The RC's BDF-to-SID table is not
  * programmed here, so the endpoint's DMA arrives as SID 0 -- and the phone's
@@ -614,13 +823,42 @@ modem_sid_setup(uint32_t mode)
 	volatile uint32_t *regs;
 	uint32_t scr0, idr0, matches, wide, n, sid0 = 0;
 
-	if (mode == 1 || mode == 2 || mode == 4) {
+	if (mode == 1 || mode == 2 || mode == 4 || mode == 6) {
 		for (uint32_t i = 0; i < 256; i++) {
 			wr(PARF + 0x2000 + 4 * i, entry);
 		}
 		hakios_tl("pcie2: SID: BDF-to-SID table all %#x (BDF 1:0.0 -> offset 1 of 0x1d00)\n", entry);
 	}
 	if (mode == 2) {
+		return;
+	}
+	if (mode == 6) {
+		/* S2CR type 2 for the endpoint's stream: if this SMMU calls it a
+		 * fault, the next read of SGFSYNR1 names the stream; if it is a
+		 * bypass, the stream's reads pass and the global fault stays 0 */
+		smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+		if (smmu == 0) {
+			return;
+		}
+		regs = (volatile uint32_t *)smmu;
+		matches = regs[0x020 / 4] & 0xff;
+		wide = regs[0x000 / 4] & (1u << 3);
+		lck_mtx_lock(&hakios_smmu_lock);
+		for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+			uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
+			uint32_t used = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+
+			if (used) {
+				continue;
+			}
+			regs[(0x800 + 4 * n) / 4] = wide ? 0x1d01 : ((1u << 31) | 0x1d01);
+			regs[(0xc00 + 4 * n) / 4] = wide ? ((1u << 10) | 0x20000) : 0x20000;
+			hakios_tl("pcie2: SID: SMR %u stream 0x1d01, s2cr read back %#x (type %u)\n", n,
+			    regs[(0xc00 + 4 * n) / 4], (regs[(0xc00 + 4 * n) / 4] >> 16) & 3);
+			break;
+		}
+		__asm__ volatile("dsb sy" ::: "memory");
+		lck_mtx_unlock(&hakios_smmu_lock);
 		return;
 	}
 	if (mode == 4) {
@@ -841,6 +1079,29 @@ image_ready:
 	hakios_tl("pcie2: BHI: writes land? INTVEC %#x, before: imgaddr %#x/%#x size %#x\n", rd(bhi + 0x20),
 	    rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10));
 
+	/* the endpoint as a bus master the SMMU lets through (its own boot arg:
+	 * the first attempt at it took the phone down with no log at all, so it
+	 * is switched on by pcie2_sid=1 while that is worked out; 5 is the
+	 * Android path, a stage-1 context with our tables and an IOVA) */
+	{
+		uint32_t sid = 0;
+
+		PE_parse_boot_argn("pcie2_sid", &sid, sizeof(sid));
+		if (sid == 5) {
+			uint64_t iova;
+
+			modem_sid_setup(2);         /* the BDF-to-SID table only */
+			iova = modem_smmu_map(memory, size);
+			if (iova != 0) {
+				phys = iova;
+			} else {
+				hakios_tl("pcie2: BHI: no SMMU context; the physical address stays\n");
+			}
+		} else if (sid != 0) {
+			modem_sid_setup(sid);
+		}
+	}
+
 	/* what the device may read: the image's own range, in both windows */
 	wr(MHI_BAR + 0x80, (uint32_t)phys);
 	wr(MHI_BAR + 0x84, (uint32_t)(phys >> 32));
@@ -851,19 +1112,17 @@ image_ready:
 	wr(MHI_BAR + 0xa0, (uint32_t)(phys + size - 1));
 	wr(MHI_BAR + 0xa4, (uint32_t)((phys + size - 1) >> 32));
 
-	/* the endpoint as a bus master the SMMU lets through (its own boot arg:
-	 * the first attempt at it took the phone down with no log at all, so it
-	 * is switched on by pcie2_sid=1 while that is worked out) */
+	/* the image, and the doorbell (the mapping is uncached: no flush needed) */
 	{
-		uint32_t sid = 0;
+		/* clear the SMMU's recorded faults so the ones after the doorbell
+		 * are the endpoint's */
+		vm_offset_t smmu = (vm_offset_t)ml_io_map(SMMU_BASE, 0x1000);
 
-		PE_parse_boot_argn("pcie2_sid", &sid, sizeof(sid));
-		if (sid != 0) {
-			modem_sid_setup(sid);
+		if (smmu != 0) {
+			((volatile uint32_t *)smmu)[0x48 / 4] = 0xffffffff;
+			__asm__ volatile("dsb sy" ::: "memory");
 		}
 	}
-
-	/* the image, and the doorbell (the mapping is uncached: no flush needed) */
 	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
 	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
 	wr(bhi + 0x08, (uint32_t)phys);
@@ -1193,13 +1452,16 @@ pcie2_run(void)
 	pcie2_pin_input(3);
 	pcie2_pin_output(57, 0);
 	pcie2_pin_output(56, 1);
-	delay(1000);
+	/* after a PMIC reset the PBL's boot window is short: the vendor goes
+	 * from the reset's 150 ms straight to AP2MDM_STATUS and the MHI load,
+	 * so the pauses here are milliseconds, not seconds, when bhi >= 2 */
+	delay(bhi >= 2 ? 10000 : 1000000);
 	hakios_tl("pcie2: modem lines: mdm2ap status %u, errfatal %u\n", pcie2_pin_in(3), pcie2_pin_in(1));
 	if (umi_rpmh_wifi_power() != 0) {
 		hakios_tl("pcie2: the PCIe rails did not come up\n");
 		return;
 	}
-	delay(1000);
+	delay(bhi >= 2 ? 10000 : 1000000);
 	if (clocks() != 0) {
 		hakios_tl("pcie2: power and clocks failed\n");
 		return;
