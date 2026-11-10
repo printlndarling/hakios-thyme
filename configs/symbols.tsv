@@ -106,8 +106,11 @@ FASTRPC_CLOSE	arg	fastrpc_close	User space	k	hakios.thyme_slpi.c
 FASTRPC_CREATE	arg	fastrpc_create	User space	k	hakios.thyme_slpi.c	
 FASTRPC_CREATE_PD	arg	fastrpc_create_pd	User space	k	hakios.thyme_slpi.c	
 FASTRPC_CREATE_PROBE	arg	fastrpc_create_probe	User space	k	hakios.thyme_slpi.c	
+FASTRPC_DEBUG	arg	fastrpc_debug	User space	k	hakios.thyme_slpi.c	
 FASTRPC_DELAY	arg	fastrpc_delay	User space	k	hakios.thyme_slpi.c	
+FASTRPC_EARLY	arg	fastrpc_early	User space	k	hakios.thyme_slpi.c	
 FASTRPC_GROW_AFTER	arg	fastrpc_grow_after	User space	k	hakios.thyme_slpi.c	
+FASTRPC_GROW_DDR	arg	fastrpc_grow_ddr	User space	k	hakios.thyme_slpi.c	
 FASTRPC_GROW_KB	arg	fastrpc_grow_kb	User space	k	hakios.thyme_slpi.c	
 FASTRPC_HEAP_MB	arg	fastrpc_heap_mb	User space	k	hakios.thyme_slpi.c	
 FASTRPC_HEAP_SMEM	arg	fastrpc_heap_smem	User space	k	hakios.thyme_slpi.c	
@@ -124,6 +127,7 @@ FASTRPC_RESTART	arg	fastrpc_restart	User space	k	hakios.thyme_slpi.c
 FASTRPC_SMMU	arg	fastrpc_smmu	User space	k	hakios.thyme_slpi.c	
 FASTRPC_STATIC_OPEN	arg	fastrpc_static_open	User space	k	hakios.thyme_slpi.c	
 FASTRPC_TID	arg	fastrpc_tid	User space	k	hakios.thyme_slpi.c	
+FASTRPC_WAIT	arg	fastrpc_wait	User space	k	hakios.thyme_slpi.c	
 FB_BEAM	arg	fb_beam	GPU and display	k	MiniIOMobileFramebuffer.cpp	frames written to the panel's memory whenever their beat comes, as before
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
@@ -259,8 +263,19 @@ MODEM_WAIT	arg	modem_wait	Cellular	k	hakios.mpss.c
 MODEM_WDA_OFF	arg	modem_wda_off	Cellular	k	hakios.mpss.c	
 NET_DHCP	arg	net_dhcp	Network	k	hakios.net.c	every DHCP message's type, address, router and DNS options
 PANEL_DSI_PROBE	arg	panel_dsi_probe	GPU and display	k	hakios.thyme_display.c	sample the DSI controller's status and TE registers after the panel timing sequence
+PANEL_RATE_GPIO	arg	panel_rate_gpio	GPU and display	k	hakios.thyme_display.c	
 PANEL_SEQ	arg	panel_seq	GPU and display	k	hakios.thyme_display.c	
+PANEL_TE_DCS	arg	panel_te_dcs	GPU and display	k	hakios.thyme_display.c	
+PANEL_TE_PROBE	arg	panel_te_probe	GPU and display	k	hakios.thyme_display.c	count the edges of the panel's TE line itself
 PANEL_TE_RATE	arg	panel_te_rate	GPU and display	k	hakios.thyme_display.c	count the edges of the panel's TE line (the device tree's platform-te-gpio, pin 66) for about a second
+PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c	
+PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
+PCIE2_KEEP	arg	pcie2_keep	User space	k	hakios.thyme_pcie2.c	leave the endpoint's PERST alone
+PCIE2_POWER	arg	pcie2_power	User space	k	hakios.thyme_pcie2.c	
+PCIE2_SID	arg	pcie2_sid	User space	k	hakios.thyme_pcie2.c	
+PCIE2_SURVEY	arg	pcie2_survey	User space	k	hakios.thyme_pcie2.c	
+PCIE2_TEST	arg	pcie2_test	User space	k	hakios.thyme_pcie2.c	
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block
 PRESS_POWER	arg	press_power	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the key's own are (hakios_touch_post):
 PRESS_POWER_MS	arg	press_power_ms	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
@@ -283,17 +298,31 @@ SERVREG	arg	servreg	User space	k	hakios.thyme_slpi.c
 SLPI	arg	slpi	User space	k	hakios.thyme_slpi.c	
 SLPI_AGAIN	arg	slpi_again	User space	k	hakios.thyme_slpi.c	
 SLPI_APR_WAIT	arg	slpi_apr_wait	User space	k	hakios.thyme_slpi.c	
+SLPI_DELAY	arg	slpi_delay	User space	k	hakios.thyme_slpi.c	let the system start first. The loader fetches this log every few seconds while the kernel runs, so a step that hangs leaves
+SLPI_DUMP_HEX	arg	slpi_dump_hex	User space	k	hakios.thyme_slpi.c	
 SLPI_DUMP_ITEM	arg	slpi_dump_item	User space	k	hakios.thyme_slpi.c	
+SLPI_HEAP_PA	hex	slpi_heap_pa	User space	k	hakios.thyme_slpi.c	
+SLPI_HEAP_SIZE	arg	slpi_heap_size	User space	k	hakios.thyme_slpi.c	
 SLPI_KEEP	arg	slpi_keep	User space	k	hakios.thyme_slpi.c	
 SLPI_LISTEN	arg	slpi_listen	User space	k	hakios.thyme_slpi.c	
 SLPI_NEW	arg	slpi_new	User space	k	hakios.thyme_slpi.c	
 SLPI_PAUSE	arg	slpi_pause	User space	k	hakios.thyme_slpi.c	
 SLPI_RETURN	arg	slpi_return	User space	k	hakios.thyme_slpi.c	
+SLPI_SMEM_DUMP	arg	slpi_smem_dump	User space	k	hakios.thyme_slpi.c	
 SLPI_STEP	arg	slpi_step	User space	k	hakios.thyme_slpi.c	
 SLPI_WAIT	arg	slpi_wait	User space	k	hakios.thyme_slpi.c	
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
 SMALL_CORES_AFTER	arg	small_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
 SNS	arg	sns	User space	k	hakios.thyme_slpi.c	
+SNS_ACCEL_DIRECT	arg	sns_accel_direct	User space	k	hakios.thyme_slpi.c	
+SNS_CLIENT_PROBE	arg	sns_client_probe	User space	k	hakios.thyme_slpi.c	
+SNS_GYRO_DIRECT	arg	sns_gyro_direct	User space	k	hakios.thyme_slpi.c	
+SNS_QUIET	arg	sns_quiet	User space	k	hakios.thyme_slpi.c	the listener and the file service stay, but no SNS message goes out
+SNS_RAW	arg	sns_raw	User space	k	hakios.thyme_slpi.c	
+SNS_REGISTRY_PROBE	arg	sns_registry_probe	User space	k	hakios.thyme_slpi.c	
+SNS_REGISTRY_UPLOAD	arg	sns_registry_upload	User space	k	hakios.thyme_slpi.c	
+SNS_REGISTRY_WRITE	arg	sns_registry_write	User space	k	hakios.thyme_slpi.c	
+SNS_WRITE_TRIES	arg	sns_write_tries	User space	k	hakios.thyme_slpi.c	
 SOC_CMD_DB	hex	soc_cmd_db	Cellular	k	hakios.mpss.c	
 SOC_GSI_BASE	hex	soc_gsi_base	Cellular	k	hakios.ipa.c	
 SOC_IMEM	hex	soc_imem	Cellular	k	hakios.mpss.c	

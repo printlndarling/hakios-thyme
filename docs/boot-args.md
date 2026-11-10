@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **436 arguments**: 365 read by the kernel, 14 by the loader, 68 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **465 arguments**: 394 read by the kernel, 14 by the loader, 68 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (81)
+## GPU and display (84)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -80,7 +80,10 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `hakios_kver` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
 | `metal` | KU | `HakiosMetal.m`, `MiniIOMobileFramebuffer.cpp`, `inject_sb.c` | `CONFIG_METAL` |  |
 | `panel_dsi_probe` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_DSI_PROBE` |  |
+| `panel_rate_gpio` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_RATE_GPIO` |  |
 | `panel_seq` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_SEQ` |  |
+| `panel_te_dcs` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_TE_DCS` |  |
+| `panel_te_probe` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_TE_PROBE` |  |
 | `panel_te_rate` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_TE_RATE` |  |
 | `rec_mb` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_MB` |  |
 | `rec_ring` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_RING` |  |
@@ -430,7 +433,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (89)
+## User space (115)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -465,8 +468,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fastrpc_create` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE` |  |
 | `fastrpc_create_pd` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE_PD` |  |
 | `fastrpc_create_probe` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_CREATE_PROBE` |  |
+| `fastrpc_debug` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_DEBUG` |  |
 | `fastrpc_delay` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_DELAY` |  |
+| `fastrpc_early` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_EARLY` |  |
 | `fastrpc_grow_after` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_GROW_AFTER` |  |
+| `fastrpc_grow_ddr` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_GROW_DDR` |  |
 | `fastrpc_grow_kb` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_GROW_KB` |  |
 | `fastrpc_heap_mb` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_HEAP_MB` |  |
 | `fastrpc_heap_smem` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_HEAP_SMEM` |  |
@@ -483,6 +489,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fastrpc_smmu` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_SMMU` |  |
 | `fastrpc_static_open` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_STATIC_OPEN` |  |
 | `fastrpc_tid` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_TID` |  |
+| `fastrpc_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_FASTRPC_WAIT` |  |
 | `gl` | U | `inject.c`, `inject_sb.c` | `CONFIG_GL` |  |
 | `glcompile` | U | `inject.c` | `CONFIG_GLCOMPILE` |  |
 | `glno` | U | `inject.c` | `CONFIG_GLNO` |  |
@@ -501,21 +508,43 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `metal_skip` | U | `HakiosMetalCA.m` | `CONFIG_METAL_SKIP` |  |
 | `metal_trace` | U | `HakiosMetalCA.m` | `CONFIG_METAL_TRACE` |  |
 | `metal_watch` | U | `inject.c` | `CONFIG_METAL_WATCH` |  |
+| `pcie2_bhi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI` |  |
+| `pcie2_bhi_bad` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI_BAD` |  |
+| `pcie2_img` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMG` |  |
+| `pcie2_keep` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_KEEP` |  |
+| `pcie2_power` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_POWER` |  |
+| `pcie2_sid` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_SID` |  |
+| `pcie2_survey` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_SURVEY` |  |
+| `pcie2_test` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_TEST` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `servreg` | K | `hakios.thyme_slpi.c` | `CONFIG_SERVREG` |  |
 | `slpi` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI` |  |
 | `slpi_again` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_AGAIN` |  |
 | `slpi_apr_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_APR_WAIT` |  |
+| `slpi_delay` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_DELAY` |  |
+| `slpi_dump_hex` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_DUMP_HEX` |  |
 | `slpi_dump_item` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_DUMP_ITEM` |  |
+| `slpi_heap_pa` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_HEAP_PA` |  |
+| `slpi_heap_size` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_HEAP_SIZE` |  |
 | `slpi_keep` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_KEEP` |  |
 | `slpi_listen` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_LISTEN` |  |
 | `slpi_new` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_NEW` |  |
 | `slpi_pause` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_PAUSE` |  |
 | `slpi_return` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_RETURN` |  |
+| `slpi_smem_dump` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_SMEM_DUMP` |  |
 | `slpi_step` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_STEP` |  |
 | `slpi_wait` | K | `hakios.thyme_slpi.c` | `CONFIG_SLPI_WAIT` |  |
 | `sns` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS` |  |
+| `sns_accel_direct` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_ACCEL_DIRECT` |  |
+| `sns_client_probe` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_CLIENT_PROBE` |  |
+| `sns_gyro_direct` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_GYRO_DIRECT` |  |
+| `sns_quiet` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_QUIET` |  |
+| `sns_raw` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_RAW` |  |
+| `sns_registry_probe` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_REGISTRY_PROBE` |  |
+| `sns_registry_upload` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_REGISTRY_UPLOAD` |  |
+| `sns_registry_write` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_REGISTRY_WRITE` |  |
+| `sns_write_tries` | K | `hakios.thyme_slpi.c` | `CONFIG_SNS_WRITE_TRIES` |  |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `tu_debug` | U | `HakiosMetalCA.m` | `CONFIG_TU_DEBUG` |  |
 | `ui_lite` | U | `inject_sb.c` | `CONFIG_UI_LITE` |  |
