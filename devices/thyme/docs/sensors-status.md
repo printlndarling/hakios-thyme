@@ -170,6 +170,15 @@ being the first client of that boot) and not a transport artefact.
   loader reported "hung" and restarted the phone (`logs/183746-run.log`, no
   kernel log at all) — so that diagnostic is removed and the DSP's log can
   only come through the diag/QSH protocol, not a memory read.
+- **The DSP answers no "DIAG" channel either**: GLINK channels may be asked
+  for by either side, so the driver now defines one named "DIAG" and opens it
+  once the versions agree (the link hex-dumps what would arrive,
+  `diag_input`). Nothing came back — no open acknowledgement, no packet, in a
+  run that otherwise went through its SNS part normally
+  (`logs/191016-run.log`) — so this firmware's diag router is not reachable
+  from the AP's side of GLINK, and the sensor framework's own log stays out of
+  reach. The remaining ways to it would be the QRTR diag service (if any of
+  the DSP's 8 services is one) or a userspace diag daemon on a future day.
 - **Our messages do not disturb the sensor process** (10 November, later):
   with `sns_quiet=1` the listener and the file service stay up and not one
   SNS message goes out (`logs/175050-run.log`, 0 QMI sends), and the DSP still

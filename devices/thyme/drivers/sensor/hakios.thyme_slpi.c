@@ -2113,7 +2113,7 @@ struct glink_packet {
  * carries APR, the sensor services' own protocol (below; Android's apr_tal_rpmsg.c asks for no
  * particular intents: what the DSP sends there is a few hundred bytes, up to a few kilobytes).
  */
-enum { CHANNEL_QRTR, CHANNEL_APR, CHANNEL_PMIC, CHANNEL_FASTRPC, CHANNELS };
+enum { CHANNEL_QRTR, CHANNEL_APR, CHANNEL_PMIC, CHANNEL_FASTRPC, CHANNEL_DIAG, CHANNELS };
 
 struct glink_channel {
 	const char *name;
@@ -2153,6 +2153,12 @@ static struct {
 		[CHANNEL_PMIC] = { .name = "PMIC_RTR_SLPI_APPS", .ours = 3, .intents = { { 0x200, 6 }, { 0x1000, 2 }, { 0, 0 } } },
 		/* the DSP's FastRPC: the AP serves its registry files (dt: qcom,msm_fastrpc_rpmsg, intents 0x64 x 64) */
 		[CHANNEL_FASTRPC] = { .name = "fastrpcglink-apps-dsp", .ours = 4, .intents = { { 0x64, 24 }, { 0, 0 }, { 0, 0 } } },
+		/*
+		 * The DSP's diag router, if it registers one: the sensor framework's own log goes through it, and
+		 * nothing else on this boot has shown where the sensor process stops. Opening a channel nobody
+		 * answers is harmless; the link says whether it was acknowledged.
+		 */
+		[CHANNEL_DIAG] = { .name = "DIAG", .ours = 5, .intents = { { 0x1000, 4 }, { 0x2000, 2 }, { 0, 0 } } },
 	},
 };
 
@@ -2379,6 +2385,16 @@ glink_pump(void)
 			} else if (message.param1 != 0) {
 				glink.features &= message.param2;
 				glink_say(GLINK_VERSION, GLINK_VERSION_1, glink.features, NULL, 0);
+			}
+			/* the diag router's channel, asked for once the versions agree (an open before that is ignored) */
+			if (glink.agreed && !glink.channel[CHANNEL_DIAG].asked) {
+				struct glink_channel *diag = &glink.channel[CHANNEL_DIAG];
+				uint32_t size = (uint32_t)strlen(diag->name) + 1;
+				char diag_name[16] = "DIAG";
+
+				glink_say(GLINK_OPEN, diag->ours, size, diag_name, (size + 7) & ~7u);
+				diag->asked = true;
+				printf("slpi: glink: asked the DSP for its \"DIAG\" channel (ours %u)\n", diag->ours);
 			}
 			break;
 		case GLINK_OPEN:
@@ -7159,6 +7175,29 @@ battmgr_stop(void)
 
 static volatile bool link_wanted, link_runs;
 
+static uint32_t diag_packets;
+
+/* Whatever the DSP's diag router sends on "DIAG": hex and text, the first handful of packets only. */
+static void
+diag_input(const uint8_t *data, uint32_t length)
+{
+	if (diag_packets >= 60) {
+		return;
+	}
+	diag_packets++;
+	printf("slpi: diag: %u bytes:", length);
+	for (uint32_t i = 0; i < length && i < 64; i++) {
+		printf(" %02x", data[i]);
+	}
+	printf(" |");
+	for (uint32_t i = 0; i < length && i < 64; i++) {
+		uint8_t c = data[i];
+
+		printf("%c", c >= 0x20 && c < 0x7f ? c : '.');
+	}
+	printf("|\n");
+}
+
 static void
 link_thread(__unused void *parameter, __unused wait_result_t result)
 {
@@ -7205,6 +7244,8 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 				battmgr_input(packet->data, packet->length);
 			} else if (from == CHANNEL_FASTRPC) {
 				fastrpc_input(packet->data, packet->length);
+			} else if (from == CHANNEL_DIAG) {
+				diag_input(packet->data, packet->length);
 			} else {
 				apr_input(packet->data, packet->length);
 			}
