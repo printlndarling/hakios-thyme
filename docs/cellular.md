@@ -262,3 +262,17 @@ Android's dmesg names `subsys-restart` and `esoc0`, so `mdm_subsys_powerup` (wit
 event handler beside it) is the path that actually brings this phone's modem up, and is what
 the next read should cover; the `mdm4x_do_first_power_on` sequence recorded above is the
 clink side of it.
+
+### The pinctrl's per-pin registers are not reached by guessing either (2026-11-10)
+
+`msm_gpio_get` shows how the vendor driver reads a line: it takes the pin's descriptor from
+a table at `[pinctrl+848]`+0x20, stride 0x50, reads `regs_base + desc[0x28]` and takes the
+bit `desc[0x40] & 0x1f`. The per-SoC data it comes from is `kona_pinctrl` (in the Image:
+pins pointer at +0 = 0x1db36c0, 184 entries; groups pointer at +0x20 = 0x1db6ad0, 184;
+functions at +0x10); the 0x50-stride descriptor table itself was not found — a scan of the
+whole Image for 184 entries whose in_reg field steps by 0x1000 found nothing, so the table
+is either built at runtime or its offsets are not the plain tile+pin*0x1000 shape. Android's
+debugfs is closed as well (`/sys/kernel/debug` does not exist and cannot be created as root),
+so the live states of gpio 1/3/56/57 cannot be read off Android either. The safe next read
+is the table through the soc_data pointers above (or the pinctrl-msm group tables); blind
+TLMM probing stays out, after the two bus hangs it caused.
