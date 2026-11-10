@@ -388,12 +388,32 @@ can compare them exactly.
 The sensor DSP firmware (the slpi.b* segments in the scene root) contains the
 reverse-tunnel's client strings: `listener_hexagon.c`, `next2 unpack error`,
 `Error %x: LISTENER unpack out bufs failed`, plus the get-in-bufs and
-initialization failures. Every next2 the driver sent in the last sensor run
-returned 0 -- the listener thread's "nothing waiting" path never fired --
-while the DSP reissued the same `apps_std` call. That is what the client does
-when unpacking the returned out buffers fails *after* a successful
-invocation, so the search is narrow now: the DSP's `unpack_out_bufs` check
-(same contract as `listener_buf.h`: every packed length must equal the length
-the call asked for) is where the reply is lost. The driver logs both sides of
-that comparison (the call's out lengths and the reply's encoded bytes) for
-the first sixteen calls, ready for the next sensor run.
+initialization failures. That failure path is the one the 9-10 November loops
+took: a reply whose out lengths did not match the call's made the DSP-side
+unpack fail, and the caller reissued the call.
+
+With the out lengths indexed by the buffer's wire position (the 10 November
+fix) the sequence no longer loops: `logs/082231-run.log` and
+`logs/175050-run.log` show one `remotectl_open("apps_std")`,
+`fopen_with_env("/sys/devices/soc0/hw_platform")`, two `fread`s (6 bytes,
+then the end) and `fclose`, and the DSP does not repeat it. What the DSP does
+*not* do is ask for anything else through the file API -- not
+`/vendor/etc/sensors/sns_reg_config` (which it lists in its own strings), not
+`/vendor/etc/sensors/config`, not `/mnt/vendor/persist/sensors/registry/...`
+-- so its registry stays empty, the client manager never comes up, and every
+SNS client message is answered result 5.
+
+The phone's persist directory (`sensors-persist.tar`) shows what a working
+boot holds: `registry/sns_reg_version` = `version=4` and the 189 group files
+(`sns_cm` with heap_size 1572864 and the two batch knobs among them), written
+by the DSP itself through this same file API. So the file API is the right
+one; the DSP is simply not reaching the code that uses it in these boots.
+
+Two experiments are prepared for the next run: `fastrpc_wait=S` holds the
+chain back until the DSP's control plane answers (the listener's open, init2
+and next2 all returned AEE 0x80000434 when the chain ran 2 s after the DSP
+appeared, and worked 30 s in), and `fastrpc_restart=4` releases the sensor PD
+after the listener is initialized and attaches it again with a fresh init2,
+so the registry read runs with a working listener from its first instruction
+(the plain restart=1 left the DSP answering no next2 at all,
+`logs/112921-run.log`).

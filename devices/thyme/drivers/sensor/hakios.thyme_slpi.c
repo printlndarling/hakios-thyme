@@ -4711,6 +4711,7 @@ static uint32_t fastrpc_debug;           /* boot-arg fastrpc_debug: print each r
 static uint32_t fastrpc_attach_late;     /* boot-arg fastrpc_attach_late: register the listener before the sensors PD starts */
 static uint32_t fastrpc_restart;         /* boot-arg fastrpc_restart: release the sensors PD and attach it again */
 static uint32_t fastrpc_delay;           /* boot-arg fastrpc_delay: seconds between the first attach and the listener */
+static uint32_t fastrpc_wait;            /* boot-arg fastrpc_wait: seconds for the DSP's control plane to settle before the chain */
 static uint32_t fastrpc_bare;            /* boot-arg fastrpc_bare: the static listener first, the sensors PD after it */
 static uint32_t fastrpc_attach_mid;      /* boot-arg fastrpc_attach_mid: register, attach the sensors PD, then the listener thread */
 static uint32_t fastrpc_static_open;     /* boot-arg fastrpc_static_open: open the adsp_listener module for init2/next2 */
@@ -6253,6 +6254,16 @@ fastrpc_first_calls(uint32_t stage)
 		printf("slpi: fastrpc: the DSP never said hello over QRTR; the chain is skipped\n");
 		return;
 	}
+	if (fastrpc_wait != 0) {
+		/*
+		 * The DSP's FastRPC control calls (the default listener's open, init2 and
+		 * next2) answered AEE 0x80000434 when the chain ran 2 s after the DSP
+		 * appeared (logs/121101-run.log, logs/121802-run.log) and worked 30 s in
+		 * (logs/082231-run.log).  Give the control plane its time before using it.
+		 */
+		printf("slpi: fastrpc: waiting %u s for the DSP's control plane\n", fastrpc_wait);
+		sleep_ms(fastrpc_wait * 1000);
+	}
 	if (shared) {
 		printf("slpi: fastrpc: stage %u: asking for a 4 KB packet in the shared memory\n", stage);
 		buf = fastrpc_smem_buffer(&shared_offset);
@@ -6563,7 +6574,7 @@ fastrpc_first_calls(uint32_t stage)
 			}
 			if (fastrpc_call(fastrpc_client, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd, physical, size, 10000,
 			    "adsp_listener_init2") && stage >= 8) {
-				if (fastrpc_restart == 1) {
+				if (fastrpc_restart == 1 || fastrpc_restart == 4) {
 					/*
 					 * The sensor process reads the registry when its PD starts, and this
 					 * first attach started it before the listener existed. Release it and
@@ -6575,6 +6586,22 @@ fastrpc_first_calls(uint32_t stage)
 					sleep_ms(500);
 					fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, client,
 					    "INIT_ATTACH_SNS (again)");
+					if (fastrpc_restart == 4) {
+						/*
+						 * The listener's session was initialized for the PD the release took
+						 * down, and the DSP then answered no next2 at all (the 112921 run).
+						 * Initialize it again for the fresh PD, before the listener waits.
+						 */
+						memset(packet, 0, 4096);
+						size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+						if (shared) {
+							fastrpc_smem_put(shared_offset, packet, size);
+						}
+						if (!fastrpc_call(fastrpc_client, fastrpc_service, fastrpc_init2_sc, 0x400 | fastrpc_pd,
+						    physical, size, 10000, "adsp_listener_init2 (again)")) {
+							printf("slpi: fastrpc: the listener's init2 after the re-attach got no answer\n");
+						}
+					}
 				} else if (fastrpc_restart == 2) {
 					/* the release after the first attach stopped the process; start a fresh one now */
 					fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, client,
@@ -7438,6 +7465,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_attach_late", &fastrpc_attach_late, sizeof(fastrpc_attach_late));
 	PE_parse_boot_argn("fastrpc_restart", &fastrpc_restart, sizeof(fastrpc_restart));
 	PE_parse_boot_argn("fastrpc_delay", &fastrpc_delay, sizeof(fastrpc_delay));
+	PE_parse_boot_argn("fastrpc_wait", &fastrpc_wait, sizeof(fastrpc_wait));
 	PE_parse_boot_argn("fastrpc_listener1", &fastrpc_listener1, sizeof(fastrpc_listener1));
 	PE_parse_boot_argn("fastrpc_bare", &fastrpc_bare, sizeof(fastrpc_bare));
 	PE_parse_boot_argn("fastrpc_attach_mid", &fastrpc_attach_mid, sizeof(fastrpc_attach_mid));
