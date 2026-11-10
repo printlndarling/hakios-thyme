@@ -1070,6 +1070,32 @@ image_ready:
 		    size, (uint32_t)memory, (unsigned long long)phys, words[0], words[1], sum);
 	}
 
+	/*
+	 * pcie2_bhi_bad tells the PBL's refusal apart: 1 sends a 4 KB zeroed
+	 * image, 2 zeroes the whole image in place, 3 sends four bytes. If the
+	 * error code is the same for a deliberately wrong image as for the real
+	 * one, the PBL is refusing the doorbell before it reads; if it changes,
+	 * the real image is being read and rejected on its content.
+	 */
+	{
+		uint32_t bad = 0;
+
+		PE_parse_boot_argn("pcie2_bhi_bad", &bad, sizeof(bad));
+		if (bad == 1 || bad == 2 || bad == 3) {
+			volatile uint32_t *words = (volatile uint32_t *)memory;
+			size_t zeros = bad == 1 ? 0x1000 : (bad == 2 ? size : 4);
+
+			for (size_t j = 0; j < zeros / 4; j++) {
+				words[j] = 0;
+			}
+			if (bad == 1 || bad == 3) {
+				size = zeros;
+			}
+			__asm__ volatile("dsb sy" ::: "memory");
+			hakios_tl("pcie2: BHI: bad image mode %u: %zu zero bytes, size now %zu\n", bad, zeros, size);
+		}
+	}
+
 	bhioff = rd(MHI_BAR + 0x28);
 	bhi = MHI_BAR + bhioff;
 
