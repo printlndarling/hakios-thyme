@@ -2794,6 +2794,18 @@ static const uint8_t sns_builtin_suids[4][16] = {
 	{ 0xcd, 0x4b, 0x1a, 0x6d, 0x68, 0xda, 0x4a, 0x77, 0x85, 0xab, 0x46, 0xe2, 0xcd, 0xa5, 0x68, 0x0b },
 	{ 0x79, 0x32, 0xb8, 0x9c, 0xdc, 0x02, 0x40, 0xaf, 0xa3, 0x8f, 0x80, 0xc0, 0xc0, 0x15, 0x36, 0x97 },
 };
+/*
+ * The registry sensor's real SUID, as the phone's own DSP reports it: a
+ * freestanding QRTR probe on Android (tools/qrtrprobe.c, 10 November) sent
+ * the "registry" lookup to service 400 and the DSP's event carried field 3
+ * with the name and low 0x5e2541b4701e2275 / high 0xe12754a7007f2759 (the
+ * same probe's "accel" event carries the accelerometer's known SUID, byte for
+ * byte). This is the address a registry group is read from or written to.
+ */
+static const uint8_t sns_registry_suid_real[16] = {
+	0x75, 0x22, 0x1e, 0x70, 0xb4, 0x41, 0x25, 0x5e,
+	0x59, 0x27, 0x7f, 0x00, 0xa7, 0x54, 0x27, 0xe1,
+};
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
@@ -3269,6 +3281,7 @@ sns_start(void)
 		sns_registry_read("sns_cm", sns_registry_suid);
 		sns_registry_read("sns_cm", sns_registry_suid_us);
 		sns_registry_read("sns_cm", sns_registry_suid_sns);
+		sns_registry_read("sns_cm", sns_registry_suid_real);
 		for (unsigned i = 0; i < sizeof(sns_builtin_suids) / sizeof(sns_builtin_suids[0]); i++) {
 			sns_registry_read("sns_cm", sns_builtin_suids[i]);
 		}
