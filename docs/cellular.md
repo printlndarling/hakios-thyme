@@ -103,3 +103,18 @@ XL_SB_DELAY=8 tools/modem-cycle.sh "modem=1 modem_again=1 modem_buffer=0xa800000
 | `modem_apn=NAME` | the session to that APN instead of the SIM's default profile |
 | `modem_ipa_data_off=1` | no IPA data path for this processor, no `en1` |
 | `modem_ipa_data_trace=1` | a log line per packet, command and DHCP/ARP answer |
+
+## Thyme (the Mi 10S): no shared-memory partition with the modem (2026-11-10)
+
+The driver is in this tree and builds for thyme (`devices/thyme/soc.args`), but its step 1
+fails on the phone: `mpss: 1: there is no partition for us and the modem (0 and 1)`
+(`logs/201955-run.log`). The table at the top of the shared memory says why
+(`logs/203058-run.log`, `show_toc()`): it has 11 entries — 0/2, 0/5, 0/3, 2/3, 0/8, 7/11,
+0/10, 10/5, the global one and two table entries — and **host 1 never appears**. The range
+0x1000-0x1ff000 is packed with no gap, so a kernel-side partition cannot simply be added
+to the 2 MB region either. This phone's boot chain therefore does not give the modem the
+shared-memory partition the reference phone's driver expects, and step 1 (and every step
+after it) cannot run. What to read next: the phone's own device tree (`/sys/firmware/fdt`:
+the `qcom,smem` partitions property, `qcom,glink/modem`, `qcom,smp2p-modem`) to learn
+whether this platform carries the AP-modem IPC in shared memory at all or over MHI/IPA
+only, and which part of the boot chain creates the partitions that are there.

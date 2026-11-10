@@ -1020,6 +1020,28 @@ ipa_clock(bool on)
 
 /* ---- step 1: the shared memory --------------------------------------------------------------------- */
 
+/* Every partition the bootloader wrote into the table at the top of the shared memory. */
+static void
+show_toc(void)
+{
+	struct smem_table table;
+	struct smem_table_entry entry;
+	uint32_t at = SMEM_SIZE - 0x1000;
+
+	if (!smem_peek(at, &table, sizeof(table)) || memcmp(table.magic, "$TOC", 4) != 0) {
+		printf("mpss: %u: no shared-memory table at %#x\n", step, at);
+		return;
+	}
+	printf("mpss: %u: the table at %#x: version %u, %u entries\n", step, at, table.version, table.count);
+	for (uint32_t i = 0; i < table.count && i < 64; i++) {
+		if (!smem_peek(at + sizeof(table) + i * sizeof(entry), &entry, sizeof(entry))) {
+			break;
+		}
+		printf("mpss: %u:   [%u] hosts %u/%u, offset %#x, size %#x, cacheline %u, flags %#x\n", step, i, entry.host0,
+		    entry.host1, entry.offset, entry.size, entry.cacheline, entry.flags);
+	}
+}
+
 static bool
 step_survey(void)
 {
@@ -1027,6 +1049,7 @@ step_survey(void)
 	uint32_t size = 0;
 
 	announce("read our partition with the modem in the shared memory (0x80900000), and its items");
+	show_toc();
 	show_partition();
 	if (dsp_words(&words)) {
 		show_words("the DSP's item (435) is there: it has run since the phone was started", &words);
