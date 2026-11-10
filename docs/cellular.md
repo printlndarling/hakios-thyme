@@ -245,3 +245,20 @@ driver as read cannot be the whole story on this phone; Android's dmesg instead 
 and the modem's SSCTL service coming up. The next thing to read is that path (`mdm_probe`,
 the esoc clink request engine, and what `subsys-restart` does with `esoc0`), not to drive
 the lines the DT does not have.
+
+### The vendor esoc stack's shape, and the tool that reads it (2026-11-10)
+
+`tools/kdisas.py` turns a symbol of the phone's kernel into annotated disassembly: with the
+live `/proc/kallsyms` (kptr_restrict 0) and `_text`, a symbol's offset in the pulled `boot_a`
+Image is its address minus `_text`, the bytes go to `llvm-mc`, and every call and adrp/add
+data address is resolved to the nearest symbol (and to its string when it is one). The
+esoc/ext-sdx55m driver's function map it gives: `mdm_probe`, `mdm_pinctrl_init`,
+`mdm_configure_ipc`, `mdm_status_fn` / `mdm2ap_status_check` / `mdm_status_change` /
+`mdm_pblrdy_change` (the line interrupts), `mdm_handle_clink_evt`, the ops `mdm_cmd_exe`,
+`mdm_get_status`, `mdm_get_err_fatal`, `mdm_notify`, the PON ops `mdm4x_do_first_power_on`,
+`sdx55m_toggle_soft_reset`, `sdx55m_power_down`, and the subsystem side `esoc_ssr_probe`,
+`mdm_subsys_powerup`, `mdm_subsys_shutdown`, `mdm_subsys_ramdumps`, `mdm_crash_shutdown`.
+Android's dmesg names `subsys-restart` and `esoc0`, so `mdm_subsys_powerup` (with the clink
+event handler beside it) is the path that actually brings this phone's modem up, and is what
+the next read should cover; the `mdm4x_do_first_power_on` sequence recorded above is the
+clink side of it.
