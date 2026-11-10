@@ -545,7 +545,10 @@ mhi_peek(void)
 		bar0 = rd(CONF + 0x10);
 	}
 	command = rd(CONF + 4);
-	wr(CONF + 4, (command & 0xffff0000u) | 0x0002u); /* memory space */
+	/* Memory space, and the bus master bit the vendor's pci_set_master
+	 * sets: the BHI engine's reads of host memory are the endpoint's DMA,
+	 * and a device whose bus master enable is clear does not start one. */
+	wr(CONF + 4, (command & 0xffff0000u) | 0x0006u);
 	iatu_config(1, 0x00, MHI_BAR, MHI_BAR + 0xfff, MHI_BAR);
 
 	cfg = rd(MHI_BAR + 0x10);
@@ -579,59 +582,50 @@ mhi_peek(void)
 	}
 }
 
+/* The window the boot image is placed in: the SLPI's reserved heap, below 4 GB. */
+#define MODEM_IMAGE_PA   0xc0000000u
+#define MODEM_IMAGE_SIZE 0x800000u
+
 /*
- * A whole file of the scene root, in physically contiguous memory: the modem's
- * BHI engine reads the boot image by physical address. The scene root is
- * mounted by launchd after boot, so the lookup retries while it appears (the
- * pcie2 thread starts 3 s in; the image is at /redwood/fw/modem/sbl1.mbn).
+ * A whole file of the scene root, read into `dest`, a mapped buffer of
+ * `capacity` bytes. The scene root is mounted by launchd after boot, so the
+ * caller retries while it appears; the image is at /redwood/fw/modem/sbl1.mbn.
  */
-static const uint8_t *
-root_file_contig(const char *name, size_t *size, vm_offset_t *memory)
+static int
+root_file_into(const char *name, vm_offset_t dest, size_t capacity, size_t *size)
 {
 	char path[96];
 	vfs_context_t context = vfs_context_kernel();
 	vnode_t vnode = NULLVP;
 	struct vnode_attr attributes;
-	vm_offset_t buffer = 0;
-	vm_size_t bytes;
 	int left = 0, error;
 
 	if (rootvnode == NULLVP) {
-		return NULL;
+		return ENOENT;
 	}
 	snprintf(path, sizeof(path), "/redwood/fw/%s", name);
-	if (vnode_lookup(path, 0, &vnode, context) != 0) {
-		return NULL;
+	error = vnode_lookup(path, 0, &vnode, context);
+	if (error != 0) {
+		return error;
 	}
 	VATTR_INIT(&attributes);
 	VATTR_WANTED(&attributes, va_data_size);
-	if (vnode_getattr(vnode, &attributes, context) != 0 || attributes.va_data_size == 0 ||
-	    attributes.va_data_size > (4u << 20)) {
+	error = vnode_getattr(vnode, &attributes, context);
+	if (error != 0 || attributes.va_data_size == 0 || attributes.va_data_size > capacity) {
+		hakios_tl("pcie2: fw: %s: getattr %d, size %lld (capacity %zu)\n", path, error,
+		    (long long)attributes.va_data_size, capacity);
 		vnode_put(vnode);
-		return NULL;
+		return error != 0 ? error : EFBIG;
 	}
-	bytes = round_page((vm_size_t)attributes.va_data_size);
-	/*
-	 * Below 4 GB: the vendor's MHI gives the device IOVAs from the DT's
-	 * iommu-dma-addr-pool (0x20000000, 512 MB), so the boot engine is not
-	 * to be trusted with an address whose high word is nonzero; the first
-	 * BHI attempt handed it 0x1942dc000 and the PBL ignored the doorbell.
-	 */
-	if (kmem_alloc_contig(kernel_map, &buffer, bytes, PAGE_MASK, 0, 0xffffffffUL,
-	    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
-		vnode_put(vnode);
-		return NULL;
-	}
-	error = vn_rdwr(UIO_READ, vnode, (caddr_t)buffer, (int)attributes.va_data_size, 0, UIO_SYSSPACE, 0,
+	error = vn_rdwr(UIO_READ, vnode, (caddr_t)dest, (int)attributes.va_data_size, 0, UIO_SYSSPACE, 0,
 	    vfs_context_ucred(context), &left, vfs_context_proc(context));
 	vnode_put(vnode);
 	if (error != 0 || left != 0) {
-		kmem_free(kernel_map, buffer, bytes);
-		return NULL;
+		hakios_tl("pcie2: fw: read %s: error %d, %d left\n", path, error, left);
+		return error != 0 ? error : EIO;
 	}
 	*size = (size_t)attributes.va_data_size;
-	*memory = buffer;
-	return (const uint8_t *)buffer;
+	return 0;
 }
 
 /*
@@ -650,27 +644,42 @@ pcie2_bhi_try(void)
 	uint32_t on = 0;
 	size_t size = 0;
 	vm_offset_t memory = 0;
-	const uint8_t *image = NULL;
 	uint64_t phys;
 	uint32_t bhioff, bhi, status = 0, mhistatus = 0, i;
 
 	if (!PE_parse_boot_argn("pcie2_bhi", &on, sizeof(on)) || on < 1) {
 		return;
 	}
+	/*
+	 * The image goes into the SLPI's reserved heap at 0xc0000000: it is
+	 * below 4 GB, which is what the PBL's engine takes (the vendor hands it
+	 * IOVAs from the DT's 0x20000000 pool; an image above 4 GB failed with
+	 * BHI_ERRCODE 0xef120700), and kernel_map will not hand out a low
+	 * contiguous run -- its low-page scan starts from a high index and
+	 * gives up (max_pnum 0x100000 fails, as does the fallback). The heap is
+	 * reserved away from the kernel by the loader and unused when the
+	 * sensor DSP is not started, which is the case in these runs.
+	 * ml_io_map makes it uncached, which is what a DMA buffer wants.
+	 */
+	memory = ml_io_map(MODEM_IMAGE_PA, MODEM_IMAGE_SIZE);
+	if (memory == 0) {
+		hakios_tl("pcie2: BHI: cannot map the image window\n");
+		return;
+	}
 	for (i = 0; i < 30; i++) {
-		image = root_file_contig("modem/sbl1.mbn", &size, &memory);
-		if (image != NULL) {
+		if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_SIZE, &size) == 0) {
 			break;
 		}
 		delay(1000000);
 	}
-	if (image == NULL) {
+	if (i == 30) {
 		hakios_tl("pcie2: BHI: no /redwood/fw/modem/sbl1.mbn after 30 s\n");
 		return;
 	}
-	phys = kvtophys(memory);
-	hakios_tl("pcie2: BHI: sbl1.mbn %zu bytes at %#llx, physical %#llx\n", size, (unsigned long long)memory,
-	    (unsigned long long)phys);
+	phys = MODEM_IMAGE_PA;
+	hakios_tl("pcie2: BHI: sbl1.mbn %zu bytes at %#x, physical %#llx, first words %#x %#x\n", size,
+	    (uint32_t)memory, (unsigned long long)phys, ((volatile uint32_t *)memory)[0],
+	    ((volatile uint32_t *)memory)[1]);
 
 	bhioff = rd(MHI_BAR + 0x28);
 	bhi = MHI_BAR + bhioff;
@@ -691,7 +700,7 @@ pcie2_bhi_try(void)
 	wr(MHI_BAR + 0xa0, (uint32_t)(phys + size - 1));
 	wr(MHI_BAR + 0xa4, (uint32_t)((phys + size - 1) >> 32));
 
-	/* the image, and the doorbell */
+	/* the image, and the doorbell (the mapping is uncached: no flush needed) */
 	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
 	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
 	wr(bhi + 0x08, (uint32_t)phys);
@@ -710,6 +719,10 @@ pcie2_bhi_try(void)
 	hakios_tl("pcie2: BHI: status %#x (result %u), errcode %#x, dbg %#x %#x %#x, execenv %#x, MHISTATUS %#x after %u ms\n",
 	    status, (status >> 30) & 3, rd(bhi + 0x30), rd(bhi + 0x34), rd(bhi + 0x38), rd(bhi + 0x3c),
 	    rd(bhi + 0x28), rd(MHI_BAR + 0x48), i * 10);
+	/* what the root complex saw of it: interrupt status and the two error
+	 * registers (whether the endpoint's reads of host memory completed) */
+	hakios_tl("pcie2: PARF: int status %#x, status %#x, core errors %#x\n", rd(PARF + 0x224), rd(PARF + 0x230),
+	    rd(PARF + 0x3c0));
 	if (((status >> 30) & 3) == 2) {
 		/* the SBL has run: the vendor's mhi_ready_state_transition then
 		 * waits for MHISTATUS.READY, and an SBL that offers BHIE bumps
@@ -724,7 +737,6 @@ pcie2_bhi_try(void)
 		hakios_tl("pcie2: BHI: after the SBL: MHISTATUS %#x, execenv %#x, BHIEOFF %#x after %u ms\n",
 		    mhistatus, rd(bhi + 0x28), rd(MHI_BAR + 0x2c), i);
 	}
-	kmem_free(kernel_map, memory, round_page((vm_size_t)size));
 }
 
 static void

@@ -515,3 +515,45 @@ reads 0 (the host has not enabled MHI) and MHISTATUS 0x7025062f; the next
 peek reads BHIOFF/BHIEOFF and the boot interface's EXECENV, which say whether
 the SDX55M sits in its PBL waiting for sbl1.mbn (the image is on the phone at
 /vendor/firmware_mnt/image/sdx55m/sbl1.mbn, 548,056 bytes).
+
+### The BHI doorbell, and the bus master bit that unlocks it (2026-11-11)
+
+The SDX55M's PBL answers at the MHI boot interface (BAR0 + BHIOFF 0x100):
+version 1.2, BHI_EXECENV 0 -- with the identity EE table that is
+`MHI_EE_PBL`, so the modem has no firmware and waits for `sdx55m/sbl1.mbn`
+(the file is on the phone at /vendor/firmware_mnt/image/sdx55m/sbl1.mbn,
+548,056 bytes, md5 d53e8d4a685e49be2f9a433501db5250; the CAF MHI driver's
+table maps dev_id 0x306 to it). The scene root now carries a copy at
+/redwood/fw/modem/sbl1.mbn (userland/root/fw/modem, packed with
+tools/apfs/mkapfs.py into userland/root.apfs; both the firmware and the
+images are git-ignored).
+
+`pcie2_bhi=N` in hakios.thyme_pcie2.c reads that file into physically
+contiguous kernel memory, flushes it from the cache, programs BHI_INTVEC,
+BHI_STATUS = 0, BHI_IMGADDR (high and low), BHI_IMGSIZE, and rings
+BHI_IMGTXDB, then polls BHI_STATUS's top two bits.
+
+The first attempts looked like the PBL was ignoring the doorbell: the
+registers read back exactly as written (IMGTXDB 0x1234567, image address,
+size) but BHI_STATUS stayed 0. What was missing was the endpoint's **bus
+master enable**. The driver had set only PCI command bit 1 (memory space);
+the vendor's `pci_set_master` also sets bit 2, and the BHI engine's reads of
+host memory are the endpoint's DMA. With command 0x100006 the very next run
+produced a transfer attempt:
+
+```text
+pcie2: MHI: BAR0 0x64300004 (was 0x4, next 0), command 0x100006, reglen 0x100
+pcie2: BHI: version 1.2, execenv 0, status 0, errcode 0, imgaddr 0/0, imgsize 0, numseg 0x3
+pcie2: BHI: wrote imgaddr 0x1/0x94214000 size 0x85cd8; read back ..., txdb 0x1234567, status 0
+pcie2: BHI: status 0xffffffff (result 3), errcode 0xef120700,
+       dbg 0x94214000 0x1 0x85cd8, execenv 0, MHISTATUS 0 after 10 ms
+```
+
+Result 3 is BHI_STATUS_ERROR, and the debug registers hold the address and
+size the engine was given. That image buffer was at physical 0x194214000 --
+above 4 GB -- while the vendor hands the device IOVAs from the DT's
+`qcom,iommu-dma-addr-pool` (0x20000000, 512 MB); the next attempt allocates
+the image below 4 GB. (kmem_alloc_contig's arguments are
+`(map, &addr, size, mask, max_pnum, pnum_mask, ...)`; putting the bound in
+the pnum_mask slot asks for an alignment, not a limit, which is why the
+first "below 4 GB" attempt returned KERN_NO_SPACE.)
