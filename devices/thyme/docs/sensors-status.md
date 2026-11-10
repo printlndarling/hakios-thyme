@@ -382,3 +382,18 @@ the rejection is on the DSP-side stub's acceptance of the reply, not its
 shape; the driver now logs, for the first sixteen calls, both the out
 lengths the call asked for and the bytes it encoded back, so the next run
 can compare them exactly.
+
+### The DSP's own listener carries the failure path we see (2026-11-11)
+
+The sensor DSP firmware (the slpi.b* segments in the scene root) contains the
+reverse-tunnel's client strings: `listener_hexagon.c`, `next2 unpack error`,
+`Error %x: LISTENER unpack out bufs failed`, plus the get-in-bufs and
+initialization failures. Every next2 the driver sent in the last sensor run
+returned 0 -- the listener thread's "nothing waiting" path never fired --
+while the DSP reissued the same `apps_std` call. That is what the client does
+when unpacking the returned out buffers fails *after* a successful
+invocation, so the search is narrow now: the DSP's `unpack_out_bufs` check
+(same contract as `listener_buf.h`: every packed length must equal the length
+the call asked for) is where the reply is lost. The driver logs both sides of
+that comparison (the call's out lengths and the reply's encoded bytes) for
+the first sixteen calls, ready for the next sensor run.
