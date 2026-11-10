@@ -60,10 +60,15 @@ fopen/fread/fwrite/readdir errors.
    flow: present-check, version compare (`no update of sns_reg_config
    version`), properties file, output directory (mkdir/stat), config
    directory, per-file `file=` entries. It has no direct `call` site; it is
-   reached through the sensor API tables (a pointer to the `SNS_REG_INIT`
-   routine at 0xb22d2b04 sits at file 0x4cb9c8 and 0x6f2008). Finding the
-   framework's sensor-instantiation path — which sensors start at boot and
-   what instantiates the registry sensor — is the next step.
+   reached through the sensor API tables. Those sit at file 0x4cb938 and
+   0x6f1db8 (two copies) and read, in order: a word pair `{float 1.0, 0x18}`,
+   two data pointers (0xb2306324, 0xb23065c0), the function pointers
+   0xb22d28f0, 0xb22d28f8, 0xb22d2960, then `{0x18, 0xb22d2b04 (the
+   SNS_REG_INIT routine), 0, 0xb22d2b74 (get_name -> "sns_registry"),
+   0xb22d2b7c, 0xb22d2b80, 0}` with the `/vendor/etc/sensors/sns_reg_config`
+   string right behind it. Finding the framework routine that walks these
+   tables at boot — `sns_sensor.c:Initializing new sensor library %x` is its
+   log line — is the next step.
 2. **The AP-side `sns_registry` module.** `libsns_registry_skel.so` (pulled
    from the phone) implements exactly one method, `get_property(name, value,
    len)` over Android's `property_get`: the listener call carries a scalar
