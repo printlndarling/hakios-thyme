@@ -2735,6 +2735,10 @@ static struct {
 } SCREEN;
 static uint64_t win_base, win_size; /* XNU's physical memory window, claimed once */
 static uint64_t resident_rd_size;   /* root image kept at win_base + RESIDENT_RD_OFFSET, 0 if none */
+/* A free range below 4 GB the loader leaves for the sensor DSP's heap: FastRPC's
+ * grow_heap takes a 32-bit address, and XNU's window (with the resident root image
+ * at its start) holds no free page there. */
+static uint64_t slpi_heap_base, slpi_heap_size;
 static char last_result[64] = "idle";
 
 static void
@@ -2781,6 +2785,54 @@ print_memory_map(void)
 		if (totals[t] != 0) {
 			print("  total of type %d: %d MB\n", (uint64_t)t, totals[t] >> 20);
 		}
+	}
+}
+
+/* An 8 MB, 4 MB-aligned free range below 4 GB, outside XNU's window and the payload. */
+static void
+choose_slpi_heap(void)
+{
+	static uint8_t map_buf[65536];
+	uint64_t map_size = sizeof(map_buf), map_key, desc_size, best = 0;
+	uint32_t desc_ver;
+
+	if (slpi_heap_base != 0) {
+		return;
+	}
+	if (EFI_ERROR(BS->get_memory_map(&map_size, map_buf, &map_key, &desc_size, &desc_ver))) {
+		return;
+	}
+	for (uint64_t off = 0; off < map_size; off += desc_size) {
+		efi_memory_descriptor *d = (efi_memory_descriptor *)(map_buf + off);
+		uint64_t lo, hi;
+
+		if (d->type != EfiConventionalMemory) {
+			continue;
+		}
+		lo = d->phys_start;
+		hi = d->phys_start + (d->pages << 12);
+		if (hi > 0x100000000ULL) {
+			hi = 0x100000000ULL;
+		}
+		if (lo < PAYLOAD_BASE + PAYLOAD_MAX_SIZE && hi > PAYLOAD_BASE) {
+			if (PAYLOAD_BASE > lo) {
+				hi = PAYLOAD_BASE < hi ? PAYLOAD_BASE : hi;
+			} else {
+				lo = PAYLOAD_BASE + PAYLOAD_MAX_SIZE;
+			}
+		}
+		lo = (lo + 0x3fffff) & ~0x3fffffULL;
+		if (hi <= lo || hi - lo < 0x800000) {
+			continue;
+		}
+		if (hi - lo > best) {
+			best = hi - lo;
+			slpi_heap_base = lo;
+			slpi_heap_size = 0x800000;
+		}
+	}
+	if (slpi_heap_base != 0) {
+		print("slpi heap range %x size %x\n", slpi_heap_base, slpi_heap_size);
 	}
 }
 
@@ -2838,6 +2890,7 @@ choose_window(const struct payload_info *pi)
 	}
 	win_base = best_base;
 	win_size = best_size;
+	choose_slpi_heap();
 	return 1;
 }
 
@@ -3195,6 +3248,22 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		}
 		for (int shift = 60; shift >= 0 && n < BOOT_LINE_LENGTH - 1; shift -= 4) {
 			ba->commandLine[n++] = hex[(address >> shift) & 0xf];
+		}
+		if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
+	}
+	if (slpi_heap_base != 0) {
+		static const char hex[] = "0123456789abcdef";
+		uint64_t values[2] = { slpi_heap_base, slpi_heap_size };
+
+		for (int v = 0; v < 2; v++) {
+			const char *prefix = v == 0 ? "slpi_heap_pa=0x" : " slpi_heap_size=0x";
+
+			for (const char *c = prefix; *c && n < BOOT_LINE_LENGTH - 1; c++) {
+				ba->commandLine[n++] = *c;
+			}
+			for (int shift = 60; shift >= 0 && n < BOOT_LINE_LENGTH - 1; shift -= 4) {
+				ba->commandLine[n++] = hex[(values[v] >> shift) & 0xf];
+			}
 		}
 		if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
 	}

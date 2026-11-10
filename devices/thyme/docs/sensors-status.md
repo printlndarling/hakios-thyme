@@ -69,42 +69,41 @@ being the first client of that boot) and not a transport artefact.
   before configuring it (root strace of the HAL; 32 of them), and its answer
   carries the client id (0x1d, 0x1e, ...) in TLV 0x10; here message 1 answers
   5, so the client manager's allocation is what fails (`logs/094020-run.log`).
-- **The sensor heap is the missing resource**: the phone hands the DSP its
-  heap from the reserved `sdsp_region` — an 8 MB, 4 MB-aligned,
-  `shared-dma-pool` reserved-memory node, dynamically placed and assigned to
-  ION heap 22 (`soc:qcom,ion:qcom,ion-heap@22: assigned reserved memory node
-  sdsp_region` in the phone's dmesg). `remotectl_grow_heap`'s address is
-  **32 bits** (the IDL's `uint32 phyAddr`), and a kernel allocation lands
-  above 4 GB: every attempt offered 0x1a1400000, whose truncated low half is
-  a meaningless address to the DSP. The shared-memory partition as the heap
-  takes the sensor process's fastrpc down in a memcpy (PC 0xb20c2dac,
-  `logs/092656-run.log`, `logs/093452-run.log`); a kernel-contiguous range
-  above 4 GB takes the DSP's kernel down in its logging path (PC 0xb01c1f2c,
-  `logs/095514-run.log`, `logs/102239-run.log`). XNU's `kmem_alloc_contig`
-  ignored both `max_pnum = 0xfffff` and `KMA_LOMEM` (every attempt came back
-  at 0x1a1400000, `logs/102937-run.log`), and at boot, before the steps run,
-  the DSP's own DMA allocator (an IOBufferMemoryDescriptor with the physical
-  mask 0xffffffff, `hakios.thyme_slpi_dma.cpp`) could not find 4 MB below
-  4 GB at all (`logs/104527-run.log`). XNU's pool simply holds no free range
-  there: the heap has to be a range the loader makes available below 4 GB,
-  the way the phone reserves `sdsp_region` (8 MB, 4 MB-aligned), with the
-  DSP's access granted to it — that is the next piece, not a runtime
-  allocation.
+  With the heap in place it still answers 5 (`logs/112921-run.log`).
+- **The heap is in place and `grow_heap` accepts it**: the loader scans the
+  firmware's memory map (the phone's map has `b0000000-bbb00000` and
+  `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
+  outside XNU's window and the payload, reserves it and passes
+  `slpi_heap_pa`/`slpi_heap_size` on the kernel command line; the chosen range
+  is 0xc0000000, `fastrpc_heap_reserve` takes it, and `remotectl_grow_heap`
+  answers **retval 0** (`logs/112921-run.log`). That works because the
+  interface's address is 32 bits (the IDL's `uint32 phyAddr`): every runtime
+  allocation had come back above 4 GB (XNU ignored `max_pnum` and
+  `KMA_LOMEM`, and its DMA allocator had no low range even at boot). The two
+  shortcuts had taken the DSP down instead: the shared-memory partition as
+  the heap (the sensor process's fastrpc memcpy, PC 0xb20c2dac) and a high
+  kernel range (the DSP's logging path, PC 0xb01c1f2c).
+
+**The boot layout for these probes**: `xl ramdisk system.apfs` must upload the
+resident system image — it is md0 and holds `/sbin/launchd`, while the small
+scene is md1 on `/redwood`, where the driver reads `fw/sensors` from. Without
+it the kernel panics at 16 s ("exec of /sbin/launchd failed") before the
+steps run (`logs/111936-run.log`). And the kernel's command line is 607
+characters: the daily set plus the sensor arguments overflows it, the loader
+says by how much, and the tail is cut — which silently dropped
+`sns_gyro_direct`, `slpi_listen` and `slpi_delay` and made several runs look
+broken (`logs/112318-run.log`).
 
 ## The next pieces, in order
 
-1. **Give the sensor process its heap from a loader-reserved range**: the
-   interface's `phyAddr` is 32 bits, so the range must lie below 4 GB, and
-   nothing in XNU's pool does: `kmem_alloc_contig` ignored both `max_pnum`
-   and `KMA_LOMEM` (0x1a1400000 every time), and the DSP's DMA allocator
-   (IOBufferMemoryDescriptor, physical mask 0xffffffff) found no 4 MB below
-   4 GB even at boot (`logs/104527-run.log`). The loader must make a range
-   available there — the way the phone reserves `sdsp_region` (8 MB,
-   4 MB-aligned; ION heap 22 there) — grant the SLPI access to it (the
-   PAS/SCM XPU assignment), and then `remotectl_grow_heap` can hand it over
-   after the attach (`fastrpc_grow_kb`, `fastrpc_grow_after`,
-   `fastrpc_grow_ddr`). With the heap in place message 1 should answer with
-   a client id instead of result 5.
+1. **The restarted sensor process does not use the tunnel**: with
+   `fastrpc_restart=1` the whole sequence succeeds — attach, grow_heap
+   (retval 0 at 0xc0000000), listener open/register/init2, release, a fresh
+   `INIT_ATTACH_SNS (again)`, and a waiting next2 (`logs/112921-run.log`) —
+   yet the fresh process issues no reverse call and message 1 still answers
+   5. The next question is the FastRPC client id of the restarted PD (the
+   listener waits on client 1) and what the client manager still lacks; the
+   heap is no longer the proven blocker.
 2. **Then the registry upload**: the client manager needs the group `sns_cm`;
    the phone's HAL uploads the groups over the SNS client service with the
    `SNS_REGISTRY_WRITE_REQ` protobuf (message ids and field layout in

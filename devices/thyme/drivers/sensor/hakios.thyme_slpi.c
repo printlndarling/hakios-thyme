@@ -5259,11 +5259,31 @@ fastrpc_grow_heap(uint64_t heap_physical, uint32_t heap_size, uint64_t physical,
 static void
 fastrpc_heap_reserve(void)
 {
-	uint64_t physical = 0;
+	uint64_t physical = 0, loader_pa = 0, loader_size = 0;
 	void *heap;
 	uint32_t size;
 
-	if (!fastrpc_grow_ddr || fastrpc_grow_kb == 0 || fastrpc_heap_memory != 0) {
+	if (fastrpc_heap_memory != 0) {
+		return;
+	}
+	/*
+	 * The loader's own range wins: its memory map has free blocks below
+	 * 4 GB that XNU's window (with the resident root image at its start)
+	 * does not cover, and it passes one as slpi_heap_pa/slpi_heap_size.
+	 */
+	if (PE_parse_boot_argn("slpi_heap_pa", &loader_pa, sizeof(loader_pa)) && loader_pa != 0 &&
+	    loader_pa < 0x100000000ULL &&
+	    PE_parse_boot_argn("slpi_heap_size", &loader_size, sizeof(loader_size)) && loader_size >= 0x100000) {
+		if (loader_size > 0x01000000ULL) {
+			loader_size = 0x01000000ULL;
+		}
+		fastrpc_heap_memory = (vm_offset_t)loader_pa;
+		fastrpc_heap_bytes = (vm_offset_t)loader_size;
+		fastrpc_heap_physical = loader_pa;
+		printf("slpi: fastrpc: the loader left a %u KB heap at %#llx for the DSP\n", (uint32_t)(loader_size >> 10), loader_pa);
+		return;
+	}
+	if (!fastrpc_grow_ddr || fastrpc_grow_kb == 0) {
 		return;
 	}
 	size = (fastrpc_grow_kb > 16384 ? 16384 : fastrpc_grow_kb) << 10;
@@ -5287,7 +5307,7 @@ fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	uint64_t heap_physical;
 	uint8_t *heap = NULL;
 
-	if (fastrpc_grow_kb == 0) {
+	if (fastrpc_grow_kb == 0 && fastrpc_heap_memory == 0) {
 		return;
 	}
 	/*
@@ -5300,7 +5320,7 @@ fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	 * process's fastrpc (PC 0xb20c2dac). docs/sensors-status.md has the
 	 * history and what remains: the phone's own heap is the sdsp_region.
 	 */
-	if (fastrpc_grow_ddr && fastrpc_heap_memory != 0) {
+	if (fastrpc_heap_memory != 0) {
 		printf("slpi: fastrpc: offering the DSP its boot heap of %u KB at %#llx\n", (uint32_t)fastrpc_heap_bytes >> 10,
 		    fastrpc_heap_physical);
 		fastrpc_grow_heap(fastrpc_heap_physical, (uint32_t)fastrpc_heap_bytes, physical, shared_offset, shared, packet);
