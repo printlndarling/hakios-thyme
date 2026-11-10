@@ -490,3 +490,21 @@ The first thing the next sensor run will show is whether the fresh PD
 `/vendor/etc/sensors/sns_reg_config`, the config directory and the persist
 output directory, and any of those calls in the log is the signal that the
 registry sensor finally started.
+
+### The registry SUID is the firmware's own UID (2026-11-11)
+
+The 16-byte SUID this driver addresses
+(`75221e70b441255e59277f00a75427e1`) is not just what the phone's lookup
+returned: it is in the image as the registry sensor's own UID. The registry
+sensor's API table (file 0x4cb938 / 0x6f1db8) carries, right after the
+`SNS_REG_INIT` routine, a function at 0xb22d2b74 that returns a pointer to
+exactly these bytes; they are stored at file 0x690553 (vaddr 0xb23c3553),
+directly behind the `sns_registry.proto` name, low word first -- unlike the
+accel/gyro SUID table at 0x481948, which stores its entries high word first.
+The same 16 bytes appear again at 0x619718 in `sns_suid_sensor.c`'s area, so
+the SUID sensor's own database knows the registry by this UID too.
+
+The addressing of the registry reads and writes was therefore already right,
+and whatever keeps the client manager from getting `sns_cm` is not a wrong
+SUID: it is the registry sensor's own instantiation, which nothing in these
+boots reaches (the parser's file reads never happen — see the section above).
