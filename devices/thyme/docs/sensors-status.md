@@ -157,9 +157,23 @@ being the first client of that boot) and not a transport artefact.
   queues 479/480 are 16 KB each), the global one 23 (the largest are 470,
   79 at 40 KB and 426 at 80 KB), and neither 79 nor 426 holds a single run of
   eight printable characters, so whatever the DSP writes about its own
-  startup is not a text ring there. Getting it would need the diag/QSH
-  channel (the DSP offers none of its GLINK channels by that name) or its
-  DDR; the SMEM path is closed.
+  startup is not a text ring there. A second dump at a 4 KB threshold reads
+  the smaller ones too (`logs/180503-run.log`): the 16 KB item 479 holds our
+  own upload as it left the AP — the QRTR queue with the groups' names
+  ("tcs3701_platform.prox", "near_threshold", ...), item 469 starts with the
+  firmware's version string `00:BOOT.XF.3.2-00304-SM8...`, and 79, 426 and
+  470 are zeroes or carry no printable run. Getting the DSP's own log would
+  need the diag/QSH channel (the DSP offers none of its GLINK channels by
+  that name) or its DDR; the SMEM path is closed.
+- **Our messages do not disturb the sensor process** (10 November, later):
+  with `sns_quiet=1` the listener and the file service stay up and not one
+  SNS message goes out (`logs/175050-run.log`, 0 QMI sends), and the DSP still
+  stops after the `hw_platform` read exactly as when the messages are sent.
+  So the stall is in its own initialization, not in an ill-timed request; and
+  the `hw_platform` content is not the cause either — the phone's own
+  `/sys/devices/soc0` values (THYME, Unknown, 0, 589824, SM8250, Snapdragon,
+  356) are what the driver serves, and the config directory has the same 49
+  files on both sides.
 - **The wire is settled** (10 November): on Android the phone's DSP takes the
   same read and write bytes this driver builds, for the group
   `ak0991x_0`, for an int-only group and for a name it has never

@@ -503,17 +503,31 @@ smem_strings(uint32_t partition, uint32_t cacheline, bool global)
 		return;
 	}
 	count = smem_items(partition, cacheline, found, at_most);
-	for (unsigned i = 0; i < count && i < at_most && shown < 4; i++) {
+	for (unsigned i = 0; i < count && i < at_most && shown < 8; i++) {
 		uint32_t limit;
 		char run[97];
 		int len = 0;
 
-		if (found[i].size < 0x8000) {
+		if (found[i].size < 0x1000) {
 			continue;
 		}
 		shown++;
-		limit = found[i].size > (128u << 10) ? (128u << 10) : found[i].size;
+		limit = found[i].size > (64u << 10) ? (64u << 10) : found[i].size;
 		printf("slpi: %u:   item %u (%u bytes), the text in its first %u bytes:\n", step, found[i].item, found[i].size, limit);
+		{
+			int at = 0;
+			char head[3 * 24 + 1];
+
+			for (unsigned k = 0; k < 24 && k < found[i].size; k++) {
+				uint8_t c;
+
+				if (!smem_peek(found[i].offset + k, &c, 1)) {
+					break;
+				}
+				at += snprintf(head + at, sizeof(head) - (size_t)at, "%02x ", c);
+			}
+			printf("slpi: %u:     head: %s\n", step, head);
+		}
 		for (uint32_t k = 0; k < limit; k++) {
 			uint8_t c;
 
@@ -2865,6 +2879,7 @@ static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a 
 static uint32_t sns_registry_write;      /* boot-arg sns_registry_write: write the sns_cm group to the registry */
 static uint32_t sns_write_tries = 1;     /* boot-arg sns_write_tries: how many times, 2 s apart (the registry comes up late) */
 static uint32_t slpi_smem_dump;          /* boot-arg slpi_smem_dump: list the shared-memory items and their text after the SNS part */
+static uint32_t sns_quiet;               /* boot-arg sns_quiet: the listener and the file service, but no SNS message at all */
 static uint32_t sns_registry_upload;     /* boot-arg sns_registry_upload: send every registry group file to the registry */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
@@ -3733,6 +3748,17 @@ sns_start(void)
 		printf("slpi: sns: looking up service %u from our port %#x\n", SNS_SERVICE, SNS_OUR_PORT);
 		qrtr_out_packet(QRTR_NEW_LOOKUP, SNS_OUR_PORT, node, QRTR_CONTROL, &lookup, sizeof(lookup));
 		sleep_ms(50);
+	}
+	/*
+	 * sns_quiet=1: the listener and the file service stay, but no SNS message
+	 * goes out. If the sensor process is disturbed by a message arriving
+	 * while it initializes, this boot is where it finds out: the DSP's own
+	 * file calls (a config or registry directory read, not only hw_platform)
+	 * would then appear in the log with no message of ours before them.
+	 */
+	if (sns_quiet) {
+		printf("slpi: sns: quiet: the listener stays, no SNS message is sent\n");
+		return;
 	}
 	/*
 	 * TLV 0x10 is 1 in every request the phone's HAL sends (strace of
@@ -7341,6 +7367,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));
 	PE_parse_boot_argn("sns_write_tries", &sns_write_tries, sizeof(sns_write_tries));
 	PE_parse_boot_argn("slpi_smem_dump", &slpi_smem_dump, sizeof(slpi_smem_dump));
+	PE_parse_boot_argn("sns_quiet", &sns_quiet, sizeof(sns_quiet));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
