@@ -60,33 +60,48 @@ being the first client of that boot) and not a transport artefact.
   service (`slpi-fastrpc.md`), and no sensors HAL runs in these scenes. The
   client manager's `sns_cm` group must therefore come from such an upload.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
-  per-processor info and needs the registry group `sns_cm`) never comes up:
-  the direct config is answered with result 5 in TLV 0x11, and the stream
-  cannot start. Its strings name the missing group and the heap it would
-  allocate.
+  per-processor info and needs the registry group `sns_cm`) never comes up,
+  and every sensor message is answered with **result 5 in TLV 0x11**: the
+  direct configs (513), the registry reads to seven candidate SUIDs (the
+  three ASCII spellings and the four in the firmware's own SUID table at file
+  offset 0x481948), and the phone's first per-sensor message. The phone sends
+  **message 1** with the 4-byte payload `12 02 10 00` to each sensor's SUID
+  before configuring it (root strace of the HAL; 32 of them), and its answer
+  carries the client id (0x1d, 0x1e, ...) in TLV 0x10; here message 1 answers
+  5, so the client manager's allocation is what fails (`logs/094020-run.log`).
+- **The sensor heap is the missing resource**: the phone hands the DSP its
+  heap from the reserved `sdsp_region` — an 8 MB, 4 MB-aligned,
+  `shared-dma-pool` reserved-memory node, dynamically placed and assigned to
+  ION heap 22 (`soc:qcom,ion:qcom,ion-heap@22: assigned reserved memory node
+  sdsp_region` in the phone's dmesg). Two shortcuts crash the DSP instead:
+  the shared-memory partition as the heap takes the sensor process's fastrpc
+  down in a memcpy (PC 0xb20c2dac, `logs/092656-run.log`, `logs/093452-run.log`),
+  and a kernel-contiguous physical range (4 MB of `kmem_alloc_contig`) takes
+  the DSP's kernel down in its logging path (PC 0xb01c1f2c,
+  `logs/095514-run.log`). The `sdsp_region` also needs the DSP's access to be
+  granted (SCM/XPU), which is the next piece.
 
 ## The next pieces, in order
 
-1. **See the DSP's side**: the registry OSA's error code is the only thing that
-   says which check fails (fopen or fread), and it exists only in the DSP's
-   log. The SLPI announces no diag service of its own
-   (`logs/221040-run.log`, `logs/221918-run.log`: services 15, 24, 43, 51, 66,
-   400), so this is either an ADSP-diag client or the disassembly work in
-   `slpi-re-plan.md`.
-2. **Finish the registry serving**: with the read terminating, the DSP goes on
-   to `/vendor/etc/sensors/sns_reg_config` (the string is in its own image:
-   `registry config file '%s' is not present`) and the rest of the soc0
-   values; the driver maps and serves all of them from the scene and the
-   built-in soc0 table.
-3. **The attach's payload is a process id, not a client id**: the phone's
-   `drivers/char/adsprpc.c` `fastrpc_init_process()` sends, for
-   `FASTRPC_INIT_ATTACH_SENSORS`, one 4-byte buffer holding the calling
-   process's **tgid** on handle `FASTRPC_STATIC_HANDLE_PROCESS_GROUP`, sc
-   `REMOTE_SCALARS_MAKE(0, 1, 0)` (0x10000); the driver's payload
-   (`fastrpc_client`) is a boot argument. The phone allocates its remote heap
-   from the reserved `sdsp_region` DMA pool; SCM-assigning a generic kernel
-   heap stalled the scene once and must not be repeated with ordinary heap
-   memory.
+1. **Give the sensor process its heap from the sdsp region**: find where the
+   phone's `sdsp_region` lands at run time (its `alloc-ranges` is dynamic;
+   the phone assigns it to ION heap 22), reserve that range for the DSP in
+   the loader/DT and grant the SLPI access (the PAS/SCM XPU assignment), then
+   offer it with `remotectl_grow_heap` after the attach (`fastrpc_grow_kb`,
+   `fastrpc_grow_after`). With the heap in place message 1 should answer with
+   a client id instead of result 5.
+2. **Then the registry upload**: the client manager needs the group `sns_cm`;
+   the phone's HAL uploads the groups over the SNS client service with the
+   `SNS_REGISTRY_WRITE_REQ` protobuf (message ids and field layout in
+   `slpi-fastrpc.md`). The registry sensor's SUID is still unknown — the
+   lookups answer with name-only events, and the firmware's four built-in
+   SUIDs all answer result 5 to a read request.
+3. **See the DSP's side**: the DSP log is still closed. The SLPI announces no
+   diag service of its own (`logs/221040-run.log`, `logs/221918-run.log`:
+   services 15, 24, 43, 51, 66, 400), the SMEM items the DSP makes (608, 611,
+   613) hold no text (`logs/084550-run.log`), and `sns_diag_fw_log` needs the
+   client manager the other pieces are for. What is left is the disassembly
+   route in `slpi-re-plan.md`.
 
 3. **Get the DSP's own log**: `sns_diag_fw_log` exists in the SNS diag sensor
    (`diag_sensor`); the HAL's `get_qmi_debug_flag` (in `/vendor/lib64/libssc.so`)

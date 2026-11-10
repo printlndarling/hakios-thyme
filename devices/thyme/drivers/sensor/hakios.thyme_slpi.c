@@ -2781,10 +2781,24 @@ static const uint8_t sns_registry_suid_us[16] = {
 static const uint8_t sns_registry_suid_sns[16] = {
 	's', 'n', 's', '_', 'r', 'e', 'g', 'i', 's', 't', 'r', 'y', '_', '_', '_', '_',
 };
+/*
+ * The sensor DSP's own SUID table (firmware file offset 0x481948, 40-byte
+ * records: SUID, a length, five function pointers). The accelerometer's and
+ * gyroscope's entries are the first two -- their values match what the phone's
+ * SUID events report -- and two more are built in; one of them may be the
+ * registry service the groups are uploaded to.
+ */
+static const uint8_t sns_builtin_suids[4][16] = {
+	{ 0x44, 0xba, 0xd7, 0xf8, 0x19, 0x8d, 0x41, 0x9a, 0xa6, 0x7e, 0x72, 0x01, 0xfc, 0x6a, 0xbb, 0x1f },
+	{ 0xc1, 0x11, 0x15, 0x49, 0x10, 0x8a, 0x41, 0xb9, 0xa0, 0x72, 0xf9, 0x69, 0x89, 0xc4, 0xd3, 0x97 },
+	{ 0xcd, 0x4b, 0x1a, 0x6d, 0x68, 0xda, 0x4a, 0x77, 0x85, 0xab, 0x46, 0xe2, 0xcd, 0xa5, 0x68, 0x0b },
+	{ 0x79, 0x32, 0xb8, 0x9c, 0xdc, 0x02, 0x40, 0xaf, 0xa3, 0x8f, 0x80, 0xc0, 0xc0, 0x15, 0x36, 0x97 },
+};
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
+static uint32_t sns_client_probe;        /* boot-arg sns_client_probe: the phone's client request (message 1) before the config */
 
 static bool
 sns_server(uint32_t *node, uint32_t *port)
@@ -3052,6 +3066,19 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 		printf("slpi: sns: \"%s\" has SUID %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", name,
 		    suid[15], suid[14], suid[13], suid[12], suid[11], suid[10], suid[9], suid[8], suid[7], suid[6], suid[5],
 		    suid[4], suid[3], suid[2], suid[1], suid[0]);
+		/*
+		 * An event with the name only is the DSP's answer when its registry
+		 * has no such sensor: the SUID would be all zeros, and a config sent
+		 * to it is answered result 5. Nothing is learned from it.
+		 */
+		bool have = false;
+
+		for (unsigned i = 0; i < sizeof(suid); i++) {
+			have |= suid[i] != 0;
+		}
+		if (!have) {
+			return;
+		}
 		if (strcmp(name, "accel") == 0) {
 			memcpy(sns_suid, suid, sizeof(sns_suid));
 			sns_have_suid = true;
@@ -3206,12 +3233,13 @@ sns_registry_read(const char *group, const uint8_t suid[16])
 {
 	uint8_t inner[64];
 	uint8_t *p = inner;
-	char shown[17];
+	char shown[33];
 
-	memcpy(shown, suid, 16);
-	shown[16] = 0;
+	for (unsigned i = 0; i < 16; i++) {
+		snprintf(shown + 2 * i, 3, "%02x", suid[i]);
+	}
 	p = sns_bytes(p, 1, group, (uint32_t)strlen(group));
-	printf("slpi: sns: asking the registry (SUID \"%s\") for group \"%s\"\n", shown, group);
+	printf("slpi: sns: asking the registry (SUID %s) for group \"%s\"\n", shown, group);
 	/* 0x200 is the registry suite's read_req, and the SUID selects which service gets it */
 	sns_qmi_send(0x200, suid, inner, (uint32_t)(p - inner));
 }
@@ -3241,12 +3269,29 @@ sns_start(void)
 		sns_registry_read("sns_cm", sns_registry_suid);
 		sns_registry_read("sns_cm", sns_registry_suid_us);
 		sns_registry_read("sns_cm", sns_registry_suid_sns);
+		for (unsigned i = 0; i < sizeof(sns_builtin_suids) / sizeof(sns_builtin_suids[0]); i++) {
+			sns_registry_read("sns_cm", sns_builtin_suids[i]);
+		}
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
 		sns_have_suid = true;
 		printf("slpi: sns: the %s is configured by the SUID the phone's DSP reports\n",
 		    sns_gyro_direct ? "gyroscope" : "accelerometer");
+		if (sns_client_probe) {
+			/*
+			 * The phone's HAL first sends message 1, a 4-byte payload
+			 * `12 02 10 00`, to each sensor's SUID before configuring it
+			 * (root strace of android.hardware.sensors@1.0-service). It is
+			 * the client request the client manager is created for; without
+			 * it every config is answered result 5.
+			 */
+			static const uint8_t client_inner[4] = { 0x12, 0x02, 0x10, 0x00 };
+
+			sns_qmi_send(1, sns_suid, client_inner, sizeof(client_inner));
+			printf("slpi: sns: the phone's client request (message 1) sent\n");
+			sleep_ms(200);
+		}
 		sns_config();
 	} else {
 		/* the sensor process may still be initialising at three seconds: ask again for a while */
@@ -4133,6 +4178,7 @@ static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the 
 static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: seconds before phone=3 re-attaches the sensors PD */
 static uint32_t fastrpc_grow_kb;         /* boot-arg fastrpc_grow_kb: offer the DSP that much remote heap before the attach */
 static uint32_t fastrpc_grow_after;      /* boot-arg fastrpc_grow_after: offer it after the attach instead */
+static uint32_t fastrpc_grow_ddr;        /* boot-arg fastrpc_grow_ddr: the heap from kernel memory, not the shared-memory partition */
 static uint32_t fastrpc_create_probe;    /* boot-arg fastrpc_create_probe: ask the DSP to create candidate static PD names */
 
 static void
@@ -5207,6 +5253,33 @@ fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	uint8_t *heap = NULL;
 
 	if (fastrpc_grow_kb == 0) {
+		return;
+	}
+	/*
+	 * fastrpc_grow_ddr: the heap from ordinary kernel memory (one contiguous
+	 * physical range) instead of the shared-memory partition. The partition's
+	 * address is one the DSP already maps for GLINK/SMP2P, and the sensor
+	 * process's fastrpc memcpy into it crashed at 0xb20c2dac; a kernel range
+	 * crashed the DSP's own kernel in its logging path (0xb01c1f2c,
+	 * logs/095514-run.log). The phone's heap is the reserved sdsp_region,
+	 * whose access the DSP has been granted; that region -- not an arbitrary
+	 * range -- is what this needs (docs/sensors-status.md).
+	 */
+	if (fastrpc_grow_ddr) {
+		vm_offset_t memory = 0;
+
+		heap_size = (fastrpc_grow_kb > 16384 ? 16384 : fastrpc_grow_kb) << 10;
+		while (heap_size >= 0x10000 &&
+		    kmem_alloc_contig(kernel_map, &memory, heap_size, PAGE_MASK, 0, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
+		    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+			heap_size >>= 1;
+		}
+		if (memory == 0) {
+			printf("slpi: fastrpc: no contiguous memory for a %u KB remote heap\n", fastrpc_grow_kb);
+			return;
+		}
+		printf("slpi: fastrpc: offering the DSP a %u KB kernel heap at %#llx\n", heap_size >> 10, kvtophys(memory));
+		fastrpc_grow_heap(kvtophys(memory), heap_size, physical, shared_offset, shared, packet);
 		return;
 	}
 	while (kb >= 16 && (heap = fastrpc_smem_item_size(ITEM_FASTRPC_GROW, kb << 10, &grow_offset)) == NULL) {
@@ -6682,6 +6755,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
+	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
@@ -6717,6 +6791,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_attach_delay", &fastrpc_attach_delay, sizeof(fastrpc_attach_delay));
 	PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
 	PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
+	PE_parse_boot_argn("fastrpc_grow_ddr", &fastrpc_grow_ddr, sizeof(fastrpc_grow_ddr));
 	PE_parse_boot_argn("fastrpc_create_probe", &fastrpc_create_probe, sizeof(fastrpc_create_probe));
 	PE_parse_boot_argn("fastrpc_early", &fastrpc_early, sizeof(fastrpc_early));
 	PE_parse_boot_argn("slpi_listen", &listen_seconds, sizeof(listen_seconds));
