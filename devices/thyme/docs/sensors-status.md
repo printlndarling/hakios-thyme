@@ -39,23 +39,31 @@ being the first client of that boot) and not a transport artefact.
 
 - **No sensor data**: no `SNS_STD_SENSOR_EVENT` (1025) follows the accepted
   config, and the sensor process's registry build is not finished, so no
-  stream is created. Everything below it now works (the tunnel, the module
-  open, the file reads and closes), and the remaining step is the DSP's own
-  reason for re-reading the platform file without accepting the end of it.
-- **The registry read does not terminate**: the DSP's `sns_registry_osa`
-  opens `/sys/devices/soc0/hw_platform` once (fd 100, accepted), reads it
-  repeatedly with `fread(100, 512)`, and never treats the served `bEOF` as
-  the end; its own strings for the failing step are `fopen failed file=%s
-  error=%i, retrying` and `sns_registry_osa.c:fread failed error=%i`
-  (file offsets 0x6887df and 0x6888fc in the concatenated SLPI image). What
-  it checks is inside the DSP firmware; `slpi-re-plan.md` records how far the
-  disassembly route has got (LLVM Hexagon tools work; the GP-relative xrefs
-  need a QDSP6-specific tool or emulation, because only 62 r25-relative
-  references exist in the whole image and no consistent base fits them).
+  stream is created. Everything below it works (the tunnel, the module
+  open, the reads and closes), and the client manager's instance is what is
+  still missing.
+- **The registry read now terminates** (10 November): the fread reply's data
+  buffer was sized from the wrong entry of the call's out-buffer lengths —
+  the primary out slot (the 8-byte numbers) instead of the sequence buffer
+  (the 512 bytes the DSP asked for). The DSP's IDL stub asserts its data
+  buffer is at least as long as it asked, so every reply was invalid and the
+  registry re-opened and re-read the file forever. With the lengths indexed
+  by the buffer's position on the wire, the whole sequence is served: open
+  the apps_std module (handle 0), `fopen_with_env`
+  `/sys/devices/soc0/hw_platform` (fd 100), `fread` twice (6 bytes, then
+  the end), `fclose` — and no retry (`logs/082231-run.log`,
+  `logs/083020-run.log`).
+- **The registry asks only for the platform file**: even with the listener
+  brought up before the sensor PD starts (`fastrpc_early=1`), the DSP reads
+  `hw_platform` once and goes no further. The per-sensor registry groups do
+  not come through the file API; the AP uploads them over the SNS client
+  service (`slpi-fastrpc.md`), and no sensors HAL runs in these scenes. The
+  client manager's `sns_cm` group must therefore come from such an upload.
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
-  per-processor info and needs the registry group `sns_cm`) therefore never
-  comes up: the stream cannot start. Its strings name the missing group and
-  the heap it would allocate.
+  per-processor info and needs the registry group `sns_cm`) never comes up:
+  the direct config is answered with result 5 in TLV 0x11, and the stream
+  cannot start. Its strings name the missing group and the heap it would
+  allocate.
 
 ## The next pieces, in order
 

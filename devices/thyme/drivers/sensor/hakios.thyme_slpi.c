@@ -4624,9 +4624,16 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			uint32_t which = (fastrpc_apps_std[def].out_numbers ? i - 1 : i);
 
 			size = sizes[fastrpc_apps_std[def].in_numbers + fastrpc_apps_std[def].in_buffers + which];
-			/* the call's own out buffer length wins: the DSP checks the reply against it */
-			if (call_out_lens != NULL && call_out_lens[which] != 0) {
-				size = call_out_lens[which];
+			/*
+			 * The call's own out-buffer lengths run in wire order, the primary
+			 * out (the numbers when the method has them) first: index them by
+			 * the buffer's position, not by how many buffers precede it. The
+			 * DSP's stub asserts its data buffer's nLen is at least the length
+			 * it asked for, so an fread answered with the numbers' 8-byte
+			 * length is an invalid reply and the registry retries forever.
+			 */
+			if (call_out_lens != NULL && call_out_lens[i] != 0) {
+				size = call_out_lens[i];
 			}
 		}
 		if (size > FASTRPC_OUT_LIMIT) {
