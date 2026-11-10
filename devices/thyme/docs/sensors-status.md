@@ -59,6 +59,8 @@ being the first client of that boot) and not a transport artefact.
   not come through the file API; the AP uploads them over the SNS client
   service (`slpi-fastrpc.md`), and no sensors HAL runs in these scenes. The
   client manager's `sns_cm` group must therefore come from such an upload.
+  *(Corrected 11 November: that read is the fusion sensor's own init, not
+  the registry's — see the last section.)*
 - **The client manager's instance** (`sns_client_manager.c`, which creates the
   per-processor info and needs the registry group `sns_cm`) never comes up,
   and every sensor message is answered with **result 5 in TLV 0x11**: the
@@ -419,3 +421,43 @@ plain delay before the chain; it does not repair the 0x80000434 answers seen
 when the listener calls ran before the PD existed -- those decode to
 `AEE_EINVALIDPROCESS` (`AEE_EOFFSET + 0x34`), i.e. no user PD yet, so the
 attach must come first (`logs/121802-run.log`).
+
+### The platform read is the fusion sensor's; the registry parser never runs (2026-11-11)
+
+Reading the reassembled firmware (`tools/slpi-split.py`; the plain `cat` of
+the split parts misaligns every segment after the first) separates two things
+the earlier notes had run together:
+
+- The `/sys/devices/soc0/hw_platform` read the listener serves comes from
+  `sns_fusion_sensor.c`: the routine that builds the path (vaddr 0xb22f7880)
+  sits among `sns_fusion_sensor_init acc: %f, mag: %f, gyro: %f`, `name=%s`
+  and the `orientation` / `Calibrated Mag` / `mag_cal` / `xiaomi/akm`
+  strings. It is the fusion sensor's own init, not the registry's.
+- The registry's file backend (`sns_registry_parser.c`, `sns_registry_osa.c`)
+  is complete in the image: `registry config file '%s' is not present`,
+  `no update of sns_reg_config version`, `update of sns_reg_config version
+  %s:=(expected)/NOT_EQUAL/(current)=:%s`, `skip loading properties file
+  '%s'`, `skip loading output directory '%s'`, `skip loading config directory
+  '%s'`, `mkdir error`, `stat error`, `Path is not a directory`. It begins at
+  the config path `/vendor/etc/sensors/sns_reg_config` (vaddr 0xb23c4aa8;
+  the code at 0xb22d369c reads it, then the `file=`, `output=` and
+  `property=` entries).
+- The parser is not called at boot in our runs: the registry is a *sensor*
+  (`sns_registry_sensor.c`; the `SNS_REG_INIT` name at vaddr 0xb23c33d8 is
+  used by the routine at 0xb22d2b04, whose pointer sits in the sensor API
+  tables at file offsets 0x4cb9c8 and 0x6f2008), and nothing in our boots
+  instantiates it. The registry stays empty, the client manager's registry
+  read never completes, and every SNS client message is answered result 5 --
+  the same conclusion the logs reached from the other side.
+
+The AP-side half of the registry is known now too: the phone's
+`libsns_registry_skel.so` implements one method, `get_property(name, value,
+len)`, over Android's `property_get` -- the scalar blob is `{name length
+including NUL, value length}`, the name is the second in buffer and the value
+the first out buffer (method 0, sc 0x00010200). The parser's `property=`
+lines resolve through it. The driver answers every `remotectl_open` with the
+apps_std handle, so if the DSP ever opens that module the call needs a handle
+of its own and this layout; it never has in any log so far.
+
+Next on the firmware side: find what instantiates the registry sensor (the
+sensor framework's boot list), since that is what gates the parse.
