@@ -69,7 +69,11 @@ being the first client of that boot) and not a transport artefact.
   before configuring it (root strace of the HAL; 32 of them), and its answer
   carries the client id (0x1d, 0x1e, ...) in TLV 0x10; here message 1 answers
   5, so the client manager's allocation is what fails (`logs/094020-run.log`).
-  With the heap in place it still answers 5 (`logs/112921-run.log`).
+  With the heap in place it still answers 5: the clean A/B (no PD restart,
+  resident image, the loader's heap accepted with retval 0, the platform
+  file served again) sends message 1 and the config, and both answer 5
+  (`logs/114433-run.log`). The heap is not what the client manager lacks; the
+  registry groups are.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
