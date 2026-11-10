@@ -246,6 +246,11 @@ and the modem's SSCTL service coming up. The next thing to read is that path (`m
 the esoc clink request engine, and what `subsys-restart` does with `esoc0`), not to drive
 the lines the DT does not have.
 
+> Corrected on 2026-11-10 (property map below): this paragraph's offsets were
+> misread. Struct+4 is AP2MDM_STATUS (set high), +0x28 is MDM2AP_PBLRDY (polled,
+> and absent on this phone, so the poll is skipped), and the DT's four lines are
+> exactly the set `sdx55m_setup_hw` requires.
+
 ### The vendor esoc stack's shape, and the tool that reads it (2026-11-10)
 
 `tools/kdisas.py` turns a symbol of the phone's kernel into annotated disassembly: with the
@@ -311,6 +316,52 @@ WEST (`0x100000`-`0x1b2fff`) and SOUTH (`0x500000`-`0x584fff`) — unmapped addr
 which is exactly the hazard the note warned about. The tile map is now in the driver
 (`hakios.thyme_pcie2.c`, `TLMM_PAGE`) and its TLMM mapping covers the south tile;
 `pcie2_survey=1` reads only the four SOUTH pages above.
+
+### The south-tile survey on the phone, and the esoc driver's real property map (2026-11-10)
+
+The corrected read-only survey ran on the phone (`logs/234257-run.log`, kernel
+`9249aff1`, image `8f5bc2aa`, args `pcie2_test=1 pcie2_survey=1`) and the four
+south pages answered without touching the link:
+
+```text
+pcie2: gpio1 at 0xf501000: config 0x1 (mux 0, pull 1, drive 0, oe 0), io 0 (in 0, out 0)
+pcie2: gpio3 at 0xf503000: config 0x1 (mux 0, pull 1, drive 0, oe 0), io 0 (in 0, out 0)
+pcie2: gpio56 at 0xf538000: config 0x1 (mux 0, pull 1, drive 0, oe 0), io 0 (in 0, out 0)
+pcie2: gpio57 at 0xf539000: config 0x1 (mux 0, pull 1, drive 0, oe 0), io 0 (in 0, out 0)
+```
+
+All four pads are at the reset default (GPIO function, pull-down, 2 mA, input),
+not at the DT's `mdm_active` state: the loader does not apply that pinctrl, so a
+RAM boot sees the lines undriven and MDM2AP_STATUS low. The tile map is confirmed.
+`logs/234257-run.log` SHA-256 `1031bd722da5718760d130a33c41020a0d4c9b62135f327d76292514ede1768e`.
+
+The same disassembly also corrects the earlier property/offset table. Reading the
+strings each `gpio_request` names gives `mdm_configure_ipc`'s real map:
+
+| property | struct offset | direction |
+|---|---|---|
+| qcom,ap2mdm-wakeup-gpio | +0x00 | optional (skipped when absent) |
+| qcom,ap2mdm-status-gpio | +0x04 | **output low** |
+| qcom,ap2mdm-chnlrdy-gpio | +0x10 | optional, output low |
+| qcom,ap2mdm-errfatal-gpio | +0x14 | **output low** |
+| qcom,mdm2ap-errfatal-gpio | +0x24 | **input**, its IRQ ("mdm errfatal", wake) |
+| qcom,mdm2ap-pblrdy-gpio | +0x28 | optional, polled |
+| qcom,mdm2ap-status-gpio | +0x2c | **input** |
+
+`sdx55m_setup_hw` requires exactly the four the phone's DT has (1, 3, 56, 57); the
+earlier note that the DT was missing a required `pblrdy` came from a misread table.
+`mdm4x_do_first_power_on` then reads: PMIC soft reset, 150 ms, AP2MDM_STATUS high,
+poll MDM2AP_PBLRDY up to 20 times at 5-6 ms (the whole poll is skipped when the
+property is absent, as here), 200 ms, then the POWER_ON request.
+
+The soft reset is not a GPIO: `sdx55m_toggle_soft_reset` calls
+`qpnp_pon_modem_pwr_off`, which writes the PMIC's PON block through regmap
+(offset+99 = 0, a delay, offset+98 = value; and the 0x80 / 0xa5 arm-and-fire
+pair at offset+99 / +100). That is an SPMI register path XNU does not have yet.
+The next XNU experiment is therefore lines-only: apply the DT's `mdm_active` pad
+configuration to 56/57 (mux 0, bias-disable, 16 mA) and 1/3 (mux 0, bias-disable,
+8 mA), drive AP2MDM_STATUS high, read MDM2AP_STATUS, and only then consider the
+PCIe2 link -- with the PMIC reset as the separate question it is.
 
 ### The pin-descriptor table search: what fits and what was a false positive (2026-11-10)
 
