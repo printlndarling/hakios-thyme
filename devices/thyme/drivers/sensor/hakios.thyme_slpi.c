@@ -2808,6 +2808,7 @@ static const uint8_t sns_registry_suid_real[16] = {
 };
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
 static uint32_t sns_registry_write;      /* boot-arg sns_registry_write: write the sns_cm group to the registry */
+static uint32_t sns_registry_upload;     /* boot-arg sns_registry_upload: send every registry group file to the registry */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
@@ -3294,6 +3295,233 @@ sns_registry_write_cm(const uint8_t suid[16])
 	sns_qmi_send(0x201, suid, payload, (uint32_t)(s - payload));
 }
 
+/* ---- the registry's group files, parsed and sent as write requests ---------------- */
+
+struct sns_reg_group {
+	uint8_t         data[4096];     /* the sns_registry_data: repeated item (field 3) */
+	uint32_t        length;
+	char            name[96];
+};
+
+/* The quoted string at `at` (which must point at its opening quote). */
+static const char *
+sns_json_string(const char *at, char *out, size_t max)
+{
+	size_t n = 0;
+
+	if (*at != '"') {
+		return NULL;
+	}
+	at++;
+	while (*at != 0 && *at != '"') {
+		if (n + 1 < max) {
+			out[n++] = *at;
+		}
+		at++;
+	}
+	if (*at != '"') {
+		return NULL;
+	}
+	out[n] = 0;
+	return at + 1;
+}
+
+static uint64_t
+sns_uint(const char *s)
+{
+	uint64_t v = 0;
+	bool neg = false;
+
+	if (*s == '-') {
+		neg = true;
+		s++;
+	}
+	while (*s >= '0' && *s <= '9') {
+		v = v * 10 + (uint64_t)(*s - '0');
+		s++;
+	}
+	return neg ? (uint64_t)(-(int64_t)v) : v;
+}
+
+static float
+sns_float_parse(const char *s)
+{
+	float v = 0, scale = 1;
+	bool neg = false, frac = false;
+
+	if (*s == '-') {
+		neg = true;
+		s++;
+	}
+	while ((*s >= '0' && *s <= '9') || *s == '.') {
+		if (*s == '.') {
+			frac = true;
+			s++;
+			continue;
+		}
+		if (!frac) {
+			v = v * 10 + (float)(*s - '0');
+		} else {
+			scale /= 10;
+			v += (float)(*s - '0') * scale;
+		}
+		s++;
+	}
+	return neg ? -v : v;
+}
+
+static const char *sns_strstr(const char *hay, const char *needle);
+
+/* "<name>":{"type":"<type>","ver":"<ver>","data":"<data>"} appended to the group. */
+static const char *
+sns_registry_item_parse(struct sns_reg_group *group, const char *at)
+{
+	char name[96], type[16], ver[16], data[256];
+	uint8_t item[512];
+	uint8_t *q = item, *end;
+	const char *p;
+
+	if ((p = sns_json_string(at, name, sizeof(name))) == NULL || name[0] == 0 || strncmp(p, ":{", 2) != 0) {
+		return NULL;
+	}
+	p += 2;
+	if ((p = sns_strstr(p, "\"type\":\"")) == NULL || (p = sns_json_string(p + 8, type, sizeof(type))) == NULL) {
+		return NULL;
+	}
+	if ((p = sns_strstr(p, "\"ver\":\"")) == NULL || (p = sns_json_string(p + 7, ver, sizeof(ver))) == NULL) {
+		return NULL;
+	}
+	if ((p = sns_strstr(p, "\"data\":\"")) == NULL || (p = sns_json_string(p + 8, data, sizeof(data))) == NULL) {
+		return NULL;
+	}
+	q = sns_bytes(q, 1, name, (uint32_t)strlen(name));
+	q = sns_fixed32(q, 2, (uint32_t)sns_uint(ver));
+	if (strcmp(type, "grp") == 0) {
+		q = sns_bytes(q, 10, "", 0);
+	} else if (strcmp(type, "str") == 0) {
+		q = sns_bytes(q, 11, data, (uint32_t)strlen(data));
+	} else if (strcmp(type, "flt") == 0) {
+		q = sns_float(q, 12, sns_float_parse(data));
+	} else {
+		q = sns_fixed64(q, 13, sns_uint(data));
+	}
+	if ((uint32_t)(q - item) + group->length + 8 > sizeof(group->data)) {
+		return NULL;
+	}
+	end = sns_bytes(group->data + group->length, 3, item, (uint32_t)(q - item));
+	if (end == NULL) {
+		return NULL;
+	}
+	group->length = (uint32_t)(end - group->data);
+	return p;
+}
+
+/* (the file and directory readers live further down; libkern has no strstr) */
+static uint8_t *fastrpc_root_read(const char *path, uint64_t limit, uint32_t *size);
+static uint32_t fastrpc_root_dir(const char *path, char names[][96], uint32_t max);
+
+static const char *
+sns_strstr(const char *hay, const char *needle)
+{
+	size_t n = strlen(needle);
+
+	for (; *hay != 0; hay++) {
+		if (strncmp(hay, needle, n) == 0) {
+			return hay;
+		}
+	}
+	return NULL;
+}
+
+/* One group file: its name, its items, one write request to the registry sensor. */
+static int
+sns_registry_file(const char *path, const uint8_t suid[16])
+{
+	struct sns_reg_group *group = NULL;
+	uint64_t size = 0;
+	const uint8_t *file = fastrpc_root_read(path, 65536, &size);
+	const char *at;
+	char owner[96];
+	uint8_t *payload, *s;
+	int result = -1;
+
+	if (file == NULL || size == 0 || size > 65535) {
+		goto out;
+	}
+	group = kalloc_data(sizeof(*group), Z_WAITOK | Z_ZERO);
+	payload = kalloc_data(8192, Z_WAITOK | Z_ZERO);
+	if (group == NULL || payload == NULL) {
+		if (group != NULL) {
+			kfree_data(group, sizeof(*group));
+		}
+		if (payload != NULL) {
+			kfree_data(payload, 8192);
+		}
+		result = -2;
+		goto out;
+	}
+	at = (const char *)file;
+	at = strchr(at, '"');
+	if (at == NULL || (at = sns_json_string(at, group->name, sizeof(group->name))) == NULL || group->name[0] == 0) {
+		goto done;
+	}
+	if ((at = sns_strstr(at, "\"owner\":\"")) == NULL || (at = sns_json_string(at + 8, owner, sizeof(owner))) == NULL) {
+		goto done;
+	}
+	while (*at != 0) {
+		at = strchr(at, '"');
+		if (at == NULL) {
+			break;
+		}
+		if ((at = sns_registry_item_parse(group, at)) == NULL) {
+			break;
+		}
+	}
+	if (group->length == 0) {
+		goto done;
+	}
+	s = payload;
+	s = sns_bytes(s, 1, group->name, (uint32_t)strlen(group->name));
+	s = sns_bytes(s, 2, group->data, group->length);
+	sns_qmi_send(0x201, suid, payload, (uint32_t)(s - payload));
+	result = 0;
+done:
+	kfree_data(group, sizeof(*group));
+	kfree_data(payload, 8192);
+out:
+	if (file != NULL) {
+		uint8_t *data = __DECONST(uint8_t *, file);
+
+		kfree_data(data, (size_t)size + 1);
+	}
+	return result;
+}
+
+/* Every group file the scene has (the phone's HAL uploads its 189 the same way). */
+static void
+sns_registry_upload_all(const uint8_t suid[16])
+{
+	static char names[256][96];
+	const char *dir = "/redwood/fw/sensors/persist/registry/registry";
+	char path[192];
+	uint32_t count, wrote = 0;
+
+	count = fastrpc_root_dir(dir, names, 256);
+	if (count == 0) {
+		dir = "/fw/sensors/persist/registry/registry";
+		count = fastrpc_root_dir(dir, names, 256);
+	}
+	printf("slpi: sns: %u registry group files under %s\n", count, dir);
+	for (uint32_t i = 0; i < count; i++) {
+		snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+		if (sns_registry_file(path, suid) == 0) {
+			wrote++;
+		}
+		sleep_ms(2);
+	}
+	printf("slpi: sns: %u of %u registry groups written\n", wrote, count);
+}
+
 static void
 sns_start(void)
 {
@@ -3327,6 +3555,10 @@ sns_start(void)
 	if (sns_registry_write) {
 		sns_registry_write_cm(sns_registry_suid_real);
 		/* give the registry time to store the group before a client asks for it */
+		sleep_ms(2000);
+	}
+	if (sns_registry_upload) {
+		sns_registry_upload_all(sns_registry_suid_real);
 		sleep_ms(2000);
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
@@ -6882,6 +7114,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));
+	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
