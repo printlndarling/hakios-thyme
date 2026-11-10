@@ -196,3 +196,17 @@ pinctrl mdm_active/mdm_suspend, `qcom,sfr-query`) is what Android's esoc driver 
 before the pcie-msm probe, and that sequence is the next thing to port (its code is in the
 vendor kernel image, like the clock tables were). Until then `pcie2_test=1` should not be
 used on this phone.
+
+### TLMM probing is not the way to the modem's lines (2026-11-10)
+
+The read-only GPIO survey (`pcie2_test=1 pcie2_survey=1`) returns config 0 and input 0
+for gpio1/3/56/57 at TLMM 0x0f000000 (`logs/220923-run.log`) — inconclusive, since the
+register layout inside Kona's 16 MB pinctrl aperture and the tile each pin lives in are
+unverified (the Wi-Fi's known-good base 0x0f900000 is the north tile). Reading the offsets
+between tiles (0x0f200000 and up) stopped the phone's bus cold in two runs
+(`logs/221637-run.log`, `logs/222527-run.log`: no log at all, and the loader restarted the
+phone), so the survey now reads only the first tile and the map is not guessed at. The
+ext-sdx55m driver's own sequence — which lines it drives, with what pin configuration, and
+the status handshake before the PCIe link — is in the vendor kernel image like the clock
+tables were, and is the next thing to read out; blind GPIO writes would be as unwise as the
+blind reads were.

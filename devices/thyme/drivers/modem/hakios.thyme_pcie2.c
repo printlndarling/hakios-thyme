@@ -185,6 +185,7 @@ static struct {
 	{ 0x01c16000, 0x2000, 0 },   /* QMP PHY */
 	{ 0x64000000, 0x1000, 0 },   /* DBI + ELBI */
 	{ 0x64100000, 0x100000, 0 }, /* endpoint configuration (ECAM, bus 1) */
+	{ 0x0f000000, 0x400000, 0 }, /* TLMM tiles (south, west, east, north): the modem's lines */
 };
 
 static vm_offset_t
@@ -193,7 +194,7 @@ pcie2_register(uint32_t address)
 	for (unsigned i = 0; i < sizeof(pcie2_regions) / sizeof(pcie2_regions[0]); i++) {
 		uint32_t base = pcie2_regions[i].address;
 
-		if (address >= base && address - base <= pcie2_regions[i].size - 4) {
+		if (pcie2_regions[i].mapping != 0 && address >= base && address - base <= pcie2_regions[i].size - 4) {
 			return pcie2_regions[i].mapping + (address - base);
 		}
 	}
@@ -409,9 +410,34 @@ endpoint(void)
 	    id >> 16, classreg, bar0);
 }
 
+/* The ext-sdx55m's lines: ap2mdm-status GPIO 56, mdm2ap-status GPIO 3, the errfatal pair 57/1
+ * (the phone's DT qcom,ext-sdx55m). A read-only survey first: their configuration word and
+ * the pad's input bit say whether the modem is powered and has signalled. */
+static void
+pcie2_lines(void)
+{
+	static const unsigned pins[] = { 1, 3, 56, 57 };
+
+	/*
+	 * Only the TLMM's first tile is read: probing the offsets between tiles
+	 * (0x0f200000 and up) stopped the phone's bus cold in two runs, so the
+	 * map of which pin lives where is not guessed at. The low-numbered pins
+	 * the ext-sdx55m node names are expected in this tile.
+	 */
+	for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+		uint32_t cfg = rd(0x0f000000 + pins[i] * 0x1000);
+		uint32_t in = rd(0x0f000000 + pins[i] * 0x1000 + 4);
+
+		hakios_tl("pcie2: gpio%u: config %#x (func %u, oe %u), input %#x\n", pins[i], cfg, cfg & 7,
+		    (cfg >> 9) & 1, in & 1);
+	}
+}
+
 static void
 pcie2_run(void)
 {
+	uint32_t survey = 0;
+
 	hakios_tl("pcie2: the modem's link, on the Wi-Fi's PCIe0 sequence and the phone's own registers\n");
 	for (unsigned i = 0; i < sizeof(pcie2_regions) / sizeof(pcie2_regions[0]); i++) {
 		pcie2_regions[i].mapping = ml_io_map(pcie2_regions[i].address, pcie2_regions[i].size);
@@ -419,6 +445,11 @@ pcie2_run(void)
 			hakios_tl("pcie2: cannot map %#x\n", pcie2_regions[i].address);
 			return;
 		}
+	}
+	pcie2_lines();
+	if (PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey)) && survey == 1) {
+		hakios_tl("pcie2: survey only; the link is not touched\n");
+		return;
 	}
 	if (umi_rpmh_wifi_power() != 0) {
 		hakios_tl("pcie2: the PCIe rails did not come up\n");
