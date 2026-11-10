@@ -2807,6 +2807,7 @@ static const uint8_t sns_registry_suid_real[16] = {
 	0x59, 0x27, 0x7f, 0x00, 0xa7, 0x54, 0x27, 0xe1,
 };
 static uint32_t sns_registry_probe;      /* boot-arg sns_registry_probe: read a registry group by that SUID */
+static uint32_t sns_registry_write;      /* boot-arg sns_registry_write: write the sns_cm group to the registry */
 static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
@@ -3255,6 +3256,38 @@ sns_registry_read(const char *group, const uint8_t suid[16])
 	/* 0x200 is the registry suite's read_req, and the SUID selects which service gets it */
 	sns_qmi_send(0x200, suid, inner, (uint32_t)(p - inner));
 }
+/*
+ * REGISTRY_WRITE_REQ (0x201) for one group: `{1: name, 2: {3: [{1: item,
+ * 2: version, 13: sfixed64 value}...]}}` -- the protobuf layout read off
+ * libsnsapi (slpi-fastrpc.md) and the sns_cm persist file's own items.
+ */
+static void
+sns_registry_write_cm(const uint8_t suid[16])
+{
+	uint8_t data[256], payload[320], item[128];
+	uint8_t *p = data, *s = payload, *q;
+	static const struct { const char *name; uint64_t value; } ints[] = {
+		{ "heap_size", 1572864 },               /* the client manager's heap, 1.5 MB */
+		{ "max_batch_disabled", 0 },
+		{ "min_batch_period_thrshld_ms", 10 },
+	};
+	char shown[33];
+
+	for (unsigned i = 0; i < sizeof(ints) / sizeof(ints[0]); i++) {
+		q = item;
+		q = sns_bytes(q, 1, ints[i].name, (uint32_t)strlen(ints[i].name));
+		q = sns_fixed32(q, 2, 0);
+		q = sns_fixed64(q, 13, ints[i].value);
+		p = sns_bytes(p, 3, item, (uint32_t)(q - item));
+	}
+	s = sns_bytes(s, 1, "sns_cm", 6);
+	s = sns_bytes(s, 2, data, (uint32_t)(p - data));
+	for (unsigned i = 0; i < 16; i++) {
+		snprintf(shown + 2 * i, 3, "%02x", suid[i]);
+	}
+	printf("slpi: sns: writing the registry group \"sns_cm\" to SUID %s\n", shown);
+	sns_qmi_send(0x201, suid, payload, (uint32_t)(s - payload));
+}
 
 static void
 sns_start(void)
@@ -3285,6 +3318,9 @@ sns_start(void)
 		for (unsigned i = 0; i < sizeof(sns_builtin_suids) / sizeof(sns_builtin_suids[0]); i++) {
 			sns_registry_read("sns_cm", sns_builtin_suids[i]);
 		}
+	}
+	if (sns_registry_write) {
+		sns_registry_write_cm(sns_registry_suid_real);
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
@@ -6838,6 +6874,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
+	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));

@@ -74,6 +74,20 @@ being the first client of that boot) and not a transport artefact.
   file served again) sends message 1 and the config, and both answer 5
   (`logs/114433-run.log`). The heap is not what the client manager lacks; the
   registry groups are.
+- **The registry's real SUID and the `sns_cm` group are known** (10
+  November): a freestanding QRTR probe on Android (`tools/qrtrprobe.c`: a raw
+  `AF_QIPCRTR` socket, the phone's own SNS client request, the DSP's replies
+  printed byte for byte) sent the "registry" lookup to service 400 (node 9,
+  port 11). The event carries the name with low `0x5e2541b4701e2275` / high
+  `0xe12754a7007f2759`; the same probe's "accel" event carries the known
+  accelerometer SUID byte for byte, so the parse is right. That is the
+  address a registry group is read from or written to, and none of the seven
+  candidates tried earlier was it. The `sns_cm` file in the scene holds the
+  client manager's `heap_size` (1572864), `max_batch_disabled` (0) and
+  `min_batch_period_thrshld_ms` (10); the driver can now send a
+  `REGISTRY_WRITE_REQ` (0x201) with exactly those items to that SUID
+  (`sns_registry_write=1`). The write's answer and whether it makes the
+  client manager come up is the next test.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
