@@ -3416,9 +3416,8 @@ sns_registry_item_parse(struct sns_reg_group *group, const char *at)
 	return p;
 }
 
-/* (the file and directory readers live further down; libkern has no strstr) */
-static uint8_t *fastrpc_root_read(const char *path, uint64_t limit, uint32_t *size);
-static uint32_t fastrpc_root_dir(const char *path, char names[][96], uint32_t max);
+/* (the image reader is the same one the camera and Wi-Fi use; libkern has no strstr) */
+extern const uint8_t *hakios_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
 
 static const char *
 sns_strstr(const char *hay, const char *needle)
@@ -3433,20 +3432,18 @@ sns_strstr(const char *hay, const char *needle)
 	return NULL;
 }
 
-/* One group file: its name, its items, one write request to the registry sensor. */
+/* One group file's bytes: its name, its items, one write request to the registry sensor. */
 static int
-sns_registry_file(const char *path, const uint8_t suid[16])
+sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[16])
 {
-	struct sns_reg_group *group = NULL;
-	uint64_t size = 0;
-	const uint8_t *file = fastrpc_root_read(path, 65536, &size);
+	struct sns_reg_group *group;
+	uint8_t *payload, *s;
 	const char *at;
 	char owner[96];
-	uint8_t *payload, *s;
 	int result = -1;
 
 	if (file == NULL || size == 0 || size > 65535) {
-		goto out;
+		return -1;
 	}
 	group = kalloc_data(sizeof(*group), Z_WAITOK | Z_ZERO);
 	payload = kalloc_data(8192, Z_WAITOK | Z_ZERO);
@@ -3457,8 +3454,7 @@ sns_registry_file(const char *path, const uint8_t suid[16])
 		if (payload != NULL) {
 			kfree_data(payload, 8192);
 		}
-		result = -2;
-		goto out;
+		return -2;
 	}
 	at = (const char *)file;
 	at = strchr(at, '"');
@@ -3488,33 +3484,90 @@ sns_registry_file(const char *path, const uint8_t suid[16])
 done:
 	kfree_data(group, sizeof(*group));
 	kfree_data(payload, 8192);
-out:
-	if (file != NULL) {
-		uint8_t *data = __DECONST(uint8_t *, file);
-
-		kfree_data(data, (size_t)size + 1);
-	}
 	return result;
 }
 
-/* Every group file the scene has (the phone's HAL uploads its 189 the same way). */
+/* One group file of the scene, by its path under fw/ (the small image). */
+static int
+sns_registry_image(const char *name, const uint8_t suid[16])
+{
+	uint64_t size = 0;
+	const uint8_t *file = hakios_image_file("fw", name, &size, NULL);
+
+	if (file == NULL || size == 0 || size > 65535) {
+		return -1;
+	}
+	return sns_registry_parse_send(file, (uint32_t)size, suid);
+}
+
+/*
+ * The scene's persist registry files (fw-sensors/persist/registry/registry,
+ * generated into this table): the phone's HAL uploads its 189 groups the same
+ * way. They are read from the image itself, because when the steps run the
+ * scene's mount is not there yet (a VFS lookup of /redwood/... and /fw/...
+ * found no file).
+ */
+static const char *const sns_registry_files[] = {
+	"ak0991x_0", "ak0991x_0.mag", "ak0991x_0.mag.config", "ak0991x_0.mag.config_2",
+	"ak0991x_0_platform", "ak0991x_0_platform.config", "ak0991x_0_platform.mag", "ak0991x_0_platform.mag.fac_cal",
+	"ak0991x_0_platform.mag.fac_cal.bias", "ak0991x_0_platform.mag.fac_cal.corr_mat", "ak0991x_0_platform.orient", "ak0991x_0_platform.pdc_parameter",
+	"ak0991x_0_platform.placement", "bmp285_0", "bmp285_0.pressure", "bmp285_0.pressure.config",
+	"bmp285_0.temp", "bmp285_0.temp.config", "bmp285_0_platform", "bmp285_0_platform.config",
+	"bmp285_0_platform.placement", "bmp285_0_platform.pressure", "bmp285_0_platform.pressure.fac_cal", "bmp285_0_platform.pressure.fac_cal.bias",
+	"bmp285_0_platform.pressure.fac_cal.scale", "bmp285_0_platform.temp", "bmp285_0_platform.temp.fac_cal", "bmp285_0_platform.temp.fac_cal.bias",
+	"bmp285_0_platform.temp.fac_cal.scale", "ccd_amd", "ccd_ttw", "ccd_walk",
+	"dae", "dbtap", "dbtap.AccVal", "dbtap.Accxy",
+	"dbtap.GroVal", "dbtap.times", "lsm6dso_0", "lsm6dso_0.accel",
+	"lsm6dso_0.accel.config", "lsm6dso_0.gyro", "lsm6dso_0.gyro.config", "lsm6dso_0.md",
+	"lsm6dso_0.md.config", "lsm6dso_0.temp", "lsm6dso_0.temp.config", "lsm6dso_0_platform",
+	"lsm6dso_0_platform.accel", "lsm6dso_0_platform.accel.fac_cal", "lsm6dso_0_platform.accel.fac_cal.bias", "lsm6dso_0_platform.accel.fac_cal.corr_mat",
+	"lsm6dso_0_platform.config", "lsm6dso_0_platform.gyro", "lsm6dso_0_platform.gyro.fac_cal", "lsm6dso_0_platform.gyro.fac_cal.bias",
+	"lsm6dso_0_platform.gyro.fac_cal.corr_mat", "lsm6dso_0_platform.md", "lsm6dso_0_platform.md.config", "lsm6dso_0_platform.orient",
+	"lsm6dso_0_platform.placement", "lsm6dso_0_platform.temp", "lsm6dso_0_platform.temp.fac_cal", "lsm6dso_0_platform.temp.fac_cal.bias",
+	"lsm6dso_0_platform.temp.fac_cal.scale", "power", "power.island", "power.mcps",
+	"sar_algo", "sar_algo.params", "sar_algo.params_reg2", "sensors_registry",
+	"sns_amd", "sns_aod", "sns_aod.params", "sns_aont",
+	"sns_cm", "sns_device_orient_platform", "sns_device_orient_platform.config", "sns_diag_config",
+	"sns_diag_sensor_datatype", "sns_dpc", "sns_fmv_platform", "sns_fmv_platform.config",
+	"sns_geomag_rv", "sns_geomag_rv.config", "sns_gyro_cal_config", "sns_mag_cal_config",
+	"sns_nonui", "sns_nonui.params", "sns_oem13", "sns_oem13.Light",
+	"sns_oem13.rotate_angle", "sns_pedometer", "sns_reg_config", "sns_rmd",
+	"sns_rotv_platform", "sns_rotv_platform.config", "sns_screen_down", "sns_screen_down.params",
+	"sns_screen_down.params1", "sns_smd", "sns_tilt", "sns_tilt_to_wake",
+	"sx933x_0", "sx933x_0.sar", "sx933x_0.sar.config", "sx933x_0_platform",
+	"sx933x_0_platform.config", "sx933x_0_platform.offset", "sx933x_0_platform.placement", "sx933x_0_platform.register",
+	"sx933x_0_platform.thresh", "tcs3408", "tcs3408.als", "tcs3408.als.config",
+	"tcs3408.prox", "tcs3408.prox.config", "tcs3408.rgb", "tcs3408.rgb.config",
+	"tcs3408_platform", "tcs3408_platform.als", "tcs3408_platform.als.fac_cal", "tcs3408_platform.channel",
+	"tcs3408_platform.channel.fac_cal", "tcs3408_platform.coefficient", "tcs3408_platform.config", "tcs3408_platform.prox",
+	"tcs3408_platform.prox.fac_cal", "tcs3408_platform.rgb", "tcs3408_platform.rgb.fac_cal", "tcs3701",
+	"tcs3701.als", "tcs3701.als.config", "tcs3701.prox", "tcs3701.prox.config",
+	"tcs3701_platform", "tcs3701_platform.60hz_max_cmp_factor", "tcs3701_platform.60hz_panel2_step_cmp_factor", "tcs3701_platform.60hz_step_cmp_factor",
+	"tcs3701_platform.90hz_max_cmp_factor", "tcs3701_platform.90hz_panel2_step_cmp_factor", "tcs3701_platform.90hz_step_cmp_factor", "tcs3701_platform.als",
+	"tcs3701_platform.als.fac_cal", "tcs3701_platform.coefficient", "tcs3701_platform.coefficient_panel2", "tcs3701_platform.config",
+	"tcs3701_platform.oled_cal_factor", "tcs3701_platform.oled_cal_factor_90hz", "tcs3701_platform.oled_fca_cal_factor_60hz", "tcs3701_platform.oled_fca_cal_factor_90hz",
+	"tcs3701_platform.oled_pwm_cal_factor_60hz", "tcs3701_platform.oled_pwm_cal_factor_90hz", "tcs3701_platform.prox", "tcs3701_platform.prox.fac_cal",
+	"tcs3701_platform.prox_cal_offset", "tcs3701_platform.under_oled_para", "tsl2540_rear", "tsl2540_rear.als",
+	"tsl2540_rear.als.config", "tsl2540_rear_platform", "tsl2540_rear_platform.als", "tsl2540_rear_platform.als.fac_cal",
+	"tsl2540_rear_platform.coefficient", "tsl2540_rear_platform.config", "vl53l1_tof", "vl53l1_tof.config",
+	"vl53l1_tof_platform", "vl53l1_tof_platform.cam", "vl53l1_tof_platform.cam.config", "vl53l1_tof_platform.config",
+	"vl53l1_tof_platform.prox", "vl53l1_tof_platform.prox.add_off_cal_data", "vl53l1_tof_platform.prox.cal_peak_rate_map", "vl53l1_tof_platform.prox.cal_peak_rate_map_mcps",
+	"vl53l1_tof_platform.prox.cust_dmax_cal", "vl53l1_tof_platform.prox.customer", "vl53l1_tof_platform.prox.fac_cal", "vl53l1_tof_platform.prox.fmt_dmax_cal",
+	"vl53l1_tof_platform.prox.gain_cal", "vl53l1_tof_platform.prox.optical_centre", "vl53l1_tof_platform.prox.xtalkhisto", "vl53l1_tof_platform.prox.xtalkhisto.xtalk_hist_removed",
+	"vl53l1_tof_platform.prox.xtalkhisto.xtalk_hist_removed_bin_data", "vl53l1_tof_platform.prox.xtalkhisto.xtalk_hist_removed_bin_rep", "vl53l1_tof_platform.prox.xtalkhisto.xtalk_hist_removed_bin_seq", "vl53l1_tof_platform.prox.xtalkhisto.xtalk_shape",
+	"vl53l1_tof_platform.prox.xtalkhisto.xtalk_shape_bin_data",
+};
+
 static void
 sns_registry_upload_all(const uint8_t suid[16])
 {
-	static char names[256][96];
-	const char *dir = "/redwood/fw/sensors/persist/registry/registry";
-	char path[192];
-	uint32_t count, wrote = 0;
+	char path[160];
+	uint32_t count = (uint32_t)(sizeof(sns_registry_files) / sizeof(sns_registry_files[0])), wrote = 0;
 
-	count = fastrpc_root_dir(dir, names, 256);
-	if (count == 0) {
-		dir = "/fw/sensors/persist/registry/registry";
-		count = fastrpc_root_dir(dir, names, 256);
-	}
-	printf("slpi: sns: %u registry group files under %s\n", count, dir);
+	printf("slpi: sns: %u registry group files in the image\n", count);
 	for (uint32_t i = 0; i < count; i++) {
-		snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
-		if (sns_registry_file(path, suid) == 0) {
+		snprintf(path, sizeof(path), "sensors/persist/registry/registry/%s", sns_registry_files[i]);
+		if (sns_registry_image(path, suid) == 0) {
 			wrote++;
 		}
 		sleep_ms(2);
