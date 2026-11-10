@@ -277,6 +277,41 @@ so the live states of gpio 1/3/56/57 cannot be read off Android either. The safe
 is the table through the soc_data pointers above (or the pinctrl-msm group tables); blind
 TLMM probing stays out, after the two bus hangs it caused.
 
+### The TLMM tiles, and why the first survey read holes (2026-11-10)
+
+The vendor `pinctrl-kona.c`'s `PINGROUP` table answers the question the Image scans
+could not: Kona's TLMM is one 16 MB aperture (`reg = <0xf000000 0x1000000>`) whose
+pins are grouped in three tiles, and a pin's page is **tile base + pin * 0x1000**:
+
+| tile | base | pins |
+|---|---|---|
+| WEST | `+0x100000` | 133-179 |
+| SOUTH | `+0x500000` | 0-132 |
+| NORTH | `+0x900000` | 4-124 |
+
+Each page is the mainline `msm_pinctrl` shape: CTL at `+0`, IO at `+4` (input bit 0,
+output bit 1), interrupt config at `+8`, status at `+0xc`; CTL has mux bits 3:2, pull
+bits 1:0, drive bits 8:6 and output-enable bit 9. The Wi-Fi driver's known-good pins
+79-81 are NORTH (`0x0f900000 + pin * 0x1000`), which is how the table was checked.
+
+All four `qcom,ext-sdx55m` lines are **SOUTH** pins, so their pages are:
+
+| line | pin | page |
+|---|---|---|
+| mdm2ap-errfatal | 1 | `0x0f501000` |
+| mdm2ap-status | 3 | `0x0f503000` |
+| ap2mdm-status | 56 | `0x0f538000` |
+| ap2mdm-errfatal | 57 | `0x0f539000` |
+
+The first read-only survey (`pcie2_test=1 pcie2_survey=1`) read
+`0x0f000000 + pin * 0x1000`, i.e. `0x0f001000`-`0x0f003000`: those addresses are in
+the hole **below** the WEST tile, so its `config 0, input 0` described nothing. The
+two later reads that stopped the bus (`0x0f200000` and up) were in the hole between
+WEST (`0x100000`-`0x1b2fff`) and SOUTH (`0x500000`-`0x584fff`) — unmapped addresses,
+which is exactly the hazard the note warned about. The tile map is now in the driver
+(`hakios.thyme_pcie2.c`, `TLMM_PAGE`) and its TLMM mapping covers the south tile;
+`pcie2_survey=1` reads only the four SOUTH pages above.
+
 ### The pin-descriptor table search: what fits and what was a false positive (2026-11-10)
 
 `msm_gpio_set` confirms the descriptor layout: `desc = table(gpio * 0x50)`, the register

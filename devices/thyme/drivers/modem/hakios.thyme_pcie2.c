@@ -185,7 +185,7 @@ static struct {
 	{ 0x01c16000, 0x2000, 0 },   /* QMP PHY */
 	{ 0x64000000, 0x1000, 0 },   /* DBI + ELBI */
 	{ 0x64100000, 0x100000, 0 }, /* endpoint configuration (ECAM, bus 1) */
-	{ 0x0f000000, 0x400000, 0 }, /* TLMM tiles (south, west, east, north): the modem's lines */
+	{ 0x0f000000, 0xa00000, 0 }, /* TLMM: west +0x100000, south +0x500000, north +0x900000 */
 };
 
 static vm_offset_t
@@ -410,6 +410,8 @@ endpoint(void)
 	    id >> 16, classreg, bar0);
 }
 
+#define TLMM_PAGE(pin) (0x0f500000u + (pin) * 0x1000) /* Kona SOUTH tile: +0x500000 */
+
 /* The ext-sdx55m's lines: ap2mdm-status GPIO 56, mdm2ap-status GPIO 3, the errfatal pair 57/1
  * (the phone's DT qcom,ext-sdx55m). A read-only survey first: their configuration word and
  * the pad's input bit say whether the modem is powered and has signalled. */
@@ -419,17 +421,25 @@ pcie2_lines(void)
 	static const unsigned pins[] = { 1, 3, 56, 57 };
 
 	/*
-	 * Only the TLMM's first tile is read: probing the offsets between tiles
-	 * (0x0f200000 and up) stopped the phone's bus cold in two runs, so the
-	 * map of which pin lives where is not guessed at. The low-numbered pins
-	 * the ext-sdx55m node names are expected in this tile.
+	 * Kona's TLMM is one 16 MB aperture whose pins are grouped in tiles:
+	 * WEST at +0x100000, SOUTH at +0x500000, NORTH at +0x900000, and a
+	 * pin's page is tile + pin * 0x1000 (CTL at +0, IO at +4; the vendor
+	 * pinctrl-kona.c's PINGROUP). All four ext-sdx55m lines are SOUTH
+	 * pins, and the Wi-Fi's known-good pins 79-81 are NORTH -- checked
+	 * against the driver's own PINGROUP table, which is also why the
+	 * first survey's reads at base + pin * 0x1000 were wrong: they fell
+	 * in the hole below the west tile, not on the modem's pads. The gaps
+	 * between tiles are unmapped and a read there stops the bus, so only
+	 * pages the pin tables place in a tile are touched.
 	 */
 	for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-		uint32_t cfg = rd(0x0f000000 + pins[i] * 0x1000);
-		uint32_t in = rd(0x0f000000 + pins[i] * 0x1000 + 4);
+		uint32_t page = TLMM_PAGE(pins[i]);
+		uint32_t cfg = rd(page);
+		uint32_t io = rd(page + 4);
 
-		hakios_tl("pcie2: gpio%u: config %#x (func %u, oe %u), input %#x\n", pins[i], cfg, cfg & 7,
-		    (cfg >> 9) & 1, in & 1);
+		hakios_tl("pcie2: gpio%u at %#x: config %#x (mux %u, pull %u, drive %u, oe %u), io %#x (in %u, out %u)\n",
+		    pins[i], page, cfg, (cfg >> 2) & 3, cfg & 3, (cfg >> 6) & 7, (cfg >> 9) & 1, io, io & 1,
+		    (io >> 1) & 1);
 	}
 }
 
