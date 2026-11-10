@@ -5802,12 +5802,13 @@ fastrpc_first_calls(uint32_t stage)
 		if (fastrpc_attach0) {
 			fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, client, "INIT_ATTACH (guest OS)");
 		}
-		if (fastrpc_attach_mid) {
-			/*
-			 * The order the phone uses with two processes: the AP is the default listener
-			 * first, then the sensors PD starts, and only then does this side wait in next2.
-			 * Requests the sensor process makes in between are for the registered listener.
-			 */
+		/*
+		 * The registration the DSP needs to know this AP serves the default
+		 * listener is always made in the bare order; the sensors attach is
+		 * separate, so "register and wait" can be tried without starting (or
+		 * restarting) a sensor process of our own.
+		 */
+		{
 			uint32_t dl = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
 
 			if (dl != 0) {
@@ -5818,13 +5819,18 @@ fastrpc_first_calls(uint32_t stage)
 				}
 				fastrpc_call(fastrpc_client, dl, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register");
 			}
-			{
-				uint32_t ac = fastrpc_attach_client;
-				uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
+		}
+		if (fastrpc_attach_mid) {
+			/*
+			 * The order the phone uses with two processes: the AP is the default listener
+			 * first, then the sensors PD starts, and only then does this side wait in next2.
+			 * Requests the sensor process makes in between are for the registered listener.
+			 */
+			uint32_t ac = fastrpc_attach_client;
+			uint32_t abuf = fastrpc_attach_client ? fastrpc_attach_client : client;
 
-				fastrpc_pd_call(ac, 0x10000, 0x102, physical, shared_offset, shared, packet, abuf,
-				    "INIT_ATTACH_SNS (mid)");
-			}
+			fastrpc_pd_call(ac, 0x10000, 0x102, physical, shared_offset, shared, packet, abuf,
+			    "INIT_ATTACH_SNS (mid)");
 			/* the sensors PD exists now: the loader's heap, if it left one, can be handed over */
 			if (fastrpc_heap_memory != 0) {
 				fastrpc_offer_heap(physical, shared_offset, shared, packet);
