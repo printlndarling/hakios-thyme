@@ -134,12 +134,13 @@ being the first client of that boot) and not a transport artefact.
   is accepted and still silent, so a write cannot yet be confirmed by reading
   the group back.
 - **What still gates every request is the client service's own readiness**,
-  not the message contents: the same 0x202 write is answered result 0 in some
-  boots (`logs/124920-run.log`) and result 5 in most, with the same bytes,
-  the same 35–40 s after the sensor process starts and the same two
-  `apps_std` calls served (`logs/154557-run.log` against
-  `logs/124920-run.log`). Whether a ready boot now stores `sns_cm` and lets
-  message 1 through is what the next run with 0x202 has to show; the
+  not the message contents: the write is answered result 0 in one boot
+  (`logs/124920-run.log`, then still under 0x201) and result 5 in most, with
+  the same bytes, the same 35–40 s after the sensor process starts and the
+  same two `apps_std` calls served (`logs/154557-run.log` against
+  `logs/124920-run.log`). It is not a matter of waiting longer: a fresh boot
+  answered 5 to 45 repeats over 90 s (`logs/165607-run.log`, no upload), so
+  the sensor process never reaches the state the earlier boot had. The
   registry's persist directory, read through the reverse file API, and the
   client manager it feeds remain the two candidates for the difference.
 - **The registry sensor's answer varies boot to boot** (10 November, the
