@@ -4798,10 +4798,14 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 #define FASTRPC_DIR_NAME_LEN    96
 #define FASTRPC_FILE_LIMIT      (512 * 1024)
 #define FASTRPC_OUT_LIMIT       1024
+#define FASTRPC_STORE_FILES     64
+#define FASTRPC_STORE_PATH      192
+#define FASTRPC_STORE_LIMIT     (4 * 1024 * 1024)
 
-#define AEE_EBADPARM            0x80000434u
-#define AEE_EFAILED             0x80004005u
-#define AEE_ENOMEMORY           0x80000002u
+/* AEEStdErr.h: the DSP's codes are AEE_EOFFSET (0x80000400) plus the number. */
+#define AEE_EBADPARM            0x8000040Eu
+#define AEE_EFAILED             0x80000401u
+#define AEE_ENOMEMORY           0x80000402u
 
 struct fastrpc_io {
 	uint32_t size;
@@ -4810,9 +4814,11 @@ struct fastrpc_io {
 
 struct fastrpc_file_slot {
 	bool used;
+	bool write;                     /* a slot opened "w"/"a": its data lives in the store */
 	uint32_t fd;
 	uint8_t *data;
 	uint32_t size, offset;
+	char path[FASTRPC_STORE_PATH];
 };
 
 struct fastrpc_dir_slot {
@@ -4826,6 +4832,128 @@ static struct fastrpc_file_slot fastrpc_files[FASTRPC_FILE_SLOTS];
 static struct fastrpc_dir_slot fastrpc_dirs[FASTRPC_DIR_SLOTS];
 /* Qualcomm's apps_std_imp.c starts its file handles at APPS_FD_BASE = 100 */
 static uint32_t fastrpc_next_fd = 100;
+
+/*
+ * The DSP's writable files.  The sensor registry keeps its parsed groups under
+ * /mnt/vendor/persist/sensors/registry/registry -- the phone's directory holds
+ * 189 of them, written by the DSP itself through this API -- and the registry
+ * parser opens its output directory and files with fopen "w"/mkdir/stat.  The
+ * scene image is read-only, so writes land in this RAM store and every read
+ * consults it first; it lives until the boot ends, which is all a RAM boot can
+ * offer and what the DSP treats the persist directory as.
+ */
+struct fastrpc_store_file {
+	bool used;
+	char path[FASTRPC_STORE_PATH];
+	uint8_t *data;
+	uint32_t size, capacity;
+};
+
+static struct fastrpc_store_file fastrpc_store[FASTRPC_STORE_FILES];
+static uint32_t fastrpc_store_bytes;
+
+static struct fastrpc_store_file *
+fastrpc_store_find(const char *path)
+{
+	for (unsigned i = 0; i < FASTRPC_STORE_FILES; i++) {
+		if (fastrpc_store[i].used && strcmp(fastrpc_store[i].path, path) == 0) {
+			return &fastrpc_store[i];
+		}
+	}
+	return NULL;
+}
+
+static struct fastrpc_store_file *
+fastrpc_store_create(const char *path, bool truncate)
+{
+	struct fastrpc_store_file *file = fastrpc_store_find(path);
+	unsigned i;
+
+	if (file != NULL) {
+		if (truncate) {
+			fastrpc_store_bytes -= file->size;
+			file->size = 0;
+		}
+		return file;
+	}
+	if (strlen(path) >= FASTRPC_STORE_PATH) {
+		return NULL;
+	}
+	for (i = 0; i < FASTRPC_STORE_FILES && fastrpc_store[i].used; i++) {
+		;
+	}
+	if (i == FASTRPC_STORE_FILES) {
+		return NULL;
+	}
+	file = &fastrpc_store[i];
+	bzero(file, sizeof(*file));
+	file->used = true;
+	strlcpy(file->path, path, sizeof(file->path));
+	return file;
+}
+
+static bool
+fastrpc_store_write(struct fastrpc_store_file *file, const uint8_t *data, uint32_t length)
+{
+	uint32_t needed = file->size + length;
+
+	if (length != 0 && (needed > FASTRPC_FILE_LIMIT || fastrpc_store_bytes + length > FASTRPC_STORE_LIMIT)) {
+		return false;
+	}
+	if (needed > file->capacity) {
+		uint32_t capacity = (needed + 0xfff) & ~0xfffu;
+		uint8_t *data_new = kalloc_data(capacity, Z_WAITOK | Z_ZERO);
+
+		if (data_new == NULL) {
+			return false;
+		}
+		if (file->size != 0) {
+			memcpy(data_new, file->data, file->size);
+		}
+		if (file->data != NULL) {
+			kfree_data(file->data, file->capacity);
+		}
+		file->data = data_new;
+		file->capacity = capacity;
+	}
+	if (length != 0) {
+		memcpy(file->data + file->size, data, length);
+		file->size += length;
+		fastrpc_store_bytes += length;
+	}
+	return true;
+}
+
+static void
+fastrpc_store_remove(struct fastrpc_store_file *file)
+{
+	fastrpc_store_bytes -= file->size;
+	if (file->data != NULL) {
+		kfree_data(file->data, file->capacity);
+	}
+	bzero(file, sizeof(*file));
+}
+
+/* A copy of a stored file, for the read paths (which free their data with size + 1). */
+static uint8_t *
+fastrpc_store_read(const char *path, uint32_t *size)
+{
+	struct fastrpc_store_file *file = fastrpc_store_find(path);
+	uint8_t *data;
+
+	if (file == NULL) {
+		return NULL;
+	}
+	data = kalloc_data(file->size + 1, Z_WAITOK | Z_ZERO);
+	if (data == NULL) {
+		return NULL;
+	}
+	if (file->size != 0) {
+		memcpy(data, file->data, file->size);
+	}
+	*size = file->size;
+	return data;
+}
 
 /* The DSP's paths, to the copies in the root image that userland/build.sh puts there from fw-sensors/. */
 static const char *
@@ -4941,6 +5069,21 @@ fastrpc_root_read(const char *path, uint64_t limit, uint32_t *size)
 	vnode_put(vnode);
 	*size = (uint32_t)attributes.va_data_size;
 	return data;
+}
+
+/* A file of the DSP's filesystem: what it wrote this boot first, then the scene. */
+static uint8_t *
+fastrpc_file_data(const char *path, uint32_t *size)
+{
+	uint8_t *data = fastrpc_store_read(path, size);
+
+	if (data != NULL) {
+		return data;
+	}
+	if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
+		return fastrpc_soc0_read(path + sizeof("/fw/sensors/soc0/") - 1, size);
+	}
+	return fastrpc_root_read(path, FASTRPC_FILE_LIMIT, size);
 }
 
 /* The entries of a directory of the root image, by name. */
@@ -5103,17 +5246,21 @@ fastrpc_encode(const struct fastrpc_io *io, uint32_t count, uint8_t *blob, uint3
 static const struct {
 	uint8_t method, in_numbers, in_buffers, out_numbers, out_buffers;
 } fastrpc_apps_std[] = {
-	{ 0, 0, 2, 2, 1 },      /* open: apps_remotectl.open, out {handle, nErr} + the dlerror buffer */
+	{ 0, 0, 2, 1, 0 },      /* fopen: in {name, mode}, out {FILE} */
 	{ 1, 1, 0, 1, 1 },      /* freopen */
-	{ 2, 8, 0, 0, 0 },      /* fflush */
+	{ 2, 1, 0, 0, 0 },      /* fflush */
 	{ 3, 1, 0, 0, 0 },      /* fclose */
 	{ 4, 1, 0, 2, 1 },      /* fread */
+	{ 5, 1, 1, 2, 0 },      /* fwrite: in {fd, buf}, out {written, bEOF} */
 	{ 9, 3, 0, 0, 0 },      /* fseek */
 	{ 19, 0, 4, 1, 0 },     /* fopen_with_env */
+	{ 23, 1, 0, 0, 0 },     /* fsync */
+	{ 24, 0, 1, 0, 0 },     /* fremove */
 	{ 26, 0, 1, 2, 0 },     /* opendir */
 	{ 27, 2, 0, 0, 0 },     /* closedir */
 	{ 28, 2, 0, 66, 0 },    /* readdir */
-	{ 31, 1, 1, 24, 0 },    /* stat */
+	{ 29, 1, 1, 0, 0 },     /* mkdir */
+	{ 31, 0, 1, 24, 0 },    /* stat */
 };
 
 /*
@@ -5163,6 +5310,98 @@ fastrpc_out_lens(uint32_t sc, const uint8_t *blob, uint32_t length, uint32_t *le
 	return (int)outs;
 }
 
+/*
+ * The module opens the DSP makes on handle 0 (apps_remotectl.open): the name
+ * decides the handle the rest of its calls carry.  apps_std is 1; the
+ * sns_registry module -- the parser's `property=` lines read through
+ * libsns_registry_skel.so's get_property, which the phone implements over
+ * Android's property_get -- gets 2 so its method 0 does not collide with
+ * apps_std's fopen.
+ */
+static int32_t
+fastrpc_serve_remotectl(uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *out, uint32_t max_out,
+    uint32_t *out_count, const uint32_t *call_out_lens)
+{
+	struct fastrpc_io in[8];
+	uint32_t method = (sc >> 24) & 0x1f, handle = 1, numbers_size, why_size;
+	int32_t result = (int32_t)AEE_EBADPARM;
+
+	*out_count = 0;
+	if (method != 0 || max_out < 2) {
+		printf("slpi: fastrpc: remotectl method %u is not served\n", method);
+		return result;
+	}
+	if (fastrpc_decode(sc, blob, length, in, 8) < 0 || in[0].size < 8) {
+		return result;
+	}
+	if (in[1].size != 0) {
+		const char *name = fastrpc_string(&in[1]);
+
+		if (name != NULL && strcmp(name, "sns_registry") == 0) {
+			handle = 2;
+		}
+	}
+	numbers_size = call_out_lens != NULL && call_out_lens[0] >= 8 ? call_out_lens[0] : 8;
+	why_size = call_out_lens != NULL && call_out_lens[1] != 0 ? call_out_lens[1] : 256;
+	if (why_size > 256) {
+		why_size = 256;
+	}
+	out[0].size = numbers_size;
+	out[0].data = kalloc_data(numbers_size, Z_WAITOK | Z_ZERO);
+	out[1].size = why_size;
+	out[1].data = kalloc_data(why_size != 0 ? why_size : 1, Z_WAITOK | Z_ZERO);
+	if (out[0].data == NULL || out[1].data == NULL) {
+		if (out[0].data != NULL) {
+			kfree_data(out[0].data, out[0].size);
+		}
+		if (out[1].data != NULL) {
+			kfree_data(out[1].data, out[1].size != 0 ? out[1].size : 1);
+		}
+		out[0].data = out[1].data = NULL;
+		return (int32_t)AEE_ENOMEMORY;
+	}
+	((uint32_t *)out[0].data)[0] = handle;
+	((uint32_t *)out[0].data)[1] = 0;
+	*out_count = 2;
+	printf("slpi: fastrpc: the DSP opened its module; handle %u\n", handle);
+	return 0;
+}
+
+/* sns_registry.get_property: an unset property answers the empty string. */
+static int32_t
+fastrpc_serve_registry(uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *out, uint32_t max_out,
+    uint32_t *out_count, const uint32_t *call_out_lens)
+{
+	struct fastrpc_io in[8];
+	uint32_t method = (sc >> 24) & 0x1f, size;
+	int32_t result = (int32_t)AEE_EBADPARM;
+
+	*out_count = 0;
+	if (method != 0 || max_out < 1) {
+		printf("slpi: fastrpc: sns_registry method %u is not served\n", method);
+		return result;
+	}
+	if (fastrpc_decode(sc, blob, length, in, 8) < 0 || in[0].size < 8) {
+		return result;
+	}
+	size = call_out_lens != NULL ? call_out_lens[0] : 0;
+	if (size > 256) {
+		size = 256;
+	}
+	out[0].size = size;
+	out[0].data = kalloc_data(size != 0 ? size : 1, Z_WAITOK | Z_ZERO);
+	if (out[0].data == NULL) {
+		return (int32_t)AEE_ENOMEMORY;
+	}
+	*out_count = 1;
+	if (fastrpc_debug) {
+		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+
+		printf("slpi: fastrpc: sns_registry: property \"%s\" -> \"\"\n", name != NULL ? name : "?");
+	}
+	return 0;
+}
+
 static int32_t
 fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length, struct fastrpc_io *out,
     uint32_t max_out, uint32_t *out_count, const uint32_t *call_out_lens)
@@ -5173,13 +5412,19 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	uint32_t *numbers = NULL;
 
 	*out_count = 0;
+	if (handle == 0) {
+		return fastrpc_serve_remotectl(sc, blob, length, out, max_out, out_count, call_out_lens);
+	}
+	if (handle == 2) {
+		return fastrpc_serve_registry(sc, blob, length, out, max_out, out_count, call_out_lens);
+	}
 	/*
 	 * The DSP's own apps_std calls carry handle -1 (and its module open
 	 * handle 0); the first reverse calls read off the phone ask for
 	 * "/sys/devices/soc0/hw_platform" through fopen_with_env on -1. Serve
 	 * those as apps_std too; anything else keeps the EBADPARM answer.
 	 */
-	if (handle != 0 && handle != 1 && handle != 0xffffffffu) {
+	if (handle != 1 && handle != 0xffffffffu) {
 		printf("slpi: fastrpc: a call for handle %u is not served\n", handle);
 		return result;
 	}
@@ -5263,18 +5508,58 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	}
 
 	switch (method) {
-	case 0: {                          /* open: hand the DSP the static apps_std handle */
-		if (numbers == NULL) {
+	case 0: {                          /* fopen */
+		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+		const char *mode = in[2].size != 0 ? fastrpc_string(&in[2]) : NULL;
+		char path[FASTRPC_STORE_PATH];
+		uint8_t *data;
+		uint32_t file_size = 0;
+		int slot;
+
+		if (name == NULL || mode == NULL || numbers == NULL) {
 			result = (int32_t)AEE_EBADPARM;
 			break;
 		}
-		numbers[0] = 1;
-		numbers[1] = 0;
-		/* apps_remotectl.open's third out is the dlerror string: an empty one, NUL-terminated */
-		if (out_count > 1 && out[1].data != NULL && out[1].size != 0) {
-			((char *)out[1].data)[0] = 0;
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			snprintf(path, sizeof(path), "%s", name);
 		}
-		printf("slpi: fastrpc: apps_std: the DSP opened its module; handle 1\n");
+		for (slot = 0; slot < FASTRPC_FILE_SLOTS && fastrpc_files[slot].used; slot++) {
+			;
+		}
+		if (slot == FASTRPC_FILE_SLOTS) {
+			result = (int32_t)AEE_ENOMEMORY;
+			break;
+		}
+		bzero(&fastrpc_files[slot], sizeof(fastrpc_files[slot]));
+		fastrpc_files[slot].used = true;
+		fastrpc_files[slot].fd = fastrpc_next_fd++;
+		numbers[0] = fastrpc_files[slot].fd;
+		if (mode[0] == 'w' || mode[0] == 'W' || mode[0] == 'a' || mode[0] == 'A') {
+			struct fastrpc_store_file *store = fastrpc_store_create(path, mode[0] == 'w' || mode[0] == 'W');
+
+			if (store == NULL) {
+				bzero(&fastrpc_files[slot], sizeof(fastrpc_files[slot]));
+				printf("slpi: fastrpc: apps_std: cannot create \"%s\" for writing\n", path);
+				result = (int32_t)AEE_EFAILED;
+				break;
+			}
+			fastrpc_files[slot].write = true;
+			strlcpy(fastrpc_files[slot].path, path, sizeof(fastrpc_files[slot].path));
+			printf("slpi: fastrpc: apps_std: opened %s for writing as %u\n", path, fastrpc_files[slot].fd);
+			result = 0;
+			break;
+		}
+		data = fastrpc_file_data(path, &file_size);
+		if (data == NULL) {
+			bzero(&fastrpc_files[slot], sizeof(fastrpc_files[slot]));
+			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
+			result = (int32_t)AEE_EFAILED;
+			break;
+		}
+		fastrpc_files[slot].data = data;
+		fastrpc_files[slot].size = file_size;
+		fastrpc_files[slot].offset = 0;
+		printf("slpi: fastrpc: apps_std: opened %s (%u bytes) as %u\n", path, file_size, fastrpc_files[slot].fd);
 		result = 0;
 		break;
 	}
@@ -5306,11 +5591,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 				snprintf(path, sizeof(path), "/fw/sensors/%s", name);
 			}
 		}
-		if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
-			data = fastrpc_soc0_read(path + sizeof("/fw/sensors/soc0/") - 1, &file_size);
-		} else {
-			data = fastrpc_root_read(path, FASTRPC_FILE_LIMIT, &file_size);
-		}
+		data = fastrpc_file_data(path, &file_size);
 		if (data == NULL) {
 			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
 			result = (int32_t)AEE_EFAILED;
@@ -5340,7 +5621,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		struct fastrpc_file_slot *file = fastrpc_file_slot(sizes[0]);
 		uint32_t got;
 
-		if (file == NULL || numbers == NULL || out[1].data == NULL) {
+		if (file == NULL || file->write || numbers == NULL || out[1].data == NULL) {
 			result = (int32_t)AEE_EBADPARM;
 			break;
 		}
@@ -5385,11 +5666,58 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			result = (int32_t)AEE_EBADPARM;
 			break;
 		}
-		kfree_data(file->data, file->size + 1);
+		if (!file->write && file->data != NULL) {
+			kfree_data(file->data, file->size + 1);
+		}
 		bzero(file, sizeof(*file));
 		result = 0;
 		break;
 	}
+	case 5: {                          /* fwrite */
+		struct fastrpc_file_slot *file = fastrpc_file_slot(sizes[0]);
+		struct fastrpc_store_file *store;
+
+		if (file == NULL || !file->write || numbers == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		store = fastrpc_store_find(file->path);
+		if (store == NULL || !fastrpc_store_write(store, in[1].data, in[1].size)) {
+			result = (int32_t)AEE_ENOMEMORY;
+			break;
+		}
+		numbers[0] = in[1].size;
+		numbers[1] = 0;
+		result = 0;
+		break;
+	}
+	case 23:                           /* fsync: the store is memory */
+		result = fastrpc_file_slot(sizes[0]) != NULL ? 0 : (int32_t)AEE_EBADPARM;
+		break;
+	case 24: {                         /* fremove */
+		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+		char path[FASTRPC_STORE_PATH];
+		struct fastrpc_store_file *store;
+
+		if (name == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			snprintf(path, sizeof(path), "%s", name);
+		}
+		store = fastrpc_store_find(path);
+		if (store == NULL) {
+			result = (int32_t)AEE_EFAILED;
+			break;
+		}
+		fastrpc_store_remove(store);
+		result = 0;
+		break;
+	}
+	case 29:                           /* mkdir: the store needs no directories */
+		result = in[1].size != 0 ? 0 : (int32_t)AEE_EBADPARM;
+		break;
 	case 26: {                         /* opendir */
 		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
 		char path[160];
@@ -5486,6 +5814,19 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		name[in[1].size] = 0;
 		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
 			snprintf(path, sizeof(path), "%s", name);
+		}
+		{
+			struct fastrpc_store_file *store = fastrpc_store_find(path);
+
+			if (store != NULL) {
+				stats->dev = 0;
+				stats->ino = 0;
+				stats->mode = 0100666;      /* S_IFREG | rw-rw-rw- */
+				stats->nlink = 1;
+				stats->size = store->size;
+				result = 0;
+				break;
+			}
 		}
 		if (vnode_lookup(path, 0, &vnode, context) != 0) {
 			result = (int32_t)AEE_EFAILED;

@@ -461,3 +461,32 @@ of its own and this layout; it never has in any log so far.
 
 Next on the firmware side: find what instantiates the registry sensor (the
 sensor framework's boot list), since that is what gates the parse.
+
+### The file API writes now, and the error codes are the DSP's own (2026-11-11)
+
+- **The write half of `apps_std` is served.** `fopen` (method 0) with
+  `"w"`/`"a"` creates or truncates a file in a 4 MB RAM store, `fwrite`
+  appends, `fflush`/`fsync` succeed, `fclose`, `fremove`, `mkdir` and `stat`
+  work, and every read path (`fopen`, `fopen_with_env`) consults the store
+  before the scene. The registry parser's output directory is where the
+  phone's DSP writes its 189 group files through exactly these calls, so the
+  write half is a prerequisite for the parser to complete; the store lives
+  until the boot ends, which is all a RAM boot can offer.
+- **The module open now gives `sns_registry` its own handle.** Handle 0 is
+  `apps_remotectl.open`: `apps_std` gets 1, `sns_registry` gets 2, and method
+  0 on handle 2 is `get_property` (the empty string, what an unset Android
+  property gives) with the layout read from `libsns_registry_skel.so`. Before,
+  every open answered with the `apps_std` handle, so a `get_property` would
+  have been decoded as an `apps_std` call.
+- **The AEE constants were wrong.** The driver answered every bad argument
+  with `0x80000434`, which `AEEStdErr.h` defines as `AEE_EINVALIDPROCESS`,
+  not `AEE_EBADPARM` (`AEE_EOFFSET + 0x0E = 0x8000040E`); `AEE_EFAILED` and
+  `AEE_ENOMEMORY` were `0x80004005`/`0x80000002` instead of
+  `0x80000401`/`0x80000402`. A refusal this driver sent was telling the DSP
+  that its *process* was invalid.
+
+The first thing the next sensor run will show is whether the fresh PD
+(`fastrpc_restart=4`) reaches the registry parser: the parser opens
+`/vendor/etc/sensors/sns_reg_config`, the config directory and the persist
+output directory, and any of those calls in the log is the signal that the
+registry sensor finally started.
