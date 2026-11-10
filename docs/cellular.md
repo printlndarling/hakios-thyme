@@ -138,3 +138,44 @@ event rings, channels, BHI/SFR), ESOC to power and boot the modem (`mdm`), QRTR 
 MHI QRTR channel for the 88 QMI services, and then the existing QMI/NAS/WDS code on that
 transport, with the IPA data path unchanged. The reference driver (`hakios.mpss.c`, SMEM,
 GLINK, SMP2P) stays as it is for that phone; thyme needs the PCIe/MHI bring-up beside it.
+
+### What Android's own boot shows of it (2026-11-10)
+
+While Android runs, the endpoint is enumerated and its stack is visible: `0002:00:00.0` is the
+PCIe2 root complex and `0002:01:00.0` the modem; `dmesg` has `msm_pcie_link_train: PCIe RC2
+link initialized` and `pci 0002:01:00.0: 15.752 Gb/s ... 8 GT/s x2`, then `mhi 0002:01:00.0:
+BAR 0: assigned [mem 0x64300000-0x64300fff 64bit]` and `Falling back to syfs fallback for:
+sdx55m/sbl1.mbn` — the modem is an **SDX55M**, its first-stage image (`sbl1.mbn`) comes from
+the AP over **Sahara**, and the MHI channels it then brings up are `QMI0`, `QMI1`, `SAHARA`,
+`DIAG`, `LOOPBACK`, `IPCR`, `IP_HW0`, `IP_HW0_RSC`, `RMNET_CTL`, `DUN`, `EFS`, `ADSP_0..3`,
+`SLPI_0..3`, `TF`, `QDSS` (their sysfs names under /sys/bus/mhi/devices). The same tree has
+the Wi-Fi's `0000:01:00.0` on PCIe0 with the `cnss` MHI, which is the code this kernel already
+drives. So the modem port is: PCIe2 RC (the Wi-Fi driver's sequence at 0x1c10000 with this
+phone's PHY data), the standard Qualcomm MHI host on BAR0 0x64300000, Sahara of `sdx55m/*.mbn`
+from the root image, then QRTR on QMI0/QMI1 and the existing QMI/NAS/WDS; the IPA data path
+stays as it is. The GCC clock/reset offsets for PCIe2 are not in this repository and the
+network is unreachable; the vendor kernel image on the phone (boot_a) carries them and is the
+next thing to read.
+
+### PCIe2's GCC registers, recovered from the vendor kernel (2026-11-10)
+
+The clocks are not in any local table and the network is unreachable, so they were read out
+of the phone's own kernel: with `kptr_restrict=2` lowered to 0 as root (Magisk), Android's
+`/proc/kallsyms` gives `_text` (0xffffff9f70880000 that boot) and every `gcc_pcie_*` static
+symbol; a symbol's file offset in the `boot_a` kernel Image is its address minus `_text`.
+Dumping the `clk_branch` structs there (halt/enable fields at their offsets, `hw.init` at
++40, the vote register and its bit at +64/+68) gives, for PCIe2 at GCC:
+
+- CBCR/halt registers: `slv_q2a` 0x6010, `slv_axi` 0x6014, `mstr_axi` 0x601c, `cfg_ahb`
+  0x6024, `aux` 0x6028, `pipe` 0x602c (the PCIe0 block is the same shape at 0x6b010-0x6b02c,
+  which is what the Wi-Fi driver already polls).
+- The branch votes are at **GCC+0x52010** (PCIe0's at 0x52008), with bits `slv_q2a` 1<<10,
+  `slv_axi` 1<<11, `mstr_axi` 1<<12, `cfg_ahb` 1<<13, `aux` 1<<14, `pipe` 1<<15 (all six
+  OR to 0xfc00; the older comment in `hakios.thyme_pcie.c` that "0x52008 takes all PCIe0
+  votes" is the same mechanism).
+- The reference clock source (`aux_clk_src`, the `source_xo` register) is **GCC+0x6038**
+  (PCIe0's 0x6b038).
+- By the PCIe0 block's shape, PCIe2's GDSC status should be at 0x6004 and its core reset at
+  0x6000; the PHY reset, which PCIe0 takes at 0x6c01c bit 0, still needs its PCIe2 bit.
+  That, and the PHY sequence from the phone's DT (`qcom,pcie@1c10000`), are what a PCIe2
+  link-up diagnostic needs next; the DT sequence is already in the pulled `dts`.
