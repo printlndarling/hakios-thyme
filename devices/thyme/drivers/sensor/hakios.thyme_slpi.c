@@ -3273,12 +3273,11 @@ sns_registry_write_cm(const uint8_t suid[16])
 	};
 	char shown[33];
 
-	/* the group's owner, a string item (field 11) as the persist file has it */
-	q = item;
-	q = sns_bytes(q, 1, "owner", 5);
-	q = sns_fixed32(q, 2, 0);
-	q = sns_bytes(q, 11, "sns_cm", 6);
-	p = sns_bytes(p, 3, item, (uint32_t)(q - item));
+	/*
+	 * The "owner" the persist file names is not an item on the wire: a write
+	 * with it added (field 11 string, 194 bytes) is not even answered, while
+	 * the same group without it (169 bytes) is accepted with result 0.
+	 */
 	for (unsigned i = 0; i < sizeof(ints) / sizeof(ints[0]); i++) {
 		q = item;
 		q = sns_bytes(q, 1, ints[i].name, (uint32_t)strlen(ints[i].name));
@@ -3329,9 +3328,6 @@ sns_start(void)
 		sns_registry_write_cm(sns_registry_suid_real);
 		/* give the registry time to store the group before a client asks for it */
 		sleep_ms(2000);
-		/* and read it back: a read_event with the group proves it was stored */
-		sns_registry_read("sns_cm", sns_registry_suid_real);
-		sleep_ms(1000);
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
