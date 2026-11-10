@@ -53,6 +53,15 @@ extern uint64_t kvtophys(vm_offset_t va);
 #define CONF 0x64100000u
 #define BIT(n) (1u << (n))
 
+/*
+ * pcie2_keep: leave the endpoint's PERST alone.  The phone's bootloader may
+ * have booted the modem already, in which case the endpoint sits in AMSS with
+ * its MHI ready rather than in the PBL's boot window; asserting PERST would
+ * send it back to the PBL.  The survey and the MHI reads then say which
+ * execution environment the endpoint really is in when this kernel starts.
+ */
+static uint32_t pcie2_keep;
+
 static const struct { uint32_t offset, value, delay_us; } pcie2_phy[] = {
 	{ 0xa40, 0x03, 0 },
 	{ 0x010, 0x01, 0 },
@@ -382,8 +391,14 @@ link_train(void)
 
 	/* PERST asserted while the controller and PHY come up: the phone's
 	 * DT pcie2_perst_default is GPIO 85, active low (the vendor's
-	 * msm_pcie_enable asserts it before touching any PCIe register). */
-	pcie2_perst(0);
+	 * msm_pcie_enable asserts it before touching any PCIe register).
+	 * pcie2_keep skips it, so an endpoint the bootloader already booted
+	 * keeps its execution environment. */
+	if (pcie2_keep) {
+		hakios_tl("pcie2: PERST left alone (pcie2_keep=1)\n");
+	} else {
+		pcie2_perst(0);
+	}
 
 	/* the vendor's msm_pcie_enable's PARF block, register for register */
 	wr(PARF + 0x1000, 4);                     /* RC mode */
@@ -1104,6 +1119,18 @@ image_ready:
 	wr(bhi + 0x20, 0);          /* BHI_INTVEC */
 	hakios_tl("pcie2: BHI: writes land? INTVEC %#x, before: imgaddr %#x/%#x size %#x\n", rd(bhi + 0x20),
 	    rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10));
+	/*
+	 * The PBL's identity and trust registers (mhi_internal.h 0x40-0x80): the
+	 * serial number, the anti-rollback revision, the segment count, the four
+	 * MSM hardware-ID words and the OEM public-key hash.  An all-zero hash is
+	 * an unfused (open) part and would let any image through; a fused one is
+	 * the root the image's signer has to match, and its words say whether
+	 * that is even possible for the sbl1.mbn this phone carries.
+	 */
+	hakios_tl("pcie2: BHI: serial %#x, antirollback %#x, numseg %#x, HWID %#x %#x %#x %#x\n", rd(bhi + 0x40),
+	    rd(bhi + 0x44), rd(bhi + 0x48), rd(bhi + 0x4c), rd(bhi + 0x50), rd(bhi + 0x54), rd(bhi + 0x58));
+	hakios_tl("pcie2: BHI: OEM PK hash %#x %#x %#x %#x %#x %#x %#x %#x\n", rd(bhi + 0x64), rd(bhi + 0x68),
+	    rd(bhi + 0x6c), rd(bhi + 0x70), rd(bhi + 0x74), rd(bhi + 0x78), rd(bhi + 0x7c), rd(bhi + 0x80));
 
 	/* the endpoint as a bus master the SMMU lets through (its own boot arg:
 	 * the first attempt at it took the phone down with no log at all, so it
@@ -1450,7 +1477,8 @@ pcie2_run(void)
 	PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey));
 	PE_parse_boot_argn("pcie2_power", &power, sizeof(power));
 	PE_parse_boot_argn("pcie2_bhi", &bhi, sizeof(bhi));
-	hakios_tl("pcie2: args: survey %u, power %u, bhi %u\n", survey, power, bhi);
+	PE_parse_boot_argn("pcie2_keep", &pcie2_keep, sizeof(pcie2_keep));
+	hakios_tl("pcie2: args: survey %u, power %u, bhi %u, keep %u\n", survey, power, bhi, pcie2_keep);
 	if (survey == 1) {
 		hakios_tl("pcie2: survey only; the link is not touched\n");
 		return;
@@ -1466,7 +1494,7 @@ pcie2_run(void)
 	/* pcie2_bhi=2 is the vendor's first power-on before the link: the PMIC
 	 * warm reset (qpnp_pon_modem_pwr_off(1), now that the PMIC bus has a
 	 * write path), a pause, and then the AP2MDM_STATUS handshake below. */
-	if (bhi >= 2) {
+	if (bhi >= 2 && !pcie2_keep) {
 		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
 		delay(150000);
 	}

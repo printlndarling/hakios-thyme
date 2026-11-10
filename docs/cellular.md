@@ -617,3 +617,28 @@ Both need a working reference -- the vendor kernel's own MHI debug log from
 a successful SBL load would do -- which this phone's Android no longer
 offers (no debugfs, no way to restart the modem from userspace). The open
 question and every register-level fact above are here for the next attempt.
+
+### The endpoint the bootloader left behind, and the PBL's trust registers (2026-11-11)
+
+Two probes are prepared for the next modem run.
+
+**`pcie2_keep=1`** leaves PERST alone (and suppresses the PMIC warm reset) so
+the endpoint keeps whatever execution environment the phone's bootloader left
+it in. The default path already says the modem was running under Android when
+this kernel was booted, and the bootloader that boots this kernel may have
+booted the modem too -- in which case the endpoint sits in AMSS with its MHI
+ready, and asserting PERST (what the vendor's enable sequence does) sends it
+back to the PBL for no reason. The survey's `BHI_EXECENV` and MHI status say
+which environment it really is in. If it is AMSS, the host side needs MHI
+bring-up, not the BHI load.
+
+**The PBL's identity and trust registers** are now printed before the
+doorbell: `BHI_SERIALNU` (0x40), `BHI_SBLANTIROLLVER` (0x44), `BHI_NUMSEG`
+(0x48), the four `BHI_MSMHWID` words (0x4c-0x58) and the eight
+`BHI_OEMPKHASH` words (0x64-0x80). The last is the PBL's root: an all-zero
+hash is an unfused (open) part and would let any image through, while a
+nonzero one is the key the SBL's certificate chain has to match. The phone's
+own Android boots this same modem with this same `sbl1.mbn`, so on a fused
+part the image *must* be able to pass -- if the fused hash is nonzero, the
+0xef120700 refusal is not an image-authentication failure and the search
+stays on the host side of the doorbell.
