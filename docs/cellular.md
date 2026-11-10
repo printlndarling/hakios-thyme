@@ -469,3 +469,49 @@ missing PERST entirely, polled 0x814 bit 6 set instead of 0xa14 bit 6 clear, nev
 enabled the refgen or toggled the PHY reset, forced Gen2, and wrote 0x78/0x8a8 as if
 the fields were whole-register values; `hakios.thyme_pcie2.c` now follows the vendor
 sequence.
+
+### The PCIe2 link trains, and the SDX55M answers on it (2026-11-11)
+
+Kernel `983385a3` (log `logs/002609-run.log`) produced the first working PCIe2
+session:
+
+```text
+pcie2: clocks: GDSC 0xf822f000, refgen 0x1, PHY reset 0
+pcie2: PARF programmed; PARF+0x350 0, +0x358 0x4000000
+pcie2: PHY ready (0xa6); releasing PERST
+pcie2: link requests done; ELBI 0x1, link status 0x10110008
+pcie2: the link is up; RC id 0x10b17cb, link status 0xb0230008, ELBI 0x11401
+pcie2: bus numbers 0x10100
+pcie2: the endpoint says id 0x30617cb (vendor 0x17cb, device 0x306), class 0xff000000, BAR0 0x4
+pcie2: MHI: BAR0 0x64300004 (was 0x4, next 0), command 0x100002, reglen 0x100
+pcie2: MHI: cfg 0x800080 (channels 128, events 128), chdb 0x300, erdb 0x700
+pcie2: MHI: control 0, status 0x7025062f
+```
+
+Three pieces were missing. The PHY would not clear bit 6 of 0xa14 (`0x61`)
+until the **MDM reference clock gate** was enabled: the DT's `pcie_mdm_clkref`
+is `GCC_PCIE_MDM_CLKREF_EN` (binding 71), i.e. GCC+0x8c00c bit 0 -- the
+vendor's RC2 clock table enables it (required) and it is the clock the modem's
+side of the link runs from. With it on, the same sequence reported 0xa6 (bit
+6 clear) within 100 ms. The other branches the vendor's table enables were
+added with it: GCC+0x9000c (TBU), GCC+0x8d058 (DDRSS SF TBU), and the PHY
+refgen source/branch at 0x6f014/0x6f034.
+
+The endpoint's config space then still read all ones, and the reason is the
+vendor's addressing, not the link: `msm_pcie_oper_conf` never uses an ECAM
+address. `msm_pcie_cfg_bdf()` re-points iATU region 0 at the wanted BDF, so
+the CONF resource's **first 4 KB are** that device's config space and a
+register is read at `CONF + offset`. `CONF + (1 << 20)` is outside the 4 KB
+iATU window and answers 0xffffffff. The driver now reads CONF + 0 / + 8 /
++ 0x10, and the RC's type-1 header gets its secondary bus number (1) written
+at DBI+0x18 first, as Linux's `pci_scan_bridge` does.
+
+The endpoint answers as `17cb:0306`, class `0xff000000` -- exactly Android's
+`0002:01:00.0`. Its BAR0 is a 64-bit memory BAR (read 0x4, unassigned); the
+driver gives it the phone's own 0x64300000, turns memory decoding on, and
+identity-maps the window through iATU region 1. MHI then answers: MHICFG
+0x800080 (128 channels, 128 events), CHDBOFF 0x300, ERDBOFF 0x700. MHICTRL
+reads 0 (the host has not enabled MHI) and MHISTATUS 0x7025062f; the next
+peek reads BHIOFF/BHIEOFF and the boot interface's EXECENV, which say whether
+the SDX55M sits in its PBL waiting for sbl1.mbn (the image is on the phone at
+/vendor/firmware_mnt/image/sdx55m/sbl1.mbn, 548,056 bytes).

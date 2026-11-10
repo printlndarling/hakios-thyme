@@ -194,6 +194,7 @@ static struct {
 	{ 0x64000000, 0x1000, 0 },   /* DBI, and ELBI at +0xf20 */
 	{ 0x64001000, 0x1000, 0 },   /* iATU */
 	{ 0x64100000, 0x100000, 0 }, /* endpoint configuration (ECAM, bus 1) */
+	{ 0x64300000, 0x1000, 0 },   /* the MHI BAR the phone assigns to the SDX55M */
 	{ 0x0f000000, 0xa00000, 0 }, /* TLMM: west +0x100000, south +0x500000, north +0x900000 */
 };
 
@@ -326,25 +327,37 @@ clocks(void)
 		hakios_tl("pcie2: the PHY refgen stays halted: %#x\n", rd(GCC + 0x6f034));
 		return error;
 	}
+	/* the modem's reference clock gate -- the DT's "pcie_mdm_clkref"
+	 * (GCC_PCIE_MDM_CLKREF_EN, binding 71) -- and the two TBU clocks the
+	 * vendor's RC2 clock table enables: GCC+0x8c00c, 0x9000c, 0x8d058,
+	 * each a branch whose enable is bit 0 and whose halt is bit 31. */
+	static const uint32_t others[] = { 0x8c00c, 0x9000c, 0x8d058 };
+	for (unsigned i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+		error = update(GCC + others[i], 0, 1);
+		if (error) {
+			return error;
+		}
+		error = wait_bits(GCC + others[i], BIT(31), 0, 10000);
+		if (error) {
+			hakios_tl("pcie2: the clock at %#x stays halted: %#x\n", GCC + others[i], rd(GCC + others[i]));
+			return error;
+		}
+	}
 	/* the two resets the phone's DT names: GCC_PCIE_2_BCR 0x6000 and
-	 * GCC_PCIE_2_PHY_BCR 0x1f01c (the vendor's gcc_kona_resets table):
-	 * assert, a millisecond, deassert. */
-	error = update(GCC + 0x6000, 0, 1);
-	if (error) {
-		return error;
-	}
-	error = update(GCC + 0x1f01c, 0, 1);
-	if (error) {
-		return error;
-	}
-	delay(1000);
-	error = update(GCC + 0x1f01c, 1, 0);
-	if (error) {
-		return error;
-	}
-	error = update(GCC + 0x6000, 1, 0);
-	if (error) {
-		return error;
+	 * GCC_PCIE_2_PHY_BCR 0x1f01c (the vendor's gcc_kona_resets table).
+	 * The vendor's loop does each one in turn: assert, a millisecond,
+	 * deassert -- core first, then the PHY. */
+	static const uint32_t resets[] = { 0x6000, 0x1f01c };
+	for (unsigned i = 0; i < sizeof(resets) / sizeof(resets[0]); i++) {
+		error = update(GCC + resets[i], 0, 1);
+		if (error) {
+			return error;
+		}
+		delay(1000);
+		error = update(GCC + resets[i], 1, 0);
+		if (error) {
+			return error;
+		}
 	}
 	hakios_tl("pcie2: clocks: GDSC %#x, refgen %#x, PHY reset %#x\n", rd(GCC + 0x6004), rd(GCC + 0x6f034),
 	    rd(GCC + 0x1f01c));
@@ -401,10 +414,18 @@ link_train(void)
 		return error;
 	}
 	/* qcom,phy-status-offset 0xa14, bit 6: clear means the PHY is ready
-	 * (the vendor's pcie_phy_is_ready returns false while the bit is set) */
-	error = wait_bits(PHY + 0xa14, BIT(6), 0, 10);
+	 * (the vendor's pcie_phy_is_ready returns false while the bit is set;
+	 * its 10 ms becomes 100 ms here, the PLL lock being the slow part) */
+	error = wait_bits(PHY + 0xa14, BIT(6), 0, 100);
 	if (error) {
+		static const uint32_t phy_regs[] = { 0xa00, 0xa04, 0xa08, 0xa0c, 0xa10, 0xa14, 0xa18, 0xa40, 0xa44, 0x800, 0x814 };
 		hakios_tl("pcie2: the PHY does not report ready: %#x\n", rd(PHY + 0xa14));
+		for (unsigned i = 0; i < sizeof(phy_regs) / sizeof(phy_regs[0]); i++) {
+			hakios_tl("pcie2:   PHY+%#x = %#x\n", phy_regs[i], rd(PHY + phy_regs[i]));
+		}
+		hakios_tl("pcie2:   GCC 0x6f000 %#x, 0x6f004 %#x, 0x6f00c %#x, 0x6f010 %#x, 0x6f034 %#x, 0x8c00c %#x\n",
+		    rd(GCC + 0x6f000), rd(GCC + 0x6f004), rd(GCC + 0x6f00c), rd(GCC + 0x6f010), rd(GCC + 0x6f034),
+		    rd(GCC + 0x8c00c));
 		return error;
 	}
 	hakios_tl("pcie2: PHY ready (%#x); releasing PERST\n", rd(PHY + 0xa14));
@@ -463,6 +484,14 @@ link_train(void)
 		return ENODEV;
 	}
 	hakios_tl("pcie2: the link is up; RC id %#x, link status %#x, ELBI %#x\n", value, rd(DBI + 0x80), rd(DBI + 0xf28));
+
+	/* The RC's type-1 header needs its secondary bus number set before
+	 * any config request to the endpoint can be forwarded; Linux's
+	 * pci_scan_bridge does this, and without it the CONF window answers
+	 * all ones. Byte 0x18: primary 0, secondary 1, subordinate 1. */
+	value = rd(DBI + 0x18);
+	wr(DBI + 0x18, (value & 0xff000000u) | 0x00010100u);
+	hakios_tl("pcie2: bus numbers %#x\n", rd(DBI + 0x18));
 	return 0;
 }
 
@@ -483,20 +512,86 @@ iatu_config(uint32_t nr, uint32_t type, uint32_t host, uint32_t host_end, uint32
 	wr(base + 0x04, BIT(31));
 }
 
+/*
+ * The endpoint's MHI registers, once its config space answers: assign it the
+ * BAR the phone's own kernel gives it (Android's dmesg: BAR0 0x64300000, and
+ * the DT's memory range starts there), turn memory decoding on, translate the
+ * window with iATU region 1 as an identity mapping, and read MHI's own idea of
+ * itself -- MHICFG's channel/event counts, the doorbell offsets, and the state
+ * in MHICTRL. Nothing is written to the device but its BAR and command word.
+ */
+#define MHI_BAR 0x64300000u
+
+static void
+mhi_peek(void)
+{
+	uint32_t bar0, bar0_before, bar1, command, cfg, control, mhistatus;
+
+	bar0 = rd(CONF + 0x10);
+	bar0_before = bar0;
+	bar1 = rd(CONF + 0x14);
+	if ((bar0 & 0xfffffff0u) == 0 || (bar0 & 0xfffffff0u) == 0xfffffff0u) {
+		wr(CONF + 0x10, MHI_BAR);
+		if ((rd(CONF + 0x10) & 0x6) == 0x4) {
+			wr(CONF + 0x14, 0); /* a 64-bit BAR's upper half */
+		}
+		bar0 = rd(CONF + 0x10);
+	}
+	command = rd(CONF + 4);
+	wr(CONF + 4, (command & 0xffff0000u) | 0x0002u); /* memory space */
+	iatu_config(1, 0x00, MHI_BAR, MHI_BAR + 0xfff, MHI_BAR);
+
+	cfg = rd(MHI_BAR + 0x10);
+	control = rd(MHI_BAR + 0x38);
+	mhistatus = rd(MHI_BAR + 0x48);
+	hakios_tl("pcie2: MHI: BAR0 %#x (was %#x, next %#x), command %#x, reglen %#x\n", bar0,
+	    bar0_before, bar1, rd(CONF + 4), rd(MHI_BAR + 0x0));
+	hakios_tl("pcie2: MHI: cfg %#x (channels %u, events %u, hw channels %u), chdb %#x, erdb %#x\n", cfg, cfg & 0xff,
+	    (cfg >> 16) & 0xff, (cfg >> 8) & 0xff, rd(MHI_BAR + 0x18), rd(MHI_BAR + 0x20));
+	hakios_tl("pcie2: MHI: control %#x, status %#x (ready %u, state %u, syserr %u)\n", control, mhistatus,
+	    mhistatus & 1, (mhistatus >> 8) & 0xff, (mhistatus >> 2) & 1);
+
+	/* BHI/BHIE: the device's boot interface, where its PBL waits for an
+	 * image. Their offsets are in the MHI register block. */
+	uint32_t bhioff = rd(MHI_BAR + 0x28);
+	uint32_t bhieoff = rd(MHI_BAR + 0x2c);
+	hakios_tl("pcie2: MHI: BHIOFF %#x, BHIEOFF %#x\n", bhioff, bhieoff);
+	if (bhioff != 0 && bhioff != UINT32_MAX && bhioff < 0x1000) {
+		uint32_t bhi = MHI_BAR + bhioff;
+
+		hakios_tl("pcie2: BHI: version %u.%u, execenv %#x, status %#x, errcode %#x, imgaddr %#x/%#x, imgsize %#x, numseg %#x\n",
+		    rd(bhi + 0x4), rd(bhi + 0x0), rd(bhi + 0x28), rd(bhi + 0x2c), rd(bhi + 0x30), rd(bhi + 0x0c),
+		    rd(bhi + 0x8), rd(bhi + 0x10), rd(bhi + 0x48));
+	}
+	if (bhieoff != 0 && bhieoff != UINT32_MAX && bhieoff < 0x1000) {
+		uint32_t bhie = MHI_BAR + bhieoff;
+
+		hakios_tl("pcie2: BHIE: msmsoid %#x, txvec %#x/%#x size %#x, txstatus %#x, rxvec %#x/%#x size %#x, rxstatus %#x\n",
+		    rd(bhie + 0x0), rd(bhie + 0x30), rd(bhie + 0x2c), rd(bhie + 0x34), rd(bhie + 0x44),
+		    rd(bhie + 0x64), rd(bhie + 0x60), rd(bhie + 0x68), rd(bhie + 0x78));
+	}
+}
+
 static void
 endpoint(void)
 {
 	uint32_t id, classreg, bar0;
 
-	/* 0002:01:00.0: bus 1, device 0, function 0 in the ECAM at CONF. The
-	 * vendor's msm_pcie_cfg_bdf programs iATU region 0 for exactly that,
-	 * which is what makes the CONF window answer at all. */
+	/* 0002:01:00.0: bus 1, device 0, function 0. The vendor does NOT use
+	 * an ECAM address (bus << 20): msm_pcie_cfg_bdf re-points iATU region 0
+	 * at the target BDF, so the CONF resource's FIRST 4 KB *are* that
+	 * device's config space and a register is read at CONF + offset.
+	 * Reading CONF + (1 << 20) misses the iATU window and answers all
+	 * ones -- the two runs that did. */
 	iatu_config(0, 0x04, CONF, CONF + 0xfff, 1u << 24);
-	id = rd(CONF + (1 << 20));
-	classreg = rd(CONF + (1 << 20) + 8);
-	bar0 = rd(CONF + (1 << 20) + 0x10);
+	id = rd(CONF);
+	classreg = rd(CONF + 8);
+	bar0 = rd(CONF + 0x10);
 	hakios_tl("pcie2: the endpoint says id %#x (vendor %#x, device %#x), class %#x, BAR0 %#x\n", id, id & 0xffff,
 	    id >> 16, classreg, bar0);
+	if (id != 0xffffffffu && id != UINT32_MAX) {
+		mhi_peek();
+	}
 }
 
 #define TLMM_PAGE(pin) (0x0f500000u + (pin) * 0x1000) /* Kona SOUTH tile: +0x500000 */
