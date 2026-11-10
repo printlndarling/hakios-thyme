@@ -3273,6 +3273,12 @@ sns_registry_write_cm(const uint8_t suid[16])
 	};
 	char shown[33];
 
+	/* the group's owner, a string item (field 11) as the persist file has it */
+	q = item;
+	q = sns_bytes(q, 1, "owner", 5);
+	q = sns_fixed32(q, 2, 0);
+	q = sns_bytes(q, 11, "sns_cm", 6);
+	p = sns_bytes(p, 3, item, (uint32_t)(q - item));
 	for (unsigned i = 0; i < sizeof(ints) / sizeof(ints[0]); i++) {
 		q = item;
 		q = sns_bytes(q, 1, ints[i].name, (uint32_t)strlen(ints[i].name));
@@ -3321,6 +3327,11 @@ sns_start(void)
 	}
 	if (sns_registry_write) {
 		sns_registry_write_cm(sns_registry_suid_real);
+		/* give the registry time to store the group before a client asks for it */
+		sleep_ms(2000);
+		/* and read it back: a read_event with the group proves it was stored */
+		sns_registry_read("sns_cm", sns_registry_suid_real);
+		sleep_ms(1000);
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
