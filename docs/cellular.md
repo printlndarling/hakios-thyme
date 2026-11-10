@@ -276,3 +276,18 @@ debugfs is closed as well (`/sys/kernel/debug` does not exist and cannot be crea
 so the live states of gpio 1/3/56/57 cannot be read off Android either. The safe next read
 is the table through the soc_data pointers above (or the pinctrl-msm group tables); blind
 TLMM probing stays out, after the two bus hangs it caused.
+
+### The pin-descriptor table search: what fits and what was a false positive (2026-11-10)
+
+`msm_gpio_set` confirms the descriptor layout: `desc = table(gpio * 0x50)`, the register
+offset at `desc+0x28` (address `regs_base + that`), and the bit in `desc+0x40` bits 9:5
+(the 64-bit load at +0x3c shifted by 37). Two whole-Image scans for a 184-entry, 0x50-stride
+table then produced candidates that do not survive checking: one run near 0x1d36628 gives
+gpio56..80 offsets that step by 0x1000 (0x52900c, 0x52a00c, ... 0x54000c) but places
+gpio79 at 0x540000 where the Wi-Fi driver's known-good TLMM write for pin 79 uses
+0x0f900000 + 79*0x1000 = 0x0f927000 — a different page, so that table is something else;
+another run at 0x1d3837c has one constant word across every entry, which no real descriptor
+has. The true `msm_pin_data` table is therefore still unlocated. The way not to repeat this:
+derive the table's layout from `msm_pinctrl_probe` (which fills it), or read the vendor
+pinctrl-msm's group/function tables directly; pin-order guessing has now cost three attempts
+and two bus hangs, and is stopped.
