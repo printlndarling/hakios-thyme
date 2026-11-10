@@ -278,7 +278,12 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 {
 	if(!width||!height||!stride||lanes<1||lanes>4)return EINVAL;
 	uint64_t bytes=(uint64_t)stride*height;
-	if(bytes>32ull<<20)return EINVAL;
+	/* The S5KHMX's full-resolution res0 (12032x9024, RAW10: 15040 bytes a
+	 * line, 129.4 MiB a frame) is the largest mode the tables carry; the
+	 * cap is above it and still refuses a mode that has gone wrong before
+	 * the allocation tries for half a gigabyte.
+	 */
+	if(bytes>192ull<<20)return EINVAL;
 	/* Two frames: the WM takes one buffer address per frame, so the ring
 	 * alternates between two so that each read can start the next frame.
 	 */
