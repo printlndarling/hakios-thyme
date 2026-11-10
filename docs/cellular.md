@@ -557,3 +557,38 @@ the image below 4 GB. (kmem_alloc_contig's arguments are
 `(map, &addr, size, mask, max_pnum, pnum_mask, ...)`; putting the bound in
 the pnum_mask slot asks for an alignment, not a limit, which is why the
 first "below 4 GB" attempt returned KERN_NO_SPACE.)
+
+### The modem's SID, the apps SMMU, and a doorbell that is answered but refuses (2026-11-11)
+
+The BHI error was first blamed on the endpoint's DMA being refused. The apps
+SMMU at 0x15000000, read only, says: SCR0 0x2d0406 (unmatched streams fault),
+87 match registers, and SMR 0 -- stream 0, mask 0 -- with S2CR 0. The RC's
+BDF-to-SID table (PARF+0x2000) was never programmed, so the endpoint's DMAs
+leave with the default stream and the SMMU has no bypass for it.
+
+Writing SMR 0's S2CR to change that took the phone down with no log at all
+(two runs, not one line of kernel output); the boot chain's own match
+register is not to be touched. What does work: filling the whole BDF-to-SID
+table with BDF 1:0.0 (0x0100) -> the table's 8-bit offset 1 (the DT's
+0x1d01 minus `qcom,smmu-sid-base` 0x1d00), so whichever slot the CRC hash
+picks holds the right entry, and taking *free* match registers only (5 on
+this boot) for the streams the table can produce.
+
+That the table works is proven by pointing its stream at a context that
+faults: with SMR 5 = stream 0x1d01 and S2CR 0 (translate into context 0,
+which is off) the SMMU's context-0 fault register records FSR 0x400 -- a
+translation fault -- so the endpoint's reads do arrive with the SID from the
+table. (The faulting address in CB0 FAR does not match the image, so the
+recorded fault is not certainly the BHI's.)
+
+With the stream sent to a bypass SMR (S2CR 0x20000, the value the SLPI's
+verified FastRPC bypass uses -- though the Arm SMMU-500's spec calls TYPE 2
+a *fault*, and this SMMU reads back 2 for a written 1) and with the image
+byte-perfect in host memory (word sum 0x92f1f39, the file's own), in the
+SLPI heap at 0xc0000000 and in ordinary kernel pages above 4 GB alike, the
+PBL still answers BHI_STATUS 0xffffffff with BHI_ERRCODE 0xef120700 within
+10 ms, and the SMMU records no global fault. The next step is the path
+Android actually uses: a stage-1 context of the apps SMMU with page tables
+of ours -- the machinery `radio_space_on()` in drivers/wifi/hakios.wifi.c
+already uses for the radio's stream (0x1c01) -- giving the modem an IOVA
+from the DT's `qcom,iommu-dma-addr-pool` that translates to the image.
