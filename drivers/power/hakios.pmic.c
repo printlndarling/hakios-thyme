@@ -131,7 +131,7 @@ pmic_mapped(void)
 
 /* Read `count` (1 to 8) registers of the peripheral at channel `channel`, from register `reg`; NULL, or what went wrong. */
 static const char *
-spmi_read(uint32_t channel, uint8_t reg, uint8_t *bytes, uint32_t count)
+spmi_read(uint32_t channel, uint16_t reg, uint8_t *bytes, uint32_t count)
 {
 	vm_offset_t ch = arb_observer + 0x10000UL * ARB_SYSTEM + 0x80UL * channel;
 	uint64_t start = mach_absolute_time(), now, interval;
@@ -165,7 +165,7 @@ spmi_read(uint32_t channel, uint8_t reg, uint8_t *bytes, uint32_t count)
 
 /* Write `count` (1 to 8) registers of the peripheral at channel `channel`; NULL, or what went wrong. */
 static const char *
-spmi_write(uint32_t channel, uint8_t reg, const uint8_t *bytes, uint32_t count)
+spmi_write(uint32_t channel, uint16_t reg, const uint8_t *bytes, uint32_t count)
 {
 	vm_offset_t ch = arb_observer + 0x10000UL * ARB_SYSTEM + 0x80UL * channel;
 	uint64_t start = mach_absolute_time(), now, interval;
@@ -205,11 +205,11 @@ spmi_write(uint32_t channel, uint8_t reg, const uint8_t *bytes, uint32_t count)
 #define RTC_TYPE                0x07
 #define RTC_SUBTYPE_WRITE       0x01
 #define PON_TYPE                0x01
-#define PON_SUBTYPE             0x01
-#define PON_REG_FIRST           0x60
+#define PON_SUBTYPE             0x04  /* the phone DT: qcom,power-on@800 under the PM8150 */
+#define PON_REG_FIRST           0x860 /* the block sits at 0x800 in the PMIC; its state registers are 0x860..0x86f */
 #define PON_REG_COUNT           0x10
-#define PON_MODEM_PWR_OFF       0x62
-#define PON_MODEM_PWR_OFF_CTL   0x63
+#define PON_MODEM_PWR_OFF       0x862
+#define PON_MODEM_PWR_OFF_CTL   0x863
 #define RTC_REG_READ            0x48
 
 static int64_t rtc_seconds_value = -1;
@@ -264,18 +264,18 @@ clock_report(uint32_t channel)
 }
 
 /*
- * The power-on block's registers 0x60-0x6f, read-only. The modem power-off pair
- * is 0x62/0x63: the vendor's qpnp_pon_modem_pwr_off (which the Mi 10S's esoc
- * stack calls before it wakes its SDX55M) writes 0x63 = 0 and then 0x62 = the
- * value, and the 0x80/0xa5 arm-and-fire pair lands on 0x63/0x64. Nothing here
- * writes them -- they make the supplies; this only says what they hold.
+ * The power-on block's registers 0x860-0x86f, read-only. The block sits at
+ * reg 0x800 in the PMIC (the phone's DT: qcom,power-on@800), so the modem
+ * power-off pair the vendor's qpnp_pon_modem_pwr_off writes is the PMIC's
+ * 0x862/0x863: 0x863 = 0, a pause, then 0x862 = the reason (1 = warm reset).
+ * Nothing here writes them; this only says what they hold.
  */
 static void
 pon_report(uint32_t channel)
 {
 	for (unsigned base = PON_REG_FIRST; base < PON_REG_FIRST + PON_REG_COUNT; base += 8) {
 		uint8_t b[8];
-		const char *problem = spmi_read(channel, (uint8_t)base, b, 8);
+		const char *problem = spmi_read(channel, (uint16_t)base, b, 8);
 
 		if (problem != NULL) {
 			say("pmic: pon 0x%02x: %s\n", base, problem);
@@ -323,7 +323,7 @@ hakios_pmic_pon_modem_reset(void)
 			say("pmic: the modem's power-off control: %s\n", problem);
 			return -EIO;
 		}
-		delay(2000);
+		delay(50000);
 		value = 1;
 		problem = spmi_write(n, PON_MODEM_PWR_OFF, &value, 1);
 		if (problem != NULL) {

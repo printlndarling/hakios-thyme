@@ -22,6 +22,7 @@
  * PHY sequence is the phone's DTB qcom,phy-sequence (136 triples).
  */
 #include <kern/clock.h>
+#include <kern/kalloc.h>
 #include <kern/thread.h>
 #include <mach/mach_types.h>
 #include <machine/machine_routines.h>
@@ -29,13 +30,19 @@
 #include <pexpert/pexpert.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
+#include <sys/uio.h>
+#include <sys/uio_internal.h>
+#include <sys/vnode.h>
+#include <sys/vnode_internal.h>
 #include <mach/vm_param.h>
+#include <vm/vm_kern.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern int umi_rpmh_wifi_power(void);
 extern int hakios_pmic_pon_modem_reset(void);
 extern kern_return_t thread_terminate(thread_t thread);
+extern uint64_t kvtophys(vm_offset_t va);
 
 #define GCC  0x00100000u
 #define PARF 0x01c10000u
@@ -572,6 +579,154 @@ mhi_peek(void)
 	}
 }
 
+/*
+ * A whole file of the scene root, in physically contiguous memory: the modem's
+ * BHI engine reads the boot image by physical address. The scene root is
+ * mounted by launchd after boot, so the lookup retries while it appears (the
+ * pcie2 thread starts 3 s in; the image is at /redwood/fw/modem/sbl1.mbn).
+ */
+static const uint8_t *
+root_file_contig(const char *name, size_t *size, vm_offset_t *memory)
+{
+	char path[96];
+	vfs_context_t context = vfs_context_kernel();
+	vnode_t vnode = NULLVP;
+	struct vnode_attr attributes;
+	vm_offset_t buffer = 0;
+	vm_size_t bytes;
+	int left = 0, error;
+
+	if (rootvnode == NULLVP) {
+		return NULL;
+	}
+	snprintf(path, sizeof(path), "/redwood/fw/%s", name);
+	if (vnode_lookup(path, 0, &vnode, context) != 0) {
+		return NULL;
+	}
+	VATTR_INIT(&attributes);
+	VATTR_WANTED(&attributes, va_data_size);
+	if (vnode_getattr(vnode, &attributes, context) != 0 || attributes.va_data_size == 0 ||
+	    attributes.va_data_size > (4u << 20)) {
+		vnode_put(vnode);
+		return NULL;
+	}
+	bytes = round_page((vm_size_t)attributes.va_data_size);
+	/*
+	 * Below 4 GB: the vendor's MHI gives the device IOVAs from the DT's
+	 * iommu-dma-addr-pool (0x20000000, 512 MB), so the boot engine is not
+	 * to be trusted with an address whose high word is nonzero; the first
+	 * BHI attempt handed it 0x1942dc000 and the PBL ignored the doorbell.
+	 */
+	if (kmem_alloc_contig(kernel_map, &buffer, bytes, PAGE_MASK, 0, 0xffffffffUL,
+	    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+		vnode_put(vnode);
+		return NULL;
+	}
+	error = vn_rdwr(UIO_READ, vnode, (caddr_t)buffer, (int)attributes.va_data_size, 0, UIO_SYSSPACE, 0,
+	    vfs_context_ucred(context), &left, vfs_context_proc(context));
+	vnode_put(vnode);
+	if (error != 0 || left != 0) {
+		kmem_free(kernel_map, buffer, bytes);
+		return NULL;
+	}
+	*size = (size_t)attributes.va_data_size;
+	*memory = buffer;
+	return (const uint8_t *)buffer;
+}
+
+/*
+ * The PBL's boot interface, the vendor's mhi_fw_load_sbl: the device sits in
+ * MHI execution environment PBL (BHI_EXECENV 0) with version 1.2, waiting for
+ * sdx55m/sbl1.mbn. The host takes the MHI core through RESET and M0
+ * (mhi_set_mhi_state, mhi_ready_state_transition), programs the window the
+ * device may read (MHICTRL and MHIDATA base/limit), hands the PBL the image's
+ * physical address and size, and rings BHI_IMGTXDB; BHI_STATUS's top two bits
+ * become 2 on success, 3 on error. Gated by pcie2_bhi=1: it writes to the
+ * modem, which the read-only runs do not.
+ */
+static void
+pcie2_bhi_try(void)
+{
+	uint32_t on = 0;
+	size_t size = 0;
+	vm_offset_t memory = 0;
+	const uint8_t *image = NULL;
+	uint64_t phys;
+	uint32_t bhioff, bhi, status = 0, mhistatus = 0, i;
+
+	if (!PE_parse_boot_argn("pcie2_bhi", &on, sizeof(on)) || on < 1) {
+		return;
+	}
+	for (i = 0; i < 30; i++) {
+		image = root_file_contig("modem/sbl1.mbn", &size, &memory);
+		if (image != NULL) {
+			break;
+		}
+		delay(1000000);
+	}
+	if (image == NULL) {
+		hakios_tl("pcie2: BHI: no /redwood/fw/modem/sbl1.mbn after 30 s\n");
+		return;
+	}
+	phys = kvtophys(memory);
+	hakios_tl("pcie2: BHI: sbl1.mbn %zu bytes at %#llx, physical %#llx\n", size, (unsigned long long)memory,
+	    (unsigned long long)phys);
+
+	bhioff = rd(MHI_BAR + 0x28);
+	bhi = MHI_BAR + bhioff;
+
+	/* the vendor's mhi_async_power_up writes the boot interrupt vector
+	 * before anything else; without it the PBL ignores the doorbell. */
+	wr(bhi + 0x20, 0);          /* BHI_INTVEC */
+	hakios_tl("pcie2: BHI: writes land? INTVEC %#x, before: imgaddr %#x/%#x size %#x\n", rd(bhi + 0x20),
+	    rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10));
+
+	/* what the device may read: the image's own range, in both windows */
+	wr(MHI_BAR + 0x80, (uint32_t)phys);
+	wr(MHI_BAR + 0x84, (uint32_t)(phys >> 32));
+	wr(MHI_BAR + 0x88, (uint32_t)(phys + size - 1));
+	wr(MHI_BAR + 0x8c, (uint32_t)((phys + size - 1) >> 32));
+	wr(MHI_BAR + 0x98, (uint32_t)phys);
+	wr(MHI_BAR + 0x9c, (uint32_t)(phys >> 32));
+	wr(MHI_BAR + 0xa0, (uint32_t)(phys + size - 1));
+	wr(MHI_BAR + 0xa4, (uint32_t)((phys + size - 1) >> 32));
+
+	/* the image, and the doorbell */
+	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
+	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
+	wr(bhi + 0x08, (uint32_t)phys);
+	wr(bhi + 0x10, (uint32_t)size);     /* BHI_IMGSIZE */
+	wr(bhi + 0x18, 0x1234567);          /* BHI_IMGTXDB */
+	hakios_tl("pcie2: BHI: wrote imgaddr %#x/%#x size %#x; read back %#x/%#x size %#x, txdb %#x, status %#x\n",
+	    (uint32_t)(phys >> 32), (uint32_t)phys, (uint32_t)size, rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10),
+	    rd(bhi + 0x18), rd(bhi + 0x2c));
+	for (i = 0; i < 200; i++) {
+		status = rd(bhi + 0x2c);
+		if (((status >> 30) & 3) == 2 || ((status >> 30) & 3) == 3) {
+			break;
+		}
+		delay(10000);
+	}
+	hakios_tl("pcie2: BHI: status %#x (result %u), errcode %#x, dbg %#x %#x %#x, execenv %#x, MHISTATUS %#x after %u ms\n",
+	    status, (status >> 30) & 3, rd(bhi + 0x30), rd(bhi + 0x34), rd(bhi + 0x38), rd(bhi + 0x3c),
+	    rd(bhi + 0x28), rd(MHI_BAR + 0x48), i * 10);
+	if (((status >> 30) & 3) == 2) {
+		/* the SBL has run: the vendor's mhi_ready_state_transition then
+		 * waits for MHISTATUS.READY, and an SBL that offers BHIE bumps
+		 * BHIEOFF. */
+		for (i = 0; i < 1000; i++) {
+			mhistatus = rd(MHI_BAR + 0x48);
+			if (mhistatus & 1) {
+				break;
+			}
+			delay(1000);
+		}
+		hakios_tl("pcie2: BHI: after the SBL: MHISTATUS %#x, execenv %#x, BHIEOFF %#x after %u ms\n",
+		    mhistatus, rd(bhi + 0x28), rd(MHI_BAR + 0x2c), i);
+	}
+	kmem_free(kernel_map, memory, round_page((vm_size_t)size));
+}
+
 static void
 endpoint(void)
 {
@@ -591,6 +746,7 @@ endpoint(void)
 	    id >> 16, classreg, bar0);
 	if (id != 0xffffffffu && id != UINT32_MAX) {
 		mhi_peek();
+		pcie2_bhi_try();
 	}
 }
 
@@ -760,6 +916,7 @@ pcie2_run(void)
 {
 	uint32_t survey = 0;
 	uint32_t power = 0;
+	uint32_t bhi = 0;
 
 	hakios_tl("pcie2: the modem's link, on the Wi-Fi's PCIe0 sequence and the phone's own registers\n");
 	for (unsigned i = 0; i < sizeof(pcie2_regions) / sizeof(pcie2_regions[0]); i++) {
@@ -772,7 +929,8 @@ pcie2_run(void)
 	pcie2_lines();
 	PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey));
 	PE_parse_boot_argn("pcie2_power", &power, sizeof(power));
-	hakios_tl("pcie2: args: survey %u, power %u\n", survey, power);
+	PE_parse_boot_argn("pcie2_bhi", &bhi, sizeof(bhi));
+	hakios_tl("pcie2: args: survey %u, power %u, bhi %u\n", survey, power, bhi);
 	if (survey == 1) {
 		hakios_tl("pcie2: survey only; the link is not touched\n");
 		return;
@@ -784,6 +942,13 @@ pcie2_run(void)
 	if (power == 1) {
 		pcie2_power();
 		return;
+	}
+	/* pcie2_bhi=2 is the vendor's first power-on before the link: the PMIC
+	 * warm reset (qpnp_pon_modem_pwr_off(1), now that the PMIC bus has a
+	 * write path), a pause, and then the AP2MDM_STATUS handshake below. */
+	if (bhi >= 2) {
+		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
+		delay(150000);
 	}
 	/* the default path: the four ext-sdx55m lines in the modem's active
 	 * state -- mdm2ap status and errfatal as inputs, ap2mdm status high,
