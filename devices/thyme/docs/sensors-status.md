@@ -111,17 +111,37 @@ being the first client of that boot) and not a transport artefact.
   nested names (192 bytes). One boot now sends **188 of 189** groups — the
   one left is `sensors_registry`, an empty file — without a panic
   (`logs/142126-run.log`), and every write is answered **result 5**, as the
-  client request and the config are. The bytes themselves are right:
-  `tools/qrtrprobe2.c` (a freestanding probe built from the same encoders)
-  sends the same read and write requests to the phone's DSP on Android and
-  gets **result 0** for the group `ak0991x_0`, for an int-only group
-  and for a name the DSP has never seen (`hakios_test_group`) — so a fully
-  started DSP creates groups from this exact wire form. What our boot lacks
-  is the registry sensor's own instance state; the phone's DSP also answers
-  `tools/qrtrprobe2.c`'s read of `lsm6dso_0`, while our boot never sees a
-  read event. The registry's persist directory, read through the reverse
-  file API, and the client manager it feeds are the two candidates for the
-  next step.
+  client request and the config are. The bytes and the message id were not
+  the whole story after all: see the 0x202 bullet below, which shows that
+  the "result 0" the probe saw on the phone was an ACK the client service
+  gives any message of that kind, and that the write had gone out as a
+  read_event. What had been settled with the probe is the protobuf itself:
+  the same item and subgroup encoding is what the phone's DSP accepts.
+- **The registry write went out under the wrong message id** (10 November,
+  later): the registry suite's enum is read_req 0x200, read_event 0x201,
+  write_req **0x202**, write_event 0x300 (`libsnsapi`'s
+  `sns_registry_msgid_IsValid` accepts `msgid - 0x200 < 3 || msgid == 0x300`,
+  in the .proto's order). Every write this driver made — the `sns_cm` group
+  and later the 188 group files — went out as 0x201, a *read_event*, and the
+  SNS client service acknowledges such a message whatever it holds: on the
+  phone, a write sent to an SUID that does not exist (all 0xab) is answered
+  result 0 exactly as one sent to the registry's own SUID
+  (`tools/qrtrprobe2.c`). So "accepted with result 0" never meant the
+  registry took the group. Writes now use 0x202 (`logs/164538-run.log`:
+  QMI 514). The registry read path (0x200) has never produced a read_event,
+  on the phone or in this kernel: the 8-byte client id in TLV 0x10 that a
+  first message's reply carries is rejected at the QMI layer, the 1-byte one
+  is accepted and still silent, so a write cannot yet be confirmed by reading
+  the group back.
+- **What still gates every request is the client service's own readiness**,
+  not the message contents: the same 0x202 write is answered result 0 in some
+  boots (`logs/124920-run.log`) and result 5 in most, with the same bytes,
+  the same 35–40 s after the sensor process starts and the same two
+  `apps_std` calls served (`logs/154557-run.log` against
+  `logs/124920-run.log`). Whether a ready boot now stores `sns_cm` and lets
+  message 1 through is what the next run with 0x202 has to show; the
+  registry's persist directory, read through the reverse file API, and the
+  client manager it feeds remain the two candidates for the difference.
 - **The registry sensor's answer varies boot to boot** (10 November, the
   same evening): with the write alone (`sns_registry_write=1`, no upload) one
   boot is healthy — the sensor process opens its `apps_std` module and reads

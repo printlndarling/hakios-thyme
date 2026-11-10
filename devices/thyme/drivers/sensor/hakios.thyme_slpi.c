@@ -3308,9 +3308,17 @@ sns_registry_read(const char *group, const uint8_t suid[16])
 	sns_qmi_send(0x200, suid, inner, (uint32_t)(p - inner));
 }
 /*
- * REGISTRY_WRITE_REQ (0x201) for one group: `{1: name, 2: {3: [{1: item,
+ * REGISTRY_WRITE_REQ for one group: `{1: name, 2: {3: [{1: item,
  * 2: version, 13: sfixed64 value}...]}}` -- the protobuf layout read off
  * libsnsapi (slpi-fastrpc.md) and the sns_cm persist file's own items.
+ *
+ * The message id is 0x202: the registry enum runs read_req 0x200,
+ * read_event 0x201, write_req 0x202, write_event 0x300 (libsnsapi's
+ * sns_registry_msgid_IsValid: `msgid - 0x200 < 3 || msgid == 0x300` with
+ * that order). The earlier writes went out as 0x201 -- a read_event sent as
+ * a request -- which the client service acknowledges whatever its target
+ * (a write to an SUID that does not exist is answered result 0 too, on the
+ * phone) and the registry never sees.
  */
 static void
 sns_registry_write_cm(const uint8_t suid[16])
@@ -3342,7 +3350,7 @@ sns_registry_write_cm(const uint8_t suid[16])
 		snprintf(shown + 2 * i, 3, "%02x", suid[i]);
 	}
 	printf("slpi: sns: writing the registry group \"sns_cm\" to SUID %s\n", shown);
-	sns_qmi_send(0x201, suid, payload, (uint32_t)(s - payload));
+	sns_qmi_send(0x202, suid, payload, (uint32_t)(s - payload));
 }
 
 /* ---- the registry's group files, parsed and sent as write requests ---------------- */
@@ -3542,7 +3550,7 @@ sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[1
 	s = payload;
 	s = sns_bytes(s, 1, group->name, (uint32_t)strlen(group->name));
 	s = sns_bytes(s, 2, group->data, group->length);
-	sns_qmi_send(0x201, suid, payload, (uint32_t)(s - payload));
+	sns_qmi_send(0x202, suid, payload, (uint32_t)(s - payload));
 	result = 0;
 done:
 	kfree_data(group, sizeof(*group));
