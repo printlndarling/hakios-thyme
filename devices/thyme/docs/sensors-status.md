@@ -84,10 +84,16 @@ being the first client of that boot) and not a transport artefact.
   address a registry group is read from or written to, and none of the seven
   candidates tried earlier was it. The `sns_cm` file in the scene holds the
   client manager's `heap_size` (1572864), `max_batch_disabled` (0) and
-  `min_batch_period_thrshld_ms` (10); the driver can now send a
+  `min_batch_period_thrshld_ms` (10); the driver sends a
   `REGISTRY_WRITE_REQ` (0x201) with exactly those items to that SUID
-  (`sns_registry_write=1`). The write's answer and whether it makes the
-  client manager come up is the next test.
+  (`sns_registry_write=1`). The write is **accepted with result 0**
+  (`logs/124920-run.log`, `logs/130603-run.log`) — the first sensor message
+  this DSP has taken — but message 1 and the config still answer 5, whether
+  the heap is grown on the FastRPC client the attach used (0) or on client 1,
+  and the DSP makes no file call afterwards, so the group may live in the
+  service's memory without reaching the client manager. A write that adds the
+  persist file's "owner" as a string item (194 bytes) is not answered at all;
+  the 169-byte one without it is the accepted form.
 - **The heap is in place and `grow_heap` accepts it**: the loader scans the
   firmware's memory map (the phone's map has `b0000000-bbb00000` and
   `c0000000-f0000000` free below 4 GB) for an 8 MB, 4 MB-aligned free range
