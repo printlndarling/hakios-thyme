@@ -179,3 +179,20 @@ Dumping the `clk_branch` structs there (halt/enable fields at their offsets, `hw
   0x6000; the PHY reset, which PCIe0 takes at 0x6c01c bit 0, still needs its PCIe2 bit.
   That, and the PHY sequence from the phone's DT (`qcom,pcie@1c10000`), are what a PCIe2
   link-up diagnostic needs next; the DT sequence is already in the pulled `dts`.
+
+### PCIe2: clocks come up, the link attempt hangs until the modem is powered (2026-11-10)
+
+The first link diagnostic (`pcie2_test=1`, `devices/thyme/drivers/modem/hakios.thyme_pcie2.c`,
+built with `CONFIG_HAKIOS_THYME_MODEM_PCIE`) runs on a thread three seconds after
+`hakios_goodix_init`, on the Wi-Fi PCIe0 sequence with the registers read out of the vendor
+kernel. The first run reached `pcie2: power and clocks ready (GDSC 0xf822f000)`
+(`logs/213357-run.log`) and then hung inside link training: the loader reported "hung" and
+restarted the phone. The second, with the waits shortened and a print at each stage,
+produced no log at all (`logs/214315-run.log`). Touching PARF/PHY/DBI while the SDX55M is
+not powered and booted can stall the AP's interconnect, so the link sequence cannot be tried
+before the modem's own power and boot control: the DT's `qcom,ext-sdx55m` esoc node
+(`phandle 0x60`: `ap2mdm-status` GPIO 0x38, `mdm2ap-status` 0x03, errfatal 0x39/0x01,
+pinctrl mdm_active/mdm_suspend, `qcom,sfr-query`) is what Android's esoc driver drives
+before the pcie-msm probe, and that sequence is the next thing to port (its code is in the
+vendor kernel image, like the clock tables were). Until then `pcie2_test=1` should not be
+used on this phone.

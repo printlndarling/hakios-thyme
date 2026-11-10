@@ -1,0 +1,9 @@
+# drivers/modem/conf: the SDX55M's PCIe2 link (the reference phone's SMEM/GLINK
+# modem driver cannot start on this one: the phone's DT has no glink/modem).
+
+driver THYME_MODEM_PCIE
+	file    bsd/dev/hakios.thyme_pcie2.c
+	requires MODEM
+	help    the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and
+	help    GDSC, the PHY's own sequence from the phone's DTB, link training
+	help    and the endpoint's configuration space (pcie2_test=1).

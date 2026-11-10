@@ -474,6 +474,12 @@ void
 hakios_goodix_init(void)
 {
 	extern void umi_bluetooth_init(void);
+#ifdef HAKIOS_THYME_MODEM_PCIE
+	extern void hakios_thyme_pcie2_test(void);
+
+	/* pcie2_test=1 only: the modem's PCIe2 link, on a thread, after the system starts */
+	hakios_thyme_pcie2_test();
+#endif
 
 	umi_touch_init();
 #ifdef HAKIOS_THYME_DISPLAY
