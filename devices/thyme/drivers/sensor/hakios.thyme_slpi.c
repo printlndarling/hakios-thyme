@@ -5686,6 +5686,9 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			result = (int32_t)AEE_ENOMEMORY;
 			break;
 		}
+		if (fastrpc_debug) {
+			printf("slpi: fastrpc: apps_std: fwrite %u bytes to %s\n", in[1].size, file->path);
+		}
 		numbers[0] = in[1].size;
 		numbers[1] = 0;
 		result = 0;
@@ -5708,16 +5711,30 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		}
 		store = fastrpc_store_find(path);
 		if (store == NULL) {
+			printf("slpi: fastrpc: apps_std: fremove %s: not in the store\n", path);
 			result = (int32_t)AEE_EFAILED;
 			break;
 		}
 		fastrpc_store_remove(store);
+		printf("slpi: fastrpc: apps_std: fremove %s\n", path);
 		result = 0;
 		break;
 	}
-	case 29:                           /* mkdir: the store needs no directories */
-		result = in[1].size != 0 ? 0 : (int32_t)AEE_EBADPARM;
+	case 29: {                         /* mkdir: the store needs no directories */
+		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
+		char path[FASTRPC_STORE_PATH];
+
+		if (name == NULL) {
+			result = (int32_t)AEE_EBADPARM;
+			break;
+		}
+		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
+			snprintf(path, sizeof(path), "%s", name);
+		}
+		printf("slpi: fastrpc: apps_std: mkdir %s\n", path);
+		result = 0;
 		break;
+	}
 	case 26: {                         /* opendir */
 		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
 		char path[160];
@@ -5824,11 +5841,13 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 				stats->mode = 0100666;      /* S_IFREG | rw-rw-rw- */
 				stats->nlink = 1;
 				stats->size = store->size;
+				printf("slpi: fastrpc: apps_std: stat %s: the store's %u bytes\n", path, store->size);
 				result = 0;
 				break;
 			}
 		}
 		if (vnode_lookup(path, 0, &vnode, context) != 0) {
+			printf("slpi: fastrpc: apps_std: stat %s: not there\n", path);
 			result = (int32_t)AEE_EFAILED;
 			break;
 		}
@@ -5843,6 +5862,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			stats->mode = (uint32_t)attributes.va_mode;
 			stats->nlink = 1;
 			stats->size = attributes.va_data_size;
+			printf("slpi: fastrpc: apps_std: stat %s: %llu bytes\n", path, attributes.va_data_size);
 			result = 0;
 		}
 		vnode_put(vnode);

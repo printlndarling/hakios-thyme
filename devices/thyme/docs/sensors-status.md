@@ -489,7 +489,11 @@ The first thing the next sensor run will show is whether the fresh PD
 (`fastrpc_restart=4`) reaches the registry parser: the parser opens
 `/vendor/etc/sensors/sns_reg_config`, the config directory and the persist
 output directory, and any of those calls in the log is the signal that the
-registry sensor finally started.
+registry sensor finally started. Every file-API call now says so on the
+console -- `fopen` (read and write), `stat` (the store's file or the image's,
+with the size or "not there"), `mkdir` and `fremove`, besides `opendir`'s
+entry count -- so the parser's first step is visible even when it only stats
+the config path.
 
 ### The registry SUID is the firmware's own UID (2026-11-11)
 
