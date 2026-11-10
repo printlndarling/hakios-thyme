@@ -73,23 +73,32 @@ being the first client of that boot) and not a transport artefact.
   heap from the reserved `sdsp_region` — an 8 MB, 4 MB-aligned,
   `shared-dma-pool` reserved-memory node, dynamically placed and assigned to
   ION heap 22 (`soc:qcom,ion:qcom,ion-heap@22: assigned reserved memory node
-  sdsp_region` in the phone's dmesg). Two shortcuts crash the DSP instead:
-  the shared-memory partition as the heap takes the sensor process's fastrpc
-  down in a memcpy (PC 0xb20c2dac, `logs/092656-run.log`, `logs/093452-run.log`),
-  and a kernel-contiguous physical range (4 MB of `kmem_alloc_contig`) takes
-  the DSP's kernel down in its logging path (PC 0xb01c1f2c,
-  `logs/095514-run.log`). The `sdsp_region` also needs the DSP's access to be
-  granted (SCM/XPU), which is the next piece.
+  sdsp_region` in the phone's dmesg). `remotectl_grow_heap`'s address is
+  **32 bits** (the IDL's `uint32 phyAddr`), and a kernel allocation lands
+  above 4 GB: every attempt offered 0x1a1400000, whose truncated low half is
+  a meaningless address to the DSP. The shared-memory partition as the heap
+  takes the sensor process's fastrpc down in a memcpy (PC 0xb20c2dac,
+  `logs/092656-run.log`, `logs/093452-run.log`); a kernel-contiguous range
+  above 4 GB takes the DSP's kernel down in its logging path (PC 0xb01c1f2c,
+  `logs/095514-run.log`, `logs/102239-run.log`), and XNU's
+  `kmem_alloc_contig` ignored both `max_pnum = 0xfffff` and `KMA_LOMEM` (the
+  request is met by the same high range, `logs/102937-run.log`). The heap has
+  to be a range the loader reserves below 4 GB (the way the phone reserves
+  `sdsp_region`), with the DSP's access granted to it — that is the next
+  piece, not an arbitrary allocation.
 
 ## The next pieces, in order
 
-1. **Give the sensor process its heap from the sdsp region**: find where the
-   phone's `sdsp_region` lands at run time (its `alloc-ranges` is dynamic;
-   the phone assigns it to ION heap 22), reserve that range for the DSP in
-   the loader/DT and grant the SLPI access (the PAS/SCM XPU assignment), then
-   offer it with `remotectl_grow_heap` after the attach (`fastrpc_grow_kb`,
-   `fastrpc_grow_after`). With the heap in place message 1 should answer with
-   a client id instead of result 5.
+1. **Give the sensor process its heap from a loader-reserved range**: the
+   interface's `phyAddr` is 32 bits, so the range must lie below 4 GB — a
+   runtime `kmem_alloc_contig` does not (XNU placed every attempt at
+   0x1a1400000 and ignored both `max_pnum` and `KMA_LOMEM`). Reserve a range
+   in the loader's memory map the way the phone reserves `sdsp_region`
+   (8 MB, 4 MB-aligned; ION heap 22 there), grant the SLPI access to it (the
+   PAS/SCM XPU assignment), then offer it with `remotectl_grow_heap` after
+   the attach (`fastrpc_grow_kb`, `fastrpc_grow_after`, `fastrpc_grow_ddr`).
+   With the heap in place message 1 should answer with a client id instead
+   of result 5.
 2. **Then the registry upload**: the client manager needs the group `sns_cm`;
    the phone's HAL uploads the groups over the SNS client service with the
    `SNS_REGISTRY_WRITE_REQ` protobuf (message ids and field layout in

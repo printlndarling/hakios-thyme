@@ -5261,25 +5261,52 @@ fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 	 * address is one the DSP already maps for GLINK/SMP2P, and the sensor
 	 * process's fastrpc memcpy into it crashed at 0xb20c2dac; a kernel range
 	 * crashed the DSP's own kernel in its logging path (0xb01c1f2c,
-	 * logs/095514-run.log). The phone's heap is the reserved sdsp_region,
-	 * whose access the DSP has been granted; that region -- not an arbitrary
-	 * range -- is what this needs (docs/sensors-status.md).
+	 * logs/095514-run.log). The interface's phyAddr is 32 bits (the IDL's
+	 * uint32), and XNU placed every attempt at 0x1a1400000 -- above 4 GB --
+	 * even with max_pnum 0xfffff and KMA_LOMEM (logs/102937-run.log). What
+	 * this needs is a range the loader reserves below 4 GB, granted to the
+	 * SLPI the way the phone's sdsp_region is (docs/sensors-status.md).
 	 */
 	if (fastrpc_grow_ddr) {
 		vm_offset_t memory = 0;
+		vm_size_t bytes;
+		uint64_t heap_physical, aligned;
+		uint32_t delta;
 
+		/*
+		 * The phone's sdsp_region is 4 MB aligned; the DSP's heap mapping
+		 * takes the address at that granularity, so the range is taken 4 MB
+		 * larger and the start moved up to the next 4 MB boundary.
+		 *
+		 * The address must also fit the interface: remotectl_grow_heap's
+		 * phyAddr is 32 bits (the IDL's uint32), and a kernel allocation may
+		 * well lie above 4 GB (the camera's frames did, at 0x104594000), so
+		 * the range is asked for below 4 GB.
+		 */
 		heap_size = (fastrpc_grow_kb > 16384 ? 16384 : fastrpc_grow_kb) << 10;
-		while (heap_size >= 0x10000 &&
-		    kmem_alloc_contig(kernel_map, &memory, heap_size, PAGE_MASK, 0, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
-		    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
-			heap_size >>= 1;
+		bytes = round_page((vm_size_t)heap_size + 0x400000);
+		while (bytes >= 0x100000 &&
+		    kmem_alloc_contig(kernel_map, &memory, bytes, PAGE_MASK, 0xfffff, 0,
+		    KMA_KOBJECT | KMA_ZERO | KMA_DATA | KMA_LOMEM, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+			bytes >>= 1;
 		}
 		if (memory == 0) {
 			printf("slpi: fastrpc: no contiguous memory for a %u KB remote heap\n", fastrpc_grow_kb);
 			return;
 		}
-		printf("slpi: fastrpc: offering the DSP a %u KB kernel heap at %#llx\n", heap_size >> 10, kvtophys(memory));
-		fastrpc_grow_heap(kvtophys(memory), heap_size, physical, shared_offset, shared, packet);
+		heap_physical = kvtophys(memory);
+		aligned = (heap_physical + 0x3fffff) & ~0x3fffffULL;
+		delta = (uint32_t)(aligned - heap_physical);
+		if ((uint64_t)delta + heap_size > bytes) {
+			heap_size = (uint32_t)(bytes - delta) & ~0x3fffffu;
+		}
+		if (heap_size < 0x100000) {
+			printf("slpi: fastrpc: the contiguous range leaves no 4 MB-aligned heap\n");
+			return;
+		}
+		printf("slpi: fastrpc: offering the DSP a %u KB kernel heap at %#llx (aligned from %#llx)\n", heap_size >> 10,
+		    aligned, heap_physical);
+		fastrpc_grow_heap(aligned, heap_size, physical, shared_offset, shared, packet);
 		return;
 	}
 	while (kb >= 16 && (heap = fastrpc_smem_item_size(ITEM_FASTRPC_GROW, kb << 10, &grow_offset)) == NULL) {
@@ -5675,6 +5702,10 @@ fastrpc_first_calls(uint32_t stage)
 	}
 	bool attached = fastrpc_attach_late || fastrpc_bare ||
 	    fastrpc_call(0, 1, 0x10000, 0x102, physical, size, 2000, "INIT_ATTACH_SNS");
+	if (fastrpc_grow_after && attached) {
+		/* the sensors PD exists now: the heap it refused before the attach */
+		fastrpc_offer_heap(physical, shared_offset, shared, packet);
+	}
 	if (attached && fastrpc_delay != 0) {
 		/* the first registry read has no listener and fails: wait for the process to be restarted */
 		printf("slpi: fastrpc: waiting %u s before the listener exists\n", fastrpc_delay);
