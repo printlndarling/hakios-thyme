@@ -118,3 +118,23 @@ after it) cannot run. What to read next: the phone's own device tree (`/sys/firm
 the `qcom,smem` partitions property, `qcom,glink/modem`, `qcom,smp2p-modem`) to learn
 whether this platform carries the AP-modem IPC in shared memory at all or over MHI/IPA
 only, and which part of the boot chain creates the partitions that are there.
+
+### The phone's own device tree answers it (2026-11-10)
+
+`/sys/firmware/fdt` has no `qcom,glink/modem` child (its `qcom,glink` node has npu, adsp,
+dsps, cdsp and spss only) and no `qcom,smp2p-modem` either: the AP-modem IPC of this
+platform is not in shared memory at all, so the SMEM/GLINK driver the reference phone
+taught the code cannot start here, and creating a partition would not help. The modem is a
+separate die on **PCIe2 over MHI**: `/soc/qcom,pcie@1c10000` (parf 0x1c10000, phy
+0x1c16000, dm_core 0x64000000, elbi 0x64000f20, iatu 0x64001000, conf 0x64100000; its
+root port `pcie2_rp` holds `qcom,mhi@0`: `esoc-names = "mdm"`, `mhi,max-channels = 0x6f`,
+`mhi,buffer-len = 0x8000`, SFR support, channels LOOPBACK, SAHARA, ...). The IPA is the
+same one the tree's driver already runs (`qcom,ipa@1e00000`, `qcom,rmnet-ipa`), and the
+`mhi-netdev0` alias points at `.../qcom,mhi@0/mhi_devices/mhi_rmnet@0`.
+
+So cellular on thyme is not the reference driver's problem of one missing item: it needs
+the PCIe2 link (PHY, clocks, power, link training), the MHI host stack over it (registers,
+event rings, channels, BHI/SFR), ESOC to power and boot the modem (`mdm`), QRTR over the
+MHI QRTR channel for the 88 QMI services, and then the existing QMI/NAS/WDS code on that
+transport, with the IPA data path unchanged. The reference driver (`hakios.mpss.c`, SMEM,
+GLINK, SMP2P) stays as it is for that phone; thyme needs the PCIe/MHI bring-up beside it.
