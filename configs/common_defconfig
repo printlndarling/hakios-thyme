@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 411 symbols in 19 groups; 44 are set, 35 of them drivers built in.
+# 499 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (35)
+# Drivers built in (37)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -121,8 +121,14 @@ CONFIG_HAKIOS_THYME_HAPTIC=y
 # ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and ... [hakios.thyme_touch.c, hakios.thyme_touch_boost.c, hakios.thyme_rpmh.c, hakios.thyme_keys.c]
 CONFIG_HAKIOS_THYME_INPUT=y
 
+# the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and GDSC, the PHY's own sequence from the phone's DTB, ... [hakios.thyme_pcie2.c; requires CONFIG_HAKIOS_MODEM]
+CONFIG_HAKIOS_THYME_MODEM_PCIE=y
+
 # THYME board address overrides, EPSS/RPMh CPU frequency control and TSENS thermal governors (cpufreq=1, thermal=1). [hakios.thyme_board.c, hakios.thyme_cpufreq.c, hakios.thyme_thermal.c]
 CONFIG_HAKIOS_THYME_POWER=y
+
+# the Xiaomi Mi 10S SLPI sensor core: its signed firmware from fw-slpi/, TrustZone startup, GLINK and the QRTR ... [hakios.thyme_slpi.c, hakios.thyme_slpi_dma.cpp]
+CONFIG_HAKIOS_THYME_SLPI=y
 
 # QCA6390 PCIe/MHI, QMI/WLFW, station and Apple80211 surface (wifi=1). Needs QCA6390 firmware from fw-wifi/. [hakios.thyme_wifi.c, hakios.thyme_wlfw.c, hakios.thyme_lx.c, hakios.thyme_apple80211.c, hakios.thyme_qmi.c, hakios.thyme_qca6390.c, hakios.thyme_mhi.c, hakios.thyme_pcie.c, hakios.thyme_sta.c, hakios.thyme_wlan.cpp]
 CONFIG_HAKIOS_THYME_WIFI=y
@@ -359,7 +365,7 @@ CONFIG_TOUCHSCREEN=y
 # CONFIG_VIRTIO_INPUT is not set
 
 #
-# GPU and display (78)
+# GPU and display (83)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -422,6 +428,9 @@ CONFIG_GPU=y
 # read by MiniIOMobileFramebuffer.cpp, hakios.thyme_display.c (kernel)
 # CONFIG_FB_HZ is not set
 
+# the registers of the display interface the panel is on, for a port
+# CONFIG_FB_INTF is not set
+
 # how often the panel is really refreshed
 # CONFIG_FB_MEASURE is not set
 
@@ -446,7 +455,7 @@ CONFIG_GPU=y
 # log the first N calls of every selector (default 3)
 # CONFIG_FBTRACE is not set
 
-# read by MiniIOMobileFramebuffer.cpp (kernel)
+# read by MiniIOMobileFramebuffer.cpp, inject_sb.c (kernel and user space)
 # CONFIG_FBWIDTH is not set
 
 # the surface's memory, as before
@@ -561,7 +570,19 @@ CONFIG_GPU=y
 # CONFIG_PANEL_DSI_PROBE is not set
 
 # read by hakios.thyme_display.c (kernel)
+# CONFIG_PANEL_RATE_GPIO is not set
+
+# read by hakios.thyme_display.c (kernel)
 # CONFIG_PANEL_SEQ is not set
+
+# read by hakios.thyme_display.c (kernel)
+# CONFIG_PANEL_TE_DCS is not set
+
+# count the edges of the panel's TE line itself
+# CONFIG_PANEL_TE_PROBE is not set
+
+# count the edges of the panel's TE line (the device tree's platform-te-gpio, pin 66) for about a second
+# CONFIG_PANEL_TE_RATE is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_REC_MB is not set
@@ -645,7 +666,7 @@ CONFIG_SOUND=4
 # read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_WAIT is not set
 
-# read by hakios.adsp.c, hakios.battery.c, hakios.thyme_adsp.c, loader.c (kernel and loader)
+# read by hakios.adsp.c, hakios.battery.c, hakios.thyme_adsp.c, hakios.thyme_slpi.c, loader.c (kernel and loader)
 # CONFIG_BATTERY is not set
 
 # every property once, for the log (which number is which on this phone's firmware)
@@ -1026,25 +1047,25 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.camera.c, hakios.thyme_camera.c (kernel)
 # CONFIG_CAM_FRAMES is not set
 
-# read by hakios.camera.c, hakios.thyme_camera.c (kernel)
+# read by hakios.camera.c, hakios.thyme_camera.c, hakios.thyme_umi_camera.c (kernel)
 # CONFIG_CAM_GAIN is not set
 
 # read by hakios.camera.c, hakios.thyme_camera.c (kernel)
 # CONFIG_CAM_KEEP_MB is not set
 
-# read by hakios.camera.c, hakios.thyme_camera.c (kernel)
+# read by hakios.camera.c, hakios.thyme_camera.c, hakios.thyme_umi_camera.c (kernel)
 # CONFIG_CAM_MODE is not set
 
 # read by hakios.camera.c, hakios.thyme_camera.c (kernel)
 # CONFIG_CAM_PATTERN is not set
 
-# read by hakios.camera.c, hakios.thyme_camera.c (kernel)
+# the S5K3T2 on CSIPHY 4 (DT cam-sensor@2) instead of the S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's ...
 # CONFIG_CAM_SENSOR is not set
 
 # read by hakios.camera.c, hakios.thyme_camera.c (kernel)
 # CONFIG_CAM_SETTLE is not set
 
-# read by hakios.camera.c, hakios.thyme_camera.c (kernel)
+# read by hakios.camera.c, hakios.thyme_camera.c, hakios.thyme_umi_camera.c (kernel)
 # CONFIG_CAM_SHUTTER is not set
 
 # read by hakios.camera.c, hakios.thyme_camera.c (kernel)
@@ -1192,7 +1213,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (32)
+# User space (113)
 #
 
 # read by inject_sb.c (user space)
@@ -1213,8 +1234,146 @@ CONFIG_MODEM_AGAIN=y
 # CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
 # CONFIG_CAENV is not set
 
+# the first frame of the wide camera's real session, for xl camera
+# CONFIG_CAM_DUMP is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_FOCUS is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_FRAME_LINES is not set
+
+# read by hakios.thyme_camera.c (kernel)
+# CONFIG_CAM_FRAME_MIN is not set
+
+# read by hakios.thyme_camera.c (kernel)
+# CONFIG_CAM_FRONT_FRAME_MIN is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_FRONT_HOLD is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_FRONT_LITE0 is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_GAIN2 is not set
+
+# the UMI modes the sessions run, whole -- the wide's mode 3 at 3008x2256 and the front's mode 1 at 2592x1940, not a ...
+# CONFIG_CAM_REAL is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_SHUTTER2 is not set
+
 # read by inject_sb.c (user space)
 # CONFIG_CC_FADE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ASSIGN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH0 is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH_CLIENT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH_DELAY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH_LATE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH_MID is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_ATTACH_TID is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_BARE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CALL is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CLIENT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CLOSE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CREATE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CREATE_PD is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_CREATE_PROBE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_DEBUG is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_DELAY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_EARLY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_GROW_AFTER is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_GROW_DDR is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_GROW_KB is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_HEAP_MB is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_HEAP_SMEM is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_LHANDLE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_LISTENER1 is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_LISTENER_TID is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_OPEN_AFTER is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_OPEN_ASYNC is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_OPEN_PD is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_OPEN_WAIT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_PD is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_PHONE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_RESTART is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_SMMU is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_STATIC_OPEN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_TID is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_WAIT is not set
 
 # not even with a GPU; gl=1: also without one, by Mesa's software driver (slow; for working on eagl.c in QEMU)
 # CONFIG_GL is not set
@@ -1270,8 +1429,113 @@ CONFIG_MODEM_AGAIN=y
 # read by inject.c (user space)
 # CONFIG_METAL_WATCH is not set
 
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_BHI is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_BHI_BAD is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_IMG is not set
+
+# leave the endpoint's PERST alone
+# CONFIG_PCIE2_KEEP is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_POWER is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_SID is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_SURVEY is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_TEST is not set
+
 # the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
 # CONFIG_ROOT_APFS is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SERVREG is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_AGAIN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_APR_WAIT is not set
+
+# let the system start first. The loader fetches this log every few seconds while the kernel runs, so a step that ...
+# CONFIG_SLPI_DELAY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_DUMP_HEX is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_DUMP_ITEM is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_HEAP_PA is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_HEAP_SIZE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_KEEP is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_LISTEN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_NEW is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_PAUSE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_RETURN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_SMEM_DUMP is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_STEP is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_WAIT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_ACCEL_DIRECT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_CLIENT_PROBE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_GYRO_DIRECT is not set
+
+# the listener and the file service stay, but no SNS message goes out
+# CONFIG_SNS_QUIET is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_RAW is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_REGISTRY_PROBE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_REGISTRY_UPLOAD is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_REGISTRY_WRITE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_WRITE_TRIES is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set
