@@ -409,11 +409,13 @@ boot holds: `registry/sns_reg_version` = `version=4` and the 189 group files
 by the DSP itself through this same file API. So the file API is the right
 one; the DSP is simply not reaching the code that uses it in these boots.
 
-Two experiments are prepared for the next run: `fastrpc_wait=S` holds the
-chain back until the DSP's control plane answers (the listener's open, init2
-and next2 all returned AEE 0x80000434 when the chain ran 2 s after the DSP
-appeared, and worked 30 s in), and `fastrpc_restart=4` releases the sensor PD
-after the listener is initialized and attaches it again with a fresh init2,
-so the registry read runs with a working listener from its first instruction
-(the plain restart=1 left the DSP answering no next2 at all,
-`logs/112921-run.log`).
+Two experiments are prepared for the next run. `fastrpc_restart=4` releases
+the sensor PD after the listener is initialized and attaches it again with a
+fresh init2, so the registry read runs with a working listener from its first
+instruction; the plain restart=1 left the DSP answering no next2 at all
+(`logs/112921-run.log`), and a listener session belongs to the PD it was
+initialized for, so it has to be initialized again. `fastrpc_wait=S` is a
+plain delay before the chain; it does not repair the 0x80000434 answers seen
+when the listener calls ran before the PD existed -- those decode to
+`AEE_EINVALIDPROCESS` (`AEE_EOFFSET + 0x34`), i.e. no user PD yet, so the
+attach must come first (`logs/121802-run.log`).

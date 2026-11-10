@@ -6256,12 +6256,13 @@ fastrpc_first_calls(uint32_t stage)
 	}
 	if (fastrpc_wait != 0) {
 		/*
-		 * The DSP's FastRPC control calls (the default listener's open, init2 and
-		 * next2) answered AEE 0x80000434 when the chain ran 2 s after the DSP
-		 * appeared (logs/121101-run.log, logs/121802-run.log) and worked 30 s in
-		 * (logs/082231-run.log).  Give the control plane its time before using it.
+		 * A plain delay before the chain, for tests that want the DSP to settle
+		 * after its boot first.  (The 0x80000434 answers seen when the listener
+		 * calls ran before the sensors PD existed decode to AEE_EINVALIDPROCESS,
+		 * not to a timing fault: the PD must be attached before its listener
+		 * session can be initialized.)
 		 */
-		printf("slpi: fastrpc: waiting %u s for the DSP's control plane\n", fastrpc_wait);
+		printf("slpi: fastrpc: waiting %u s before the chain\n", fastrpc_wait);
 		sleep_ms(fastrpc_wait * 1000);
 	}
 	if (shared) {
