@@ -9,11 +9,17 @@
  * train the link, and read the endpoint's configuration space. Nothing is
  * flashed and no DMA is enabled; pcie2_test=1 asks for it.
  *
- * The GCC registers are not in any local table: they were read out of the
- * phone's own kernel (docs/cellular.md has the method and the numbers) --
- * GDSC 0x6004, CBCRs 0x6010-0x602c, refgen 0x6038, branch votes at 0x52010
- * (bits 10-15), core reset 0x6000. The PHY sequence is the phone's DTB
- * qcom,phy-sequence of qcom,pcie@1c10000 (136 triples).
+ * The sequence now follows the vendor's own msm_pcie_enable() and
+ * msm_pcie_link_train() from the CAF SM8250 tree (drivers/pci/controller/
+ * pci-msm.c), which is the code the phone's kernel runs: PERST (GPIO 85,
+ * active low) held while the PARF block and PHY are set up, the PHY ready
+ * poll at qcom,phy-status-offset 0xa14 bit 6 (clear = ready), then the
+ * endpoint is released and the DBI link-training writes run. The clocks are
+ * the vendor's clk_branch data from the phone's own kernel Image: GDSC
+ * 0x6004, CBCRs 0x6010-0x602c, refgen source 0x6f014, refgen branch
+ * 0x6f034 bit 0, branch votes 0x52010 bits 10-15, and the two resets the
+ * DT names -- GCC_PCIE_2_BCR 0x6000 and GCC_PCIE_2_PHY_BCR 0x1f01c. The
+ * PHY sequence is the phone's DTB qcom,phy-sequence (136 triples).
  */
 #include <kern/clock.h>
 #include <kern/thread.h>
@@ -28,12 +34,14 @@
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern int umi_rpmh_wifi_power(void);
+extern int hakios_pmic_pon_modem_reset(void);
 extern kern_return_t thread_terminate(thread_t thread);
 
 #define GCC  0x00100000u
 #define PARF 0x01c10000u
 #define PHY  0x01c16000u
 #define DBI  0x64000000u
+#define IATU 0x64001000u
 #define CONF 0x64100000u
 #define BIT(n) (1u << (n))
 
@@ -180,10 +188,11 @@ static struct {
 	uint32_t address, size;
 	vm_offset_t mapping;
 } pcie2_regions[] = {
-	{ 0x00100000, 0xa0000, 0 },  /* GCC */
+	{ 0x00100000, 0x1f0000, 0 }, /* GCC: the phone's DT's whole 0x1f0000, the PHY reset is at 0x1f01c */
 	{ 0x01c10000, 0x3000, 0 },   /* PARF */
 	{ 0x01c16000, 0x2000, 0 },   /* QMP PHY */
-	{ 0x64000000, 0x1000, 0 },   /* DBI + ELBI */
+	{ 0x64000000, 0x1000, 0 },   /* DBI, and ELBI at +0xf20 */
+	{ 0x64001000, 0x1000, 0 },   /* iATU */
 	{ 0x64100000, 0x100000, 0 }, /* endpoint configuration (ECAM, bus 1) */
 	{ 0x0f000000, 0xa00000, 0 }, /* TLMM: west +0x100000, south +0x500000, north +0x900000 */
 };
@@ -283,12 +292,19 @@ clocks(void)
 		hakios_tl("pcie2: the GDSC does not come up: %#x\n", rd(GCC + 0x6004));
 		return error;
 	}
+	/* the auxiliary clock's source, and the PHY's reference clock source:
+	 * both 19.2 MHz XO, the same registers the vendor's clk driver picks. */
 	error = source_xo(GCC + 0x6038);
 	if (error) {
 		return error;
 	}
-	/* the five halt-polled branches, and the votes that enable them */
-	error = update(GCC + 0x52010, 0, 0x7c00);
+	error = source_xo(GCC + 0x6f014);
+	if (error) {
+		return error;
+	}
+	/* all six branch votes: slv_q2a 10, slv_axi 11, mstr_axi 12, cfg_ahb 13,
+	 * aux 14, pipe 15 (the enable masks in the vendor's clk_branch data). */
+	error = update(GCC + 0x52010, 0, 0xfc00);
 	if (error) {
 		return error;
 	}
@@ -300,101 +316,171 @@ clocks(void)
 			return error;
 		}
 	}
-	/* the core reset: set, a millisecond, clear */
+	/* the per-controller PHY reference clock branch (its own halt bit too) */
+	error = update(GCC + 0x6f034, 0, 1);
+	if (error) {
+		return error;
+	}
+	error = wait_bits(GCC + 0x6f034, BIT(31), 0, 10000);
+	if (error) {
+		hakios_tl("pcie2: the PHY refgen stays halted: %#x\n", rd(GCC + 0x6f034));
+		return error;
+	}
+	/* the two resets the phone's DT names: GCC_PCIE_2_BCR 0x6000 and
+	 * GCC_PCIE_2_PHY_BCR 0x1f01c (the vendor's gcc_kona_resets table):
+	 * assert, a millisecond, deassert. */
 	error = update(GCC + 0x6000, 0, 1);
 	if (error) {
 		return error;
 	}
+	error = update(GCC + 0x1f01c, 0, 1);
+	if (error) {
+		return error;
+	}
 	delay(1000);
-	return update(GCC + 0x6000, 1, 0);
+	error = update(GCC + 0x1f01c, 1, 0);
+	if (error) {
+		return error;
+	}
+	error = update(GCC + 0x6000, 1, 0);
+	if (error) {
+		return error;
+	}
+	hakios_tl("pcie2: clocks: GDSC %#x, refgen %#x, PHY reset %#x\n", rd(GCC + 0x6004), rd(GCC + 0x6f034),
+	    rd(GCC + 0x1f01c));
+	return 0;
 }
+
+static void pcie2_perst(unsigned high);
 
 static int
 link_train(void)
 {
 	int error;
-	uint32_t control;
+	uint32_t value;
 
-	/* root complex, per the Wi-Fi's PCIe0 sequence, at this controller's PARF */
-	wr(PARF + 0x1000, 4);
-	error = update(PARF + 0x40, 1, 0);
+	/* PERST asserted while the controller and PHY come up: the phone's
+	 * DT pcie2_perst_default is GPIO 85, active low (the vendor's
+	 * msm_pcie_enable asserts it before touching any PCIe register). */
+	pcie2_perst(0);
+
+	/* the vendor's msm_pcie_enable's PARF block, register for register */
+	wr(PARF + 0x1000, 4);                     /* RC mode */
+	error = update(PARF + 0x20, BIT(5), 0);   /* L1 entry allowed */
 	if (error) {
 		return error;
 	}
-	wr(PARF + 0x350, 0);
-	wr(PARF, 0x365e);
-	error = update(PARF + 0x174, 0, BIT(4));
+	error = update(PARF + 0x40, 1, 0);        /* PHY_CTRL: PHY powered up */
 	if (error) {
 		return error;
 	}
-	wr(PARF + 0x22c, 0);
-	wr(PARF + 0x358, 0x04000000);
-	error = update(PARF + 0x1a8, 0, BIT(31));
+	wr(PARF + 0x350, 0);                      /* DBI base address */
+	wr(PARF, 0x365e);                         /* SYS_CTRL */
+	error = update(PARF + 0x174, 0, BIT(4));  /* MHI clock reset control */
+	if (error) {
+		return error;
+	}
+	wr(PARF + 0x22c, 0);                      /* no interrupts yet */
+	wr(PARF + 0x358, 0x04000000);             /* 64 MB slave address space */
+	error = update(PARF + 0x1a8, 0, BIT(31)); /* halt writes for the iATU */
 	if (error) {
 		return error;
 	}
 	hakios_tl("pcie2: PARF programmed; PARF+0x350 %#x, +0x358 %#x\n", rd(PARF + 0x350), rd(PARF + 0x358));
+
+	/* the PHY sequence: the phone's DTB qcom,phy-sequence, in its order */
 	for (unsigned i = 0; i < sizeof(pcie2_phy) / sizeof(pcie2_phy[0]); i++) {
 		wr(PHY + pcie2_phy[i].offset, pcie2_phy[i].value);
 		if (pcie2_phy[i].delay_us) {
 			delay(pcie2_phy[i].delay_us);
 		}
 	}
-	delay(1000);
-	error = update(GCC + 0x52010, 0, 0x8000);       /* the pipe clock's vote */
+	delay(1000);                              /* PHY stabilization */
+	error = update(GCC + 0x52010, 0, 0x8000); /* the pipe clock's vote */
 	if (error) {
 		return error;
 	}
-	hakios_tl("pcie2: PHY sequence written; PHY+0x814 %#x\n", rd(PHY + 0x814));
-	error = wait_bits(PHY + 0x814, BIT(6), 0, 10000);
+	/* qcom,phy-status-offset 0xa14, bit 6: clear means the PHY is ready
+	 * (the vendor's pcie_phy_is_ready returns false while the bit is set) */
+	error = wait_bits(PHY + 0xa14, BIT(6), 0, 10);
 	if (error) {
-		hakios_tl("pcie2: the PHY does not report ready: %#x\n", rd(PHY + 0x814));
+		hakios_tl("pcie2: the PHY does not report ready: %#x\n", rd(PHY + 0xa14));
 		return error;
 	}
-	delay(10000);
+	hakios_tl("pcie2: PHY ready (%#x); releasing PERST\n", rd(PHY + 0xa14));
+	delay(10000);                             /* qcom,ep-latency, 10 ms */
+
+	pcie2_perst(1);
+	delay(1000);                              /* perst-delay-us */
+
+	/* the vendor's msm_pcie_link_train */
 	error = update(DBI + 0x80c, 0x1f00, 0x100);
 	if (error) {
 		return error;
 	}
-	wr(DBI + 0x8a8, 0x20);
+	error = update(DBI + 0x8a8, 0, 0x20);
+	if (error) {
+		return error;
+	}
 	error = update(DBI + 0x890, BIT(0), 0);
 	if (error) {
 		return error;
 	}
-	error = update(DBI + 0x8bc, 0, BIT(0));
+	error = update(DBI + 0x8bc, 0, BIT(0));    /* DBI read-only writes off */
 	if (error) {
 		return error;
 	}
-	wr(DBI + 0x154, 0x55555555);
+	wr(DBI + 0x154, 0x55555555);              /* PCIE_GEN3_PRESET_DEFAULT */
 	error = update(DBI + 0x8bc, BIT(0), 0);
 	if (error) {
 		return error;
 	}
-	error = update(DBI + 0xa0, 0xf, 2);             /* Gen2, as the Wi-Fi's sequence */
+	/* no speed forcing: qcom,target-link-speed is absent from the DT, so
+	 * the core trains at the endpoint's best rate (Android shows 8 GT/s) */
+	error = update(DBI + 0x78, 0x7000, 5 << 12); /* TLP read size 5 */
 	if (error) {
 		return error;
 	}
-	control = rd(DBI + 0x78);
-	if (control == UINT32_MAX) {
-		return EIO;
-	}
-	wr(DBI + 0x78, (control & 0xffff) & ~0x7000u);
-	error = update(PARF + 0x1b0, 0, BIT(8));
+	error = update(PARF + 0x1b0, 0, BIT(8));   /* enable link training */
 	if (error) {
 		return error;
 	}
-	hakios_tl("pcie2: link requests done; LTSSM %#x, link status %#x\n", rd(DBI + 0xf28), rd(DBI + 0x80));
-	error = wait_bits(DBI + 0xf28, BIT(10), BIT(10), 5000);
+	hakios_tl("pcie2: link requests done; ELBI %#x, link status %#x\n", rd(DBI + 0xf28), rd(DBI + 0x80));
+	/* the vendor allows 20 checks 5 ms apart: 100 ms, here 100 x 1 ms */
+	error = wait_bits(DBI + 0xf28, BIT(10), BIT(10), 100);
 	if (error) {
 		hakios_tl("pcie2: no link training done: %#x\n", rd(DBI + 0xf28));
 		return error;
 	}
-	error = wait_bits(DBI + 0x80, BIT(29), BIT(29), 5000);
+	error = wait_bits(DBI + 0x80, BIT(29), BIT(29), 100);
 	if (error) {
 		hakios_tl("pcie2: the link does not come up: %#x\n", rd(DBI + 0x80));
 		return error;
 	}
+	value = rd(DBI);
+	if (value == UINT32_MAX || value == 0xffffffffu) {
+		hakios_tl("pcie2: the RC's own config space reads %#x\n", value);
+		return ENODEV;
+	}
+	hakios_tl("pcie2: the link is up; RC id %#x, link status %#x, ELBI %#x\n", value, rd(DBI + 0x80), rd(DBI + 0xf28));
 	return 0;
+}
+
+/* One iATU region, the vendor's msm_pcie_iatu_config: host window to target
+ * BDF, type 0x04 = config type 0, enabled by bit 31 of the control register. */
+static void
+iatu_config(uint32_t nr, uint32_t type, uint32_t host, uint32_t host_end, uint32_t target)
+{
+	uint32_t base = IATU + nr * 0x200;
+
+	wr(base + 0x04, 0);
+	wr(base + 0x00, type);
+	wr(base + 0x08, host);
+	wr(base + 0x0c, 0);
+	wr(base + 0x10, host_end);
+	wr(base + 0x14, target);
+	wr(base + 0x18, 0);
+	wr(base + 0x04, BIT(31));
 }
 
 static void
@@ -402,7 +488,10 @@ endpoint(void)
 {
 	uint32_t id, classreg, bar0;
 
-	/* 0002:01:00.0: bus 1, device 0, function 0 in the ECAM at CONF */
+	/* 0002:01:00.0: bus 1, device 0, function 0 in the ECAM at CONF. The
+	 * vendor's msm_pcie_cfg_bdf programs iATU region 0 for exactly that,
+	 * which is what makes the CONF window answer at all. */
+	iatu_config(0, 0x04, CONF, CONF + 0xfff, 1u << 24);
 	id = rd(CONF + (1 << 20));
 	classreg = rd(CONF + (1 << 20) + 8);
 	bar0 = rd(CONF + (1 << 20) + 0x10);
@@ -443,10 +532,139 @@ pcie2_lines(void)
 	}
 }
 
+/*
+ * The DT's mdm_active state, written into the pads themselves: every line is
+ * GPIO function with the bias off; the two AP outputs at 16 mA and the two
+ * modem outputs at 8 mA (the DT's drive-strength 16 and 8 are the values 7 and
+ * 3 in CTL bits 8:6). A line is set by writing its output latch before the
+ * output enable, as the Wi-Fi's gpio_output does.
+ */
+#define TLMM_MUX_GPIO     0u
+#define TLMM_PULL_DISABLE 3u
+#define TLMM_DRIVE_8MA    3u
+#define TLMM_DRIVE_16MA   7u
+#define TLMM_OE           BIT(9)
+#define TLMM_OUT          BIT(1)
+
+static void
+pcie2_pin_input(unsigned pin)
+{
+	wr(TLMM_PAGE(pin), TLMM_MUX_GPIO | TLMM_PULL_DISABLE | (TLMM_DRIVE_8MA << 6));
+}
+
+static void
+pcie2_pin_output(unsigned pin, unsigned high)
+{
+	wr(TLMM_PAGE(pin) + 4, high ? TLMM_OUT : 0);
+	wr(TLMM_PAGE(pin), TLMM_MUX_GPIO | TLMM_PULL_DISABLE | (TLMM_DRIVE_16MA << 6) | TLMM_OE);
+}
+
+static unsigned
+pcie2_pin_in(unsigned pin)
+{
+	return rd(TLMM_PAGE(pin) + 4) & 1;
+}
+
+/*
+ * GPIO 85, the endpoint's PERST: the DT's pcie2_perst_default is GPIO
+ * function, 2 mA, pull-down, and the line is active low, so "asserted" is
+ * the output latch at 0. The vendor's msm_pcie_enable drives it low before
+ * any PCIe register access and releases it only after the PHY is ready.
+ */
+static void
+pcie2_perst(unsigned high)
+{
+	wr(TLMM_PAGE(85) + 4, high ? TLMM_OUT : 0);
+	wr(TLMM_PAGE(85), 1u | (0u << 2) | (0u << 6) | TLMM_OE); /* pull-down, 2 mA, output */
+}
+
+/*
+ * The vendor's first power-on, less the PMIC soft reset (that is a PON regmap
+ * sequence XNU does not have yet): apply the DT's pad state, hold the AP lines
+ * low, then raise AP2MDM_STATUS and watch MDM2AP_STATUS. The vendor's PBLRDY
+ * poll is skipped because this phone's DT has no pblrdy line. No PCIe register
+ * is touched -- the link is the step after this one answers.
+ */
+static void
+pcie2_power(void)
+{
+	unsigned status, waited = 0;
+
+	hakios_tl("pcie2: power: configuring the four lines, no PCIe access\n");
+	pcie2_pin_input(1);      /* MDM2AP_ERRFATAL */
+	hakios_tl("pcie2: power: gpio1 configured\n");
+	pcie2_pin_input(3);      /* MDM2AP_STATUS */
+	hakios_tl("pcie2: power: gpio3 configured\n");
+	pcie2_pin_output(56, 0); /* AP2MDM_STATUS */
+	hakios_tl("pcie2: power: gpio56 low\n");
+	pcie2_pin_output(57, 0); /* AP2MDM_ERRFATAL */
+	hakios_tl("pcie2: power: gpio57 low\n");
+	delay(150000);           /* the vendor's pause after its PMIC reset */
+	hakios_tl("pcie2: power: pause done\n");
+
+	status = pcie2_pin_in(3);
+	hakios_tl("pcie2: lines configured (56/57 out low); before the wake: status %u, errfatal %u\n",
+	    status, pcie2_pin_in(1));
+
+	pcie2_pin_output(56, 1); /* AP2MDM_STATUS high: the modem's power-on handshake */
+	for (unsigned i = 0; i < 400; i++) {
+		delay(5000);
+		status = pcie2_pin_in(3);
+		if (status) {
+			waited = (i + 1) * 5;
+			break;
+		}
+	}
+	hakios_tl("pcie2: AP2MDM_STATUS high; MDM2AP_STATUS %s, MDM2AP_ERRFATAL %u, waited %u ms\n",
+	    status ? "high" : "stays low", pcie2_pin_in(1), waited);
+	delay(200000); /* the vendor's pause before the POWER_ON request */
+	hakios_tl("pcie2: after the pause: status %u, errfatal %u; gpio56 ctl %#x io %#x, gpio57 ctl %#x, gpio1 io %#x, gpio3 io %#x\n",
+	    pcie2_pin_in(3), pcie2_pin_in(1), rd(TLMM_PAGE(56)), rd(TLMM_PAGE(56) + 4),
+	    rd(TLMM_PAGE(57)), rd(TLMM_PAGE(1) + 4), rd(TLMM_PAGE(3) + 4));
+}
+
+/*
+ * power=2: the wake above, then the link, for the case where the modem answers.
+ * The vendor's POWER_ON request is what starts the client's (MHI's) bring-up;
+ * here the PCIe2 link follows directly, with no MHI yet.
+ */
+static void
+pcie2_power_link(void)
+{
+	unsigned status;
+
+	pcie2_pin_input(1);
+	pcie2_pin_input(3);
+	pcie2_pin_output(56, 0);
+	pcie2_pin_output(57, 0);
+	delay(150000);
+	pcie2_pin_output(56, 1);
+	delay(200000);
+
+	status = pcie2_pin_in(3);
+	hakios_tl("pcie2: power=2: AP2MDM_STATUS high, MDM2AP_STATUS %u; the link follows\n", status);
+	if (umi_rpmh_wifi_power() != 0) {
+		hakios_tl("pcie2: the PCIe rails did not come up\n");
+		return;
+	}
+	delay(1000);
+	if (clocks() != 0) {
+		hakios_tl("pcie2: power and clocks failed\n");
+		return;
+	}
+	hakios_tl("pcie2: power and clocks ready (GDSC %#x)\n", rd(GCC + 0x6004));
+	if (link_train() != 0) {
+		return;
+	}
+	hakios_tl("pcie2: link status %#x\n", rd(DBI + 0x80));
+	endpoint();
+}
+
 static void
 pcie2_run(void)
 {
 	uint32_t survey = 0;
+	uint32_t power = 0;
 
 	hakios_tl("pcie2: the modem's link, on the Wi-Fi's PCIe0 sequence and the phone's own registers\n");
 	for (unsigned i = 0; i < sizeof(pcie2_regions) / sizeof(pcie2_regions[0]); i++) {
@@ -457,10 +675,31 @@ pcie2_run(void)
 		}
 	}
 	pcie2_lines();
-	if (PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey)) && survey == 1) {
+	PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey));
+	PE_parse_boot_argn("pcie2_power", &power, sizeof(power));
+	hakios_tl("pcie2: args: survey %u, power %u\n", survey, power);
+	if (survey == 1) {
 		hakios_tl("pcie2: survey only; the link is not touched\n");
 		return;
 	}
+	if (power == 2) {
+		pcie2_power_link();
+		return;
+	}
+	if (power == 1) {
+		pcie2_power();
+		return;
+	}
+	/* the default path: the four ext-sdx55m lines in the modem's active
+	 * state -- mdm2ap status and errfatal as inputs, ap2mdm status high,
+	 * ap2mdm errfatal low -- without a reset pulse, because the modem was
+	 * already running under Android when this kernel was booted. */
+	pcie2_pin_input(1);
+	pcie2_pin_input(3);
+	pcie2_pin_output(57, 0);
+	pcie2_pin_output(56, 1);
+	delay(1000);
+	hakios_tl("pcie2: modem lines: mdm2ap status %u, errfatal %u\n", pcie2_pin_in(3), pcie2_pin_in(1));
 	if (umi_rpmh_wifi_power() != 0) {
 		hakios_tl("pcie2: the PCIe rails did not come up\n");
 		return;

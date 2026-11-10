@@ -363,6 +363,29 @@ configuration to 56/57 (mux 0, bias-disable, 16 mA) and 1/3 (mux 0, bias-disable
 8 mA), drive AP2MDM_STATUS high, read MDM2AP_STATUS, and only then consider the
 PCIe2 link -- with the PMIC reset as the separate question it is.
 
+### The lines-only wake: the pad writes take, the modem does not answer (2026-11-10)
+
+`pcie2_power=1` applies the DT's `mdm_active` pad state and raises AP2MDM_STATUS
+without touching any PCIe register (`logs/235616-run.log`, kernel `371a184e`, image
+`8f5bc2aa`, SHA-256 `6738a4e16e683c3d077871f0abc21d6e9a383c4bed3667becc716b802cab8934`):
+
+```text
+pcie2: lines configured (56/57 out low); before the wake: status 0, errfatal 0
+pcie2: AP2MDM_STATUS high; MDM2AP_STATUS stays low, MDM2AP_ERRFATAL 0, waited 0 ms
+pcie2: after the pause: status 0, errfatal 0; gpio56 ctl 0x3c3 io 0x3, gpio57 ctl 0x3c3, gpio1 io 0, gpio3 io 0
+```
+
+The writes take: gpio56/57 read back `ctl 0x3c3` (mux gpio, bias off, 16 mA, output
+enabled) and gpio56's IO reads `0x3` (latch and pad high). The modem does not answer:
+MDM2AP_STATUS and MDM2AP_ERRFATAL stay low for the whole two-second poll. So the
+status line alone does not wake the SDX55M; the vendor's sequence starts with the PMIC
+PON modem power-off pulse (`qpnp_pon_modem_pwr_off`, register pair 0x62/0x63), which
+XNU has no write path for yet. That is the next piece.
+
+Test-setup note: a boot without the 2.5 GB resident system image panics in launchd
+(`errno 2`) at about 18 s (`logs/235222-run.log`); it is not a modem effect. With the
+image resident the kernel stayed up to 172 s.
+
 ### The pin-descriptor table search: what fits and what was a false positive (2026-11-10)
 
 `msm_gpio_set` confirms the descriptor layout: `desc = table(gpio * 0x50)`, the register
@@ -377,3 +400,72 @@ has. The true `msm_pin_data` table is therefore still unlocated. The way not to 
 derive the table's layout from `msm_pinctrl_probe` (which fills it), or read the vendor
 pinctrl-msm's group/function tables directly; pin-order guessing has now cost three attempts
 and two bus hangs, and is stopped.
+
+### The pin tables, finally: the addresses were off by 0x80000 (2026-11-11)
+
+`msm_pinctrl_probe` reads `soc = pctrl+848` (its second argument) and then
+`soc+0x10` / `soc+0x18` for a 0x18-stride function table, so the
+`struct msm_pinctrl_soc_data` is `{pins, npins, functions, nfunctions, groups,
+ngroups}`. In the phone's Image the symbol `kona_pinctrl` is at file 0x1d33668, and
+its fields point at pins 0x1d336c0, functions 0x1d35770 (stride 0x18) and groups
+0x1d36ad0 (stride 0x50, 184 entries). The earlier reads used 0x1db36c0/0x1d6ad0 --
+the field values with an extra 0x80000 -- which is why nothing matched. The group
+entries are the `struct msm_pingroup` that `msm_gpio_get/set` indexes by GPIO number:
+
+```text
++0x00 name    +0x08 pins    +0x10 npins   +0x18 funcs   +0x20 nfuncs (10)
++0x24 ctl_reg +0x28 io_reg  +0x2c intr_cfg +0x30 intr_status +0x34 intr_target
++0x3c bitfields: mux 2 (3 bits at bit 2), pull 0 (bit 0), drive 6 (bit 6),
+                 oe 9, in 0, out 1
+```
+
+The exact registers (TLMM base 0x0f000000, from the group entries, cross-checked
+with `pinctrl-kona.c`: SOUTH=+0x500000, NORTH=+0x900000, ctl = base + pin*0x1000):
+
+| line | GPIO | CTL | IO |
+|---|---|---|---|
+| MDM2AP_ERRFATAL | 1 | 0x0f501000 | 0x0f501004 |
+| MDM2AP_STATUS | 3 | 0x0f503000 | 0x0f503004 |
+| AP2MDM_STATUS | 56 | 0x0f538000 | 0x0f538004 |
+| AP2MDM_ERRFATAL | 57 | 0x0f539000 | 0x0f539004 |
+| PCIE2 PERST | 85 | 0x0f555000 | 0x0f555004 |
+| PCIE2 WAKE | 87 | 0x0f557000 | 0x0f557004 |
+
+(gpio84 is a NORTH pin at 0x0f954000; gpio85-88 are back in SOUTH. The earlier
+"first survey" read 0x0f001000 etc., which is not any pin's page.)
+
+### The vendor pci-msm source, and what the PCIe2 bring-up was missing (2026-11-11)
+
+The CAF SM8250 tree (`UtsavBalar1231/kernel_xiaomi_sm8250`, android14-stable) has
+`drivers/pci/controller/pci-msm.c`, the driver the phone's DT's `qcom,pci-msm`
+binds. `qcom,boot-option = <1>` is `MSM_PCIE_NO_PROBE_ENUMERATION`: probe does not
+train the link; something later (the sysfs `enumerate` file, or the client) does.
+`msm_pcie_enable` is:
+
+1. assert PERST -- `perst-gpio` GPIO 85, active low (the info table's on=0);
+2. regulators (vreg-1p8, vreg-0p9), GDSC, bus vote, clocks, resets;
+3. PARF: DEVICE_TYPE=4, PM_CTRL bit 5 cleared, PHY_CTRL bit 0 cleared,
+   DBI_BASE_ADDR=0, SYS_CTRL=0x365E, MHI_CLOCK_RESET_CTRL bit 4 set,
+   INT_ALL_MASK=0, SLV_ADDR_SPACE_SIZE (DT 0x4000000), AXI_MSTR_WR_ADDR_HALT bit
+   31 set;
+4. PHY: write the DT `qcom,phy-sequence`, 1 ms, enable the pipe clock, then poll
+   `PHY + 0xa14` (qcom,phy-status-offset) bit 6 clear -- set means not ready;
+5. wait `qcom,ep-latency` (10 ms), release PERST, 1 ms;
+6. `msm_pcie_link_train`: 0x80c field 0x1f00=1, 0x8a8 |= 0x20, 0x890 bit 0 cleared,
+   0x8bc bit 0 set, 0x154 = 0x55555555, 0x8bc bit 0 cleared, LNKCTL2 speed only if
+   the DT says so, 0x78 field 0x7000 = 5 (TLP read size), PARF+0x1b0 bit 8 set;
+   poll ELBI+0x08 (0x64000f28) bit 10 (XMLH_LINK_UP) 20 x 5 ms, then `dm_core+0x80`
+   bit 29 and `dm_core+0` != 0xffffffff;
+7. program iATU region 0 (at 0x64001000) for the CONF window to BDF 1:0.0, type
+   0x04 (config type 0), enable with bit 31, then read the endpoint.
+
+The clocks, from the phone kernel's `clk_branch` data: the per-branch enable is
+GCC+0x52010 with the masks slv_q2a 0x400, slv_axi 0x800, mstr_axi 0x1000, cfg_ahb
+0x2000, aux 0x4000, pipe 0x8000; the PHY refgen branch is GCC+0x6f034 bit 0 (its
+halt bit is bit 31), its source GCC+0x6f014 (19.2 MHz XO); the DT's two resets are
+GCC_PCIE_2_BCR = GCC+0x6000 (binding 14) and GCC_PCIE_2_PHY_BCR = GCC+0x1f01c
+(binding 17), confirmed by `gcc_kona_resets` in the Image. The old driver was
+missing PERST entirely, polled 0x814 bit 6 set instead of 0xa14 bit 6 clear, never
+enabled the refgen or toggled the PHY reset, forced Gen2, and wrote 0x78/0x8a8 as if
+the fields were whole-register values; `hakios.thyme_pcie2.c` now follows the vendor
+sequence.
