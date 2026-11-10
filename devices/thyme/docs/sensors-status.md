@@ -165,6 +165,11 @@ being the first client of that boot) and not a transport artefact.
   470 are zeroes or carry no printable run. Getting the DSP's own log would
   need the diag/QSH channel (the DSP offers none of its GLINK channels by
   that name) or its DDR; the SMEM path is closed.
+- **The DSP's DDR window is not the AP's to read**: mapping and scanning
+  0x88000000-0x8b000000 (the segments' window) took the kernel down — the
+  loader reported "hung" and restarted the phone (`logs/183746-run.log`, no
+  kernel log at all) — so that diagnostic is removed and the DSP's log can
+  only come through the diag/QSH protocol, not a memory read.
 - **Our messages do not disturb the sensor process** (10 November, later):
   with `sns_quiet=1` the listener and the file service stay up and not one
   SNS message goes out (`logs/175050-run.log`, 0 QMI sends), and the DSP still

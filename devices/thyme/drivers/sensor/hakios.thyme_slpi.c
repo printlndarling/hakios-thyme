@@ -3562,6 +3562,7 @@ sns_strstr(const char *hay, const char *needle)
 	return NULL;
 }
 
+
 /* One group file's bytes: its name, its items, one write request to the registry sensor. */
 static int
 sns_registry_parse_send(const uint8_t *file, uint32_t size, const uint8_t suid[16])
