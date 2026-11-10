@@ -4179,6 +4179,9 @@ static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: sec
 static uint32_t fastrpc_grow_kb;         /* boot-arg fastrpc_grow_kb: offer the DSP that much remote heap before the attach */
 static uint32_t fastrpc_grow_after;      /* boot-arg fastrpc_grow_after: offer it after the attach instead */
 static uint32_t fastrpc_grow_ddr;        /* boot-arg fastrpc_grow_ddr: the heap from kernel memory, not the shared-memory partition */
+static vm_offset_t fastrpc_heap_memory;  /* the grow_ddr heap, taken at boot while the low range is still free */
+static vm_offset_t fastrpc_heap_bytes;
+static uint64_t fastrpc_heap_physical;
 static uint32_t fastrpc_create_probe;    /* boot-arg fastrpc_create_probe: ask the DSP to create candidate static PD names */
 
 static void
@@ -5244,6 +5247,38 @@ fastrpc_grow_heap(uint64_t heap_physical, uint32_t heap_size, uint64_t physical,
 	return fastrpc_call(fastrpc_client, 0, 0x02010000, 0x200 | fastrpc_pd, physical, size, 5000, "remotectl_grow_heap");
 }
 
+/*
+ * Take the grow_ddr heap at boot with the DMA allocator that already exists
+ * for the DSP (hakios.thyme_slpi_dma.cpp: an IOBufferMemoryDescriptor with the
+ * physical mask 0xffffffff), because the interface's phyAddr is 32 bits and
+ * kmem_alloc_contig ignored both max_pnum and KMA_LOMEM, putting every
+ * attempt above 4 GB (0x1a1400000, 0x199c00000). Even this allocator finds no
+ * 4 MB below 4 GB at boot (logs/104527-run.log): the range has to come from
+ * the loader's memory map, as docs/sensors-status.md says.
+ */
+static void
+fastrpc_heap_reserve(void)
+{
+	uint64_t physical = 0;
+	void *heap;
+	uint32_t size;
+
+	if (!fastrpc_grow_ddr || fastrpc_grow_kb == 0 || fastrpc_heap_memory != 0) {
+		return;
+	}
+	size = (fastrpc_grow_kb > 16384 ? 16384 : fastrpc_grow_kb) << 10;
+	heap = hakios_slpi_heap_alloc((size_t)size, &physical);
+	if (heap == NULL) {
+		printf("slpi: fastrpc: no low contiguous memory (%u KB) for the DSP's heap at boot; the steps try again\n",
+		    fastrpc_grow_kb);
+		return;
+	}
+	fastrpc_heap_memory = (vm_offset_t)heap;
+	fastrpc_heap_bytes = size;
+	fastrpc_heap_physical = physical;
+	printf("slpi: fastrpc: reserved the DSP's %u KB heap at %#llx at boot\n", size >> 10, physical);
+}
+
 /* The heap itself: as much shared memory as fits, page-aligned, offered to the DSP. */
 static void
 fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8_t *packet)
@@ -5256,57 +5291,32 @@ fastrpc_offer_heap(uint64_t physical, uint32_t shared_offset, bool shared, uint8
 		return;
 	}
 	/*
-	 * fastrpc_grow_ddr: the heap from ordinary kernel memory (one contiguous
-	 * physical range) instead of the shared-memory partition. The partition's
-	 * address is one the DSP already maps for GLINK/SMP2P, and the sensor
-	 * process's fastrpc memcpy into it crashed at 0xb20c2dac; a kernel range
-	 * crashed the DSP's own kernel in its logging path (0xb01c1f2c,
-	 * logs/095514-run.log). The interface's phyAddr is 32 bits (the IDL's
-	 * uint32), and XNU placed every attempt at 0x1a1400000 -- above 4 GB --
-	 * even with max_pnum 0xfffff and KMA_LOMEM (logs/102937-run.log). What
-	 * this needs is a range the loader reserves below 4 GB, granted to the
-	 * SLPI the way the phone's sdsp_region is (docs/sensors-status.md).
+	 * fastrpc_grow_ddr: the heap from the DSP's own DMA allocator
+	 * (hakios.thyme_slpi_dma.cpp: an IOBufferMemoryDescriptor with the
+	 * physical mask 0xffffffff), because remotectl_grow_heap's phyAddr is 32
+	 * bits and kmem_alloc_contig ignored max_pnum and KMA_LOMEM, placing
+	 * every attempt above 4 GB (0x1a1400000, 0x199c00000); the shared-memory
+	 * partition, the other shortcut, is both small and fatal to the sensor
+	 * process's fastrpc (PC 0xb20c2dac). docs/sensors-status.md has the
+	 * history and what remains: the phone's own heap is the sdsp_region.
 	 */
+	if (fastrpc_grow_ddr && fastrpc_heap_memory != 0) {
+		printf("slpi: fastrpc: offering the DSP its boot heap of %u KB at %#llx\n", (uint32_t)fastrpc_heap_bytes >> 10,
+		    fastrpc_heap_physical);
+		fastrpc_grow_heap(fastrpc_heap_physical, (uint32_t)fastrpc_heap_bytes, physical, shared_offset, shared, packet);
+		return;
+	}
 	if (fastrpc_grow_ddr) {
-		vm_offset_t memory = 0;
-		vm_size_t bytes;
-		uint64_t heap_physical, aligned;
-		uint32_t delta;
+		uint64_t address = 0;
 
-		/*
-		 * The phone's sdsp_region is 4 MB aligned; the DSP's heap mapping
-		 * takes the address at that granularity, so the range is taken 4 MB
-		 * larger and the start moved up to the next 4 MB boundary.
-		 *
-		 * The address must also fit the interface: remotectl_grow_heap's
-		 * phyAddr is 32 bits (the IDL's uint32), and a kernel allocation may
-		 * well lie above 4 GB (the camera's frames did, at 0x104594000), so
-		 * the range is asked for below 4 GB.
-		 */
 		heap_size = (fastrpc_grow_kb > 16384 ? 16384 : fastrpc_grow_kb) << 10;
-		bytes = round_page((vm_size_t)heap_size + 0x400000);
-		while (bytes >= 0x100000 &&
-		    kmem_alloc_contig(kernel_map, &memory, bytes, PAGE_MASK, 0xfffff, 0,
-		    KMA_KOBJECT | KMA_ZERO | KMA_DATA | KMA_LOMEM, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
-			bytes >>= 1;
-		}
-		if (memory == 0) {
-			printf("slpi: fastrpc: no contiguous memory for a %u KB remote heap\n", fastrpc_grow_kb);
+		heap = hakios_slpi_heap_alloc((size_t)heap_size, &address);
+		if (heap == NULL) {
+			printf("slpi: fastrpc: no low contiguous memory for the %u KB remote heap\n", fastrpc_grow_kb);
 			return;
 		}
-		heap_physical = kvtophys(memory);
-		aligned = (heap_physical + 0x3fffff) & ~0x3fffffULL;
-		delta = (uint32_t)(aligned - heap_physical);
-		if ((uint64_t)delta + heap_size > bytes) {
-			heap_size = (uint32_t)(bytes - delta) & ~0x3fffffu;
-		}
-		if (heap_size < 0x100000) {
-			printf("slpi: fastrpc: the contiguous range leaves no 4 MB-aligned heap\n");
-			return;
-		}
-		printf("slpi: fastrpc: offering the DSP a %u KB kernel heap at %#llx (aligned from %#llx)\n", heap_size >> 10,
-		    aligned, heap_physical);
-		fastrpc_grow_heap(aligned, heap_size, physical, shared_offset, shared, packet);
+		printf("slpi: fastrpc: offering the DSP a %u KB heap at %#llx\n", heap_size >> 10, address);
+		fastrpc_grow_heap(address, heap_size, physical, shared_offset, shared, packet);
 		return;
 	}
 	while (kb >= 16 && (heap = fastrpc_smem_item_size(ITEM_FASTRPC_GROW, kb << 10, &grow_offset)) == NULL) {
@@ -7092,6 +7102,11 @@ hakios_slpi_init(void)
 		printf("slpi: slpi=1 and slpi_step=N are for the phone's sensor DSP, and this is not the phone\n");
 		return;
 	}
+	/* the grow_ddr heap is taken now, while the memory below 4 GB is still in large pieces */
+	(void)PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
+	(void)PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
+	(void)PE_parse_boot_argn("fastrpc_grow_ddr", &fastrpc_grow_ddr, sizeof(fastrpc_grow_ddr));
+	fastrpc_heap_reserve();
 	if (last_step == 0) {
 		/* all of it, on a thread of its own, and left up */
 		last_step = STEPS;

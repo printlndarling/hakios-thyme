@@ -80,25 +80,31 @@ being the first client of that boot) and not a transport artefact.
   takes the sensor process's fastrpc down in a memcpy (PC 0xb20c2dac,
   `logs/092656-run.log`, `logs/093452-run.log`); a kernel-contiguous range
   above 4 GB takes the DSP's kernel down in its logging path (PC 0xb01c1f2c,
-  `logs/095514-run.log`, `logs/102239-run.log`), and XNU's
-  `kmem_alloc_contig` ignored both `max_pnum = 0xfffff` and `KMA_LOMEM` (the
-  request is met by the same high range, `logs/102937-run.log`). The heap has
-  to be a range the loader reserves below 4 GB (the way the phone reserves
-  `sdsp_region`), with the DSP's access granted to it — that is the next
-  piece, not an arbitrary allocation.
+  `logs/095514-run.log`, `logs/102239-run.log`). XNU's `kmem_alloc_contig`
+  ignored both `max_pnum = 0xfffff` and `KMA_LOMEM` (every attempt came back
+  at 0x1a1400000, `logs/102937-run.log`), and at boot, before the steps run,
+  the DSP's own DMA allocator (an IOBufferMemoryDescriptor with the physical
+  mask 0xffffffff, `hakios.thyme_slpi_dma.cpp`) could not find 4 MB below
+  4 GB at all (`logs/104527-run.log`). XNU's pool simply holds no free range
+  there: the heap has to be a range the loader makes available below 4 GB,
+  the way the phone reserves `sdsp_region` (8 MB, 4 MB-aligned), with the
+  DSP's access granted to it — that is the next piece, not a runtime
+  allocation.
 
 ## The next pieces, in order
 
 1. **Give the sensor process its heap from a loader-reserved range**: the
-   interface's `phyAddr` is 32 bits, so the range must lie below 4 GB — a
-   runtime `kmem_alloc_contig` does not (XNU placed every attempt at
-   0x1a1400000 and ignored both `max_pnum` and `KMA_LOMEM`). Reserve a range
-   in the loader's memory map the way the phone reserves `sdsp_region`
-   (8 MB, 4 MB-aligned; ION heap 22 there), grant the SLPI access to it (the
-   PAS/SCM XPU assignment), then offer it with `remotectl_grow_heap` after
-   the attach (`fastrpc_grow_kb`, `fastrpc_grow_after`, `fastrpc_grow_ddr`).
-   With the heap in place message 1 should answer with a client id instead
-   of result 5.
+   interface's `phyAddr` is 32 bits, so the range must lie below 4 GB, and
+   nothing in XNU's pool does: `kmem_alloc_contig` ignored both `max_pnum`
+   and `KMA_LOMEM` (0x1a1400000 every time), and the DSP's DMA allocator
+   (IOBufferMemoryDescriptor, physical mask 0xffffffff) found no 4 MB below
+   4 GB even at boot (`logs/104527-run.log`). The loader must make a range
+   available there — the way the phone reserves `sdsp_region` (8 MB,
+   4 MB-aligned; ION heap 22 there) — grant the SLPI access to it (the
+   PAS/SCM XPU assignment), and then `remotectl_grow_heap` can hand it over
+   after the attach (`fastrpc_grow_kb`, `fastrpc_grow_after`,
+   `fastrpc_grow_ddr`). With the heap in place message 1 should answer with
+   a client id instead of result 5.
 2. **Then the registry upload**: the client manager needs the group `sns_cm`;
    the phone's HAL uploads the groups over the SNS client service with the
    `SNS_REGISTRY_WRITE_REQ` protobuf (message ids and field layout in
