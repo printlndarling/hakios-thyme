@@ -107,7 +107,13 @@ broken (`logs/112318-run.log`).
    yet the fresh process issues no reverse call and message 1 still answers
    5. The next question is the FastRPC client id of the restarted PD (the
    listener waits on client 1) and what the client manager still lacks; the
-   heap is no longer the proven blocker.
+   heap is no longer the proven blocker. The daemon order
+   (`fastrpc_bare`, the listener registered before any attach) does not work
+   on this firmware: with no sensors PD session yet, init2 answers
+   0x80000434 even after the registration, and the process the DSP started
+   itself stalls into its timer watchdog (`logs/121802-run.log`). The
+   non-bare order — attach first, then open/register/init2 — is the one whose
+   init2 succeeds and stays the baseline.
 2. **Then the registry upload**: the client manager needs the group `sns_cm`;
    the phone's HAL uploads the groups over the SNS client service with the
    `SNS_REGISTRY_WRITE_REQ` protobuf (message ids and field layout in
