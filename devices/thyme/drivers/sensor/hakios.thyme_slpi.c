@@ -5519,6 +5519,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 
 /* The reverse tunnel kept open: each nested call the DSP makes is served from fw/sensors. */
 static volatile bool fastrpc_listener_wanted;
+static uint32_t fastrpc_reply_log;       /* the first calls' reply shapes, for the protocol work */
 
 /* What the DSP last said before it died (item 424): the string names the failing process. */
 static void
@@ -5644,9 +5645,14 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			memset(out, 0, sizeof(out));
 			{
 				uint32_t call_out_lens[8] = { 0 };
+				int outs;
 
-				(void)fastrpc_out_lens(numbers[2], nested,
+				outs = fastrpc_out_lens(numbers[2], nested,
 				    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), call_out_lens, 8);
+				if (fastrpc_reply_log < 16) {
+					printf("slpi: fastrpc: the call's out lengths (%d): %u %u %u %u (sc %#x)\n", outs,
+					    call_out_lens[0], call_out_lens[1], call_out_lens[2], call_out_lens[3], numbers[2]);
+				}
 				served = fastrpc_serve(numbers[1], numbers[2], nested,
 				    numbers[3] <= sizeof(nested) ? numbers[3] : (uint32_t)sizeof(nested), out, 4, &out_count,
 				    call_out_lens);
@@ -5658,6 +5664,14 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			 * took the DSP down at the first call; the folded form stays.
 			 */
 			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 1024) : 0;
+			if (fastrpc_reply_log < 16) {
+				printf("slpi: fastrpc: the reply for sc %#x is %u bytes:", numbers[2], returned_length);
+				for (uint32_t i = 0; i < returned_length && i < 24; i++) {
+					printf(" %02x", returned[i]);
+				}
+				printf("\n");
+				fastrpc_reply_log++;
+			}
 			if (served != 0) {
 				printf("slpi: fastrpc: the call is answered with %#x\n", (uint32_t)served);
 			}

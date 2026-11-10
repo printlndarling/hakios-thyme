@@ -348,3 +348,37 @@ the observed SUIDs use (`registry` NUL-padded, and `registry________` /
 `sns_registry____` with underscores) is answered result 0 by the transport but
 produces no read_event (`logs/223806-run.log`), so the SNS client service ACKs
 any SUID and the probe cannot prove which spelling (if any) is the registry's.
+
+### The official apps_std layouts, checked against a real call (2026-11-11)
+
+Qualcomm's `apps_std.idl`, its generated `apps_std_skel.c` and the
+reference `apps_std_imp.c` (the sources fetched on 10 November) give the
+exact shapes the listener must honour:
+
+- `fopen_with_env(in string envvarname, in string delim, in string name,
+  in string mode, rout long psout)`: **five** input buffers -- the 16-byte
+  scalar blob (the four string lengths) and the four strings, each
+  non-empty and NUL-terminated -- and **one** output scalar, 4 bytes.
+- `fread(in long sin, rout sequence<byte> buf, rout long bytesRead,
+  rout long bEOF)`: inputs `{fd, buf_size}` in the scalar blob and the
+  data buffer as the first out buffer; outputs `{written, is_eof}`.
+- The listener's `outBufs` buffer is packed as the reference
+  `pack_out_bufs` does it: for each out buffer a 4-byte length, an 8-byte
+  alignment, then the data; the DSP-side `unpack_out_bufs` verifies each
+  length against the one it asked for.
+
+A real `fopen_with_env` call from the phone (110 bytes, log
+`logs/235047-run.log`) decodes byte for byte as the IDL says:
+`ADSP_LIBRARY_PATH\0`, `;\0`, `/sys/devices/soc0/hw_platform\0`, `r\0`,
+and the out-length tail is a single 4. The driver's reply for it (length
+4 + the file handle) matches that shape, and its `fread`/`fseek`/`fclose`
+handling matches the IDL's scalar layouts too.
+
+What the same log shows is the DSP repeating `open(handle 0, sc 0x20200)`
+then `fopen_with_env(handle -1, sc 0x13050100)` with identical arguments
+about fifty times, without ever issuing a `fread` and without our listener
+answering an error. Since the framing and the lengths match the reference,
+the rejection is on the DSP-side stub's acceptance of the reply, not its
+shape; the driver now logs, for the first sixteen calls, both the out
+lengths the call asked for and the bytes it encoded back, so the next run
+can compare them exactly.
