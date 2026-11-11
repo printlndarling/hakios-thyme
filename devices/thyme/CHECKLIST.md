@@ -49,6 +49,16 @@ preview and still-capture PASS evidence is unchanged; the scene itself needs
 exercise the UI. Its old first line, `sound_test springboard`, stalled the
 scene the same way and was removed (`logs/121542-run.log`).
 
+The follow-up UI run did open the app (scene `fe6583df`, taps only, kernel
+`35d4e53f`, `logs/123501-run.log`, SHA-256
+`399443d646849d30007c8661d21326441d999038b95698dfc71b038d9603d2b1`): the taps
+started Camera.app and the capture stack opened **the rear S5KHMX's own
+session** -- `3008x2256 (mode 3 whole)` -- and delivered 34 frames (33 given)
+before it closed. The front-switch tap did not register (the second session is
+the wide again), and the two screenshots were mistimed (the loader's hello
+screen and the home screen), so this run proves the app/preview path but not
+the front switch; the earlier front/rear switch evidence stands.
+
 ## Upstream main 87bf485 merged (2026-11-05)
 
 Upstream main was merged at `87bf485`. It brings the Metal-on-Vulkan/Turnip
