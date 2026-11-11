@@ -168,6 +168,18 @@ mtime 00:53:16 against a 00:33:1x boot is about 1200 s. The status bar read
 59% at 7 minutes and 53% at 18 (the kernel 57 -> 52; `logs/soak3-420.png`,
 `-1080.png`).
 
+The same soak was repeated on the shipped scenario with the touch unlock
+(`5f57d77b`; 2026-11-12, `logs/020252-run.log`, SHA-256
+`67dee841aeca3092ceae9e1886400fb9a7680f2534840b165145d0afd46905ae`): 109
+`UMI Wi-Fi` lines, the network joined for 763 s (199 frames sent, 111 for us,
+405 to everybody, 4 handshake messages), `en0` 8,896 sent / 839 KB and 21,185
+received / 29.2 MB (8 dropped out, 0 in); LE events with no H4 transport
+fault; thermal nominal at 52.9 C with **no slowdowns**; the battery 49 -> 44%
+with the guard quiet; no panic and no jetsam; the DSPs stopped in order; the
+log mtime 02:23:09 against a 02:03:0x boot is about 1200 s. The status bar
+read 52% at 7 minutes and 46% at 18 (the kernel 49 -> 44;
+`logs/soak4-420.png`, `-1080.png`).
+
 With the power source in place the baseline was soaked for 20 minutes
 (`logs/205259-run.log`, SHA-256
 `2ee5306bc35361ea77553e4ff4bc3b694d0ed234e2517079ecbd4ae63d600b9c`, scene
