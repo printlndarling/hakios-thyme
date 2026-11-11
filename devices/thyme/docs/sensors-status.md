@@ -554,8 +554,12 @@ a vaddr in the code segment is `0x4cd000 + (vaddr - 0xb2200000)`, not
   `sns_fw_init.c:Register Sensor from static list %i` (`0xb23d5e58`). The
   fusion sensor is entry 28; its thunk `0xb22f7dd8` calls `0xb22f78dc` ->
   `0xb22f7760`, which builds `/sys/devices/soc0/hw_platform` (`0xb23cc1be`)
-  and calls `fopen` (`0xb227a720`) -- exactly the file read every HakiOS boot
-  logs. So the list really executes at boot, in index order.
+  and calls `fopen` (`0xb227a720`). **Correction:** that read is what entry 28
+  does *when the process runs*; our logs show **no** such call -- the scene's
+  `/redwood/fw/sensors/soc0/hw_platform` appears only in the file listing, and
+  no `apps_std` call is logged in any sensor run (checked `logs/235100-run.log`
+  and `logs/101729-run.log`). So the list is the framework's design, but our
+  boots do not reach it.
 - **The registry is entry 45.** Its entry at `0xb23b9340` is
   `{0xb22d2aec, 1}`; the thunk loads the registry's API record at
   `0xb2424dc4` and calls slot0, `0xb22d2b04`, which loads `SNS_REG_INIT`
@@ -581,3 +585,32 @@ The next measurement is a SUID lookup for the firmware's own name:
 `0xe12754a7007f2759`) is answered, entry 45 ran and the failure is in its
 thread/parser; if it stays silent, the loop never reached it and the stall is
 in entries 28-44.
+
+### The SUID lookup answers zero for every name; the framework never runs (2026-11-11)
+
+The probe ran (`logs/101729-run.log`, kernel `09cb2178`, scene `root-slpitest`
+`2164c9c7`, args include `slpi_step=10 sns=1 fastrpc_restart=4
+sns_ask_name=SNS_REG_INIT`, SHA-256
+`6dbc79db4676d28f74e71209a65a08ba245ec64c0ff8799669af1ee1c28bac02`). The three
+SUID requests ("registry", "accel" and the firmware's own "SNS_REG_INIT") are
+accepted with QMI result 0, and each event carries the name with an **all-zero
+SUID**:
+
+```text
+slpi: sns: "registry" has SUID 00000000000000000000000000000000
+slpi: sns: "accel" has SUID 00000000000000000000000000000000
+slpi: sns: "SNS_REG_INIT" has SUID 00000000000000000000000000000000
+```
+
+even "accel", whose real SUID the phone's own capture shows. The DSP is alive
+(176 s, clean stop) and the SNS service answers, but its registry has no sensor
+at all. Together with the missing file-service calls this is the same
+conclusion from a new side: **the sensor process does not reach the framework's
+static list**, so neither the fusion entry (28) nor the registry (45) runs.
+
+The firmware-side map now says what *would* happen once the process runs; the
+gate is in the process's own start-up (the PD/QDI path the earlier sections
+describe), before `sns_fw_init`'s loop. The next measurement should read that
+start-up's state after `fastrpc_restart=4` (item 424's text, the QDI device
+opens, the user-PD watchdog) rather than the AP side of the tunnel or the
+sensor names.
