@@ -792,3 +792,23 @@ registers (`CCABAP_HIGHER/LOWER`, `ECABAP_*`, `CRCBAP_*`) which the vendor's
 explicit `MHICTRL` reset (`mhi_set_mhi_state(MHI_STATE_RESET)` then waiting for
 the bit to clear) before the BHI registers are touched. Both are in the next
 cold-modem run.
+
+### The context bases and an explicit reset change nothing (2026-11-11)
+
+That run (`logs/090737-run.log`, kernel `16883c86`, cold modem, SHA-256
+`365dd4279473bc33e191023406f7ca5f6905cf638e444d24d9418e7b20130c68`): the six
+context-base registers are written (the image's IOVA stands in for all three
+until there are real MHI contexts), `MHICTRL`'s reset bit is set -- and **the
+device never clears it** (`reset bit did not clear (control 0x2, status 0)`),
+which is consistent with the vendor only issuing that reset in the SYSERR path.
+The doorbell is then refused exactly as before: result 3 / `0xef120700` in
+0 ms with the image at `0x20000000`.
+
+So the host-side MHI register state is now as faithful as the vendor's up to
+the SBL load, and the PBL still refuses. The remaining possibilities are that
+the BHI engine's reads of host memory are being dropped before they are
+translated (the RC's inbound path, or a SID the SMMU never sees), or a PBL-side
+check that needs a reference the AP cannot provide. The modem work pauses here
+with the facts recorded; the next hardware slot goes to the sensor bring-up's
+prepared probe, and the modem returns with a new measurement (an RC-side
+inbound/DMA trace) rather than another variation of the same doorbell.
