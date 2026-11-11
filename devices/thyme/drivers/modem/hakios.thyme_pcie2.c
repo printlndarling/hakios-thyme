@@ -1031,6 +1031,35 @@ root_file_into(const char *name, vm_offset_t dest, size_t capacity, size_t *size
 }
 
 /*
+ * The stage-1 context's fault register: cleared before the doorbell and read
+ * after it, so a fault then is the transfer's. FAR is the input address the
+ * endpoint asked for.
+ */
+static void
+modem_context_fsr(bool clear)
+{
+	volatile uint32_t *regs, *cb;
+	uint32_t idr1, page, pages;
+
+	if (!modem_space.on || smmu_va == 0) {
+		return;
+	}
+	regs = (volatile uint32_t *)smmu_va;
+	idr1 = regs[0x024 / 4];
+	page = (idr1 & (1u << 31)) ? 0x10000 : 0x1000;
+	pages = 2u << ((idr1 >> 28) & 7);
+	cb = (volatile uint32_t *)(smmu_va + (pages + modem_space.context) * page);
+	if (clear) {
+		cb[SMMU_CB_FSR / 4] = 0xc00001fe;
+		__asm__ volatile("dsb sy" ::: "memory");
+		return;
+	}
+	/* the FAULT bits of the SMMU-500's CBF FSR; 0x400 (FORMAT) is not one */
+	hakios_tl("pcie2: SMMU: our context %u FSR %#x (fault bits %#x) FAR %#x\n", modem_space.context,
+	    cb[SMMU_CB_FSR / 4], cb[SMMU_CB_FSR / 4] & 0xc000011eu, cb[0x60 / 4]);
+}
+
+/*
  * The PBL's boot interface, the vendor's mhi_fw_load_sbl: the device sits in
  * MHI execution environment PBL (BHI_EXECENV 0) with version 1.2, waiting for
  * sdx55m/sbl1.mbn. The host takes the MHI core through RESET and M0
@@ -1215,6 +1244,13 @@ image_ready:
 			((volatile uint32_t *)smmu)[0x48 / 4] = 0xffffffff;
 			__asm__ volatile("dsb sy" ::: "memory");
 		}
+		/* ... and our own context's, whose boot-chain state is not this
+		 * transfer's fault */
+		if (modem_space.on) {
+			modem_context_fsr(true);
+			hakios_tl("pcie2: SMMU: before the doorbell:\n");
+			modem_context_fsr(false);
+		}
 	}
 	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
 	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
@@ -1224,10 +1260,16 @@ image_ready:
 	hakios_tl("pcie2: BHI: wrote imgaddr %#x/%#x size %#x; read back %#x/%#x size %#x, txdb %#x, status %#x\n",
 	    (uint32_t)(phys >> 32), (uint32_t)phys, (uint32_t)size, rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10),
 	    rd(bhi + 0x18), rd(bhi + 0x2c));
-	for (i = 0; i < 200; i++) {
+	delay(10000);
+	modem_context_fsr(false);
+	for (i = 0; i < 1000; i++) {
 		status = rd(bhi + 0x2c);
 		if (((status >> 30) & 3) == 2 || ((status >> 30) & 3) == 3) {
 			break;
+		}
+		if (i % 100 == 99) {
+			hakios_tl("pcie2: BHI: still %#x at %u ms (execenv %#x, MHISTATUS %#x)\n", status, (i + 1) * 10,
+			    rd(bhi + 0x28), rd(MHI_BAR + 0x48));
 		}
 		delay(10000);
 	}

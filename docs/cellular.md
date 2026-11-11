@@ -695,3 +695,54 @@ the stream a stage-1 context (`pcie2_sid=5`); the context's own FSR, TTBR0,
 TCR and SCTLR are printed after the doorbell now, and a match register that
 already carries one of the two streams is repointed at the context instead of
 being duplicated (first match wins, so a duplicate would never be reached).
+
+### The table and the context: no refusal and no fault, but no completion either (2026-11-11)
+
+With the BDF-to-SID table written and read back 256/256 (`logs/083456-run.log`,
+SHA-256 `917269e313244a0803e6e7eee331ecf8f0c680256d9d690be57feb247eb13872`) the
+doorbell still answers 0xef120700 in 10 ms and SGFSR stays 0: no unmatched
+stream ever reaches the SMMU, i.e. the reads still arrive as SID 0 (matched by
+the boot chain's SMR 0 and faulting in its off context 0) or not at all.
+
+With a stage-1 context behind the table as well (`pcie2_sid=5`, the zero image,
+`logs/083705-run.log`, SHA-256 `07ccaa63020373bb3fd4ec5b1923e5b2be2b5199ad7685b47f1c80a245e41b8c`)
+the doorbell **stops erroring at once**: BHI_STATUS stays 0 (no result) for the
+whole two-second poll, and the context the stream now goes through reads:
+
+```text
+pcie2: SMMU: context 3 (page 0x1000, 128 pages) tables ..., SCTLR 0x127, streams 2
+pcie2: BHI: wrote imgaddr 0/0x20000000 size 0x1000; ... status 0
+pcie2: BHI: status 0 (result 0), errcode 0xef120700 (stale), dbg ... after 2000 ms
+pcie2: SMMU: our context 3: FSR 0x400 FAR 0xfeeee4b9, ...
+pcie2: apps SMMU: SMR 5 stream 0x1d01 mask 0 s2cr 0x3 (kind 0 context 3)
+```
+
+The real SBL through the same context (`logs/083903-run.log`, SHA-256
+`389547238bb68fcc76a1ff5eba0e6060aaba9103698705ba216fdbc0f218c1f0`) repeats it
+with SMR 5 repointed to context 5 (the new path): status 0 for two seconds, and
+context 5's FSR 0x400.
+
+The FSR is **not a fault**: in the SMMU-500's CBF FSR the fault bits are
+`MULTI|SS|UUT|EF|PF|AFF|TF` = `0xc000011e`, and 0x400 is a FORMAT bit. The last
+run cleared and re-read the context's FSR immediately before and 10 ms after
+the doorbell and it did not change (`logs/084236-run.log`, SHA-256
+`920a67cf74ea18b162bcda870312b901fe2c653fd53482c507821bf091ab5f95`). So the
+table plus the context stop the instant refusal without introducing a fault:
+the BHI leaves status 0, which is either a transfer still in progress after
+two seconds or no transfer at all. The next probe polls for ten seconds and
+logs the status, EXECENV and MHI status once a second, to tell those apart.
+
+That run (`logs/084639-run.log`, SHA-256
+`10ce4580019d2a217ea3bbfcea8f8f1ef6342af86744461b7b0e85cce2dd998a`) answered a
+different question first: the **BHI registers still hold the previous run's
+image**. The survey line at the start of the boot reads `imgaddr
+0/0x20000000, imgsize 0x85cd8` and the previous errcode before this run wrote
+anything. So neither the PMIC pulse (`qpnp_pon_modem_pwr_off`, PON 0x862/0x863)
+nor PERST resets the modem's boot block, and the doorbell that follows is
+issued into an engine still holding the last attempt: status stays 0 at 1, 2
+and 5 s, EXECENV 0, MHISTATUS 0. A modem test therefore needs a cold modem
+state -- the phone's reboot into Android, whose modem boot resets it -- or a
+reset whose effect is actually observed, before the BHI results mean anything.
+Verifying the PON pulse (read 0x862/0x863 back, watch MDM2AP_STATUS) is the
+next step, and the doorbell's status semantics will be read again only after
+that.
