@@ -746,3 +746,34 @@ reset whose effect is actually observed, before the BHI results mean anything.
 Verifying the PON pulse (read 0x862/0x863 back, watch MDM2AP_STATUS) is the
 next step, and the doorbell's status semantics will be read again only after
 that.
+
+### A cold modem refuses the translated IOVA too -- and the MHI windows were the image's, not the pool (2026-11-11)
+
+The first run after a reboot (a cold modem: the BHI survey reads `imgaddr 0/0,
+status 0, errcode 0` before the driver writes) repeats the refusal with the
+table and the stage-1 context in place (`logs/085402-run.log`, SHA-256
+`4dedb066d54bb40388ef75eb33957e8452462428f3e5c1b85aab49424f1f6372`):
+
+```text
+pcie2: SMMU: context 3 (page 0x1000, 128 pages) tables ..., SCTLR 0x127, streams 2
+pcie2: SMMU: before the doorbell: our context 3 FSR 0x400 (fault bits 0) ...
+pcie2: BHI: wrote imgaddr 0/0x20000000 size 0x85cd8; ... status 0
+pcie2: BHI: status 0xffffffff (result 3), errcode 0xef120700, dbg 0x20000000 0 0x85cd8, ... after 0 ms
+pcie2: apps SMMU: SMR 5 stream 0x1d01 mask 0 s2cr 0x3 (kind 0 context 3)
+```
+
+Immediate (0 ms), the same code, and no SMMU fault. So the earlier status-0
+runs were the stale state, and a fresh PBL refuses **every** image address --
+physical below 4 GB, the SLPI heap, and an IOVA that a stage-1 context of ours
+maps -- in the same way.
+
+Comparing the driver with the vendor's `mhi_init_mmio` found one thing that was
+not faithful: the four MHI window registers are the **DMA pool**, not the image
+range. `MHICTRLBASE/LIMIT` (0x80/0x88 and 0x84/0x8c) and
+`MHIDATABASE/LIMIT` (0x98/0xa0 and 0x9c/0xa4) take the DT's
+`mhi_0_iommu_group` pool, `qcom,iommu-dma-addr-pool = <0x20000000 0x1fffffff>`
+(i.e. 0x20000000..0x3ffffffe), and the image is placed inside it; the driver
+had written the image's own [addr, addr+size-1]. It now programs the pool on
+both windows and logs them, and the PON block's registers are read back right
+after the modem pulse and 150 ms later, so the reset's effect (or its absence)
+is visible instead of assumed.

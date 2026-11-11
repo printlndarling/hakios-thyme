@@ -335,6 +335,34 @@ hakios_pmic_pon_modem_reset(void)
 	return -ENODEV;
 }
 
+/* The same block's registers, for a driver that has just pulsed it. */
+void
+hakios_pmic_pon_report(void)
+{
+	uint32_t channels;
+
+	if (!pmic_mapped()) {
+		say("pmic: pon: no arbiter\n");
+		return;
+	}
+	channels = rd(arb_core + ARB_FEATURES) & 0x7ff;
+	if (channels == 0 || channels > ARB_MAX_CHANNELS) {
+		channels = ARB_MAX_CHANNELS;
+	}
+	for (uint32_t n = 0; n < channels; n++) {
+		uint8_t is[2];
+
+		if (rd(arb_core + ARB_CHANNEL(n)) == 0) {
+			continue;
+		}
+		if (spmi_read(n, REG_TYPE, is, 2) == NULL && is[0] == PON_TYPE && is[1] == PON_SUBTYPE) {
+			pon_report(n);
+			return;
+		}
+	}
+	say("pmic: pon: no power-on block found\n");
+}
+
 static bool list_all = true;
 
 static void

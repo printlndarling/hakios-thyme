@@ -42,6 +42,7 @@ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern int umi_rpmh_wifi_power(void);
 extern int hakios_pmic_pon_modem_reset(void);
+extern void hakios_pmic_pon_report(void);
 extern kern_return_t thread_terminate(thread_t thread);
 extern uint64_t kvtophys(vm_offset_t va);
 
@@ -1224,15 +1225,23 @@ image_ready:
 		}
 	}
 
-	/* what the device may read: the image's own range, in both windows */
-	wr(MHI_BAR + 0x80, (uint32_t)phys);
-	wr(MHI_BAR + 0x84, (uint32_t)(phys >> 32));
-	wr(MHI_BAR + 0x88, (uint32_t)(phys + size - 1));
-	wr(MHI_BAR + 0x8c, (uint32_t)((phys + size - 1) >> 32));
-	wr(MHI_BAR + 0x98, (uint32_t)phys);
-	wr(MHI_BAR + 0x9c, (uint32_t)(phys >> 32));
-	wr(MHI_BAR + 0xa0, (uint32_t)(phys + size - 1));
-	wr(MHI_BAR + 0xa4, (uint32_t)((phys + size - 1) >> 32));
+	/* What the device may read. The vendor's mhi_init_mmio gives both
+	 * windows the DT's DMA pool (the mhi_0_iommu_group's
+	 * qcom,iommu-dma-addr-pool = <0x20000000 0x1fffffff>), not the image:
+	 * MHICTRLBASE/LIMIT and MHIDATABASE/LIMIT are the IOVA range MHI may
+	 * use, and the image is placed inside it. */
+#define MODEM_IOVA_BASE 0x20000000u
+#define MODEM_IOVA_STOP 0x3ffffffeu
+	wr(MHI_BAR + 0x80, MODEM_IOVA_BASE);
+	wr(MHI_BAR + 0x84, 0);
+	wr(MHI_BAR + 0x88, MODEM_IOVA_STOP);
+	wr(MHI_BAR + 0x8c, 0);
+	wr(MHI_BAR + 0x98, MODEM_IOVA_BASE);
+	wr(MHI_BAR + 0x9c, 0);
+	wr(MHI_BAR + 0xa0, MODEM_IOVA_STOP);
+	wr(MHI_BAR + 0xa4, 0);
+	hakios_tl("pcie2: MHI: windows base %#x stop %#x, image at %#llx size %zu\n", MODEM_IOVA_BASE,
+	    MODEM_IOVA_STOP, (unsigned long long)phys, size);
 
 	/* the image, and the doorbell (the mapping is uncached: no flush needed) */
 	{
@@ -1585,7 +1594,11 @@ pcie2_run(void)
 	 * write path), a pause, and then the AP2MDM_STATUS handshake below. */
 	if (bhi >= 2 && !pcie2_keep) {
 		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
+		hakios_tl("pcie2: PON right after the pulse:\n");
+		hakios_pmic_pon_report();
 		delay(150000);
+		hakios_tl("pcie2: PON 150 ms later:\n");
+		hakios_pmic_pon_report();
 	}
 	/* the default path: the four ext-sdx55m lines in the modem's active
 	 * state -- mdm2ap status and errfatal as inputs, ap2mdm status high,
