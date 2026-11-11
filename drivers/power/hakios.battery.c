@@ -17,6 +17,7 @@
 #include <sys/systm.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern void HakiosBatteryReport(const void *state, unsigned size);     /* drivers/power/hakios.battery.cpp */
 
 #define LOADER_BATTERY_MAGIC            0x2154544142574452ULL
 #define LOADER_BATTERY_VERSION          1
@@ -100,6 +101,7 @@ static void
 battery_poll(void)
 {
 	struct loader_battery sample;
+	struct hakios_battery_state state;
 
 	if (!battery_snapshot(&sample) || sample.magic != LOADER_BATTERY_MAGIC ||
 	    sample.version != LOADER_BATTERY_VERSION || sample.size < sizeof(sample) ||
@@ -117,6 +119,33 @@ battery_poll(void)
 	battery_soc_estimated = (sample.flags & LOADER_BATTERY_SOC_ESTIMATED) != 0;
 	battery_charger_action = (int)sample.charger_action;
 	battery_updates++;
+
+	/*
+	 * Darwin reads the battery through an IOPMPowerSource (drivers/power/hakios.battery.cpp):
+	 * powerd, BatteryCenter, and with them the status bar, the lock screen and Settings >
+	 * Battery, take their numbers from it. The DSP's battery manager reports through that
+	 * path already, but with battery=1 it is this loader page that answers, and without the
+	 * power source the status bar keeps the percentage it had at launch (seen 2026-11-11:
+	 * 53% at 7 and 18 minutes while this driver read 47 -> 42%). So each valid reading here
+	 * is passed on too.
+	 *
+	 * The loader's signed current is positive while the battery discharges (the firmware's
+	 * fuel gauge), while the power source's is positive while it takes charge: negated here.
+	 */
+	memset(&state, 0, sizeof(state));
+	state.size = sizeof(state);
+	state.percent_hundredths = battery_soc_percent * 100;
+	if (battery_voltage_mv > 0) {
+		state.voltage_uv = battery_voltage_mv * 1000;
+	}
+	state.current_ua = -battery_current_ma * 1000;
+	if (battery_temperature_c > -100) {
+		state.temperature_hundredths = battery_temperature_c * 100;
+	}
+	state.present = battery_present ? 1 : 0;
+	state.external = battery_charger_present ? 1 : 0;
+	state.status = battery_charging ? 1 : (state.external ? 3 : 2);
+	HakiosBatteryReport(&state, sizeof(state));
 }
 
 /*
