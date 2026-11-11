@@ -1184,6 +1184,38 @@ image_ready:
 	bhioff = rd(MHI_BAR + 0x28);
 	bhi = MHI_BAR + bhioff;
 
+	/*
+	 * The vendor's mhi_init_mmio writes the three MHI context bases before
+	 * the SBL is loaded (CCABAP/ECABAP/CRCBAP, 0x58-0x6c). They are not
+	 * used until MHI is up, but they are part of the state Android leaves
+	 * behind; the image's own IOVA stands in for all three until there are
+	 * real context structures. And mhi_set_mhi_state(MHI_STATE_RESET) --
+	 * write MHICTRL's reset bit and wait for the device to clear it -- is
+	 * the vendor's way of telling a PBL/SBL device that the host is taking
+	 * it over; it is tried here before the boot interface is touched.
+	 */
+	wr(MHI_BAR + 0x58, (uint32_t)(phys & ~0xfffu));
+	wr(MHI_BAR + 0x5c, (uint32_t)(phys >> 32));
+	wr(MHI_BAR + 0x60, (uint32_t)(phys & ~0xfffu));
+	wr(MHI_BAR + 0x64, (uint32_t)(phys >> 32));
+	wr(MHI_BAR + 0x68, (uint32_t)(phys & ~0xfffu));
+	wr(MHI_BAR + 0x6c, (uint32_t)(phys >> 32));
+	{
+		uint32_t control = rd(MHI_BAR + 0x38);
+
+		if (!(control & 0x2)) {
+			wr(MHI_BAR + 0x38, control | 0x2);
+			for (i = 0; i < 100 && (rd(MHI_BAR + 0x38) & 0x2); i++) {
+				delay(1000);
+			}
+			hakios_tl("pcie2: MHI: reset bit %s (control %#x, status %#x)\n",
+			    (rd(MHI_BAR + 0x38) & 0x2) ? "did not clear" : "cleared", rd(MHI_BAR + 0x38),
+			    rd(MHI_BAR + 0x48));
+		} else {
+			hakios_tl("pcie2: MHI: already in reset (control %#x)\n", control);
+		}
+	}
+
 	/* the vendor's mhi_async_power_up writes the boot interrupt vector
 	 * before anything else; without it the PBL ignores the doorbell. */
 	wr(bhi + 0x20, 0);          /* BHI_INTVEC */
