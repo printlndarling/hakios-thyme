@@ -20,7 +20,7 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 
 | # | Stage | What happens to the phone | State |
 |---|---|---|---|
-| 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The battery gate is NOT checked by anything yet (see "The phone that went quiet") |
+| 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
 | 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). Not run on a phone: the phone was not on USB when it was finished |
 | 2 | **Carve `darwin`** off the end of Android's userdata | **Android's data is shrunk and moved**: the f2fs is resized and the GPT rewritten. Back up the phone's data first (the user's own, with Android's tools); the tool does not | plan only: `tools/userdata-carve.py` prints the commands and writes nothing |
 | 3 | **Write the system image to `darwin`** with the guarded writer | writes `darwin` only; the writer refuses any other partition and reads every write back | exists: `tools/darwin-write.py`; its self-test refuses the wrong partition. Never run on a phone |
@@ -47,8 +47,11 @@ normally and left the phone in the loader. The likeliest cause is the **battery*
 loader (the kernel's charging path is not written; the UEFI shell does not charge), the screen was on for hours, and a long session
 is a flat battery. If so, plugging it into a charger for a few minutes brings it back to Android by itself. That has not been
 confirmed. It is why stage 0 has a battery gate, and why an unattended run is not a safe thing to leave overnight until the kernel
-reads the battery and stops the run (`thermal_stop` is the same idea for heat; a battery guard is the same again, and needs the
-battery reading of the audio DSP's driver, which only runs with `adsp=1`).
+reads the battery and stops the run. That guard now exists and is verified: the loader's charging bit follows the cell's voltage
+(a cable attached is not charging), and with `battery_stop=25 battery_stop_poll=30`, which `devices/thyme/ram.args` now carries,
+an unattended run hands back to the loader before the cell is empty (forced at 95% in `logs/134145-run.log`). It hands back to the
+**loader**, not to Android: only the host's `XL_REBOOT_AFTER=1` sends the phone where it charges, so a run is still not something
+to leave with nobody there to take it back.
 
 ## What the user decides
 

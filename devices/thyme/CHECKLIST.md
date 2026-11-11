@@ -4,6 +4,61 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## The battery guard, and the charging bit that defeated it (2026-11-11)
+
+A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
+`35d4e53f`, scene `8f5bc2aa`, SHA-256 `8268de80de00a089b3f24342a075bf314ccb1c074d4ecbf647de8ae19b9afc9c`)
+stayed up for the whole 1800 s: the network joined and held for 1657 s (215 frames
+sent, 112 for us, 5 handshake messages, the group's key changed once; `en0` 13,261
+sent / 941 KB and 22,174 received / 29.9 MB, 2 dropped out, 0 in), 537 LE reports
+arrived (173 named) with no H4 transport fault, thermal stayed nominal (54-60 C)
+until the return's teardown (one moderate 70.1 C, one heavy 75.5 C), there was no
+panic, no jetsam, and the audio DSP stopped in order; the UI answered at 7, 15 and
+25 minutes (`logs/soak30-420.png`, `-900`, `-1500`). The battery told another story:
+the loader read 70% at boot and +895..+1067 mA through the run, but the cell fell to
+3583 mV and 53% (the next boot read 56%, so the 70% was the unsettled gauge), and
+the phone was discharging through the PC port the whole time.
+
+That exposed the guard's blind spot. The loader's `LOADER_BATTERY_CHARGING` bit meant
+only "a cable is attached", and in a RAM run the cable is always attached, so the
+kernel's `battery_stop` guard refused to act on a real reading: with `battery_stop=95`
+it logged `charge 56% (battery present, charger attached, charging yes); stop at or
+below 95% -- not a reading it acts on` while the cell fell 3905 -> 3514 mV in six
+minutes at +810..+1025 mA (`logs/133314-run.log`, SHA-256
+`db035ccb0e3aed9bb04458d4fd61a2c7b0d6f9d592700696047065a32b08c4eb`). The firmware's
+signed current cannot be the test either: positive values appeared both while the
+cell was rising at 98% (`logs/185653-run.log`, 2026-11-08) and while it was falling
+here.
+
+The bit now follows the cell itself: `charger_poll()` in `xnuloader/loader.c` keeps
+the highest terminal voltage seen since the loader started and clears the bit when
+the cell is more than 40 mV below it -- a cell taking charge holds or raises its
+voltage, one being drained under the load falls. A run at 53% with `battery_stop=95`
+then ended by itself: `charging=0` at 3429 mV and +1418 mA, three looks, and
+`--- battguard: the charge is 53%, at or below battery_stop=95 three looks in a row:
+back to the loader ---` at 175 s; the kernel returned at 185 s (XL_SECS was 420),
+Wi-Fi restored its SMMU context, the audio DSP was asked to stop and TrustZone shut
+it down, and there was no panic (`logs/134145-run.log`, SHA-256
+`651533984e8f4bed4c5d8959c3d405b91fb1968da3950faca08c276eb8637114`, loader
+`50c56443`, boot image `7c5a2cd8`). `devices/thyme/ram.args` now carries
+`battery_stop=25 battery_stop_poll=30`, so a run nobody watches ends before the cell
+is empty. The guard still returns to the loader, not to Android: the host's
+`XL_REBOOT_AFTER=1` is what puts the phone where it charges.
+
+Known limit, by design: a charging phone whose load rises faster than the charger can
+follow is read as not charging, so the guard may end a run early. That is the safe
+direction; the alternative was never stopping at all.
+
+The canonical wireless regression on the committed loader (`82a7ea5`) and the new
+arguments then passed the same gate on the new boot image: 109 `UMI Wi-Fi` lines,
+DHCP `192.168.0.103` with the DNS servers, 121 LE reports (37 named), zero `H4
+transport fault` lines, no panic or jetsam, and the guard stayed quiet above its
+threshold (`logs/134621-run.log`, SHA-256
+`2bd570248a9d059bfbf709bf978c6391b3dbe4f5cadd45e6de66713b3417f863`; loader
+`50c56443`, image `7c5a2cd8`, args `e1aa63c2`). The version string says `-dirty`
+because the documentation was being written while the run started; kernel
+`35d4e53f`, loader and arguments are the hashes in the log.
+
 ## Wireless regression, and the config drift it caught (2026-11-11)
 
 The daily wireless regression on the current tree (`logs/094056-run.log`, kernel
@@ -750,11 +805,11 @@ No item moves to `PASS` from source inspection alone.
 |---|---|---|
 | Battery percentage/voltage/temperature | PASS for telemetry; iOS status bar refresh mismatch remains | PASS |
 | Signed current | PASS, `-97 mA` during the probe | PASS |
-| Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1` | PASS |
+| Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1`, but a positive reading is not proof of charging (2026-11-11: +1025 mA while the cell fell 3905 -> 3514 mV, `logs/133314-run.log`) | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
 | 30-minute charging endurance | PASS; endpoint online throughout the UI run, 0 failed reads | PASS with endpoint online |
-| Net charge under USB load | PARTIAL: SOC stayed 97% over the 30-minute UI run at +129..151 mA; longer net-charge test still required | PARTIAL: load can exceed a 500 mA host port |
-| `battery_stop` safety guard | TODO | PASS |
+| Net charge under USB load | PARTIAL: SOC stayed 97% over the 30-minute UI run at +129..151 mA, but the daily scene drains through a PC port: 30-minute soak at 4054 -> 3583 mV, 70 -> 53% (`logs/125243-run.log`); real charging still needs the charger state machine (TakeAction) | PARTIAL: load can exceed a 500 mA host port |
+| `battery_stop` safety guard | PASS on hardware: with the charging bit following the cell's voltage, a run at 53% and `battery_stop=95` ended after three looks and handed back to the loader at 185 s, Wi-Fi restored and the DSP stopped in order, no panic (`logs/134145-run.log`); the old cable-only bit never fired (`logs/133314-run.log`). `ram.args` now defaults to `battery_stop=25 battery_stop_poll=30`; the guard returns to the loader, so `XL_REBOOT_AFTER=1` is still what sends the phone to Android | PASS |
 | Thermal frequency caps | PASS; big-core domain 17 -> 16 at 75.9 C, then recovered | PASS |
 | `thermal_stop` hand-back | PASS with forced `thermal_stop=30`; GPU stopped in order and loader returned without panic | TODO |
 | Automatic Android return after `thermal_stop` | TODO: host must issue `fastboot -s xnuloader reboot` | TODO |
