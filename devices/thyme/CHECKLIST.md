@@ -882,7 +882,7 @@ No item moves to `PASS` from source inspection alone.
 | `battery_stop` safety guard | PASS on hardware: with the charging bit following the cell's voltage, a run at 53% and `battery_stop=95` ended after three looks and handed back to the loader at 185 s, Wi-Fi restored and the DSP stopped in order, no panic (`logs/134145-run.log`); the old cable-only bit never fired (`logs/133314-run.log`). Reproduced on the `0df6409a` baseline by `devices/thyme/battery-guard.sh` at threshold 99: the stop fired with `charging=0` and the kernel returned at 186 s instead of 420 (`logs/201116-run.log`, SHA-256 `558a75a4af82cf921c4eee4f14f858c38706ff42b208a4016eaebbda08f14ed1`). `ram.args` now defaults to `battery_stop=25 battery_stop_poll=30`; the guard returns to the loader, so `XL_REBOOT_AFTER=1` is still what sends the phone to Android | PASS |
 | Thermal frequency caps | PASS; big-core domain 17 -> 16 at 75.9 C, then recovered | PASS |
 | `thermal_stop` hand-back | PASS with forced `thermal_stop=30`; GPU stopped in order and loader returned without panic | TODO |
-| Automatic Android return after `thermal_stop` | TODO: host must issue `fastboot -s xnuloader reboot` | TODO |
+| Automatic Android return after `thermal_stop` | PASS: a forced `thermal_stop=30` fired at 37.0 °C after 2000 ms, the teardown stopped the DSPs in order, the loader returned 18 s after the kernel started, and `xl`'s `XL_REBOOT_AFTER=1` put the phone back in Android without a manual command (`logs/212426-run.log`, SHA-256 `c98eb759f36d832a283aeb0f68ef88e9679ba2498242214bd818fb04b1d5980d`; `adb` saw it back) | TODO |
 
 ## Audio, wireless, and sensors
 
