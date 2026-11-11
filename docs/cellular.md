@@ -670,3 +670,28 @@ reaching host memory; the next run sends a deliberately wrong image without
 reading any file (`pcie2_bhi_bad=1`, from the SLPI heap) -- if the error code is
 unchanged the PBL rejects the transfer before the image's content matters, and
 if it changes the content is being read.
+
+### The zero image is refused exactly like the real one (2026-11-11)
+
+That run is in: `pcie2_bhi=2` + the bad-image flag + `pcie2_img=1`
+(`logs/082821-run.log`, kernel `90ce0739`, image `4f3cf17e`, SHA-256
+`52d290e7ba88c4ca6a153b69c3d1a4bb41333e79c97bd768f47c6e75f292e8df`). A 4 KB
+zeroed image from the SLPI heap, with no file read at all, is refused in 10 ms
+with **the same** `BHI_STATUS` 0xffffffff / result 3 and `BHI_ERRCODE`
+0xef120700; only the debug registers follow the image (address `0xc0000000`,
+size `0x1000`). So the refusal is not about the image's content: the PBL never
+gets to read it.
+
+The SMMU says why. In that run the boot chain's match register 0 is still
+stream 0, mask 0, S2CR 0 -- translation into **context 0, which is switched
+off** -- and the BDF-to-SID table at PARF+0x2000 was not programmed, so the
+endpoint's reads leave as SID 0, match SMR 0, and fault there (CB0 FSR 0x400,
+SGFSR 0 because the stream matched an SMR before the unmatched-stream policy
+could apply). A doorbell whose DMA faults reads nothing, and the PBL reports a
+transfer error whatever the image is.
+
+The next runs program the table (`pcie2_sid=2`) and read it back, and then give
+the stream a stage-1 context (`pcie2_sid=5`); the context's own FSR, TTBR0,
+TCR and SCTLR are printed after the doorbell now, and a match register that
+already carries one of the two streams is repointed at the context instead of
+being duplicated (first match wins, so a duplicate would never be reached).

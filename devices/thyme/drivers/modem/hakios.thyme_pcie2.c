@@ -781,12 +781,36 @@ modem_smmu_map(vm_offset_t buffer, size_t size)
 		__asm__ volatile("dsb sy" ::: "memory");
 		cb[SMMU_CB_SCTLR / 4] = SMMU_SCTLR_ON;
 
-		/* two free match registers: the table's offset (1) and the DT SID */
+		/* The table's offset (1) and the DT SID: a match register that
+		 * already carries one of them (a previous run's, e.g.) is
+		 * repointed at this context rather than duplicated -- a duplicate
+		 * would never be reached, the first match wins. SMR 0 stays the
+		 * boot chain's. */
 		{
 			static const uint32_t streams[] = { 1, 0x1d01 };
 
 			for (uint32_t s = 0; s < 2; s++) {
-				for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+				uint32_t existing = matches;
+
+				for (n = 1; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+					uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
+					uint32_t valid = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+					uint32_t stream = smr & (wide ? 0xffff : 0x7fff);
+					uint32_t mask = (smr >> 16) & (wide ? 0xffff : 0x7fff);
+
+					if (valid && mask == 0 && stream == streams[s]) {
+						existing = n;
+						break;
+					}
+				}
+				if (existing != matches) {
+					regs[(0xc00 + 4 * existing) / 4] = wide ? ((1u << 10) | c) : c;
+					made++;
+					hakios_tl("pcie2: SMMU: SMR %u repointed to context %u for stream %#x\n", existing, c,
+					    streams[s]);
+					continue;
+				}
+				for (n = 1; n < matches && 0x800 + 4 * n < 0xc00; n++) {
 					uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
 					uint32_t valid = wide ? (s2cr & (1u << 10)) : (smr >> 31);
 
@@ -839,10 +863,18 @@ modem_sid_setup(uint32_t mode)
 	uint32_t scr0, idr0, matches, wide, n, sid0 = 0;
 
 	if (mode == 1 || mode == 2 || mode == 4 || mode == 6) {
+		uint32_t nonz = 0;
+
 		for (uint32_t i = 0; i < 256; i++) {
 			wr(PARF + 0x2000 + 4 * i, entry);
 		}
-		hakios_tl("pcie2: SID: BDF-to-SID table all %#x (BDF 1:0.0 -> offset 1 of 0x1d00)\n", entry);
+		for (uint32_t i = 0; i < 256; i++) {
+			if (rd(PARF + 0x2000 + 4 * i) != 0) {
+				nonz++;
+			}
+		}
+		hakios_tl("pcie2: SID: BDF-to-SID table all %#x (BDF 1:0.0 -> offset 1 of 0x1d00); read back %u of 256\n",
+		    entry, nonz);
 	}
 	if (mode == 2) {
 		return;
@@ -1220,6 +1252,13 @@ image_ready:
 
 			hakios_tl("pcie2: SMMU: SGFSR %#x, SGFSYNR0 %#x, SGFSYNR1 %#x (the stream), CB0 FSR %#x FAR %#x\n",
 			    regs[0x48 / 4], regs[0x50 / 4], regs[0x54 / 4], regs[cb0 + 0x58 / 4], regs[cb0 + 0x60 / 4]);
+			if (modem_space.on) {
+				uint32_t our = (pages + modem_space.context) * page / 4;
+
+				hakios_tl("pcie2: SMMU: our context %u: FSR %#x FAR %#x, TTBR0 %#x%08x, TCR %#x, SCTLR %#x\n",
+				    modem_space.context, regs[our + 0x58 / 4], regs[our + 0x60 / 4], regs[our + 0x24 / 4],
+				    regs[our + 0x20 / 4], regs[our + 0x30 / 4], regs[our + 0x00 / 4]);
+			}
 		}
 	}
 	/* the iATU's other regions, as the bootloader left them: an enabled
