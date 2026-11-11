@@ -77,10 +77,12 @@ battery item the 30-minute soak showed at 69%, now with both sides in one run.
 
 One measurement is open: `loader_return_after` hands back late. This run's
 budget of 1200 s ended with the teardown at 1326 s, and the 30-minute soak's
-1800 s at 1928 s -- both about 127 s over. The kernel's timestamps track the
-host's wall clock, the loader banner reads `CNTFRQ=192000000`
-(`logs/loader-banner.png`) and the kernel's timebase default is 24 MHz, so the
-early deadline conversion is one suspect; the 130 s boot that would show
+1800 s at 1928 s -- both about 127 s over. The timestamps are not the loader's
+or a raw power-on counter: they are `libkern/os/log.c`'s
+`absolutetime_to_microtime(mach_absolute_time())`, so they are since boot and
+the timer really does fire late. The loader banner reads `CNTFRQ=192000000`
+(`logs/loader-banner.png`) while the kernel's timebase default is 24 MHz, so
+the early deadline conversion is one suspect; the 130 s boot that would show
 whether the error is a fixed offset or proportional was stopped by a wedged
 loader USB endpoint (the phone stayed in fastboot and every getvar timed out;
 it needs a replug). The guard and thermal stops call `loader_return` directly
