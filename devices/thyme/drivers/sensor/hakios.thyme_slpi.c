@@ -2843,6 +2843,12 @@ static const uint8_t sns_accel_suid[16] = {
 	0xa6, 0x7e, 0x72, 0x01, 0xfc, 0x6a, 0xbb, 0x1f,
 };
 static uint32_t sns_accel_direct;        /* boot-arg sns_accel_direct: configure the accelerometer by that SUID */
+/* boot-arg sns_ask_name=NAME: one more SUID lookup, for the firmware's own
+ * sensor names (the registry sensor's is SNS_REG_INIT; "registry" is what the
+ * driver already asks). Its answer says whether the boot list reached that
+ * sensor. */
+static char sns_ask_name[32];
+static bool sns_have_ask_name;
 
 /* The gyroscope's SUID from the same capture (high 0x97d3c48969f972a0, low 0xb9418a10491511c1). */
 static const uint8_t sns_gyro_suid[16] = {
@@ -3236,6 +3242,8 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 			sns_config();
 		} else if (strcmp(name, "registry") == 0) {
 			sns_have_registry = true;
+		} else if (sns_ask_name[0] != 0 && strcmp(name, sns_ask_name) == 0) {
+			sns_have_ask_name = true;
 		}
 	}
 }
@@ -3834,14 +3842,21 @@ sns_start(void)
 		sns_config();
 	} else {
 		/* the sensor process may still be initialising at three seconds: ask again for a while */
-		for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid); attempt++) {
+		for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid &&
+		    (sns_ask_name[0] == 0 || sns_have_ask_name)); attempt++) {
 			sns_ask("registry");
 			sns_ask("accel");
+			if (sns_ask_name[0] != 0) {
+				sns_ask(sns_ask_name);
+			}
 			sleep_ms(2000);
 		}
 	}
 	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
 	    sns_have_suid ? "ANSWERED" : "silent");
+	if (sns_ask_name[0] != 0) {
+		printf("slpi: sns: \"%s\" %s\n", sns_ask_name, sns_have_ask_name ? "ANSWERED" : "silent");
+	}
 	if (slpi_smem_dump) {
 		uint32_t cacheline = 0, partition_size = 0;
 		uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
@@ -7807,6 +7822,16 @@ step_qrtr(void)
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
+	PE_parse_boot_argn("sns_ask_name", sns_ask_name, sizeof(sns_ask_name));
+	/* a name longer than the buffer arrives truncated; say so rather than ask
+	 * for the wrong name */
+	{
+		char check[64] = { 0 };
+
+		if (PE_parse_boot_argn("sns_ask_name", check, sizeof(check)) && strcmp(check, sns_ask_name) != 0) {
+			printf("slpi: sns: sns_ask_name \"%s\" is too long; asking for \"%s\"\n", check, sns_ask_name);
+		}
+	}
 	PE_parse_boot_argn("sns_gyro_direct", &sns_gyro_direct, sizeof(sns_gyro_direct));
 	PE_parse_boot_argn("sns_registry_probe", &sns_registry_probe, sizeof(sns_registry_probe));
 	PE_parse_boot_argn("sns_registry_write", &sns_registry_write, sizeof(sns_registry_write));

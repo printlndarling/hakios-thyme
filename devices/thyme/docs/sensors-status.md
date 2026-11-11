@@ -541,3 +541,43 @@ sensor: the earlier notes' `sns_cm`/registry-group path and the client
 manager's own start-up. The next probe should look at the DSP's own start-up
 sequence (the reassembled firmware's `sns_client_manager`/registry init) rather
 than at the AP side of the tunnel, which is now demonstrated end to end.
+
+### The boot list, and where it stops before the registry (2026-11-11)
+
+Disassembling the reassembled image (`tools/slpi-split.py`; the file offset of
+a vaddr in the code segment is `0x4cd000 + (vaddr - 0xb2200000)`, not
+`vaddr - 0x8A000000`, which is the segment's *physical* load address):
+
+- **The sensor framework boots a static list.** `sns_fw_init` at `0xb22a21e4`
+  reads the count `memw(0xb23b93d0)` = **63** and walks `0xb23b91d8 + 8*i`;
+  each entry is `{init_fn, n}`. The log string is
+  `sns_fw_init.c:Register Sensor from static list %i` (`0xb23d5e58`). The
+  fusion sensor is entry 28; its thunk `0xb22f7dd8` calls `0xb22f78dc` ->
+  `0xb22f7760`, which builds `/sys/devices/soc0/hw_platform` (`0xb23cc1be`)
+  and calls `fopen` (`0xb227a720`) -- exactly the file read every HakiOS boot
+  logs. So the list really executes at boot, in index order.
+- **The registry is entry 45.** Its entry at `0xb23b9340` is
+  `{0xb22d2aec, 1}`; the thunk loads the registry's API record at
+  `0xb2424dc4` and calls slot0, `0xb22d2b04`, which loads `SNS_REG_INIT`
+  (`0xb23c33d8`), creates the sensor object and the instance/thread
+  (`0xb2248ff0`, body `0xb22d2e8c`), whose first act is the parser init
+  `0xb22d3694` opening `/vendor/etc/sensors/sns_reg_config` (`0xb23c4aa8`).
+- **The API records** are a contiguous array of
+  `{u32 size; void *slot[(size/4)-1]}`. The registry's (RW copy base
+  `0xb2424dc4`, rodata `0x2b91944`): size `0x18`, slot0 = boot init
+  `0xb22d2b04`, slot1 null, slot2 = the SUID getter `0xb22d2b74` (returns
+  `0xb23c3553`, the 16 bytes `75 22 1e 70 b4 41 25 5e 59 27 7f 00 a7 54 27 e1`
+  inline after `sns_registry.proto`), slot4 = the message handler
+  `0xb22d2b80` (ids 0x200/0x201, "Failure creating registry group"). The
+  fusion family's record at `0xb2424d20` has slot0 `0xb22f7dd8`.
+
+Nothing in our boots reaches `sns_reg_init`'s fopen, while the fusion entry 28
+before it does run, so the boot loop stops between entries 28 and 45 (or the
+registry's thread creation fails); the exact stopping point is not proven.
+
+The next measurement is a SUID lookup for the firmware's own name:
+`sns_ask_name=SNS_REG_INIT` (boot arg added; the driver already asks for
+"registry"). If the registry's SUID (`0x5e2541b4701e2275` /
+`0xe12754a7007f2759`) is answered, entry 45 ran and the failure is in its
+thread/parser; if it stays silent, the loop never reached it and the stall is
+in entries 28-44.
