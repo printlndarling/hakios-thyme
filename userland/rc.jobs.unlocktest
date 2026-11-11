@@ -1,0 +1,3 @@
+# The smallest cover-sheet test: post the injector unlock and wait.
+/redwood/bin/rwtouch wait 90 notify com.hakios.unlock
+/redwood/bin/rwtouch wait 20

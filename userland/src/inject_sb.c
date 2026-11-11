@@ -990,12 +990,48 @@ unlock(void)
 	manager = ((id (*)(Class, SEL))objc_msgSend)(cls, shared);
 	if (manager == NULL) {
 		say("hakios: unlock: no lock screen manager yet\n");
-	} else if (!((BOOL (*)(id, SEL))objc_msgSend)(manager, locked)) {
+		return;
+	}
+	if (!((BOOL (*)(id, SEL))objc_msgSend)(manager, locked)) {
 		say("hakios: unlock: not locked\n");
 	} else {
 		BOOL done = ((BOOL (*)(id, SEL, long, id))objc_msgSend)(manager, unlock_ui, UNLOCK_SOURCE_COVER_SHEET, NULL);
 
 		say("hakios: unlock: asked, answer %d\n", done);
+	}
+	/*
+	 * The manager can say "not locked" while the cover sheet is still drawn:
+	 * the window server leaves it up, the same layer trouble the poster
+	 * switcher has (2026-11-11: com.hakios.unlock answered "not locked" and the
+	 * lock screen stayed on the framebuffer with a ticking clock,
+	 * logs/batui6-435.png). Dismiss it through its own sliding controller too.
+	 * The getter and the selector are SpringBoard 16.5's (ipsw dyld search:
+	 * SBLockScreenManager's coverSheetViewController,
+	 * SBCoverSheetSlidingViewController's _dismissCoverSheetAnimated:withCompletion:).
+	 */
+	{
+		SEL cover_sel = sel_registerName("coverSheetViewController");
+		SEL dismiss_sel = sel_registerName("_dismissCoverSheetAnimated:withCompletion:");
+
+		if (class_getInstanceMethod(cls, cover_sel) != NULL) {
+			id target = ((id (*)(id, SEL))objc_msgSend)(manager, cover_sel);
+
+			if (target != NULL && class_getInstanceMethod(object_getClass(target), dismiss_sel) == NULL) {
+				SEL parent_sel = sel_registerName("parentViewController");
+
+				if (class_getInstanceMethod(object_getClass(target), parent_sel) != NULL) {
+					id parent = ((id (*)(id, SEL))objc_msgSend)(target, parent_sel);
+
+					if (parent != NULL && class_getInstanceMethod(object_getClass(parent), dismiss_sel) != NULL) {
+						target = parent;
+					}
+				}
+			}
+			if (target != NULL && class_getInstanceMethod(object_getClass(target), dismiss_sel) != NULL) {
+				((void (*)(id, SEL, BOOL, id))objc_msgSend)(target, dismiss_sel, YES, NULL);
+				say("hakios: unlock: the cover sheet was dismissed directly\n");
+			}
+		}
 	}
 }
 

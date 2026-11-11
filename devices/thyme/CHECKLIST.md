@@ -105,17 +105,20 @@ screen's status bar went from 83% at 7:54 to 82% at 7:58
 value. The other user-facing places follow too: the status bar read 68% at 7
 minutes and 61% at 18 of the 20-minute soak (kernel 61%), and the lock screen
 showed 62%, 57% and 54% with the green charge state
-(`logs/soak2-420.png`, `logs/batui4-435.png`). The Settings > Battery page
-itself is **not yet captured**: neither touch nor the injector's own unlock
-dismisses the boot-time cover sheet. A 250 ms bottom-edge swipe, the camera
-scene's swipe and a 150 ms grab plus a 500 ms drag all left "Wednesday,
-November 11" up (`logs/220342-run.log`, `logs/batui5-435.png`, 52%), and the
-Darwin notification `com.hakios.unlock` answers "not locked" while the cover
-sheet is still drawn and its clock ticks (`logs/batui6-435.png`, 10:51, 51%;
-`logs/224403-run.log`). So the lock manager and the cover sheet are out of step
-on this build: the battery UI evidence stands on the status bar, the lock
-screen and IOPS, and the Settings page waits for a fix to that state
-(`userland/src/inject_sb.c`'s `unlock()`).
+(`logs/soak2-420.png`, `logs/batui4-435.png`). The lock screen's cover sheet
+was the one piece missing, and its blocker is now fixed: it stayed drawn after
+the one-shot auto-unlock (touch gestures did nothing, and `com.hakios.unlock`
+answered "not locked" while its clock ticked, `logs/batui6-435.png`), so
+`inject_sb.c`'s `unlock()` now also dismisses it directly -- `SBLockScreenManager`'s
+`coverSheetViewController` and `SBCoverSheetSlidingViewController`'s
+`_dismissCoverSheetAnimated:withCompletion:` (both SpringBoard 16.5's, found
+with `ipsw dyld search`). The minimal unlock scene proves the call:
+`hakios: unlock: asked, answer 1` then `hakios: unlock: the cover sheet was
+dismissed directly` (`logs/unlock-live.log`, SHA-256
+`6b6f734e8186c515b2b78d1ef8dd1f7dcc77f84ad9e6f79e496daa59a7ced03d`;
+`logs/235108-run.log`). Its captures are black because the notification does
+not wake a sleeping display, so the visual Settings capture still needs a
+wake-then-capture run (`rc.jobs.battery` now does notify, home and a swipe).
 
 The canonical wireless regression on `0df6409a` then passed the usual gate: 109
 `UMI Wi-Fi` lines, the network joined with `en0` addressed, 149 LE reports (33
@@ -127,6 +130,13 @@ Bluetooth screenshot of that run failed in the host's raw-to-PNG step (a
 written); the LE counters above are the discovery evidence, and the next
 regression carries the screenshot again. The kernel is the regression baseline
 now.
+
+The regression on the rebuilt scenario -- the injector fix included -- passed
+the same gate: 109 `UMI Wi-Fi` lines, `en0` addressed, zero `H4 transport
+fault` lines, no panic and no jetsam, and both screenshots written this time
+(`logs/235830-run.log`, SHA-256
+`851e4d01d29a7bb1fec8d4851724ec11d4c68f3ad47bdc4f618ecb64bb61249c`). The
+scenario is the baseline (`SCENARIO_SHA256` 71ebd6ae).
 
 With the power source in place the baseline was soaked for 20 minutes
 (`logs/205259-run.log`, SHA-256
@@ -1012,7 +1022,7 @@ Evidence:
 |---|---|---|
 | Native 1080 x 2340 display | PASS in historical runs | loader validates THYME GOP size and SpringBoard renders at the panel resolution. The phone's dtbo (`dtbo_a`, the `xiaomi 42 02 0a cmd mode dsc dsi panel` nodes) has exactly two timings, **60 and 120 Hz** (no 90), and its timing-switch commands (F0 page 0, B4, C1 `00 50`/`00 4b`, F0 page 3, BB, 2F, 26, marked `dsi_lp_mode`) are now what the driver sends; the panel still counts 119 DSI command-DMA transitions a second with them (`logs/174108-run.log`, `logs/173158-run.log`), so the low-power send those commands are marked for is the next thing to try. The sequence was then tried on the **60 Hz path at boot** (the regression's `fb_hz=60`): the phone vanished from USB during that boot and needed a physical reset, so the change is reverted (`2538eff`) until the 60 Hz switch can be watched on a console — the 90 Hz path of the same code had booted and run the jiggle scene (`logs/174108-run.log`) |
 | Brightness control | PARTIAL | iOS hook and DSI DCS `0x51` completion are verified; human comparison and automatic brightness remain missing |
-| Display sleep and wake | PASS (re-verified on the current baseline) | the `rc.jobs.buttons` session's side-button presses: `08:53:53 Set Blanked: YES` (backlight factor 0, fade 0.185 s), `08:54:01 Set Blanked: NO` (`NotificationDeviceWake`, `changeSource: LockButton`, backlight factor 1), `08:54:12 YES` again and `08:54:32 NO`. Screenshots: `logs/buttons-085056/03-script-lock.png` (7 KB, black), `04-script-lock.png` (3.6 MB, the lock screen at 8:54), `05-script-lock.png` (7 KB, black). Logs: `logs/085255-run.log`, `logs/buttons-085056.watch.log`. **The lock screen's cover sheet is separate and open**: after the one-shot 10 s auto-unlock, a re-locked cover sheet cannot be dismissed by touch or by the `com.hakios.unlock` notification on this build -- the manager answers "not locked" while the sheet still draws and its clock ticks (`logs/batui6-435.png`, `logs/224403-run.log`; see the battery section) |
+| Display sleep and wake | PASS (re-verified on the current baseline) | the `rc.jobs.buttons` session's side-button presses: `08:53:53 Set Blanked: YES` (backlight factor 0, fade 0.185 s), `08:54:01 Set Blanked: NO` (`NotificationDeviceWake`, `changeSource: LockButton`, backlight factor 1), `08:54:12 YES` again and `08:54:32 NO`. Screenshots: `logs/buttons-085056/03-script-lock.png` (7 KB, black), `04-script-lock.png` (3.6 MB, the lock screen at 8:54), `05-script-lock.png` (7 KB, black). Logs: `logs/085255-run.log`, `logs/buttons-085056.watch.log`. **The lock screen's cover sheet**: after the one-shot 10 s auto-unlock a re-locked sheet could not be dismissed by touch, and `com.hakios.unlock` answered "not locked" while it still drew (`logs/batui6-435.png`); `inject_sb.c`'s `unlock()` now dismisses it directly through `SBCoverSheetSlidingViewController`, and the minimal unlock scene logs "the cover sheet was dismissed directly" (`logs/unlock-live.log`; see the battery section). The visual wake-and-capture of Settings > Battery is still to do |
 | APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
 | UFS read-only survey | PASS | The rebuilt THYME UEFI exposed 6 UFS LUNs with valid GPT CRCs and enumerated `super`, `userdata`, both boot slots and firmware partitions. The final packaged `prebuilt/xnu-usb.img` repeated this successfully (`logs/043951-run.log`); no write was attempted |
 | Storage layout survey | PASS, read-only | Six LUNs and both liblp metadata slots validated. `super` uses 6.25/8.50 GB in slot A with 2.24 GB uncovered; `userdata` is about 111.4 GB and ends near LUN0's end. No free GPT partition exists (`docs/storage-layout.md`) |
