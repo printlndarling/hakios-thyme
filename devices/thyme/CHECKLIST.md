@@ -75,18 +75,23 @@ Bluetooth showing the toggle on and the phone discoverable as "HakiOS Mi 10S"
 stayed at the boot value (53%) while the kernel read 47 -> 42% -- the stale
 battery item the 30-minute soak showed at 69%, now with both sides in one run.
 
-One measurement is open: `loader_return_after` hands back late. This run's
-budget of 1200 s ended with the teardown at 1326 s, and the 30-minute soak's
-1800 s at 1928 s -- both about 127 s over. The timestamps are not the loader's
-or a raw power-on counter: they are `libkern/os/log.c`'s
-`absolutetime_to_microtime(mach_absolute_time())`, so they are since boot and
-the timer really does fire late. The loader banner reads `CNTFRQ=192000000`
-(`logs/loader-banner.png`) while the kernel's timebase default is 24 MHz, so
-the early deadline conversion is one suspect; the 130 s boot that would show
-whether the error is a fixed offset or proportional was stopped by a wedged
-loader USB endpoint (the phone stayed in fastboot and every getvar timed out;
-it needs a replug). The guard and thermal stops call `loader_return` directly
-and do not depend on this timer.
+`loader_return_after` is on time; the ~127 s is the loader's own clock, not
+lateness (2026-11-11). The kernel's log timestamps are `libkern/os/log.c`'s
+`absolutetime_to_microtime(mach_absolute_time())`, and this machine's absolute
+clock starts before the kernel: the fastboot boot, the UEFI, the system-image
+upload and the payload staging all run while the counter runs. A 130 s budget
+settled it: the log's last timestamp is 255 s but the kernel returned **135 s**
+after it started (the log file's mtime 20:41:42 against the launchd boot-args
+line at 20:39:27), and the 1200 s and 1800 s soaks' last timestamps (1326,
+1928) are 1200 and 1800 s of uptime plus about 127 s the loader spent before
+the handoff (the 2.4 GB upload). So `XL_SECS` is honest and the guard and
+thermal stops, which call `loader_return` directly, do not depend on any of
+this; the earlier reading of this paragraph (a late timer, the timebase as a
+suspect) was wrong -- CNTFRQ is 192 MHz and no timer is late
+(`logs/203916-run.log`, SHA-256
+`cc1c1236b5e66a1f336dd1fd1dcba714a0fc6ad67bdcc22bb5ed733210d5e221`). The same
+clock explains the demo job's "131 s": launchd starts the job about four
+seconds into the kernel, 127 s after the counter's origin.
 
 The loader's reading is a power source now (2026-11-11). Kernel `0df6409a`
 (commit `c527a65`) makes the loader path publish the `IOPMPowerSource` as the
