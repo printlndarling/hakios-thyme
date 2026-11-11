@@ -124,6 +124,15 @@ make config
 make kernel -j8
 ```
 
+`.config` is generated and must not be edited by hand: `make thyme_defconfig`
+rebuilds it from `configs/thyme.config` (and the common/SM8250 fragments). A
+hand-edited `.config` lost `CONFIG_HAKIOS_THYME_WIFI` once and the daily
+wireless regression caught it (`net_test: wifi: no en0 after 120 s`, and not
+one `UMI Wi-Fi` line in the log, `logs/092827-run.log`). If a driver looks
+missing, regenerate the config first; `hakios-config.py kernel` also names a
+driver whose `requires` is not met (the PCIe2 modem driver's `requires MODEM`
+was stale -- it uses none of the reference driver).
+
 The canonical userland root image is built by one script. It sets `GL=1`,
 `BLUETOOTH=1`, `ADSP=1` and `REST=1`, then refuses an image missing any
 daily-driver component: the Mesa/EAGL userspace, the QCA responder, `scname`,
