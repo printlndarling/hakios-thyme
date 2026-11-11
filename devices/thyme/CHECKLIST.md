@@ -59,6 +59,33 @@ threshold (`logs/134621-run.log`, SHA-256
 because the documentation was being written while the run started; kernel
 `35d4e53f`, loader and arguments are the hashes in the log.
 
+The committed baseline was then soaked for 20 minutes with `ram.args` as
+committed (`logs/140455-run.log`, kernel `35d4e53f`, loader `50c56443`, scene
+`8f5bc2aa`, SHA-256
+`5c5437a96f9ec713cd5e00445dafd0a07fddc90e2280e5f7a7e7deae8d18d55d`): 109 `UMI
+Wi-Fi` lines, the network joined for 1053 s (201 frames sent, 108 for us, 4
+handshake messages, the group's key unchanged), `en0` 6,395 sent / 582 KB and
+21,308 received / 29.2 MB (2 dropped out, 0 in); 614 LE reports (53 named) with
+no H4 transport fault; thermal nominal at 54-57 C with one slowdown; no panic
+and no jetsam; the audio DSP stopped in order at 1326 s. The battery went 54 ->
+42% (V 4.0 -> 3.48 V, 37-40 C) with the guard reading `charging no` and never
+reaching its 25% threshold. The UI answered at 7 and 18 minutes, Settings >
+Bluetooth showing the toggle on and the phone discoverable as "HakiOS Mi 10S"
+(`logs/soak20-520.png`, `logs/soak20-1080.png`); the status bar's percentage
+stayed at the boot value (53%) while the kernel read 47 -> 42% -- the stale
+battery item the 30-minute soak showed at 69%, now with both sides in one run.
+
+One measurement is open: `loader_return_after` hands back late. This run's
+budget of 1200 s ended with the teardown at 1326 s, and the 30-minute soak's
+1800 s at 1928 s -- both about 127 s over. The kernel's timestamps track the
+host's wall clock, the loader banner reads `CNTFRQ=192000000`
+(`logs/loader-banner.png`) and the kernel's timebase default is 24 MHz, so the
+early deadline conversion is one suspect; the 130 s boot that would show
+whether the error is a fixed offset or proportional was stopped by a wedged
+loader USB endpoint (the phone stayed in fastboot and every getvar timed out;
+it needs a replug). The guard and thermal stops call `loader_return` directly
+and do not depend on this timer.
+
 ## Wireless regression, and the config drift it caught (2026-11-11)
 
 The daily wireless regression on the current tree (`logs/094056-run.log`, kernel
@@ -803,7 +830,7 @@ No item moves to `PASS` from source inspection alone.
 
 | Check | Official main | Legacy evidence |
 |---|---|---|
-| Battery percentage/voltage/temperature | PASS for telemetry; iOS status bar refresh mismatch remains | PASS |
+| Battery percentage/voltage/temperature | PASS for telemetry; the status bar keeps the boot-time percentage (53% at 7 and 18 minutes while the kernel read 54 -> 42%, `logs/soak20-520.png`, `logs/soak20-1080.png`) | PASS |
 | Signed current | PASS, `-97 mA` during the probe | PASS |
 | Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1`, but a positive reading is not proof of charging (2026-11-11: +1025 mA while the cell fell 3905 -> 3514 mV, `logs/133314-run.log`) | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
