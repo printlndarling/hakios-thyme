@@ -6,19 +6,20 @@
 # battery goes and comes back) and Battery Health & Charging, and the lock screen ("56% Charged"
 # under the date).
 #
-# Status 2026-11-11: the status bar and the lock screen do show the live charge
-# (68 -> 61 percent through a soak; 62/57/54 percent on the lock screen, IOPS
-# equal to the kernel), but the lock screen does not unlock with rwtouch on
-# this build: a 250 ms bottom-edge swipe, the camera scene's swipe, and a
-# grab-drag (150 ms still, then 500 ms up) all left "Wednesday, November 11" on
-# the screen (logs/220342-run.log, logs/batui5-435.png, 52 percent). So the
-# Settings pages here are never reached from the lock screen; the camera scene
-# did open its app, so the home screen itself takes taps once the device is
-# unlocked. Next ideas if this is picked up again: a faster flick from the
-# indicator, a tap on the screen before the swipe, or an app launched through
-# SpringBoardServices instead of a gesture.
+# Status 2026-11-11: the status bar and the lock screen show the live charge
+# (68 -> 61 percent through a soak; 51-62 percent on the lock screen, IOPS equal
+# to the kernel), but the Settings pages were never reached: the boot-time cover
+# sheet stays up and neither touch (a 250 ms bottom-edge swipe, the camera
+# scene's swipe, a grab-drag) nor the injector's own unlock dismisses it -- the
+# Darwin notification com.hakios.unlock answers "not locked" while the cover
+# sheet is still on the framebuffer and its clock keeps ticking
+# (logs/batui6-435.png, 10:51, 51 percent; logs/224403-run.log). So the lock
+# manager and the cover sheet are out of step on this build; the battery UI
+# evidence stands on the status bar, the lock screen and IOPS, and the Settings
+# page waits for a proper fix to that state (the injector's unlock() is in
+# userland/src/inject_sb.c).
 /redwood/bin/battery_test 1
-/redwood/bin/rwtouch wait 300 drag 0.5 0.995 0.5 0.45 500 0 150 wait 4 button home wait 5 swipe 0.5 0.5 0.98 0.5 300 wait 5
+/redwood/bin/rwtouch wait 300 notify com.hakios.unlock wait 4 button home wait 5 swipe 0.5 0.5 0.98 0.5 300 wait 5
 /redwood/bin/battery_test open prefs:root=BATTERY_USAGE
 /redwood/bin/rwtouch wait 7 tap 0.843 0.179 wait 5 tap 0.843 0.179 wait 5 drag 0.5 0.85 0.5 0.45 2000 400 wait 5
 /redwood/bin/battery_test open prefs:root=BATTERY_USAGE&path=BATTERY_HEALTH
