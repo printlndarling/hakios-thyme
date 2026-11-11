@@ -25,6 +25,30 @@ PCIe2 modem driver's stale `requires MODEM` was removed (it uses none of the
 reference driver) so the config check passes. The old run's kernel `16883c86`
 and the passing one's `7349bee2` differ only by those options and that line.
 
+## Camera path re-check on the rebuilt config (2026-11-11)
+
+The camera scene was rebuilt from the current tree and run on kernel `35d4e53f`
+(`logs/122328-run.log`, scene `ea83382f`, SHA-256
+`c12229e24b949c6dc298a57da0a9fa26ab06fa60cc677bd7810b41d6e9f5d5b6`). Its first
+command, `camera_avtest`, opened a session that started cleanly:
+
+```text
+UMI camera stream: armed 2592x1940 stride 3248, 4 lane(s) cfg 0x3210 phy 4 vc 0 dt 0x2b, 6301120 bytes
+UMI camera: sensor streaming mode 1 (2592x1940)
+UMI camera: iOS session start error=0
+camera: frame 3 read: 8482560 bytes, the caches' lines forgotten in 226 us, copied in 1766 us
+hakios: camera: focus: the lens to 439 (target 439) ...
+```
+
+So the device opens, the stream arms and frames reach the capture stack on the
+rebuilt configuration. The scene's UI step did not run: `camera_avtest` does
+not return, so the `rwtouch` line after it never starts (the two screenshots
+from this run are the home screen, not a preview). The earlier Camera.app
+preview and still-capture PASS evidence is unchanged; the scene itself needs
+`camera_avtest` backgrounded (or given a timeout) before its tap step can
+exercise the UI. Its old first line, `sound_test springboard`, stalled the
+scene the same way and was removed (`logs/121542-run.log`).
+
 ## Upstream main 87bf485 merged (2026-11-05)
 
 Upstream main was merged at `87bf485`. It brings the Metal-on-Vulkan/Turnip
