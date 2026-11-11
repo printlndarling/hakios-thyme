@@ -777,3 +777,18 @@ had written the image's own [addr, addr+size-1]. It now programs the pool on
 both windows and logs them, and the PON block's registers are read back right
 after the modem pulse and 150 ms later, so the reset's effect (or its absence)
 is visible instead of assumed.
+
+That run is in too (`logs/090020-run.log`, kernel `90de7063`, cold modem,
+SHA-256 `b421227e7e25147477263850942289942faa4260cbed8fb488c4b4b6744fb265`):
+the windows read back as the pool (`base 0x20000000 stop 0x3ffffffe, image at
+0x20000000 size 548056`) and the PBL still answers result 3 / `0xef120700` in
+0 ms with the image inside them. The PON block reads all zeros right after the
+pulse and 150 ms later -- the write either self-clears as a pulse or never
+lands, so the reset's effect is still unproven.
+
+What is left to try on the host side of the doorbell: the MHI context base
+registers (`CCABAP_HIGHER/LOWER`, `ECABAP_*`, `CRCBAP_*`) which the vendor's
+`mhi_init_mmio` writes before the SBL load and this driver never has, and an
+explicit `MHICTRL` reset (`mhi_set_mhi_state(MHI_STATE_RESET)` then waiting for
+the bit to clear) before the BHI registers are touched. Both are in the next
+cold-modem run.
