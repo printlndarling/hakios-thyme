@@ -984,6 +984,8 @@ static struct loader_battery charger_shared __attribute__((aligned(0x2000))) = {
 static efi_charger_ex *CHARGER_EX;
 static efi_qcom_charger *QCOM_CHARGER;
 static int charger_enabled;
+/* the highest cell voltage seen since the loader started; the charging bit follows it (see charger_poll) */
+static int32_t charger_peak_mv;
 
 /* The screen recording the last kernel left in memory, if it made one ("oem recording" stages it). */
 static const char *recording_data;
@@ -1177,7 +1179,27 @@ charger_poll(void)
 		charger_shared.soc_percent = soc_from_voltage((uint32_t)charger_shared.voltage_mv);
 		flags |= LOADER_BATTERY_VALID | LOADER_BATTERY_SOC_ESTIMATED;
 	}
-	if (plugged && charger_shared.soc_percent < 100) {
+	/*
+	 * "Plugged in" is not "charging": during a RAM run the cable is always in, so a bit that
+	 * only looks at the connector is always set, and the kernel's battery_stop guard
+	 * (hakios.battguard.c) can never end an unattended run before the cell is empty. The
+	 * firmware's signed current does not answer it either: on 2026-11-11, with the phone on
+	 * a PC port, it read +810 to +1065 mA while the cell fell from 3905 to 3514 mV within
+	 * six minutes (logs/133314-run.log) and from 4054 to about 3600 mV in half an hour
+	 * (logs/125243-run.log). What the cell itself does is the honest signal: one taking
+	 * charge holds or raises its terminal voltage, while one being drained under the load
+	 * falls below the highest it has shown since the loader started. 40 mV is above the
+	 * load's own ripple and far below what an hour of this phone's discharge moves.
+	 */
+	int rising = 0;
+
+	if (charger_shared.voltage_mv >= 2500) {
+		if (charger_shared.voltage_mv > charger_peak_mv) {
+			charger_peak_mv = charger_shared.voltage_mv;
+		}
+		rising = charger_shared.voltage_mv + 40 >= charger_peak_mv;
+	}
+	if (plugged && charger_shared.soc_percent < 100 && rising) {
 		flags |= LOADER_BATTERY_CHARGING;
 	}
 	charger_shared.flags = flags;
