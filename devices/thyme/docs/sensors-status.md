@@ -614,3 +614,33 @@ describe), before `sns_fw_init`'s loop. The next measurement should read that
 start-up's state after `fastrpc_restart=4` (item 424's text, the QDI device
 opens, the user-PD watchdog) rather than the AP side of the tunnel or the
 sensor names.
+
+### The framework init is one phase of a boot state machine (2026-11-11)
+
+Following the call chain above `sns_fw_init` upward (direct calls only; the
+image's data sections hold no 32-bit pointer to any of these functions, so the
+chain is straight code):
+
+- `sns_fw_init` (`0xb22a21e4`) is called from `0xb22493e0`, inside the
+  framework-init function at **`0xb22492e8`**. That function first tests a byte
+  at **`0xb2a234e0`** and returns if it is non-zero, calls three init helpers,
+  runs the 63-entry sensor list, and sets the byte to 1.
+- Its only caller is **`0xb220750c`**, one of the boot-phase functions around
+  `0xb22073c0`-`0xb22074b0`. Each phase function ends by writing a **boot
+  phase marker** to the byte at **`0xb242fd79`**: 1 after its first group
+  (`0xb22073c0`), 2 after the second (`0xb2207414`), 3 after the third
+  (`0xb22074b4`), and the framework phase writes **8** (`0xb2207504`) -- it
+  calls `0xb22492e8` first (`0xb220750c`).
+- Those phase functions are called from `0xb2207528`-`0xb2207534`, which is
+  called from **`0xb22b0ee0`**, inside the process's top-level init
+  (`0xb22b0e94`): a long chain of init calls whose results are stored in a
+  structure at `0xb2a28a80` (offsets +0x18, +0x1c, +0x20), with the sensor
+  framework at `0xb22b0ee0` in that order.
+
+So the framework's list runs only after boot phases 1-3 have completed, and
+the process's phase byte (`0xb242fd79`) is written 8 only after it. The process
+in our boots reaches neither the file service nor that call: the stall is in
+the top-level init (`0xb22b0e94`) or in phases 1-3, which are the QDI/timer
+and service bring-ups the earlier sections name. A runtime view of those
+phases is what the next probe needs; static reading has taken the chain as far
+as it can without knowing which call blocks.
