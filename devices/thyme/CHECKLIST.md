@@ -4,6 +4,27 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## Wireless regression, and the config drift it caught (2026-11-11)
+
+The daily wireless regression on the current tree (`logs/094056-run.log`, kernel
+`7349bee2`, source `37c7b7f1`, image `8f5bc2aa`, SHA-256
+`e69682dad0d71783b62dd50d27eb5546a22e2183b2105df308bdcd9bf85fab5d`) passes: 109
+`UMI Wi-Fi` lines, the network joined (167 frames sent, 106 received, block ack
+5/5), DHCP `192.168.0.103` with Safari's TCP connections to outside hosts
+through `en0`; 127 LE reports (42 named) with **zero** `H4 transport fault`
+lines; 113 `hakios-gl` frame lines; no panic. `logs/wirelessregress-wifi.png`
+is the joined Wi-Fi page; `logs/wirelessregress-bt.png` (9 KB) missed the
+Bluetooth page (the discovery itself is in the LE counters).
+
+It first failed, and usefully so. The kernel that preceded it had been built
+from a hand-edited `.config` in which `CONFIG_HAKIOS_THYME_WIFI` was lost: the
+run had not one `UMI Wi-Fi` line and `net_test: wifi: no en0 after 120 s`
+(`logs/092827-run.log`). The `.config` is generated; `make thyme_defconfig`
+rebuilt it from `configs/thyme.config` (Wi-Fi and the PMIC both back), and the
+PCIe2 modem driver's stale `requires MODEM` was removed (it uses none of the
+reference driver) so the config check passes. The old run's kernel `16883c86`
+and the passing one's `7349bee2` differ only by those options and that line.
+
 ## Upstream main 87bf485 merged (2026-11-05)
 
 Upstream main was merged at `87bf485`. It brings the Metal-on-Vulkan/Turnip
