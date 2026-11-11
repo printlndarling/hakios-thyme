@@ -142,6 +142,19 @@ fault` lines, no panic and no jetsam, and both screenshots written this time
 `851e4d01d29a7bb1fec8d4851724ec11d4c68f3ad47bdc4f618ecb64bb61249c`). The
 scenario is the baseline (`SCENARIO_SHA256` 71ebd6ae).
 
+The final 20-minute soak on the shipped scenario (2026-11-12,
+`logs/003259-run.log`, SHA-256
+`5a0002924650ae8fde8a3a216dd352c0bb3828803f5b7e0c7283eb76beec99cf`, scene
+`71ebd6ae` with the cover-sheet fix) held the Wi-Fi join for 1053 s (197
+frames sent, 125 for us, 687 to everybody, 4 handshake messages), `en0` 8,675
+sent / 783 KB and 21,480 received / 29.2 MB (2 dropped out, 0 in), 2,175 LE
+events with no H4 fault, thermal nominal at 52.9-54.9 C with **no slowdown at
+all**, the battery 57 -> 52% with the guard quiet, no panic and no jetsam, and
+the DSPs stopped in order. The wall clock again matched the budget: the log's
+mtime 00:53:16 against a 00:33:1x boot is about 1200 s. The status bar read
+59% at 7 minutes and 53% at 18 (the kernel 57 -> 52; `logs/soak3-420.png`,
+`-1080.png`).
+
 With the power source in place the baseline was soaked for 20 minutes
 (`logs/205259-run.log`, SHA-256
 `2ee5306bc35361ea77553e4ff4bc3b694d0ed234e2517079ecbd4ae63d600b9c`, scene
