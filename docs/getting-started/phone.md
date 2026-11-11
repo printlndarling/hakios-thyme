@@ -69,4 +69,5 @@ A configuration sets them for you (`CONFIG_GPU=y` is `gpu=1`); [every argument](
 | the phone getting hot | with `thermal=1` (the SC7280's fragment sets it) the run is handed back to the loader at 105 °C; `thermal_stop=N` changes the limit. Seen on the phone, 27 October 2026: `thermal: ... stop at 105 C` |
 | a run left alone on battery | `battery_stop=<percent>` ends it before the battery is flat |
 | a problem in `make config` | it names the symbol and why: a driver left out that an argument needs, firmware the open profile does not load |
+| the phone stops answering in the loader: `fastboot devices` lists `xnuloader` (or only `????????????`) but every command, `getvar` included, times out with `AdbWriteEndpointSync failed` 121 | unplug and replug the USB cable; if the phone does not come back to Android, hold power for about 15 s. The loader's USB endpoint is stuck, and nothing on the host revives it (control transfers answer, bulk stays dead). A boot with `XL_RAMDISK=none` hangs and can leave the phone in this state: a RAM run needs the resident image |
 | anything else | the log in `logs/`, and `make doctor` with the phone on `adb` |
