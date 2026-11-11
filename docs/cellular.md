@@ -812,3 +812,22 @@ check that needs a reference the AP cannot provide. The modem work pauses here
 with the facts recorded; the next hardware slot goes to the sensor bring-up's
 prepared probe, and the modem returns with a new measurement (an RC-side
 inbound/DMA trace) rather than another variation of the same doorbell.
+
+### The SMMU's extended-SID bit was never set (2026-11-11)
+
+One host-side difference remains between this kernel and Android, and it is in
+the apps SMMU's global configuration: `SCR0` reads `0x2d0406`, and bit 3 --
+`sCR0_EXIDENABLE`, the extended (16-bit) stream-ID mode -- is **clear**. The
+boot chain leaves the SMMU in the 8-bit mode; Android's `arm-smmu` driver sets
+the bit when it initializes the block, because this SMMU reports 16-bit SIDs
+and the DT's streams (`0x1d01` for the modem, `0x1c01` for the Wi-Fi) need
+them. XNU never programs it. The Wi-Fi's stream setup happens to work anyway
+(its SMR's low byte matches after the truncation), which is why the radio
+never showed the difference.
+
+`pcie2_exid=1` now sets `SCR0` bit 3 before the match registers are
+reprogrammed, so the driver uses the wide encodings: SMR = 16-bit ID and mask
+(no bit-31 valid), S2CR = `EXIDVALID` (bit 10) | type | context, with the full
+`0x1d01`/`1` streams. The next cold run is `pcie2_test=1 pcie2_bhi=2
+pcie2_img=1 pcie2_sid=5 pcie2_exid=1`; a change in the doorbell's answer (or
+in what the SMMU records) tells whether the truncation was the wall.

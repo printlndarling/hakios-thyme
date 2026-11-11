@@ -723,6 +723,21 @@ modem_smmu_map(vm_offset_t buffer, size_t size)
 		return 0;
 	}
 	regs = (volatile uint32_t *)smmu_va;
+	/* The DT's stream IDs are 16-bit (0x1d01); the boot chain may leave
+	 * SCR0.EXIDENABLE (bit 3) clear, in which case the SMMU matches 8-bit
+	 * streams and the wide SMR/S2CR format is not in force. pcie2_exid=1
+	 * asks for the wide mode: the bit is set before the match registers
+	 * are (re)programmed below, so the wide encodings are used for them. */
+	{
+		uint32_t exid = 0;
+
+		PE_parse_boot_argn("pcie2_exid", &exid, sizeof(exid));
+		if (exid && !(regs[0x000 / 4] & (1u << 3))) {
+			regs[0x000 / 4] = regs[0x000 / 4] | (1u << 3);
+			__asm__ volatile("dsb sy" ::: "memory");
+			hakios_tl("pcie2: SMMU: EXIDENABLE set (SCR0 %#x)\n", regs[0x000 / 4]);
+		}
+	}
 	scr0 = regs[0x000 / 4];
 	idr0 = regs[0x020 / 4];
 	idr1 = regs[0x024 / 4];
