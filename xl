@@ -33,6 +33,7 @@
 #   XL_HOME=fastboot   after a hang, keep the phone in its bootloader instead of sending it to Android (and send it
 #               there from Android): a long session of runs never waits for Android to start
 #   XL_REBOOT_AFTER=1  when the run is over, send the phone back to Android (it charges there; in the loader it does not,
+#               0 or empty leaves the phone in the loader, for a series of runs on the resident image,
 #               and its screen stays on: a phone left in the loader overnight is a flat one by morning)
 #   XL_FIRMWARE=u-boot|silicium   what the phone's bootloader starts the loader with (default: Silicium's UEFI when its
 #               image is built, else HakiOS's U-Boot: docs/u-boot.md); either way from RAM, nothing is flashed
@@ -291,7 +292,7 @@ run() { # run <oem command> <label>
 	esac
 	# XL_REBOOT_AFTER=1: the run is over and the phone goes back to Android, which charges it. A phone left in the loader
 	# keeps its screen on and charges nothing, so a battery is flat by morning; for a run nobody waits for.
-	if [ -n "$XL_REBOOT_AFTER" ]; then
+	if [ -n "${XL_REBOOT_AFTER:-}" ] && [ "$XL_REBOOT_AFTER" != 0 ]; then
 		echo "xl: XL_REBOOT_AFTER: the phone goes back to Android (it charges there)"
 		fb reboot >/dev/null
 	fi

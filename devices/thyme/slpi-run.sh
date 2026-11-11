@@ -33,7 +33,7 @@ if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
 fi
 
 XL_SECS=${XL_SECS:-40} \
-XL_REBOOT_AFTER=0 \
+XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-0} \
 XL_RAMDISK="$SCENE" \
 XL_CMDLINE="$ARGS" \
 	./xl run
