@@ -12,4 +12,13 @@
 # need it. camera_avtest does not return either (it keeps its session open; its
 # own evidence is logs/122328-run.log), so it stays out of this scene -- the
 # taps below are the UI check, and Camera.app opens the device itself.
-/redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 20 tap 0.886 0.871 wait 20
+# The taps wait for SpringBoard this time. The demo job starts when launchd
+# does -- a second or two into the kernel -- while SpringBoard's window server
+# and first frame take minutes: in the 20:15 run SpringBoard spawned at 20:20:53
+# and the job's taps at 20:16:2x hit a screen that was not there yet (no
+# "camera:" session, logs/201553-run.log). The Camera icon is at 0.855 0.36 of
+# the screen (camui-front.png), the flip button at 0.886 0.871. The app's
+# preview starts about 130 s after the tap (kernel t≈435 in logs/202610-run.log),
+# so captures ~520-580 s after the run command catch it (the kernel starts ~105 s
+# into it); the taps at 300/330 s were verified by the kernel's session lines.
+/redwood/bin/rwtouch wait 300 swipe 0.5 0.99 0.5 0.4 250 wait 3 tap 0.845 0.36 wait 30 tap 0.886 0.871 wait 30
