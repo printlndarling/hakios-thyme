@@ -9,6 +9,7 @@
 # The first line used to be /redwood/bin/sound_test springboard; on 2026-11-11 it
 # never returned, so neither camera_avtest nor the taps ran (logs/121542-run.log,
 # screenshot camcheck-rear.png shows the home screen). The camera path does not
-# need it.
-/redwood/bin/camera_avtest
+# need it. camera_avtest does not return either (it keeps its session open; its
+# own evidence is logs/122328-run.log), so it stays out of this scene -- the
+# taps below are the UI check, and Camera.app opens the device itself.
 /redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 20 tap 0.886 0.871 wait 20
