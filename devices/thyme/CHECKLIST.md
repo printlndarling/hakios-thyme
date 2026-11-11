@@ -88,14 +88,27 @@ loader USB endpoint (the phone stayed in fastboot and every getvar timed out;
 it needs a replug). The guard and thermal stops call `loader_return` directly
 and do not depend on this timer.
 
-A candidate kernel is built but **not yet verified**: `0df6409a` (commit
-`c527a65`) makes the loader's reading publish the `IOPMPowerSource` as the
-audio DSP's battery manager does, so powerd, BatteryCenter and the status bar
-have a battery to follow with `battery=1`. The check is a daily run whose
-kernel log says `HakiosBattery: the battery's power source is up` and whose
-screenshot at several minutes shows the status bar at the kernel's charge
-rather than the launch value; the regression baseline stays at `35d4e53f`
-until that passes.
+The loader's reading is a power source now (2026-11-11). Kernel `0df6409a`
+(commit `c527a65`) makes the loader path publish the `IOPMPowerSource` as the
+audio DSP's battery manager does, and the battery scene's `battery_test` sees
+it: `the power source in the kernel is HakiosBattery`, `CurrentCapacity=84`,
+`IsCharging=no`, `ExternalConnected=yes`, `MaxCapacity=100`, with powerd/IOPS
+reporting 84% (`logs/195212-run.log`, SHA-256
+`359c7fec03901be486b8766e30421443ac23d18593753d3c390aedfb8c586655`). The lock
+screen's status bar went from 83% at 7:54 to 82% at 7:58
+(`logs/batterysrc-150.png`, `-360.png`): the live charge rather than the launch
+value.
+
+The canonical wireless regression on `0df6409a` then passed the usual gate: 109
+`UMI Wi-Fi` lines, the network joined with `en0` addressed, 149 LE reports (33
+named), zero `H4 transport fault` lines, no panic and no jetsam, and the audio
+DSP stopped in order (`logs/200338-run.log`, SHA-256
+`8965d63fc34b8b747f4eefcf2c8f1d640cb8190a95113769fc43e2246a028c51`). The
+Bluetooth screenshot of that run failed in the host's raw-to-PNG step (a
+`ValueError` on the framebuffer slice, `logs/wirelessregress-bt.png` not
+written); the LE counters above are the discovery evidence, and the next
+regression carries the screenshot again. The kernel is the regression baseline
+now.
 
 ## Wireless regression, and the config drift it caught (2026-11-11)
 
@@ -841,7 +854,7 @@ No item moves to `PASS` from source inspection alone.
 
 | Check | Official main | Legacy evidence |
 |---|---|---|
-| Battery percentage/voltage/temperature | PASS for telemetry; the status bar keeps the boot-time percentage (53% at 7 and 18 minutes while the kernel read 54 -> 42%, `logs/soak20-520.png`, `logs/soak20-1080.png`) | PASS |
+| Battery percentage/voltage/temperature | PASS for telemetry; with the loader path publishing the power source (kernel `0df6409a`) powerd/IOPS report the kernel's charge and the status bar follows it live (83 -> 82% while the kernel read 84 -> 81%, `logs/batterysrc-150.png`, `-360.png`, `logs/195212-run.log`) | PASS |
 | Signed current | PASS, `-97 mA` during the probe | PASS |
 | Positive current in HakiOS | PASS; observed 1239 mA and 106-140 mA with `charging=1`, but a positive reading is not proof of charging (2026-11-11: +1025 mA while the cell fell 3905 -> 3514 mV, `logs/133314-run.log`) | PASS |
 | One-shot `TakeAction` | TODO | PASS, exactly two calls |
