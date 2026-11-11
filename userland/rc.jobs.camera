@@ -6,6 +6,9 @@
 # its preview left running for 20 seconds, then the front/rear switch tapped and the front's preview left for 20
 # (xl screenshot meanwhile). The kernel's "camera:" lines say when the frames came and why they stopped;
 # mediaserverd's "hakios: camera:" lines what the capture stack asked of the device.
-/redwood/bin/sound_test springboard
+# The first line used to be /redwood/bin/sound_test springboard; on 2026-11-11 it
+# never returned, so neither camera_avtest nor the taps ran (logs/121542-run.log,
+# screenshot camcheck-rear.png shows the home screen). The camera path does not
+# need it.
 /redwood/bin/camera_avtest
 /redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 20 tap 0.886 0.871 wait 20
