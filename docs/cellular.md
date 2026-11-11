@@ -642,3 +642,31 @@ own Android boots this same modem with this same `sbl1.mbn`, so on a fused
 part the image *must* be able to pass -- if the fused hash is nonzero, the
 0xef120700 refusal is not an image-authentication failure and the search
 stays on the host side of the doorbell.
+
+### The bootloader leaves the modem in PBL, and the part is fused (2026-11-11)
+
+The keep-PERST probe ran (`logs/082114-run.log`, kernel `4258b7dc`, image
+`4f3cf17e`, `pcie2_test=1` + the keep argument + `pcie2_bhi=1 pcie2_img=1`,
+SHA-256 `79f559ddce5cc2b281d7368579c2f7a5ff4f5870af893c07487a732ee13ad9b0`).
+With PERST and the PMIC reset suppressed the link still trains, so the endpoint
+is alive without the vendor's reset; the endpoint answers `17cb:0306` again with
+MHISTATUS 0. The BHI reads:
+
+```text
+pcie2: BHI: version 1.2, execenv 0, status 0, errcode 0, imgaddr 0/0, imgsize 0, numseg 0x3
+pcie2: BHI: serial 0x9721197d, antirollback 0, numseg 0x3, HWID 0 0xe50e1 0 0
+pcie2: BHI: OEM PK hash 0x56ee0ed4 0x654619f3 0xa3094157 0x4a726792 0x344194e7 0x76cb53cd 0x3c3d297e 0x55794940
+```
+
+`EXECENV 0` is PBL: the bootloader does **not** leave a running AMSS behind, so
+the BHI load is the right path (there is no MHI bring-up to join). The OEM PK
+hash is nonzero -- the part is fused -- and the SBL is the same image Android
+boots, so authentication is not what 0xef120700 is about. The load attempt
+fails exactly as before (dbg1 = the image address, dbg3 = its size).
+
+The SMMU still records a context-0 translation fault (`CB0 FSR 0x400`) from the
+boot chain's fault-type SMR, i.e. the doorbell's DMA is still not verifiably
+reaching host memory; the next run sends a deliberately wrong image without
+reading any file (`pcie2_bhi_bad=1`, from the SLPI heap) -- if the error code is
+unchanged the PBL rejects the transfer before the image's content matters, and
+if it changes the content is being read.

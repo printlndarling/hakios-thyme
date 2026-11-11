@@ -1011,7 +1011,7 @@ root_file_into(const char *name, vm_offset_t dest, size_t capacity, size_t *size
 static void
 pcie2_bhi_try(void)
 {
-	uint32_t on = 0;
+	uint32_t on = 0, bad = 0;
 	size_t size = 0;
 	vm_offset_t memory = 0;
 	uint64_t phys;
@@ -1019,6 +1019,27 @@ pcie2_bhi_try(void)
 
 	if (!PE_parse_boot_argn("pcie2_bhi", &on, sizeof(on)) || on < 1) {
 		return;
+	}
+	/* A deliberately wrong image needs no file and no userland: send zeroed
+	 * bytes from the SLPI heap. If the refusal's error code is the same as
+	 * the real image's, the PBL rejects the transfer before it can be about
+	 * the image's content; if it changes, the content is being read. */
+	PE_parse_boot_argn("pcie2_bhi_bad", &bad, sizeof(bad));
+	if (bad == 1 || bad == 3) {
+		memory = ml_io_map(MODEM_IMAGE_PA, 0x1000);
+		if (memory == 0) {
+			hakios_tl("pcie2: BHI: cannot map the bad-image window\n");
+			return;
+		}
+		for (unsigned j = 0; j < 0x400; j++) {
+			((volatile uint32_t *)memory)[j] = 0;
+		}
+		__asm__ volatile("dsb sy" ::: "memory");
+		size = bad == 1 ? 0x1000 : 4;
+		phys = MODEM_IMAGE_PA;
+		hakios_tl("pcie2: BHI: bad image mode %u: %zu zero bytes at %#llx, the file not read\n", bad, size,
+		    (unsigned long long)phys);
+		goto image_ready;
 	}
 	/*
 	 * Where the image lives for the PBL. pcie2_img=1 (the default) puts it
@@ -1085,30 +1106,17 @@ image_ready:
 		    size, (uint32_t)memory, (unsigned long long)phys, words[0], words[1], sum);
 	}
 
-	/*
-	 * pcie2_bhi_bad tells the PBL's refusal apart: 1 sends a 4 KB zeroed
-	 * image, 2 zeroes the whole image in place, 3 sends four bytes. If the
-	 * error code is the same for a deliberately wrong image as for the real
-	 * one, the PBL is refusing the doorbell before it reads; if it changes,
-	 * the real image is being read and rejected on its content.
-	 */
-	{
-		uint32_t bad = 0;
+	/* pcie2_bhi_bad=2: zero the real image in place, to keep the file's
+	 * address and size while its content is wrong. 1 and 3 were handled
+	 * above, without the file. */
+	if (bad == 2) {
+		volatile uint32_t *words = (volatile uint32_t *)memory;
 
-		PE_parse_boot_argn("pcie2_bhi_bad", &bad, sizeof(bad));
-		if (bad == 1 || bad == 2 || bad == 3) {
-			volatile uint32_t *words = (volatile uint32_t *)memory;
-			size_t zeros = bad == 1 ? 0x1000 : (bad == 2 ? size : 4);
-
-			for (size_t j = 0; j < zeros / 4; j++) {
-				words[j] = 0;
-			}
-			if (bad == 1 || bad == 3) {
-				size = zeros;
-			}
-			__asm__ volatile("dsb sy" ::: "memory");
-			hakios_tl("pcie2: BHI: bad image mode %u: %zu zero bytes, size now %zu\n", bad, zeros, size);
+		for (size_t j = 0; j < size / 4; j++) {
+			words[j] = 0;
 		}
+		__asm__ volatile("dsb sy" ::: "memory");
+		hakios_tl("pcie2: BHI: bad image mode 2: the whole %zu-byte image zeroed\n", size);
 	}
 
 	bhioff = rd(MHI_BAR + 0x28);
