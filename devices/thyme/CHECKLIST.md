@@ -115,6 +115,20 @@ written); the LE counters above are the discovery evidence, and the next
 regression carries the screenshot again. The kernel is the regression baseline
 now.
 
+With the power source in place the baseline was soaked for 20 minutes
+(`logs/205259-run.log`, SHA-256
+`2ee5306bc35361ea77553e4ff4bc3b694d0ed234e2517079ecbd4ae63d600b9c`, scene
+`8f5bc2aa`): 109 `UMI Wi-Fi` lines, the network joined for 1053 s (7,547
+frames sent, 12,026 for us, 5 handshake messages), `en0` 25,104 sent / 2.3 MB
+and 28,845 received / 37.8 MB (2 dropped out, 0 in); 1,051 LE events with no
+H4 transport fault; thermal nominal at 53.7-56.4 C with six slowdowns; no
+panic and no jetsam; the audio DSP stopped in order. The wall clock also
+confirms the corrected timing: the log's mtime 21:13:16 against the 20:53:10
+boot-args is 1206 s for the 1200 s budget. The battery went 69 -> 61%
+(V 3.58 -> 3.60 V, 35-38 C) with the guard quiet, and the status bar read 68%
+at 7 minutes and 61% at 18 -- the live charge, matching the kernel's 61% at
+the end (`logs/soak2-420.png`, `logs/soak2-1080.png`).
+
 ## Wireless regression, and the config drift it caught (2026-11-11)
 
 The daily wireless regression on the current tree (`logs/094056-run.log`, kernel
