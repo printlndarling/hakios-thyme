@@ -106,10 +106,13 @@ value. The other user-facing places follow too: the status bar read 68% at 7
 minutes and 61% at 18 of the 20-minute soak (kernel 61%), and the lock screen
 showed 62%, 57% and 54% with the green charge state
 (`logs/soak2-420.png`, `logs/batui4-435.png`). The Settings > Battery page
-itself is **not yet captured**: the lock screen's swipe-up does not unlock on
-this build (the same bottom-edge swipe that the camera scene used left the lock
-screen up, `logs/220342-run.log`); the next gesture to try is a grab before the
-move (`rwtouch drag ... GRAB`, see `userland/rc.jobs.battery`).
+itself is **not yet captured**: the lock screen does not unlock with any of the
+gestures tried -- a 250 ms bottom-edge swipe, the camera scene's swipe, and a
+150 ms grab followed by a 500 ms drag all left "Wednesday, November 11" up
+(`logs/220342-run.log`, `logs/batui5-435.png`, 52%). The camera scene did open
+its app, so the home screen takes taps once the device is unlocked; next ideas
+are a faster flick, a tap before the swipe, or launching through
+SpringBoardServices instead of a gesture (see `userland/rc.jobs.battery`).
 
 The canonical wireless regression on `0df6409a` then passed the usual gate: 109
 `UMI Wi-Fi` lines, the network joined with `en0` addressed, 149 LE reports (33

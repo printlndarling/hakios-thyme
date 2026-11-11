@@ -7,14 +7,18 @@
 # under the date).
 #
 # Status 2026-11-11: the status bar and the lock screen do show the live charge
-# (68 -> 61 percent through a soak; 54 percent on the lock screen in
-# logs/batui4-435.png, IOPS 54), but the lock screen's swipe-up has not unlocked
-# on this build, so the Settings pages were never reached (the same bottom-edge
-# swipe the camera scene used still left "Wednesday, November 11" on the screen,
-# logs/220342-run.log). The next gesture to try is a grab before the move --
-# rwtouch's "drag X0 Y0 X1 Y1 MS HOLD GRAB" with about 150 ms of staying still.
+# (68 -> 61 percent through a soak; 62/57/54 percent on the lock screen, IOPS
+# equal to the kernel), but the lock screen does not unlock with rwtouch on
+# this build: a 250 ms bottom-edge swipe, the camera scene's swipe, and a
+# grab-drag (150 ms still, then 500 ms up) all left "Wednesday, November 11" on
+# the screen (logs/220342-run.log, logs/batui5-435.png, 52 percent). So the
+# Settings pages here are never reached from the lock screen; the camera scene
+# did open its app, so the home screen itself takes taps once the device is
+# unlocked. Next ideas if this is picked up again: a faster flick from the
+# indicator, a tap on the screen before the swipe, or an app launched through
+# SpringBoardServices instead of a gesture.
 /redwood/bin/battery_test 1
-/redwood/bin/rwtouch wait 300 swipe 0.5 0.99 0.5 0.4 250 wait 3 button home wait 5 swipe 0.5 0.5 0.98 0.5 300 wait 5
+/redwood/bin/rwtouch wait 300 drag 0.5 0.995 0.5 0.45 500 0 150 wait 4 button home wait 5 swipe 0.5 0.5 0.98 0.5 300 wait 5
 /redwood/bin/battery_test open prefs:root=BATTERY_USAGE
 /redwood/bin/rwtouch wait 7 tap 0.843 0.179 wait 5 tap 0.843 0.179 wait 5 drag 0.5 0.85 0.5 0.45 2000 400 wait 5
 /redwood/bin/battery_test open prefs:root=BATTERY_USAGE&path=BATTERY_HEALTH
