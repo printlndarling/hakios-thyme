@@ -831,3 +831,13 @@ reprogrammed, so the driver uses the wide encodings: SMR = 16-bit ID and mask
 `0x1d01`/`1` streams. The next cold run is `pcie2_test=1 pcie2_bhi=2
 pcie2_img=1 pcie2_sid=5 pcie2_exid=1`; a change in the doorbell's answer (or
 in what the SMMU records) tells whether the truncation was the wall.
+
+That run is in (`logs/095542-run.log`, kernel `3c861adf`, cold modem,
+SHA-256 `29670876464b6af60a1b241020c1b049f5d04092674122f91110b36f3541187e`):
+`EXIDENABLE set` was logged, but the register **reads back `0x2d0406` with bit
+3 still clear** -- the global SMMU configuration is not writable from this
+non-secure kernel (the Wi-Fi driver's comment already called the global
+registers the hypervisor's to grant). The doorbell is unchanged: result 3 /
+`0xef120700` in 0 ms with the context and the wide encodings written into
+match register 5. So the stream-ID width is not something the AP can change,
+and the wall is not there either.
