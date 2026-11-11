@@ -2850,6 +2850,32 @@ static uint32_t sns_accel_direct;        /* boot-arg sns_accel_direct: configure
 static char sns_ask_name[32];
 static bool sns_have_ask_name;
 
+/*
+ * The DSP process's own boot state, for a run where its framework never runs:
+ * the framework init (sns_fw_init's 63-entry list) is phase 8 of a state
+ * machine that writes a phase byte (vaddr 0xb242fd79 -> paddr 0x8a22fd79) and
+ * a "framework inited" flag (0xb2a234e0 -> 0x8a8234e0). Boot-arg slpi_phase=1
+ * maps those pages of the SLPI's DDR carveout (the AP's ramdump path reads
+ * the same memory) and prints them; a read that the carveout does not allow
+ * leaves the loader to bring the phone back, which is the measurement.
+ */
+static uint32_t slpi_phase;
+
+static void
+slpi_dsp_phase(const char *when)
+{
+	vm_offset_t page, flag;
+
+	if (!slpi_phase) {
+		return;
+	}
+	page = ml_io_map(0x8a22f000, 0x1000);
+	flag = ml_io_map(0x8a823000, 0x1000);
+	printf("slpi: dsp phase: %s: phase %u, framework flag %u\n", when,
+	    page != 0 ? *(volatile uint8_t *)(page + 0xd79) : 0xff,
+	    flag != 0 ? *(volatile uint8_t *)(flag + 0x4e0) : 0xff);
+}
+
 /* The gyroscope's SUID from the same capture (high 0x97d3c48969f972a0, low 0xb9418a10491511c1). */
 static const uint8_t sns_gyro_suid[16] = {
 	0xc1, 0x11, 0x15, 0x49, 0x10, 0x8a, 0x41, 0xb9,
@@ -3857,6 +3883,7 @@ sns_start(void)
 	if (sns_ask_name[0] != 0) {
 		printf("slpi: sns: \"%s\" %s\n", sns_ask_name, sns_have_ask_name ? "ANSWERED" : "silent");
 	}
+	slpi_dsp_phase("after the sns asks");
 	if (slpi_smem_dump) {
 		uint32_t cacheline = 0, partition_size = 0;
 		uint32_t partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &partition_size);
@@ -7823,6 +7850,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
 	PE_parse_boot_argn("sns_ask_name", sns_ask_name, sizeof(sns_ask_name));
+	PE_parse_boot_argn("slpi_phase", &slpi_phase, sizeof(slpi_phase));
 	/* a name longer than the buffer arrives truncated; say so rather than ask
 	 * for the wrong name */
 	{

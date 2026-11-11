@@ -644,3 +644,23 @@ the top-level init (`0xb22b0e94`) or in phases 1-3, which are the QDI/timer
 and service bring-ups the earlier sections name. A runtime view of those
 phases is what the next probe needs; static reading has taken the chain as far
 as it can without knowing which call blocks.
+
+### The SLPI's DDR is not readable from the AP (2026-11-11)
+
+The phase byte lives at paddr **`0x8a22fd79`** (the segment vaddr
+`0xb23f8000` maps to paddr `0x8a1f8000`, memsz `0x635000`), so a boot arg
+`slpi_phase=1` mapped `0x8a22f000` after the SNS asks and read it. The run
+(`logs/110459-run.log`, kernel `35d4e53f`, SHA-256
+`35d1db22844d8de2c5881dc67ad16a64e701772d528e1075a3813dd65de212cc`) **never
+printed the line** and ended at the read:
+
+```text
+psci: cpu 1 ends the system: the return to the boot loader is the boot processor's to make
+psci: cpu 1 cannot return to the boot loader and the boot processor does not answer: all cores stop here
+```
+
+The SLPI's DDR carveout is the DSP's; the AP's access aborts (the hypervisor
+does not grant it, and the return path itself failed at that point). So the
+phase byte cannot be observed from the AP this way, and the runtime channel
+has to come from the DSP's side: a crash dump it writes (item 424 via its
+user-PD watchdog or an induced fault), its QDI/diag service, or its own logs.
