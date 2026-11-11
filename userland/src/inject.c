@@ -852,7 +852,24 @@ extern void IOHIDEventSetIntegerValue(IOHIDEventRef event, uint32_t field, CFInd
 static struct {
 	bool touching, edge;
 	double x, y;
+	/* the unlock gesture: down near the bottom edge, up past the middle, quickly (see send_touch) */
+	uint64_t down_ns;
+	double start_y;
+	bool asked;
 } fingers[MAX_FINGERS];
+
+static uint64_t
+now_ns(void)
+{
+	static mach_timebase_info_data_t timebase;
+	uint64_t t;
+
+	if (timebase.denom == 0) {
+		mach_timebase_info(&timebase);
+	}
+	t = mach_absolute_time();
+	return t * timebase.numer / timebase.denom;
+}
 
 static CFNumberRef
 number(int value)
@@ -1028,6 +1045,21 @@ send_touch(IOHIDServiceClientRef screen, const struct hakios_touch *t)
 	if (t->type == HAKIOS_TOUCH_DOWN) {
 		fingers[f].edge = fingers[f].x < EDGE_SIDE || fingers[f].x > 1 - EDGE_SIDE || fingers[f].y < EDGE_TOP ||
 		    fingers[f].y > 1 - EDGE_BOTTOM;
+		fingers[f].down_ns = now_ns();
+		fingers[f].start_y = fingers[f].y;
+		fingers[f].asked = false;
+	} else if ((t->type == HAKIOS_TOUCH_MOVE || t->type == HAKIOS_TOUCH_UP) && !fingers[f].asked &&
+	    fingers[f].start_y > 0.96 && fingers[f].y < 0.6 && now_ns() - fingers[f].down_ns < 700 * 1000000ULL) {
+		/*
+		 * The lock screen's own swipe-up does not fire on this build (the cover
+		 * sheet takes no touch gesture), so the gesture is recognized here and
+		 * the injector in SpringBoard is asked to unlock (inject_sb.c's
+		 * unlock(), through com.hakios.unlock). A bottom-edge down that comes
+		 * up past the middle within 700 ms is that swipe, wherever it is used.
+		 */
+		fingers[f].asked = true;
+		notify_post("com.hakios.unlock");
+		say("hakios: input: a swipe up from the bottom edge: the unlock asked for\n");
 	}
 	for (unsigned i = 0; i < MAX_FINGERS; i++) {
 		any |= fingers[i].touching;
