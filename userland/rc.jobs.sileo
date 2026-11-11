@@ -5,7 +5,10 @@
 # index, the half minute LaunchServices wants before it registers the prefix's applications (with the root
 # on the flash: prep.sh, uicache), and then the whole way a person goes: the package's own page is opened by URL (no typing),
 # GET puts it in the queue, Confirm installs it. At the end, what dpkg has to say about it.
-/redwood/bin/sound_test springboard
+# The first line used to be /redwood/bin/sound_test springboard; on 2026-11-11 it
+# never returned, so none of the commands below ran (logs/111316-run.log). The
+# apt path does not need it, and the 2026-11-08 online run that passed
+# (logs/012326-run.log) did not have it.
 /var/jb/bin/sh /var/jb/prep.sh
 /redwood/bin/net_test wait 120 joinfile /redwood/fw/network
 /redwood/bin/net_test joinfile /redwood/fw/network
