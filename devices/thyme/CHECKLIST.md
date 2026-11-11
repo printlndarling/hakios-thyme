@@ -58,6 +58,7 @@ before it closed. The front-switch tap did not register (the second session is
 the wide again), and the two screenshots were mistimed (the loader's hello
 screen and the home screen), so this run proves the app/preview path but not
 the front switch; the earlier front/rear switch evidence stands.
+Timing note for the next preview screenshot: the demo job starts late in this scene (the first session began at kernel time 131 s), so a capture has to be taken about 230-250 s after the run command (roughly 96 s of upload plus the kernel's own 130 s), not at 125 s -- the two mistimed captures were the loader's hello screen and the home screen.
 
 ## Upstream main 87bf485 merged (2026-11-05)
 
