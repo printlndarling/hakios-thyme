@@ -86,6 +86,15 @@ loader USB endpoint (the phone stayed in fastboot and every getvar timed out;
 it needs a replug). The guard and thermal stops call `loader_return` directly
 and do not depend on this timer.
 
+A candidate kernel is built but **not yet verified**: `0df6409a` (commit
+`c527a65`) makes the loader's reading publish the `IOPMPowerSource` as the
+audio DSP's battery manager does, so powerd, BatteryCenter and the status bar
+have a battery to follow with `battery=1`. The check is a daily run whose
+kernel log says `HakiosBattery: the battery's power source is up` and whose
+screenshot at several minutes shows the status bar at the kernel's charge
+rather than the launch value; the regression baseline stays at `35d4e53f`
+until that passes.
+
 ## Wireless regression, and the config drift it caught (2026-11-11)
 
 The daily wireless regression on the current tree (`logs/094056-run.log`, kernel
