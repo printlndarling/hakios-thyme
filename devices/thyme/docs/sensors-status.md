@@ -512,3 +512,32 @@ The addressing of the registry reads and writes was therefore already right,
 and whatever keeps the client manager from getting `sns_cm` is not a wrong
 SUID: it is the registry sensor's own instantiation, which nothing in these
 boots reaches (the parser's file reads never happen — see the section above).
+
+### `fastrpc_restart=4` ran; the parser still does not (2026-11-11)
+
+The first prepared experiment was run (`logs/092230-run.log`, kernel
+`16883c86`, scene `root-slpitest` `2164c9c7`, SHA-256
+`6118cda12f39d1d34ff8033c07ff4de0360413af1e5dabe6d7b678a924db9a90`). The
+sequence is exactly the designed one:
+
+```text
+fastrpc: INIT_ATTACH_SNS: ctx 0x102 retval 0
+fastrpc: adsp_default_listener_register: ctx 0x302 retval 0
+fastrpc: adsp_listener_init2: ctx 0x402 retval 0
+fastrpc: INIT_RELEASE: ctx 0x502 retval 0
+fastrpc: INIT_ATTACH_SNS (again): ctx 0x102 retval 0
+fastrpc: adsp_listener_init2 (again): ctx 0x402 retval 0
+fastrpc: a listener waits for client 1 in PD 2 (tid 2)
+```
+
+Every step answers 0, and `next2` then waits with the listener in place. No
+`apps_std` call is logged: the DSP never opens, stats or lists any file, so
+the registry parser is still not reached even when the PD is released and
+attached again with a listener initialized for it. The listener's readiness
+at PD start was therefore not the missing piece.
+
+What remains is the reason the sensor process never instantiates the registry
+sensor: the earlier notes' `sns_cm`/registry-group path and the client
+manager's own start-up. The next probe should look at the DSP's own start-up
+sequence (the reassembled firmware's `sns_client_manager`/registry init) rather
+than at the AP side of the tunnel, which is now demonstrated end to end.
