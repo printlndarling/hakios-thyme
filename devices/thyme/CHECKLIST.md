@@ -116,9 +116,13 @@ with `ipsw dyld search`). The minimal unlock scene proves the call:
 `hakios: unlock: asked, answer 1` then `hakios: unlock: the cover sheet was
 dismissed directly` (`logs/unlock-live.log`, SHA-256
 `6b6f734e8186c515b2b78d1ef8dd1f7dcc77f84ad9e6f79e496daa59a7ced03d`;
-`logs/235108-run.log`). Its captures are black because the notification does
-not wake a sleeping display, so the visual Settings capture still needs a
-wake-then-capture run (`rc.jobs.battery` now does notify, home and a swipe).
+`logs/235108-run.log`). Its captures were black because the notification
+does not wake a sleeping display. The visual capture then followed with the
+small `rc.jobs.batteryui` scene -- notify, a wake tap, home, then the Settings
+> Battery URL: `logs/batteryui-200.png` shows **Settings > Battery** with the
+Battery Percentage switch on, Low Power Mode, Battery Health & Charging, and
+the status bar at 60% with the charging bolt (`logs/001330-run.log`, SHA-256
+`0874fe424c86e20e0ddfd18991a910b6ae4f347aeef9052453399e30eb387abd`).
 
 The canonical wireless regression on `0df6409a` then passed the usual gate: 109
 `UMI Wi-Fi` lines, the network joined with `en0` addressed, 149 LE reports (33
@@ -1022,7 +1026,7 @@ Evidence:
 |---|---|---|
 | Native 1080 x 2340 display | PASS in historical runs | loader validates THYME GOP size and SpringBoard renders at the panel resolution. The phone's dtbo (`dtbo_a`, the `xiaomi 42 02 0a cmd mode dsc dsi panel` nodes) has exactly two timings, **60 and 120 Hz** (no 90), and its timing-switch commands (F0 page 0, B4, C1 `00 50`/`00 4b`, F0 page 3, BB, 2F, 26, marked `dsi_lp_mode`) are now what the driver sends; the panel still counts 119 DSI command-DMA transitions a second with them (`logs/174108-run.log`, `logs/173158-run.log`), so the low-power send those commands are marked for is the next thing to try. The sequence was then tried on the **60 Hz path at boot** (the regression's `fb_hz=60`): the phone vanished from USB during that boot and needed a physical reset, so the change is reverted (`2538eff`) until the 60 Hz switch can be watched on a console — the 90 Hz path of the same code had booted and run the jiggle scene (`logs/174108-run.log`) |
 | Brightness control | PARTIAL | iOS hook and DSI DCS `0x51` completion are verified; human comparison and automatic brightness remain missing |
-| Display sleep and wake | PASS (re-verified on the current baseline) | the `rc.jobs.buttons` session's side-button presses: `08:53:53 Set Blanked: YES` (backlight factor 0, fade 0.185 s), `08:54:01 Set Blanked: NO` (`NotificationDeviceWake`, `changeSource: LockButton`, backlight factor 1), `08:54:12 YES` again and `08:54:32 NO`. Screenshots: `logs/buttons-085056/03-script-lock.png` (7 KB, black), `04-script-lock.png` (3.6 MB, the lock screen at 8:54), `05-script-lock.png` (7 KB, black). Logs: `logs/085255-run.log`, `logs/buttons-085056.watch.log`. **The lock screen's cover sheet**: after the one-shot 10 s auto-unlock a re-locked sheet could not be dismissed by touch, and `com.hakios.unlock` answered "not locked" while it still drew (`logs/batui6-435.png`); `inject_sb.c`'s `unlock()` now dismisses it directly through `SBCoverSheetSlidingViewController`, and the minimal unlock scene logs "the cover sheet was dismissed directly" (`logs/unlock-live.log`; see the battery section). The visual wake-and-capture of Settings > Battery is still to do |
+| Display sleep and wake | PASS (re-verified on the current baseline) | the `rc.jobs.buttons` session's side-button presses: `08:53:53 Set Blanked: YES` (backlight factor 0, fade 0.185 s), `08:54:01 Set Blanked: NO` (`NotificationDeviceWake`, `changeSource: LockButton`, backlight factor 1), `08:54:12 YES` again and `08:54:32 NO`. Screenshots: `logs/buttons-085056/03-script-lock.png` (7 KB, black), `04-script-lock.png` (3.6 MB, the lock screen at 8:54), `05-script-lock.png` (7 KB, black). Logs: `logs/085255-run.log`, `logs/buttons-085056.watch.log`. **The lock screen's cover sheet**: after the one-shot 10 s auto-unlock a re-locked sheet could not be dismissed by touch, and `com.hakios.unlock` answered "not locked" while it still drew (`logs/batui6-435.png`); `inject_sb.c`'s `unlock()` now dismisses it directly through `SBCoverSheetSlidingViewController`, the minimal unlock scene logs "the cover sheet was dismissed directly" (`logs/unlock-live.log`), and the wake-and-open scene reached Settings > Battery (`logs/batteryui-200.png`; see the battery section) |
 | APFS root/system images | PASS in RAM | the small `/redwood` image and full 2.5 GB system image mount in RAM |
 | UFS read-only survey | PASS | The rebuilt THYME UEFI exposed 6 UFS LUNs with valid GPT CRCs and enumerated `super`, `userdata`, both boot slots and firmware partitions. The final packaged `prebuilt/xnu-usb.img` repeated this successfully (`logs/043951-run.log`); no write was attempted |
 | Storage layout survey | PASS, read-only | Six LUNs and both liblp metadata slots validated. `super` uses 6.25/8.50 GB in slot A with 2.24 GB uncovered; `userdata` is about 111.4 GB and ends near LUN0's end. No free GPT partition exists (`docs/storage-layout.md`) |

@@ -1,0 +1,4 @@
+# Unlock, wake the display, and open Settings > Battery: the cover-sheet fix in inject_sb.c plus a wake-tap (the notification alone does not light a sleeping screen).
+/redwood/bin/rwtouch wait 90 notify com.hakios.unlock wait 2 tap 0.5 0.5 wait 3 button home wait 4
+/redwood/bin/battery_test open prefs:root=BATTERY_USAGE
+/redwood/bin/rwtouch wait 10
