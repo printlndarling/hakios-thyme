@@ -858,3 +858,28 @@ available" and "Unable to open '%s' %i (%s)" -- is not reached, and the file
 service is not what holds the registry up yet. The framework blocks before the
 registry parse, and its user-PD watchdog ends it; what it waits for is the next
 thing to find.
+
+Two more candidates were tried and both are negative:
+
+- **The restarted PD.** `sns_start_delay=150` waits past the first watchdog
+  restart and probes the new instance. `logs/171852-run.log`: message 1 to the
+  registry's own SUID and to the accelerometer's were "never answered 0", the
+  write loop got nothing back, and the sensor process was already in its
+  crash-and-restart cycle (four restarts in that run, each ending in
+  `sns_err_handler.c:180:Crash`).
+- **The AP's sleep state.** The phone's `smp2p_sleepstate` driver keeps
+  `SLEEP_STATE_WAKEUP` (bit 1) in the `sleepstate` entry while the AP is awake,
+  and a sensor that only acts on changes would never see one from a constant
+  0. `slpi_sleep_value` (default 2) is written at creation and announced once
+  with a 0 -> value transition and the SMP2P doorbell after the DSP is up
+  (`logs/173017-run.log`: "the AP's sleep state is 0x2 ... and the DSP has its
+  doorbell", at +147 ms; the DSP still adds its `sleepstate_see` at 147 ms).
+  The hang is unchanged: the watchdog fires 77 s after the start
+  (`+77075.967 ms: signal 0 ...`, `TMR_CLNT_1:...:dog_virtual_user.c:240:U`)
+  and the restarts repeat the pattern.
+
+So the block is inside the framework's own start-up and not in anything the
+AP says through SMP2P. The next probe has to see the DSP's own log; its diag
+router was asked for its channel (`DIAG`) but sends nothing, so either the
+channel's log mask has to be configured (the AP's diag daemon does that on the
+phone) or the framework's start-up chain has to be read from `slpi.b15`.

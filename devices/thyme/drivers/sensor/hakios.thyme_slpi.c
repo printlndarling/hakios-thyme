@@ -679,6 +679,15 @@ static uint32_t slpi_watch_item;
  */
 static uint32_t slpi_sleep = 1;
 
+/*
+ * The AP's state in that entry. The phone's smp2p_sleepstate driver keeps bit
+ * 1 set while the AP is awake (SLEEP_STATE_WAKEUP) and bit 0 when it suspends;
+ * the DSP's remote-process-state sensor reads the value and its own
+ * "sleepstate_see" entry is what it writes back. slpi_sleep_value changes it
+ * from 2 for an experiment.
+ */
+static uint32_t slpi_sleep_value = 2;
+
 static void
 watch_item_thread(__unused void *parameter, __unused wait_result_t result)
 {
@@ -1902,7 +1911,7 @@ step_our_item(void)
 		for (uint32_t word = 0; word < 4; word++) {
 			smem_poke(our_item + SMP2P_AT_NAME(1) + 4 * word, name[word]);
 		}
-		smem_poke(our_item + SMP2P_AT_VALUE(1), 0);
+		smem_poke(our_item + SMP2P_AT_VALUE(1), slpi_sleep_value);
 		entries = 2;
 	}
 	smem_poke(our_item + SMP2P_AT_COUNTS, 16 | entries << 16);
@@ -1982,6 +1991,37 @@ step_our_item(void)
 	}
 	glink_reset();
 	return true;
+}
+
+/*
+ * Announce the AP's sleep state in the entry the DSP's remote-process-state
+ * sensor reads. The value is already there when the DSP starts (step_our_item
+ * writes it); after the DSP is up, one more write with the SMP2P doorbell is
+ * its event, and the 0 in between is a real transition for a sensor that only
+ * acts on changes.
+ */
+static void
+say_sleepstate(uint32_t value)
+{
+	struct smp2p ours;
+	int entry;
+
+	if (slpi_sleep == 0 || our_item == 0) {
+		return;
+	}
+	if (!smem_peek(our_item, &ours, sizeof(ours)) || ours.magic != SMP2P_MAGIC ||
+	    (entry = smp2p_entry(&ours, OUR_ENTRY_SLEEP)) < 0) {
+		return;
+	}
+	need(&ipcc);
+	snprintf(last_write, sizeof(last_write), "step %u announced the AP's sleep state", step);
+	smem_poke(our_item + SMP2P_AT_VALUE((uint32_t)entry), 0);
+	settle();
+	smem_poke(our_item + SMP2P_AT_VALUE((uint32_t)entry), value);
+	settle();
+	wr(ipcc.base + IPCC_SEND, IPCC_SLPI << 16 | IPCC_SMP2P);
+	printf("slpi: %u: the AP's sleep state is %#x in the \"%s\" entry, and the DSP has its doorbell\n", step, value,
+	    OUR_ENTRY_SLEEP);
 }
 
 /* ---- step 7: the DSP, started ---------------------------------------------------------------------- */
@@ -2073,6 +2113,7 @@ step_start(void)
 				limit = now + 3000000ull;
 				printf("slpi: %u: THE SENSOR DSP SAYS IT IS UP: \"slave-kernel\" says %#x, %llu.%03llu ms after TrustZone started "
 				    "it\n", step, state, (now - started) / 1000, (now - started) % 1000);
+				say_sleepstate(slpi_sleep_value);
 			}
 			if ((state & DSP_HANDOVER) && !handed_over) {
 				handed_over = true;
@@ -2984,6 +3025,8 @@ static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends i
 static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
 static uint32_t sns_client_probe;        /* boot-arg sns_client_probe: the phone's client request (message 1) before the config */
 static uint32_t sns_client_tries = 1;    /* boot-arg sns_client_tries: repeat message 1 until one is answered 0 */
+static uint32_t sns_registry_client;     /* boot-arg sns_registry_client: message 1 to the registry's own SUID before the write */
+static uint32_t sns_start_delay;         /* boot-arg sns_start_delay: seconds to wait before the first sensor message */
 static uint32_t sns_upload_rounds = 1;   /* boot-arg sns_upload_rounds: send the group files again, the registry comes up late */
 static volatile uint32_t sns_ok_count;   /* QMI 0x20 responses that came back result 0 */
 
@@ -3868,6 +3911,16 @@ sns_start(void)
 		return;
 	}
 	/*
+	 * sns_start_delay=N: wait N seconds before the first sensor message. The
+	 * sensor PD's own user watchdog restarts it about two minutes after its
+	 * start (dog_virtual_user.c); a delayed probe is the one that meets the
+	 * restarted instance, whose QRTR services come back before the run ends.
+	 */
+	if (sns_start_delay != 0) {
+		printf("slpi: sns: waiting %u s before the sensor messages\n", sns_start_delay);
+		sleep_ms(sns_start_delay * 1000);
+	}
+	/*
 	 * TLV 0x10 is 1 in every request the phone's HAL sends (strace of
 	 * android.hardware.sensors@1.0-service): the earlier 0 came from a guess, and the
 	 * failed variant sweeps are what broke the sensor process's initialization (a boot
@@ -3893,6 +3946,24 @@ sns_start(void)
 		 * 2 s rides that out; the last one that matters is the one the client
 		 * manager reads, and a repeat of an already-stored group is harmless.
 		 */
+		if (sns_registry_client) {
+			/* The phone's HAL asks the registry's own SUID for a client before
+			 * it writes a group; a write with no client behind it is what the
+			 * result 5 answers have in common so far. */
+			static const uint8_t client_inner[4] = { 0x12, 0x02, 0x10, 0x00 };
+			uint32_t tries = sns_client_tries != 0 ? sns_client_tries : 1;
+			bool answered = false;
+
+			for (uint32_t i = 0; i < tries && !answered; i++) {
+				uint32_t before = sns_ok_count;
+
+				sns_qmi_send(1, sns_registry_suid_real, client_inner, sizeof(client_inner));
+				printf("slpi: sns: message 1 to the registry's own SUID, try %u\n", i + 1);
+				sleep_ms(1000);
+				answered = sns_ok_count != before;
+			}
+			printf("slpi: sns: the registry's client request %s\n", answered ? "WAS ANSWERED 0" : "was never answered 0");
+		}
 		for (uint32_t i = 0; i < (sns_write_tries != 0 ? sns_write_tries : 1); i++) {
 			uint32_t before = sns_ok_count;
 
@@ -7958,10 +8029,13 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_quiet", &sns_quiet, sizeof(sns_quiet));
 	PE_parse_boot_argn("slpi_watch_item", &slpi_watch_item, sizeof(slpi_watch_item));
 	PE_parse_boot_argn("slpi_sleep", &slpi_sleep, sizeof(slpi_sleep));
+	PE_parse_boot_argn("slpi_sleep_value", &slpi_sleep_value, sizeof(slpi_sleep_value));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
 	PE_parse_boot_argn("sns_client_tries", &sns_client_tries, sizeof(sns_client_tries));
+	PE_parse_boot_argn("sns_registry_client", &sns_registry_client, sizeof(sns_registry_client));
+	PE_parse_boot_argn("sns_start_delay", &sns_start_delay, sizeof(sns_start_delay));
 	PE_parse_boot_argn("sns_upload_rounds", &sns_upload_rounds, sizeof(sns_upload_rounds));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
