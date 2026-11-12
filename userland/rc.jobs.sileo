@@ -40,8 +40,11 @@
 # the battery guard's reach at a low charge (it ended a 600 s run at 25 % after
 # 316 s, before the final dpkg-query)
 /redwood/bin/rwtouch wait 130
-# GET -> QUEUE
-/redwood/bin/rwtouch tap 0.86 0.37 wait 8
+# GET -> QUEUE. The tap is repeated: an already-queued button only presents the
+# popup and reloads (PackageQueueButton.buttonTapped), it does not unqueue, so a
+# tap that lands on a late permission alert (and dismisses it) costs nothing and
+# the next one lands on the button.
+/redwood/bin/rwtouch tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5
 # close the package sheet: a drag from the grabber itself (y 0.060, measured; the header
 # below it belongs to the scrolling page), twice
 /redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.80 500 wait 6
