@@ -30,7 +30,9 @@ SCENE=${SCENE:-out/thyme-boot/root-sileo.apfs}
 # 749 s run, and the 572 s run before it ended before them. 900 leaves room
 # for the apt simulation and the final dpkg-query/tree.
 SILEO_SECS=${SILEO_SECS:-900}
-STEP=${STEP:-60}
+# every half minute: the confirm taps and the install that follows fall inside
+# a few of them, and a run is expensive enough to want the picture
+STEP=${STEP:-30}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
 ARGS=${ARGS//battery_stop=25/battery_stop=10}
 case "$ARGS" in
@@ -77,3 +79,23 @@ XL_CMDLINE="$ARGS" \
 kill "$CAPTURE_PID" 2>/dev/null || true
 trap - EXIT HUP INT TERM
 echo "sileo: run's own output in $LOG"
+
+# What to look at first, out of the run's own log: the DIAG answer (if any), the
+# DRM shim's refusals, what apt/dpkg said about tree, and whether the window
+# server faulted. A run that ends before the scene's last lines leaves these empty.
+RUNLOG=$(sed -n 's/.*\[\(logs\/[0-9]*-run\.log\)\].*/\1/p' "$LOG" | tail -1)
+if [ -n "$RUNLOG" ] && [ -f "$RUNLOG" ]; then
+	echo "sileo: what the run showed ($RUNLOG):"
+	echo "sileo: --- the DSP's diag channel"
+	found=$(grep -n 'slpi: diag:' "$RUNLOG" | tail -6)
+	echo "${found:-sileo:     (nothing)}"
+	echo "sileo: --- refusals the DRM shim named"
+	found=$(grep -n 'hakios-drm: method\|hakios-drm: 16 refusals' "$RUNLOG" | tail -6)
+	echo "${found:-sileo:     (nothing)}"
+	echo "sileo: --- apt and dpkg on tree"
+	found=$(grep -n 'Setting up tree\|dpkg-query\|/usr/bin/tree\|E: ' "$RUNLOG" | tail -10)
+	echo "${found:-sileo:     (nothing)}"
+	echo "sileo: --- the window server's fault"
+	found=$(grep -n 'signal 11 at 0x18' "$RUNLOG" | tail -2)
+	echo "${found:-sileo:     (none)}"
+fi
