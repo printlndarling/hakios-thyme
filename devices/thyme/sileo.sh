@@ -5,8 +5,10 @@
 #
 #   devices/thyme/sileo.sh
 #   EXTRA_ARGS="gl=0" devices/thyme/sileo.sh     (CoreAnimation's own software
-#       renderer instead of ours: whether the window server's mid-run SIGSEGV
-#       is in the GL path is what that comparison answers -- CHECKLIST, 2026-11-13)
+#       renderer instead of ours: that GL path was where the window server's
+#       SIGSEGV at 0x18 came from -- fd6_build_bindless_state on a NULL
+#       buffer; CHECKLIST, 2026-11-13 -- so gl=0 is also the way to run the UI
+#       without it if a regression is ever suspected there)
 #
 # The battery guard stops at 25 % by default, which ended a 600 s run after
 # 316 s once; the scene needs its whole length, so the stop is moved to 10 %.
@@ -23,7 +25,11 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-sileo.apfs}
-SILEO_SECS=${SILEO_SECS:-600}
+# The scene's GET taps come ~610 s after the demo job starts, which is ~740 s
+# of kernel time (boot included): the 01:01 run reached them at 737 s of a
+# 749 s run, and the 572 s run before it ended before them. 900 leaves room
+# for the apt simulation and the final dpkg-query/tree.
+SILEO_SECS=${SILEO_SECS:-900}
 STEP=${STEP:-60}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
 ARGS=${ARGS//battery_stop=25/battery_stop=10}

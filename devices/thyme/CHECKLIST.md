@@ -42,8 +42,9 @@ tap and its `apt-get -sqf ... install --reinstall tree=2.0.1` happened 17 s
 before this fault, i.e. in the run's last seconds -- the run ended mid-scene,
 before the scene's own apt simulation could print. The queue did not "clear on
 an apt error", and nothing restarted the UI mid-run; the run simply ended.
-`devices/thyme/sileo.sh` gives that scene 600 s now (the battery guard moved to
-10 %, which had cut a 600 s run short at 316 s before).
+`devices/thyme/sileo.sh` gives that scene 900 s now (its taps come ~737 s of
+kernel time; the battery guard is at 10 %, since 25 % had cut a 600 s run short
+at 316 s before).
 
 The fix, in two halves. (1) `tools/mesa/fd6-bindless-null-bo.patch`: a NULL
 from `fd_bo_new` leaves the state group out (`fd6_state_emit()` already
