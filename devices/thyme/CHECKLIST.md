@@ -50,7 +50,9 @@ Built as `434b92e304af2cd916a9369ab265c9a2c07b23cd6dea13cd80f9a38d3e9912c1`
 Sileo diagnostic too, `8732cae7ef40111cd30c3de125842d210a895caf6e6a72ad1f491cb3d07fdcb6`
 (`root-sileo.apfs`). The next occurrence on the phone names the function, and
 the same build's teardown line will show whether the return's SIGSEGV is the
-same image.
+same image. `devices/thyme/sileo.sh` runs that scene turnkey (`EXTRA_ARGS="gl=0"`
+asks for CoreAnimation's own software renderer instead of ours: if the fault
+disappears, it is in the GL path; if it stays, it is not).
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
