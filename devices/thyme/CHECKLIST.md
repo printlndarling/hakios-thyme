@@ -69,9 +69,9 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`87b7e62795aff2ea36ab1284a74db27b738b61a15465740e7e948b57e3d5c88a` and
+`b3b2ffaf1d63b8d324d2739e0732b9b19ec72af530fecc1b6292f8ecd68ae5f9` and
 `root-sileo.apfs`
-`1dd2dcd1c7c77139d60db743bc935739a49fbd60294e0dc03dfc5d9f3126964d`
+`4539e9a532337b956dcadf213467e9c2eb7cacb92713a2d71df353682a151738`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for). An image's
 hash is of that build only: `/etc/motd` carries the build's date and time
@@ -122,6 +122,29 @@ on its first empty section: `set -e` aborts on a failing `$(grep ...)`; each
 capture now ends `|| true`. (adb itself had to be given a second server port,
 `ANDROID_ADB_SERVER_PORT=5039`: the one running since the day before answered
 no client.)
+
+### The scene's long tap lines were being cut at 62 words (2026-11-13)
+
+The 05:31 run, with the prefix in place, reached Sileo's package page -- the
+300 s screenshot shows `tree` with the notification permission alert still up
+-- and never pressed GET: the alert was dismissed by nothing, and the taps
+after it landed on a home-screen search. The cause was in init, not in the
+alert's timing: `run_command()` parses into `argv[64]` and stops at 62 words
+without a word, and the scene's "two and a half minutes of taps" lines held
+thirty taps, so each ran its first twelve and lost its trailing `&` -- about
+48 s of dismissal, not 132, and the second line's `&` went too, so it ran in
+the foreground and delayed everything after it.
+
+`run_command()` now prints `init: a line has more than 62 words; the rest of
+it is not run` when that happens. The scene was rewritten within the limit:
+eleven taps a line, lines staggered 40 s apart from +15 to +515 so one is
+tapping whenever the alert appears, and the GET is alternated with a
+dismissal round so a tap swallowed by a late alert costs one round instead of
+the run. Both scene images rebuilt and read back (apfsck clean, 924/925
+entries): `root-wirelessfull.apfs`
+`b3b2ffaf1d63b8d324d2739e0732b9b19ec72af530fecc1b6292f8ecd68ae5f9`,
+`root-sileo.apfs`
+`4539e9a532337b956dcadf213467e9c2eb7cacb92713a2d71df353682a151738`.
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 

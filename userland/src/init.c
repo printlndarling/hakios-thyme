@@ -1277,6 +1277,11 @@ run_command(char *line)
 		}
 	}
 	argv[argc] = NULL;
+	if (argc == 63) {
+		/* the loop above stops there: say so, or a long line loses its tail -- and with
+		   it a trailing "&" -- without a word (a scene's tap line did, 2026-11-13) */
+		printf("init: a line has more than 62 words; the rest of it is not run\n");
+	}
 	if (argc == 0) {
 		return;
 	}
