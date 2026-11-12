@@ -1015,6 +1015,17 @@ AArch64 (`/vendor/lib64`, pulled with `su`) and ARM32 (`/vendor/lib`,
 linux-msm/hexagon-dsp-binaries tree's SM8250 SLPI directory carries
 `libsns_direct_channel_skel.so` (whose Hexagon copy the scene already serves)
 but no registry skeleton, so the module's dynamic load has no file to
-succeed with from the AP side. Whether the phone's own DSP loads this module
-from its firmware instead of the AP is the next question; the rest of the
+succeed with from the AP side.
+
+The phone's own environment does not change that. Its SLPI shell is
+`/vendor/dsp/sdsp/fastrpc_shell_2` (Hexagon ELF32, 858,968 bytes; the scene
+was serving the RB5 tree's 893,796-byte build); with the phone's shell staged
+the DSP's lookup is byte for byte the same and the ARM64 copy is refused the
+same way (`logs/000351-run.log`). The phone's sdsp directory holds only
+sysmon, the shell, `sns_bring_to_ear.so` and `wigig_sensing.so`, and its map
+files (`map_SLPI_SHARED_LIBS_8250.slpi.prodQ.txt`,
+`map_SSC_SLPI_USER_8250.slpi.prodQ.txt`) list exactly those. The registry
+module's skeleton is therefore not an AP-side file on the phone at all; the
+module the HAL's direct channel uses is one the firmware itself provides, and
+this AP-side open is not the phone's path to the registry. The rest of the
 registry gate stays as it was.
