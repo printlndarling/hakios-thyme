@@ -984,3 +984,37 @@ its QSH/diag ring is not in the AP's shared memory (`slpi_smem_dump=1` over
 the live framework still shows only GLINK and version strings,
 `logs/195649-run.log`), so the DIAG channel's log mask is the remaining
 source.
+
+### The registry's direct channel needs its skel library (2026-11-12, night)
+
+The phone's HAL talks to the registry over FastRPC's direct channel
+(`sensors.ssc.so`: `direct_channel::init_fastRPC_symbols`,
+`sensor_factory::is_registry_up`, `libsns_fastRPC_util.so`): it opens the
+registry's module by name and calls its methods. The driver can make the same
+AP -> DSP `remotectl_open` (boot argument `fastrpc_open_registry`, shown by
+`logs/230419-run.log`): the DSP's rtld takes the open, asks for the module's
+own skeleton through the reverse file service, and this driver's file lookup
+could not serve it -- `/fw/sensors/...` was only ever read from the mounted
+root, while the sensor tree travels in the scene image.
+
+Serving it took two driver changes (`hakios.thyme_slpi.c`):
+
+- `/fw/sensors/...` now falls back to the scene image (`hakios_image_file`)
+  when the mounted root has no such file, handed back as a kalloc'd copy;
+- the listener's shared packet grew from 4 KB to 16 KB and one nested call's
+  out buffers from 1 KB to 8 KB (`FASTRPC_PACKET_SIZE`, `FASTRPC_OUT_MAX`):
+  the DSP's module loader reads its libraries 0x1000 bytes at a time, and the
+  old 1 KB reply cap answered a 4 KB fread with 1048 bytes
+  (`logs/233427-run.log`).
+
+With both, the loader gets its whole 0x1000-byte read (4120-byte reply,
+`logs/234154-run.log`) and rejects the file for what it is: **wrong ELF class
+2, expected 1 in libsns_registry_skel.so**. The copies on the phone are
+AArch64 (`/vendor/lib64`, pulled with `su`) and ARM32 (`/vendor/lib`,
+4480 bytes); the DSP's rtld maps Hexagon ELF32 only. The public
+linux-msm/hexagon-dsp-binaries tree's SM8250 SLPI directory carries
+`libsns_direct_channel_skel.so` (whose Hexagon copy the scene already serves)
+but no registry skeleton, so the module's dynamic load has no file to
+succeed with from the AP side. Whether the phone's own DSP loads this module
+from its firmware instead of the AP is the next question; the rest of the
+registry gate stays as it was.

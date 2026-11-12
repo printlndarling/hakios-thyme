@@ -4766,6 +4766,14 @@ fastrpc_build(uint8_t *buf, uint64_t pv_base, uint64_t physical, uint32_t count,
 #define ITEM_FASTRPC_LISTENER    623       /* the listener thread's packet: it can be outstanding while a control call runs */
 #define ITEM_FASTRPC_LISTENER2   626       /* the second listener (phone=4 runs one in the root PD and one in the sensors PD) */
 #define ITEM_FASTRPC_GROW        627       /* the remote heap offered to the DSP with remotectl_grow_heap */
+/*
+ * The listener's shared packet. The phone's daemon reserves a much larger one;
+ * this one has to hold the reply to a nested call, and the DSP's module loader
+ * reads its libraries 4 KB at a time (fread 0x1000), so a 1 KB reply cap left
+ * every skel load failing with an empty answer (logs/232344-run.log). 16 KB
+ * carries a 4 KB read with room for the next next2's buffers.
+ */
+#define FASTRPC_PACKET_SIZE      (16u << 10)
 
 static uint8_t *
 fastrpc_smem_item_size(uint32_t item, uint32_t size, uint32_t *offset)
@@ -4935,6 +4943,7 @@ static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the de
 static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
 static uint32_t fastrpc_client = 1;      /* boot-arg fastrpc_client: the session's client id; the DSP names its kthreads by it */
 static uint32_t fastrpc_listener_tid = 2; /* boot-arg fastrpc_listener_tid: the thread id the next2 loop runs on */
+static uint32_t fastrpc_open_registry;   /* boot-arg fastrpc_open_registry: open the registry's fastrpc module from the AP, as the HAL does */
 static uint32_t fastrpc_attach_delay = 30; /* boot-arg fastrpc_attach_delay: seconds before phone=3 re-attaches the sensors PD */
 static uint32_t fastrpc_grow_kb;         /* boot-arg fastrpc_grow_kb: offer the DSP that much remote heap before the attach */
 static uint32_t fastrpc_grow_after;      /* boot-arg fastrpc_grow_after: offer it after the attach instead */
@@ -5001,6 +5010,10 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 #define FASTRPC_DIR_NAME_LEN    96
 #define FASTRPC_FILE_LIMIT      (512 * 1024)
 #define FASTRPC_OUT_LIMIT       1024
+/* One nested call's out buffers: the DSP's module loader reads its libraries
+ * 4 KB at a time (fread 0x1000), so the old 1 KB cap left every skel load
+ * with a truncated reply (logs/233427-run.log: 1048 bytes for a 4 KB read). */
+#define FASTRPC_OUT_MAX         (8u << 10)
 #define FASTRPC_STORE_FILES     64
 #define FASTRPC_STORE_PATH      192
 #define FASTRPC_STORE_LIMIT     (4 * 1024 * 1024)
@@ -5285,6 +5298,28 @@ fastrpc_file_data(const char *path, uint32_t *size)
 	}
 	if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
 		return fastrpc_soc0_read(path + sizeof("/fw/sensors/soc0/") - 1, size);
+	}
+	if (strncmp(path, "/fw/sensors/", sizeof("/fw/sensors/") - 1) == 0) {
+		/*
+		 * The sensor tree travels in the scene image (md1, mounted at /redwood),
+		 * not in the mounted root; the root has no /fw/sensors. The DSP's module
+		 * loader asks for its skels through here (the registry's own
+		 * libsns_registry_skel.so among them), so when the root lookup would
+		 * fail, read the file from the scene and hand back a copy of its own
+		 * (the caller frees what it is given).
+		 */
+		uint64_t image_size = 0;
+		const uint8_t *image = hakios_image_file("fw", path + sizeof("/fw/") - 1, &image_size, NULL);
+
+		if (image != NULL && image_size != 0 && image_size <= FASTRPC_FILE_LIMIT) {
+			uint8_t *copy = kalloc_data((size_t)image_size + 1, Z_WAITOK | Z_ZERO);
+
+			if (copy != NULL) {
+				memcpy(copy, image, (size_t)image_size);
+				*size = (uint32_t)image_size;
+				return copy;
+			}
+		}
 	}
 	return fastrpc_root_read(path, FASTRPC_FILE_LIMIT, size);
 }
@@ -5690,8 +5725,8 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 				size = call_out_lens[i];
 			}
 		}
-		if (size > FASTRPC_OUT_LIMIT) {
-			size = FASTRPC_OUT_LIMIT;
+		if (size > FASTRPC_OUT_MAX) {
+			size = FASTRPC_OUT_MAX;
 		}
 		out[i].size = size;
 		out[i].data = kalloc_data(size ? size : 1, Z_WAITOK | Z_ZERO);
@@ -6116,8 +6151,9 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 	uint32_t pd = args != NULL ? args->pd : fastrpc_pd;
 	uint32_t tid = args != NULL ? args->tid : fastrpc_listener_tid;
 	uint32_t item = args != NULL ? args->item : ITEM_FASTRPC_LISTENER;
-	uint8_t *packet = kalloc_data(4096, Z_WAITOK | Z_ZERO), *reply = kalloc_data(4096, Z_WAITOK | Z_ZERO);
-	uint8_t *returned = kalloc_data(4096, Z_WAITOK | Z_ZERO);
+	uint8_t *packet = kalloc_data(FASTRPC_PACKET_SIZE, Z_WAITOK | Z_ZERO);
+	uint8_t *reply = kalloc_data(FASTRPC_PACKET_SIZE, Z_WAITOK | Z_ZERO);
+	uint8_t *returned = kalloc_data(FASTRPC_PACKET_SIZE, Z_WAITOK | Z_ZERO);
 	uint32_t offset = 0, physical, rctx = 0, result_code = 0xffffffff, returned_length = 0, calls = 0;
 	uint32_t sizes[4], numbers[4], lengths[4], size;
 	uint8_t nested[2048];
@@ -6127,7 +6163,7 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 		printf("slpi: fastrpc: the listener has no buffers\n");
 		goto out;
 	}
-	if (fastrpc_smem_item(item, &offset) == NULL) {
+	if (fastrpc_smem_item_size(item, FASTRPC_PACKET_SIZE, &offset) == NULL) {
 		goto out;
 	}
 	physical = SMEM_PHYS + offset;
@@ -6153,9 +6189,9 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 		sources[2] = numbers;
 		lengths[3] = (uint32_t)sizeof(nested);
 		sources[3] = nested;
-		memset(packet, 0, 4096);
+		memset(packet, 0, FASTRPC_PACKET_SIZE);
 		size = fastrpc_build(packet, physical, physical, 4, lengths, sources);
-		if (size > 4096) {
+		if (size > FASTRPC_PACKET_SIZE) {
 			printf("slpi: fastrpc: the listener's packet would be %u bytes\n", size);
 			break;
 		}
@@ -6191,7 +6227,7 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 		{
 			struct fastrpc_remote_buf *rpra;
 
-			fastrpc_smem_get(offset, reply, 4096);
+			fastrpc_smem_get(offset, reply, FASTRPC_PACKET_SIZE);
 			rpra = (struct fastrpc_remote_buf *)reply;
 			fastrpc_smem_get(offset + (uint32_t)(rpra[2].pv - physical), (uint8_t *)numbers, sizeof(numbers));
 			fastrpc_smem_get(offset + (uint32_t)(rpra[3].pv - physical), nested, sizeof(nested));
@@ -6234,7 +6270,7 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			 * context input and 4-byte result input) was tried on 9 November and
 			 * took the DSP down at the first call; the folded form stays.
 			 */
-			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, 1024) : 0;
+			returned_length = out_count != 0 ? fastrpc_encode(out, out_count, returned, FASTRPC_PACKET_SIZE - 2048 - 128) : 0;
 			if (fastrpc_reply_log < 16) {
 				printf("slpi: fastrpc: the reply for sc %#x is %u bytes:", numbers[2], returned_length);
 				for (uint32_t i = 0; i < returned_length && i < 24; i++) {
@@ -6257,13 +6293,13 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 	}
 out:
 	if (packet != NULL) {
-		kfree_data(packet, 4096);
+		kfree_data(packet, FASTRPC_PACKET_SIZE);
 	}
 	if (reply != NULL) {
-		kfree_data(reply, 4096);
+		kfree_data(reply, FASTRPC_PACKET_SIZE);
 	}
 	if (returned != NULL) {
-		kfree_data(returned, 4096);
+		kfree_data(returned, FASTRPC_PACKET_SIZE);
 	}
 	thread_terminate(current_thread());
 }
@@ -6697,6 +6733,23 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 			    "INIT_ATTACH_SNS (late)");
 		}
 		fastrpc_listener_start();
+	}
+	if (fastrpc_open_registry) {
+		/*
+		 * The phone's HAL opens the registry's own fastrpc module and calls its
+		 * methods over the direct channel (sensors.ssc.so: direct_channel::
+		 * init_fastRPC_symbols, sensor_factory::is_registry_up). The open is an
+		 * AP -> DSP remotectl_open, the same control call the listener chain
+		 * makes; if the DSP starts the module, its instance may come up with it.
+		 * The names are tried in turn and each answer is printed.
+		 */
+		static const char *const registry_names[] = { "sns_registry", "sns_registry_skel", "sns_suid_sensor" };
+
+		for (unsigned i = 0; i < sizeof(registry_names) / sizeof(registry_names[0]); i++) {
+			uint32_t opened = fastrpc_open_name(registry_names[i], physical, shared_offset, packet, reply, 5000);
+
+			printf("slpi: fastrpc: the \"%s\" module open: handle %u\n", registry_names[i], opened);
+		}
 	}
 }
 
@@ -8073,6 +8126,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("fastrpc_attach_tid", &fastrpc_attach_tid, sizeof(fastrpc_attach_tid));
 	PE_parse_boot_argn("fastrpc_close", &fastrpc_close, sizeof(fastrpc_close));
 	PE_parse_boot_argn("fastrpc_phone", &fastrpc_phone, sizeof(fastrpc_phone));
+	PE_parse_boot_argn("fastrpc_open_registry", &fastrpc_open_registry, sizeof(fastrpc_open_registry));
 	PE_parse_boot_argn("fastrpc_client", &fastrpc_client, sizeof(fastrpc_client));
 	PE_parse_boot_argn("fastrpc_listener_tid", &fastrpc_listener_tid, sizeof(fastrpc_listener_tid));
 	PE_parse_boot_argn("fastrpc_tid", &fastrpc_call_tid, sizeof(fastrpc_call_tid));

@@ -677,5 +677,7 @@ process from starting a nested call.
 | `logs/152916-run.log` | `fastrpcglink-apps-dsp` open both ways; no DSP FastRPC message before listener registration |
 | `logs/182550-run.log` | `fastrpc_phone=2`: `adsp_default_listener` opens (retval 0); the DSP's first nested calls arrive and `hw_platform` is served; no watchdog |
 | `logs/183050-run.log` | the same with `sns=1`: the DSP's `frpc_dsp` thread excepts at `PC=0xb20c2dac` (`slpi.b20`, offset `0x6022c`) |
+| `logs/230419-run.log` | `fastrpc_open_registry=1`: the DSP's rtld opens the registry module and asks the file service for `libsns_registry_skel.so` |
+| `logs/234154-run.log` | with the scene-image fallback and the 16 KB packet / 8 KB out cap: the 4 KB skel read is served whole (4120-byte reply) and the loader rejects the file -- `wrong ELF class 2 expected 1` (the phone's copies are AArch64/ARM32, the DSP wants Hexagon ELF32) |
 | `devices/thyme/drivers/sensor/hakios.thyme_slpi.c` | the loader, GLINK/QRTR and SNS client |
 | `devices/thyme/CHECKLIST.md` | the hardware checklist and current blockers |
