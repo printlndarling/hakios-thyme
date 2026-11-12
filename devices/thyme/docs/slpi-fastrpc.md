@@ -675,5 +675,7 @@ process from starting a nested call.
 | `logs/140238-run.log` | SNS client QMI result 0, silent SUID lookups, watchdog |
 | `logs/141201-run.log` | Legacy AP SNS_REG service probe: no group requests |
 | `logs/152916-run.log` | `fastrpcglink-apps-dsp` open both ways; no DSP FastRPC message before listener registration |
+| `logs/182550-run.log` | `fastrpc_phone=2`: `adsp_default_listener` opens (retval 0); the DSP's first nested calls arrive and `hw_platform` is served; no watchdog |
+| `logs/183050-run.log` | the same with `sns=1`: the DSP's `frpc_dsp` thread excepts at `PC=0xb20c2dac` (`slpi.b20`, offset `0x6022c`) |
 | `devices/thyme/drivers/sensor/hakios.thyme_slpi.c` | the loader, GLINK/QRTR and SNS client |
 | `devices/thyme/CHECKLIST.md` | the hardware checklist and current blockers |

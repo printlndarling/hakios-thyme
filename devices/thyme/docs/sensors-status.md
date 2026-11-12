@@ -883,3 +883,42 @@ AP says through SMP2P. The next probe has to see the DSP's own log; its diag
 router was asked for its channel (`DIAG`) but sends nothing, so either the
 channel's log mask has to be configured (the AP's diag daemon does that on the
 phone) or the framework's start-up chain has to be read from `slpi.b15`.
+
+### The listener's order was the gate (2026-11-12, later)
+
+The 77 s hang was the registry parser's first file call with no listener to
+answer it. The driver had been running `fastrpc_restart=4`, whose chain never
+opens `adsp_default_listener` on the DSP. The bare/middle order
+(`fastrpc_bare=1 fastrpc_attach_mid=1`) opens it before the sensors PD exists,
+and the DSP refuses that open: `logs/181928-run.log` logs
+`> adsp_default_listener ... sc 0x20200` answered `retval -2147482572`
+(`0x80000434`, invalid process), and the run still ends in the watchdog. The
+phone daemon's own order does what the DSP expects: attach the sensors PD
+(`INIT_ATTACH_SNS`), `adsp_listener_init2` on the fixed handle 3, **then**
+open `adsp_default_listener` (retval 0, handle `837051616`), register it, and
+only then wait in `next2` (`fastrpc_phone=2`).
+
+With that order and the sleepstate entry the sensor process lives:
+
+- `logs/182550-run.log` (`fastrpc_phone=2 fastrpc_pd=2 fastrpc_smmu=2
+  fastrpc_call=9 fastrpc_early=1 fastrpc_grow_kb=4096
+  fastrpc_grow_after=1`, `sns=0`) has **zero protection-domain failures and
+  zero watchdog lines** through its 110 s, and the DSP acknowledges the stop
+  in 20.5 ms when the run ends;
+- the DSP's nested calls arrive and are served: it opens the `apps_std`
+  module on handle 0 (`sc 0x20200`), then `fopen_with_env` (`0x13050100`),
+  `fread` twice (`0x4010200`) and `fclose` (`0x3010000`) on handle 1, and the
+  driver serves `/fw/sensors/soc0/hw_platform` (6 bytes, fd 100) -- the
+  framework's first file read, the fusion sensor's platform query.
+
+So the framework reaches and uses the file service; the gate that remains is
+the run's length (the registry parser's own reads come later) and the SNS
+client path. The first run with the messages on top of the live framework
+(`logs/183050-run.log`, same arguments plus `sns=1`, message 1 and the
+`sns_cm` write) dies differently: the DSP's **`frpc_dsp`** thread takes an
+exception at `PC=0xb20c2dac` (`slpi.b20`: segment vaddr `0xb2062b80`,
+offset `0x6022c`) and the err handler follows
+(`irq115:0x1072:sns_err_handler.c:180:Crash`); its two SNS answers are
+result 5. The file reads themselves are still served (the same five nested
+calls, `hw_platform` again), so the SNS message path and the FastRPC reply
+path meet badly -- the next thing to read is the function at `b20c2dac`.
