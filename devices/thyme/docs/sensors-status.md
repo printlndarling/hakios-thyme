@@ -1046,12 +1046,17 @@ status = %d, equip_id = %d`):
 
     u32 pkt_id = 9        (DIAG_CTRL_MSG_EQUIP_LOG_MASK)
     u32 len    = 11 + mask size          (what follows these eight bytes)
-    u8  stream_id = 1
+    u8  stream_id = 1, then 0
     u8  status    = 3                    (a valid mask)
     u8  equip_id  = 0, then 1
-    u32 num_items = 511                  (the last log code the mask covers)
-    u32 log_mask_size = 64
-    ...64 bytes of 0xFF                  (every log of the range)
+    u32 num_items = the equipment's last log code (0x0, then 0x1DB2)
+    u32 log_mask_size = (last + 1 + 7) / 8 -- 1 byte, then 951
+    ...mask bytes, all 0xFF              (every log of the range)
+
+The last code per equipment is the msm kernels' `log_code_last_tbl`
+(`include/linux/diagchar.h`), and it is what the mask size comes from:
+equipment 1 -- the one the sensor framework logs on -- reaches 0x1DB2, so a
+64-byte mask would have left its logs above code 511 disabled.
 
 Before each mask goes the TX-mode message diagchar sends first (struct
 `diag_ctrl_peripheral_tx_mode`, pkt_id 17: `{version 1, stream_id, tx_mode 0}`
@@ -1066,5 +1071,5 @@ is as before. Whatever the router sends back is printed by `diag_input()` (the
 first 60 packets, hex and text), which has never had a packet. The open
 question is the router's answer, not the channel: a run with `diag_mask=1`
 either shows it (and then the sensor framework's own lines) or shows that this
-channel is not how its log leaves the DSP. Kernel `33a17d7a` carries it; the
+channel is not how its log leaves the DSP. Kernel `472562b3` carries it; the
 kernel baseline is not rebaselined for an unverified change.

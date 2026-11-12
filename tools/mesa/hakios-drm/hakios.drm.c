@@ -103,6 +103,10 @@ call(unsigned number, void *data, size_t size)
 				said_count++;
 				fprintf(stderr, "hakios-drm: method %#x (%zu bytes) refused: %#x\n",
 				    number, size, (unsigned)result);
+			} else if (said_count == 16) {
+				/* the table full: say that from here on they go unnamed, once */
+				said_count++;
+				fprintf(stderr, "hakios-drm: 16 refusals named; further ones are not\n");
 			}
 		}
 		return EIO;

@@ -66,9 +66,9 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`5bac645878b84e9509a1c999b7978da24f6caa410d4381add216d9a926f2e0ae` and
+`8810c930e3e06cd8a73a24afe6c774eff9c2a10ab85dfbbbfe442013b1caf201` and
 `root-sileo.apfs`
-`1517c88dc33b91001517566957489397a0fcbeeafb2ae63a8a9dba53d1737e9f`
+`ee5105413a7427265ab6513f08f5b4713c14ea7231250632e1eca98863a91335`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for).
 

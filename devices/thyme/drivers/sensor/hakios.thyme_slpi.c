@@ -7877,8 +7877,8 @@ diag_input(const uint8_t *data, uint32_t length)
  *   u8  stream_id = 1
  *   u8  status    = 3 (a valid mask)
  *   u8  equip_id  = 0, then 1
- *   u32 num_items = the last log code the mask covers
- *   u32 log_mask_size
+ *   u32 num_items = the equipment's last log code (0x0, then 0x1DB2)
+ *   u32 log_mask_size = (last code + 1 + 7) / 8, so 1 byte and then 951
  *   ...mask, one bit a log code, all 0xFF (every log of the range)
  *
  * The DSP's own strings for this path are in the firmware ("Assertion equip_id <=
@@ -7897,8 +7897,16 @@ static uint32_t diag_mask_ask;
 static uint32_t diag_mask_tries;
 static uint64_t diag_asked_at;
 #define DIAG_ASK_MS     5000                    /* re-asserted: a PD restart forgets the mask */
-#define DIAG_MASK_LOGS  512                     /* log codes the mask covers */
 #define DIAG_LOG_MASK_HEADER 19                 /* pkt_id..log_mask_size, packed */
+/* Each equipment's last log code (the msm kernels' include/linux/diagchar.h, log_code_last_tbl):
+ * a mask must name the last code it covers, and equipment 1 -- the one the sensor framework
+ * logs on -- goes to 0x1DB2, so 64 bytes of mask would leave its logs above 511 disabled. */
+static const struct {
+	uint32_t id, last_code;
+} diag_equips[] = {
+	{ 0, 0x0 },
+	{ 1, 0x1db2 },
+};
 
 static void
 diag_store32(uint8_t *at, uint32_t value)
@@ -7910,10 +7918,12 @@ static void
 diag_ask_mask(void)
 {
 	uint8_t tx_mode[14];                            /* pkt_id..tx_mode, packed */
-	uint8_t ask[DIAG_LOG_MASK_HEADER + DIAG_MASK_LOGS / 8];
+	static uint8_t ask[DIAG_LOG_MASK_HEADER + (0x1db2 + 1 + 7) / 8];
 	uint32_t stream = (diag_mask_tries & 1) != 0 ? 0 : 1;
-	uint32_t equip = (diag_mask_tries >> 1) & 1;
-	uint32_t size = DIAG_MASK_LOGS / 8;
+	uint32_t which = ((diag_mask_tries >> 1) % (sizeof(diag_equips) / sizeof(diag_equips[0])));
+	uint32_t equip = diag_equips[which].id;
+	uint32_t size = (diag_equips[which].last_code + 1 + 7) / 8;
+	uint32_t length = DIAG_LOG_MASK_HEADER + size;
 
 	bzero(tx_mode, sizeof(tx_mode));
 	diag_store32(tx_mode + 0, 17);                  /* DIAG_CTRL_MSG_CONFIG_PERIPHERAL_TX_MODE */
@@ -7925,21 +7935,21 @@ diag_ask_mask(void)
 		printf("slpi: diag: the channel did not take the TX-mode ask (stream %u)\n", stream);
 	}
 
-	bzero(ask, sizeof(ask));
+	bzero(ask, length);
 	diag_store32(ask + 0, 9);                       /* DIAG_CTRL_MSG_EQUIP_LOG_MASK */
 	diag_store32(ask + 4, 11 + size);               /* LOG_MASK_CTRL_HEADER_LEN + mask */
 	ask[8] = (uint8_t)stream;
 	ask[9] = 3;                                     /* DIAG_CTRL_MASK_VALID */
 	ask[10] = (uint8_t)equip;
-	diag_store32(ask + 11, DIAG_MASK_LOGS - 1);     /* num_items: the last log code */
+	diag_store32(ask + 11, diag_equips[which].last_code); /* num_items: the last log code */
 	diag_store32(ask + 15, size);                   /* log_mask_size */
 	memset(ask + DIAG_LOG_MASK_HEADER, 0xff, size); /* every log of the range */
-	if (glink_send(&glink.channel[CHANNEL_DIAG], ask, sizeof(ask)) != 0) {
+	if (glink_send(&glink.channel[CHANNEL_DIAG], ask, length) != 0) {
 		printf("slpi: diag: the channel did not take the log mask ask (equipment %u, stream %u)\n", equip,
 		    stream);
 	} else {
 		printf("slpi: diag: asked for logs 0..%u of equipment %u on stream %u (%u bytes)\n",
-		    DIAG_MASK_LOGS - 1, equip, stream, (unsigned)sizeof(ask));
+		    diag_equips[which].last_code, equip, stream, length);
 	}
 	diag_mask_tries++;
 	diag_asked_at = now_us();

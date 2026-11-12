@@ -266,6 +266,8 @@ static void
 note_images(void)
 {
 	uint32_t count = _dyld_image_count();
+	size_t cache_length = 0;
+	const void *cache = _dyld_get_shared_cache_range(&cache_length);
 
 	for (uint32_t i = 0; i < count && fault_image_count < FAULT_IMAGES; i++) {
 		const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(i);
@@ -275,6 +277,17 @@ note_images(void)
 		const struct load_command *command;
 
 		if (header == NULL || header->magic != MH_MAGIC_64 || path == NULL) {
+			continue;
+		}
+		/*
+		 * The shared cache's images come first in dyld's list and there are thousands of
+		 * them (2,710 in the 20F66 cache): they would take every place in the table and
+		 * leave out the image that matters -- ours.  Their addresses are already named by
+		 * the number with the cache's slide taken off (tools/dyld-cache-image.py), so they
+		 * are skipped here and a fault in one still prints that number.
+		 */
+		if (cache != NULL && (uintptr_t)header >= (uintptr_t)cache &&
+		    (uintptr_t)header < (uintptr_t)cache + cache_length) {
 			continue;
 		}
 		command = (const struct load_command *)(header + 1);
