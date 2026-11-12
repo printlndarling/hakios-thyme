@@ -4,55 +4,65 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
-## The window server's mid-run restarts, and a fault line with a name in it (2026-11-13)
+## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
-`backboardd` dying with `signal 11 at 0x18` was taken for the return's known
-teardown artefact. It is two different faults. The teardown one (its six-frame
-stack, no pthread tail) does come at the end of a run, after the GPU is given
-back. The other one is mid-run: **47 run logs carry it** (`grep -l 0x1d0cd50ec
-logs/0*-run.log`), each with ~4,000 lines of the run still to come after it --
-`logs/092254-run.log` (2026-11-06) through `logs/012034-run.log` (2026-11-13,
-01:11:37, seventeen seconds after the Sileo GET tap). Each one kills the window
-server and SpringBoard restarts around it (backboardd pid 15 -> 599); a Sileo
-queue queued in the app's memory does not survive that, which is what emptied
-the queue in the 01:01 run -- not an apt error, as the earlier reading had it
-(the `apt-get -sqf ... install --reinstall tree=2.0.1` that the tap spawned is
-in that log and its result was never seen).
+`backboardd` dying with `signal 11 at 0x18` was called the return's teardown
+artefact, and it is: in all **46 run logs** that carry this stack the fault
+comes within ~12 s of the run's last kernel timestamp (median 12 s; measured
+with the `tl:` microsecond lines around the fault, since the instrument lines
+between the last kernel stamp and the crash carry no stamp of their own). It
+was, however, an unnamed artefact. It has a name now.
 
-What the stack says: the eight frames are identically spaced in every run, so
-they are all in **one non-cache image**, and the outermost two are
-`libsystem_pthread.dylib+0x30ec` and `+0x172c` (resolved against
-`sysimage/20F66__iPhone10,3_6/dyld_shared_cache_arm64` with
-`tools/dyld-cache-image.py`; the image table is `imagesOffset`/`imagesCount` at
-header 0x1C0 in this cache format). So it is a worker thread: pthread's start
-trampoline called a body function in that image, which faulted on a null+0x18
-read. The frame span is ~3 MB, so the image has at least that much code; the
-main executable is 1.2 MB and the only image we load that is large enough is
-`libOSMesa.8.dylib` (13.4 MB of text, pulled in by `libhakios.gl.dylib` when
-`opengl_es()` runs). Whether it *is* OSMesa was checked rather than assumed:
-taking every BL/BLR in the shipped library's `__text` (109,424 call sites in
-2,024,369 instructions), the set of slides that makes each of the seven return
-addresses land just after a call intersects to exactly **one** value,
-`0xb71f4004`. That value is 4 bytes off a 4 KB page, and a real slide cannot be
--- so either the frames are not OSMesa's or one call in the chain is not a BL
-(a tail call through a register, or a `br` stub). The named fault line settles
-it on the next occurrence; nothing here is claimed as the crash's name yet.
+The stack, resolved: a worker thread's `thrd_start` (Mesa's C11 threads,
+`threads_posix.c`) called into the `u_threaded_context` layer, which was in
+`freedreno_draw` -> `a6xx_fd6_draw` -> `a6xx_fd6_emit` ->
+`fd6_build_bindless_state` -> `fd_bo_mark_for_dump`. The slide was solved, not
+guessed: a BL's return address is the call's address + 4, so every frame fixes
+the slide to (printed - call site - 4); over the shipped library's `__text`
+(109,424 BL/BLR sites in 2,024,369 instructions) the six return addresses meet
+in exactly one page-aligned value, **0xb71f4000**, and the offsets then match
+`xnu-deps/build/mesa/mesa-25.0.7`'s objects byte for byte. The fault is
+`fd_bo_mark_for_dump(NULL)`: the function is `bo->reloc_flags |= FD_RELOC_DUMP`,
+offset 0x18 of the buffer object -- the address the kernel printed.
+`fd6_build_bindless_state()` calls `fd_bo_new()` and passes the result straight
+on, so an allocation that fails is a store to 0x18 on the render thread.
 
-The fault line now names it: `say_the_fault()` (`userland/src/inject.c`) notes
-every loaded image and its address range once, at the end of `hakios_init()`
-(after `opengl_es()`, so OSMesa is in the list), and prints
-`hakios: signal 11 at 0x18, pc libOSMesa.8.dylib+0x2a1e4, lr ...` followed by
-one `hakios:   from NAME+0xOFF` per frame. The list is read from the signal
-handler without calling dyld (its locks may be held by another thread at the
-moment of the fault). Addresses in no image still print unslid, as before.
-Built as `434b92e304af2cd916a9369ab265c9a2c07b23cd6dea13cd80f9a38d3e9912c1`
-(`out/thyme-boot/root-wirelessfull.apfs`) and, for the run that carries the
-Sileo diagnostic too, `8732cae7ef40111cd30c3de125842d210a895caf6e6a72ad1f491cb3d07fdcb6`
-(`root-sileo.apfs`). The next occurrence on the phone names the function, and
-the same build's teardown line will show whether the return's SIGSEGV is the
-same image. `devices/thyme/sileo.sh` runs that scene turnkey (`EXTRA_ARGS="gl=0"`
-asks for CoreAnimation's own software renderer instead of ours: if the fault
-disappears, it is in the GL path; if it stays, it is not).
+Why the allocation fails is the run's ending: `hakios_gpu_stop()` gives the GPU
+back (`gpu_kept = false`, "the run is about to end") a couple of seconds before
+the shutdown finishes, the UI is still drawing, and the next `kMsmGemNew` is
+refused with `kIOReturnNotReady` -- the one refusal the DRM shim mapped to a
+plain EIO with no line in the log, which is why 46 runs showed a NULL buffer
+and none of the driver's own allocation-failure lines (`no memory for a
+buffer`, `no handles left`, `a buffer ... cannot be entered ...`). Handing the
+GPU back earlier than the clients stop drawing is also why the fault lands
+where it does in every run.
+
+That also corrects the Sileo reading of the same evening: the 01:01 run's GET
+tap and its `apt-get -sqf ... install --reinstall tree=2.0.1` happened 17 s
+before this fault, i.e. in the run's last seconds -- the run ended mid-scene,
+before the scene's own apt simulation could print. The queue did not "clear on
+an apt error", and nothing restarted the UI mid-run; the run simply ended.
+`devices/thyme/sileo.sh` gives that scene 600 s now (the battery guard moved to
+10 %, which had cut a 600 s run short at 316 s before).
+
+The fix, in two halves. (1) `tools/mesa/fd6-bindless-null-bo.patch`: a NULL
+from `fd_bo_new` leaves the state group out (`fd6_state_emit()` already
+disables an empty group, and the next frame retries) instead of dereferencing
+it; a failed `fd_bo_map` is handled the same way. (2)
+`tools/mesa/hakios-drm/hakios.drm.c`: every kern_return_t the shim did not name
+became a silent EIO; it now prints `hakios-drm: method 0x.. refused: 0x..`
+once per method and code, so `kIOReturnNotReady` has a line next time. The
+renderer's fault line is still named for real crashes:
+`say_the_fault()` (`userland/src/inject.c`) notes every loaded image and its
+range at the end of `hakios_init()` (after `opengl_es()`, so OSMesa is in the
+list) and prints `pc libOSMesa.8.dylib+0x2a1e4` with one
+`hakios:   from NAME+0xOFF` per frame, read without calling dyld from the
+signal handler. The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
+`35e40355ce9bc340dfb2498a14dc93c8e2be253ff9d4c79e79dd9493c765db03` and
+`root-sileo.apfs`
+`1c08ae200bd4725ac9361ed7d5e9893195b9870e82081fc10c63ce5533806e7a`
+(Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
+`libair.a`, which `build.sh`'s HakiosMetal step then asks for).
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 

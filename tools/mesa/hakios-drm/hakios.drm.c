@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
 #include <stdlib.h>
@@ -77,6 +78,33 @@ call(unsigned number, void *data, size_t size)
 	case kIOReturnUnsupported:
 		return ENOSYS;
 	default:
+		/*
+		 * Everything else became an EIO to the caller, and an EIO says
+		 * nothing: a buffer allocation refused this way returns NULL to
+		 * freedreno, which does not check it everywhere (fd6_image.cc's
+		 * bindless set wrote to 0x18 and the window server died).  Say each
+		 * selector and code once, so the refusal has a name in the log.
+		 */
+		{
+			static struct {
+				unsigned number;
+				kern_return_t result;
+			} said[16];
+			static unsigned said_count;
+
+			for (unsigned i = 0; i < said_count; i++) {
+				if (said[i].number == number && said[i].result == result) {
+					return EIO;
+				}
+			}
+			if (said_count < 16) {
+				said[said_count].number = number;
+				said[said_count].result = result;
+				said_count++;
+				fprintf(stderr, "hakios-drm: method %#x (%zu bytes) refused: %#x\n",
+				    number, size, (unsigned)result);
+			}
+		}
 		return EIO;
 	}
 }
