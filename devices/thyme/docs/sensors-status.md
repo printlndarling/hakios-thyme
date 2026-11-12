@@ -664,3 +664,44 @@ does not grant it, and the return path itself failed at that point). So the
 phase byte cannot be observed from the AP this way, and the runtime channel
 has to come from the DSP's side: a crash dump it writes (item 424 via its
 user-PD watchdog or an induced fault), its QDI/diag service, or its own logs.
+
+### The diagnostic needs its own scene; the accelerometer's uuid is in b13 (2026-11-12)
+
+`devices/thyme/slpi-run.sh` defaults to the daily `root-wirelessfull` scene,
+which carries no `fw/slpi.*`, so every step stops at step 2 ("no fw/slpi.mdt
+in the small image nor on the root"); `SCENE=out/thyme-boot/root-slpitest.apfs`
+is the scene to run the steps with.
+
+The accelerometer's suid from the phone's own capture -- low
+`0x9a418d19f8d7ba44`, high `0x1fbb6afc01727ea6` -- is in the firmware as a
+16-byte constant, the low half first, at `slpi.b13` offset `0x1f7d8`
+(segment vaddr `0x02b30000` + `0x1f7d8`), and it heads a four-entry table of
+`0x28`-byte records (uuid, a `0x18`, then five 32-bit pointers into the BSS
+segment at `0xb210f000`): `44bad7f8198d419aa67e7201fc6abb1f`,
+`c1111549108a41b9a072f96989c4d397`, `cd4b1a6d68da4a7785ab46e2cda5680b`,
+`7932b89cdc0240afa38f80c0c0153697`. The registry sensor's uuid is not in
+that table, and the framework's name strings are a packed blob with no
+direct pointers to them (`accel` at b13 `0x61c3a`, `registry` at `0x61e20`),
+so a uuid-to-name map is still to be found -- the next places to look are the
+larger uuid tables in `slpi.b15` and the registry constants the framework
+copies into its BSS at init.
+
+A calibration run with that scene and only `slpi_step=10 sns=1`
+(`logs/143543-run.log`, kernel `7fa5e99b`, scene `2164c9c7`) reaches step 7
+and stops: TrustZone authenticates the image, the DSP says it is up after
+102 ms, the SMP2P items appear and RPMh is handed back, and the log ends on
+the third SMP2P item. Steps 8-10 and the SNS stage need the longer argument
+set the sections above describe (`slpi_step=10 sns=1 fastrpc_restart=4
+sns_ask_name=SNS_REG_INIT`), so a future run should take the args from the
+specific section it reproduces rather than from this minimum.
+
+The full set ran too (`logs/145037-run.log`): steps 1-10 complete -- TrustZone
+authenticates the image, the DSP says it is up 109 ms after the start, GLINK
+opens both ways, QRTR lists the DSP's services (400, the SNS client, among
+them), and the servreg locator answers the DSP's two requests. The step-10
+summary ("after 3 s: ..."), the final "THE SENSOR DSP IS UP AND LINKED" line
+and every SNS ask are missing, so the step thread stops inside step 10 after
+the two advertise calls. The next probe prints around the second advertise
+and the listen loop to place it; `slpi-run.sh` now takes `BASE_ARGS` like the
+modem probe (the loader's 607-character cmdline had room here, but not
+always).

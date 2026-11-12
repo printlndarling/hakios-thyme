@@ -19,8 +19,12 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-wirelessfull.apfs}
-ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# BASE_ARGS replaces the daily argument set when a probe needs the room: the
+# loader's cmdline buffer is 607 characters and cuts the tail silently, and
+# the sensor arguments sit at the end.
+ARGS=${BASE_ARGS:-$(tr -d '\n' < devices/thyme/ram.args)}
 [ -z "${RAM_EXTRA_ARGS:-}" ] || ARGS="$ARGS $RAM_EXTRA_ARGS"
+echo "slpi-run: our kernel arguments are ${#ARGS} characters (about 420 fit before the loader cuts)"
 
 [ -f "$SYSTEM_IMAGE" ] || { echo "slpi-run: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
 [ -f "$SCENE" ] || { echo "slpi-run: no scenario image: $SCENE" >&2; exit 1; }
