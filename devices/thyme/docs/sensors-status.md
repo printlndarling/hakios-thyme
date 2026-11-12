@@ -734,3 +734,31 @@ is up and unused. The gate is unchanged and now measured from both orders:
 the sensor process neither answers the SUID lookups nor asks the tunnel for
 its registry, which is the framework init the boot-phase disassembly was
 following.
+
+A correction to the "no longer crashes" reading above: `slpi_step=10`
+*stops* the DSP when the steps end (the step-10 teardown line says so), so
+the runs above ended around +30 s with the DSP already off and the 164 s
+watchdog never had a chance to fire. `slpi_watch_item=424`, a new probe
+argument, reads shared-memory item 424 every 20 s after step 10; in that
+run the item goes from empty to `sys_m_smsm_non_mpss.c:278:APPS force stop`
+-- the DSP's record of this driver's own stop, nothing more. Whether the
+sensor process still stalls or crashes is measured by the next run, the
+same configuration with `slpi_keep=1`, which leaves the DSP up for the whole
+200 s.
+
+That run settles it: with the DSP kept up (`slpi_keep=1`,
+`logs/153617-run.log`) item 424 holds, from the first watch's read on,
+
+```text
+EX:kernel:0x0:sns_sig_remote_:0x2062:PC=0xb01c1f2c
+```
+
+so the sensor process still dies in the SNS remote-processor-state signal
+path -- the same PC the earlier `0x2061` text named, with a different code
+word. The PC is in `slpi.b04` (segment vaddr `0xb0152000`, offset
+`0x6ff2c`), and there it is a string compare: the entry at `0xb01c1f20`
+takes the first pointer into r3 (`{ r0 = #0x0; r3 = r0 }`, then
+`loop0(0xb01c1f2c, r2)` and `memb(r3+#0x0)`), so the caller passes NULL as
+the string it compares. The call sites are at `0xb0155dd0`, `0xb0157110`,
+`0xb01686b0`, `0xb016b148`, `0xb016b4f4` and `0xb016cc44`; naming which of
+them is the signal path, and what pointer is NULL there, is the next read.

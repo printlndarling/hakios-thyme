@@ -638,22 +638,46 @@ show_words(const char *prefix, const struct smp2p *words)
 }
 
 static void
-show_crash_reason(void)
+show_smem_item(uint32_t id)
 {
 	char text[257];
-	uint32_t size = 0, at = smem_item(ITEM_CRASH_REASON, &size);
+	uint32_t size = 0, at = smem_item(id, &size);
 
 	if (at == 0 || size == 0) {
-		printf("slpi: %u: item %u, the DSP's last words: not there\n", step, ITEM_CRASH_REASON);
+		printf("slpi: %u: item %u, the DSP's last words: not there\n", step, id);
 		return;
 	}
 	bzero(text, sizeof(text));
 	smem_peek(at, text, size < sizeof(text) - 1 ? size : sizeof(text) - 1);
 	if (text[0] == 0) {
-		printf("slpi: %u: item %u, the DSP's last words (%u bytes): none\n", step, ITEM_CRASH_REASON, size);
+		printf("slpi: %u: item %u, the DSP's last words (%u bytes): none\n", step, id, size);
 	} else {
-		printf("slpi: %u: THE SENSOR DSP'S LAST WORDS (item %u, %u bytes): \"%s\"\n", step, ITEM_CRASH_REASON, size, text);
+		printf("slpi: %u: THE SENSOR DSP'S LAST WORDS (item %u, %u bytes): \"%s\"\n", step, id, size, text);
 	}
+}
+
+static void
+show_crash_reason(void)
+{
+	show_smem_item(ITEM_CRASH_REASON);
+}
+
+/*
+ * slpi_watch_item=N: read shared-memory item N every 20 s once step 10 has
+ * run. The user-PD watchdog fires around 164 s, late in a run the loader's
+ * log no longer keeps whole; a watchdog's text in item 424 is the DSP's own
+ * statement of where it stalled.
+ */
+static uint32_t slpi_watch_item;
+
+static void
+watch_item_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	while (slpi_watch_item != 0) {
+		sleep_ms(20000);
+		show_smem_item(slpi_watch_item);
+	}
+	thread_terminate(current_thread());
 }
 
 /* ---- the doorbells, and the mailbox to the always-on processor (hakios.wifi.c, steps 2 and 7) ------ */
@@ -7866,6 +7890,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_write_tries", &sns_write_tries, sizeof(sns_write_tries));
 	PE_parse_boot_argn("slpi_smem_dump", &slpi_smem_dump, sizeof(slpi_smem_dump));
 	PE_parse_boot_argn("sns_quiet", &sns_quiet, sizeof(sns_quiet));
+	PE_parse_boot_argn("slpi_watch_item", &slpi_watch_item, sizeof(slpi_watch_item));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
@@ -7979,6 +8004,14 @@ step_qrtr(void)
 	if (dump_hex != 0) {
 		/* the crash item holds more than its first line: registers and a stack, as bytes */
 		dump_smem_hex(dump_hex);
+	}
+	if (sns_on && slpi_watch_item != 0) {
+		thread_t watch;
+
+		if (kernel_thread_start(watch_item_thread, NULL, &watch) == KERN_SUCCESS) {
+			thread_deallocate(watch);
+			printf("slpi: %u: item %u is read every 20 s from here on\n", step, slpi_watch_item);
+		}
 	}
 	return qrtr_hellos != 0;
 }
