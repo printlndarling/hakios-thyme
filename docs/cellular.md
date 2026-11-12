@@ -841,3 +841,92 @@ registers the hypervisor's to grant). The doorbell is unchanged: result 3 /
 `0xef120700` in 0 ms with the context and the wide encodings written into
 match register 5. So the stream-ID width is not something the AP can change,
 and the wall is not there either.
+
+### The root complex's AER view, and a probe that was running all along (2026-11-12)
+
+The 9:12 run (`logs/091212-run.log`, kernel `22f39ebe`, `pcie2_test=1
+pcie2_bhi=1 pcie2_img=1`) appeared to stop between the MHI survey and the
+doorbell: no file load, no refusal, no SMMU line. The probe had in fact run --
+the scene it booted carried no `/redwood/fw/modem/sbl1.mbn` (the 11-11 images
+had it, a later root rebuild did not), so the driver sat in its 30 s retry
+loop and then said so. That line fell into the one part of the kernel log a
+long run cannot keep: the console log is a 256 KB linear head followed by a
+1 MB ring (`osfmk/arm64/loader_return.c`), so a run longer than about a minute
+returns the boot's start and only the most recent megabyte, and everything in
+between is overwritten. `userland/build.sh` now stages
+`../fw-modem-sdx55m/sbl1.mbn` into `root/fw/modem/` whenever it is present, so
+a scene, not a hand copy, carries the firmware.
+
+The rerun did run the load: scene `out/thyme-boot/root-modemprobe.apfs`
+(`a85da21b`, the shipped job list), same kernel, `logs/093611-run.log`. The
+image read back byte-identical (`first words 0x464c457f 0x10101, word sum
+0x92f1f39`), the doorbell registers read back as written, and the PBL refused
+again in 0 ms: `BHI_STATUS 0xffffffff` (result 3), `0xef120700`, dbg
+`0xc0000000 0 0x85cd8`. The new reads:
+
+```text
+pcie2: PARF: int status 0x2000, status 0xb40, core errors 0
+pcie2: AER: uncorr 0 corr 0x2000 root 0 src 0
+pcie2: SMMU: SGFSR 0, SGFSYNR0 0, SGFSYNR1 0 (the stream), CB0 FSR 0x400 FAR 0xd55bee94
+```
+
+`PARF` shows link-up and nothing else. The correctable status's bit 13 is
+*Advisory Non-Fatal Error* -- the bit the AER spec uses for an uncorrectable
+error (unsupported request, completer abort, completion timeout) that is
+masked and marked non-fatal -- while the uncorrectable status itself reads 0.
+The registers were not cleared before the doorbell, though, and Android boots
+this modem constantly, so the reading may be the boot chain's. The driver now
+writes 1 to the three status registers (RW1C) before the doorbell, prints the
+read-back, and after the doorbell prints the uncorrectable status with its
+mask and severity, the correctable mask, and the header log -- so the next run
+separates this transfer's errors from an earlier boot's.
+
+That run is in (`logs/094256-run.log`, kernel `22e8487d`, same scene):
+
+```text
+pcie2: AER: before the doorbell: uncorr 0 corr 0 root 0
+pcie2: BHI: status 0xffffffff (result 3), errcode 0xef120700, dbg 0xc0000000 0 0x85cd8, execenv 0, MHISTATUS 0 after 0 ms
+pcie2: PARF: int status 0x2000, status 0xb40, core errors 0
+pcie2: AER: uncorr 0 (mask 0x400000, severity 0x462030), corr 0x2000 (mask 0xe000), root 0 src 0
+pcie2: AER: header log 0xa0 0 0 0
+```
+
+The clear landed -- the pre-doorbell read is zero -- and the same advisory bit
+is set again after the doorbell: the event is this transfer's, not the boot
+chain's. The uncorrectable status still reads 0 while the correctable
+status's Advisory Non-Fatal bit stands, so the root complex saw an
+uncorrectable-class error on a non-posted request and downgraded it; the
+header log carries no usable TLP. The SMMU's global fault status stays 0 and
+no context fault appears, and while that is not conclusive (a secure fault
+need not be visible here) it points at the root complex's inbound path rather
+than at a translation fault. The next probe (`pcie2_inb=1`) turns iATU region
+2 into an inbound window over the image's range: the vendor driver programs
+no inbound region, and that is the one host-side difference left between this
+path and a working one.
+
+That probe is in (`logs/094949-run.log`, kernel `c89211cb`, `pcie2_inb=1`):
+region 2 went in as ctrl1 `0x1`, ctrl2 `0x80000000`, `0xc0000000..0xc07fffff ->
+0xc0000000`, and the doorbell's answer did not move -- result 3 / `0xef120700`
+in 0 ms, the AER advisory bit set again. So the inbound translation is not the
+wall either. What no probe has read yet is the fault state of the contexts the
+boot chain left behind: the modem's stream matches an SMR the boot chain made
+(SMR 5, stream `0x1d01`, S2CR translate into context 3, whose tables are
+Android's). A read translated there would fault in *that* context's FSR, not
+in SGFSR and not in context 0's. The driver now prints every enabled
+context's SCTLR, FSR and FAR after the doorbell; the next run reads them.
+
+That run is in (`logs/095518-run.log`, kernel `1c3c98c2`): every context
+reads `FSR 0x400` -- bit 10, outside the SMMU's fault bits (`FSR_FAULT` is
+`0xc00001fe` in the vendor's own `drivers/iommu/arm-smmu-regs.h`) -- and only
+context 3 is enabled (`SCTLR 0x127`): the one the boot chain left behind with
+Android's tables. So no context records a fault for the refused read. The
+BDF-to-SID entry format is explicit in the vendor's `msm_pcie_config_sid`
+(`drivers/pci/controller/pci-msm.c`: `BDF [31:16] | SID [15:8] | NEXT [7:0]`),
+so the boot chain's `0x01000100` is BDF 1:0.0 -> SID `0x1d00 + 1 = 0x1d01`,
+and `0x1d01` matches SMR 5 -- the S2CR type is 0, translate, into context 3
+(`S2CR_TYPE_TRANS` = 0 in the vendor's header, so the driver's old note that
+SMR 0 was "type FAULT" misread the encoding). Whether context 3's tables
+actually map the address the PBL is given is now a table walk: its `TTBR0` and
+`TCR` are readable, and the next probe resolves the image's IOVA through them
+-- if it is mapped, the read reached memory and what refuses is the PBL; if it
+is not, the SMMU refused the translation without a record this kernel can see.

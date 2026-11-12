@@ -530,6 +530,15 @@ for f in ../fw-haptic/aw8697_haptic.bin ../fw-haptic/aw8697_rtp_*.bin; do
 	mkdir -p root/fw
 	install -m 0644 "$f" root/fw/
 done
+# ... and the boot image the PCIe2 BHI probe hands the SDX55M's PBL
+# (devices/thyme/drivers/modem/hakios.thyme_pcie2.c, pcie2_bhi=1; the phone's
+# /vendor/firmware_mnt/image/sbl1.mbn in ../fw-modem-sdx55m, 548 KB, the
+# vendor's and not in the repository either). Without it the probe's retry
+# loop gives up after 30 s and none of the MHI load path runs.
+if [ -f ../fw-modem-sdx55m/sbl1.mbn ]; then
+	mkdir -p root/fw/modem
+	install -m 0644 ../fw-modem-sdx55m/sbl1.mbn root/fw/modem/
+fi
 # ... and the cameras' register tables (drivers/camera/hakios.camera.c, cam=2 and up), made by tools/camsensor.py out of
 # the sensors' module files of Android's camera stack, the phone's /vendor/lib64/camera/com.qti.sensormodule.
 # hakios_<maker>_<sensor>_<camera>.bin, in ../fw-camera (the vendor's: neither they nor the tables are in the

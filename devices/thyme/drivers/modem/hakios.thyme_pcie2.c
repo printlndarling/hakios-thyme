@@ -854,19 +854,22 @@ modem_smmu_map(vm_offset_t buffer, size_t size)
 }
 
 /*
- * The modem's streams in the apps SMMU. The RC's BDF-to-SID table is not
- * programmed here, so the endpoint's DMA arrives as SID 0 -- and the phone's
- * boot chain leaves SMR 0 (stream 0, mask 0) in S2CR type FAULT, with
- * SCR0's unmatched-stream policy also FAULT. Every read of the PBL's boot
- * engine was therefore faulted in the SMMU, which is the BHI error
- * (0xef120700) that neither the address nor the image explained.
+ * The modem's streams in the apps SMMU. The RC's BDF-to-SID entry is
+ * `BDF [31:16] | SID [15:8] | NEXT [7:0]` (the vendor's msm_pcie_config_sid),
+ * so the boot chain's 0x01000100 is BDF 1:0.0 -> SID 0x1d00 + 1 = 0x1d01,
+ * which matches an SMR the boot chain made: S2CR type 0, translate, into
+ * context 3 (S2CR_TYPE_TRANS is 0 in the vendor's arm-smmu-regs.h; an older
+ * note here read that as FAULT). What that context's tables do with the
+ * PBL's address, and whether the read completes, is what the context dump
+ * and the AER probe now measure.
  *
- * Two writes fix that the way the DT intends: the BDF-to-SID table gets BDF
- * 1:0.0 (0x0100) -> the DT SID's offset in every entry, so the hash the RC
- * computes cannot miss it; and two free SMRs are given the table offset (1)
- * and the full SID (0x1d01) with S2CR type BYPASS, like the SLPI's FastRPC
- * stream is given one. SID 0's fault entry is left as the boot chain made
- * it -- writing that SMR was the one change followed by a log-less reset.
+ * Two writes let a probe take the stream the way the DT intends: the
+ * BDF-to-SID table gets BDF 1:0.0 (0x0100) -> the DT SID's offset in every
+ * entry, so the hash the RC computes cannot miss it; and two free SMRs are
+ * given the table offset (1) and the full SID (0x1d01) with S2CR type
+ * BYPASS, like the SLPI's FastRPC stream is given one. SID 0's entry is left
+ * as the boot chain made it -- writing that SMR was the one change followed
+ * by a log-less reset.
  */
 static void
 modem_sid_setup(uint32_t mode)
@@ -1308,6 +1311,42 @@ image_ready:
 			modem_context_fsr(false);
 		}
 	}
+	/*
+	 * ... and the root complex's AER status, which the boot chain's own
+	 * traffic (Android boots this modem often) leaves behind. Writing 1 to a
+	 * status bit clears it; the read-back says whether the registers are
+	 * writable at all, so the read after the doorbell is this transfer's and
+	 * not an earlier boot's.
+	 */
+	wr(DBI + 0x104, 0xffffffff);
+	wr(DBI + 0x110, 0xffffffff);
+	wr(DBI + 0x130, 0xffffffff);
+	__asm__ volatile("dsb sy" ::: "memory");
+	hakios_tl("pcie2: AER: before the doorbell: uncorr %#x corr %#x root %#x\n", rd(DBI + 0x104),
+	    rd(DBI + 0x110), rd(DBI + 0x130));
+	/*
+	 * pcie2_inb=1: an inbound window for the image's address range (region
+	 * 2, ctrl1 0x01 = inbound memory; the outbound regions 0 and 1 are the
+	 * other direction). The vendor driver programs no inbound region, but the
+	 * PBL's read of host memory is exactly an inbound TLP, and the AER's
+	 * advisory event after the doorbell says the read reaches the root
+	 * complex's error path. If the core's inbound routing is what terminates
+	 * it, this is where the answer changes; it touches only TLPs from the
+	 * endpoint to this address range, never the host's own accesses to the
+	 * modem.
+	 */
+	{
+		uint32_t inb = 0;
+
+		PE_parse_boot_argn("pcie2_inb", &inb, sizeof(inb));
+		if (inb != 0 && (phys >> 32) == 0) {
+			uint32_t base = (uint32_t)phys & ~0xfffu;
+
+			iatu_config(2, 0x01, base, base + 0x7fffff, base);
+			hakios_tl("pcie2: iATU 2: inbound %#x..%#x -> %#x, ctrl1 %#x ctrl2 %#x\n", base, base + 0x7fffff,
+			    base, rd(IATU + 2 * 0x200), rd(IATU + 2 * 0x200 + 0x4));
+		}
+	}
 	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
 	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
 	wr(bhi + 0x08, (uint32_t)phys);
@@ -1336,13 +1375,31 @@ image_ready:
 	 * registers (whether the endpoint's reads of host memory completed) */
 	hakios_tl("pcie2: PARF: int status %#x, status %#x, core errors %#x\n", rd(PARF + 0x224), rd(PARF + 0x230),
 	    rd(PARF + 0x3c0));
+	/*
+	 * The root complex's own AER view (the DBI window is its config space):
+	 * a completer abort or an unsupported request for the endpoint's reads of
+	 * host memory lands in the status registers; the mask and severity words
+	 * say how each class is treated (a masked, non-fatal uncorrectable error
+	 * shows up as the correctable status's Advisory Non-Fatal bit, 0x2000),
+	 * and the header log, when the class logs one, holds the TLP that did it.
+	 * The four vendor offsets are from drivers/pci/controller/pci-msm.c
+	 * (PCIE20_AER_UNCORR_ERR_STATUS_REG 0x104, PCIE20_AER_CORR_ERR_STATUS_REG
+	 * 0x110, PCIE20_AER_ROOT_ERR_STATUS_REG 0x130, PCIE20_AER_ERR_SRC_ID_REG
+	 * 0x134); the mask, severity and header log are the standard AER layout
+	 * beside them (0x108/0x114, 0x10c, 0x118-0x124).
+	 */
+	hakios_tl("pcie2: AER: uncorr %#x (mask %#x, severity %#x), corr %#x (mask %#x), root %#x src %#x\n",
+	    rd(DBI + 0x104), rd(DBI + 0x108), rd(DBI + 0x10c), rd(DBI + 0x110), rd(DBI + 0x114), rd(DBI + 0x130),
+	    rd(DBI + 0x134));
+	hakios_tl("pcie2: AER: header log %#x %#x %#x %#x\n", rd(DBI + 0x118), rd(DBI + 0x11c), rd(DBI + 0x120),
+	    rd(DBI + 0x124));
 	/* the stream the SMMU refused, if it refused one: SGFSYNR1 is the ID;
 	 * a translation fault inside a context lands in that context's FSR */
+	vm_offset_t smmu_win = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
 	{
-		vm_offset_t smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+		volatile uint32_t *regs = (volatile uint32_t *)smmu_win;
 
-		if (smmu != 0) {
-			volatile uint32_t *regs = (volatile uint32_t *)smmu;
+		if (smmu_win != 0) {
 			uint32_t idr1 = regs[0x024 / 4];
 			uint32_t page = (idr1 & (1u << 31)) ? 0x10000 : 0x1000;
 			uint32_t pages = 2u << ((idr1 >> 28) & 7);
@@ -1356,6 +1413,22 @@ image_ready:
 				hakios_tl("pcie2: SMMU: our context %u: FSR %#x FAR %#x, TTBR0 %#x%08x, TCR %#x, SCTLR %#x\n",
 				    modem_space.context, regs[our + 0x58 / 4], regs[our + 0x60 / 4], regs[our + 0x24 / 4],
 				    regs[our + 0x20 / 4], regs[our + 0x30 / 4], regs[our + 0x00 / 4]);
+			}
+			/* Every enabled context's fault state, not only this driver's:
+			 * the boot chain's SMR for the modem's stream points at a context
+			 * of its own (3 on this phone) with Android's tables, and a read
+			 * translated there faults there, not in SGFSR. */
+			{
+				uint32_t nctx = idr1 & 0xff;
+
+				for (uint32_t cx = 0; cx < nctx; cx++) {
+					uint32_t at = (pages + cx) * page / 4;
+
+					if ((regs[at + SMMU_CB_SCTLR / 4] & 1) || regs[at + SMMU_CB_FSR / 4]) {
+						hakios_tl("pcie2: SMMU: context %u: SCTLR %#x FSR %#x FAR %#x\n", cx,
+						    regs[at + SMMU_CB_SCTLR / 4], regs[at + SMMU_CB_FSR / 4], regs[at + 0x60 / 4]);
+					}
+				}
 			}
 		}
 	}
@@ -1372,12 +1445,13 @@ image_ready:
 	/* The apps SMMU's streams for the modem: the RC's BDF-to-SID table is
 	 * not programmed here, so the endpoint's DMAs arrive with whatever SID
 	 * the table's default gives, and an SMR that matches it with a context
-	 * turns our physical addresses into translations. */
+	 * turns our physical addresses into translations. The block above already
+	 * mapped the block; a second ml_io_map of the same range is refused, and
+	 * that silence was this block's for one run. */
 	{
-		vm_offset_t smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+		volatile uint32_t *regs = (volatile uint32_t *)smmu_win;
 
-		if (smmu != 0) {
-			volatile uint32_t *regs = (volatile uint32_t *)smmu;
+		if (smmu_win != 0) {
 			uint32_t scr0 = regs[0x000 / 4], idr0 = regs[0x020 / 4];
 			uint32_t matches = idr0 & 0xff, wide = scr0 & (1u << 3);
 
