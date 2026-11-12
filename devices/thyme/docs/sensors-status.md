@@ -1029,3 +1029,29 @@ module's skeleton is therefore not an AP-side file on the phone at all; the
 module the HAL's direct channel uses is one the firmware itself provides, and
 this AP-side open is not the phone's path to the registry. The rest of the
 registry gate stays as it was.
+
+## The DSP's own log: the DIAG channel and the log mask ask (2026-11-13)
+
+The sensor framework's log goes to the DSP's diag router, whose GLINK channel
+"DIAG" the driver opens (`CHANNEL_DIAG`, ours 5). In every run that reaches it
+the DSP acknowledges our open -- `< open-ack 5 0` in `logs/000351-run.log` --
+and then sends nothing: the router forwards logs only for the equipment IDs a
+client has asked for, and the ask is diag's "log config" request (command
+0x73): a command byte, a count of items, and per item an equipment id, a mask
+size and the mask. Nothing in the phone's files or the firmware strings says
+which shape this router takes, so the driver now tries the three it is known
+in, two seconds apart, as soon as the channel is open:
+
+1. the clear-every-mask request diagchar itself sends, eight bytes
+   `73 00 00 00 00 00 00 00`;
+2. and 3. one item -- `73`, a count of 1 at bytes 4..7 -- with equipment id 0
+   and then 1, a 64-byte mask of 0xFF (every log of the range).
+
+Boot-arg `diag_mask=1` turns it on; without it nothing is sent and the driver
+is as before. Whatever the router sends back is printed by `diag_input()`
+(the first 60 packets, hex and text), which has never had a packet. The
+mask's shape is therefore the open question, not the channel: a run with
+`diag_mask=1` either shows the router's answer (and then the sensor
+framework's own lines) or shows that this channel is not how its log leaves
+the DSP. Kernel `3a819963` carries it; the kernel baseline is not rebaselined
+for an unverified change.

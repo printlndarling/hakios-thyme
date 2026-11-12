@@ -7863,6 +7863,54 @@ diag_input(const uint8_t *data, uint32_t length)
 	printf("|\n");
 }
 
+/* ---- asking the DSP's diag router for the sensor framework's own log ----------------- */
+
+/*
+ * "DIAG" is open both ways and the DSP has never sent a byte on it: its router forwards
+ * the DSP's logs only for the equipment IDs a client has asked for, and the ask is diag's
+ * "log config" request (command 0x73): a command byte, a count of items, and for each item
+ * an equipment id, a mask size and the mask itself.  What this router accepts beyond that
+ * is not written down anywhere this driver can read, so the shapes it is known in are
+ * tried in turn -- first the clear-every-mask request diagchar itself sends (0x73 and
+ * seven zero bytes), then one item with equipment 0 and then 1, each mask 64 bytes of
+ * 0xFF (every log of the range) -- and every packet the router sends back is printed by
+ * diag_input().  Boot-arg diag_mask=1 (default 0: nothing is sent).
+ */
+static uint32_t diag_mask_ask;
+static uint32_t diag_mask_tries;
+static uint64_t diag_asked_at;
+#define DIAG_ASK_SHAPES 3
+#define DIAG_ASK_MS     2000
+
+static void
+diag_ask_mask(void)
+{
+	static const uint8_t disable_all[8] = { 0x73, 0, 0, 0, 0, 0, 0, 0 };
+	uint8_t ask[16 + 64];
+	uint32_t equip, size;
+
+	if (diag_mask_tries >= DIAG_ASK_SHAPES) {
+		return;
+	}
+	if (diag_mask_tries == 0) {
+		glink_send(&glink.channel[CHANNEL_DIAG], disable_all, sizeof(disable_all));
+		printf("slpi: diag: asked the router to clear every log mask (%u bytes)\n", (unsigned)sizeof(disable_all));
+	} else {
+		equip = diag_mask_tries - 1;            /* equipment id 0, then 1 */
+		size = sizeof(ask) - 16;
+		bzero(ask, sizeof(ask));
+		ask[0] = 0x73;                          /* DIAG_LOG_CONFIG */
+		ask[4] = 1;                             /* one item (u32, little-endian) */
+		memcpy(ask + 8, &equip, sizeof(equip));
+		memcpy(ask + 12, &size, sizeof(size));
+		memset(ask + 16, 0xff, size);           /* every log of the range */
+		glink_send(&glink.channel[CHANNEL_DIAG], ask, sizeof(ask));
+		printf("slpi: diag: asked for every log of equipment %u (%u bytes)\n", equip, (unsigned)sizeof(ask));
+	}
+	diag_mask_tries++;
+	diag_asked_at = now_us();
+}
+
 static void
 link_thread(__unused void *parameter, __unused wait_result_t result)
 {
@@ -7915,6 +7963,10 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 				apr_input(packet->data, packet->length);
 			}
 			kfree_data(packet, sizeof(*packet) + packet->length);
+		}
+		if (diag_mask_ask != 0 && diag_mask_tries < DIAG_ASK_SHAPES && glink.channel[CHANNEL_DIAG].open &&
+		    (diag_mask_tries == 0 || now_us() - diag_asked_at >= (uint64_t)DIAG_ASK_MS * 1000)) {
+			diag_ask_mask();
 		}
 	}
 	link_runs = false;
@@ -8086,6 +8138,7 @@ step_qrtr(void)
 	PE_parse_boot_argn("sns_write_tries", &sns_write_tries, sizeof(sns_write_tries));
 	PE_parse_boot_argn("slpi_smem_dump", &slpi_smem_dump, sizeof(slpi_smem_dump));
 	PE_parse_boot_argn("sns_quiet", &sns_quiet, sizeof(sns_quiet));
+	PE_parse_boot_argn("diag_mask", &diag_mask_ask, sizeof(diag_mask_ask));
 	PE_parse_boot_argn("slpi_watch_item", &slpi_watch_item, sizeof(slpi_watch_item));
 	PE_parse_boot_argn("slpi_sleep", &slpi_sleep, sizeof(slpi_sleep));
 	PE_parse_boot_argn("slpi_sleep_value", &slpi_sleep_value, sizeof(slpi_sleep_value));
