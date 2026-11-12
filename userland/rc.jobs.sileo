@@ -72,5 +72,5 @@
 # what apt did, and what became of the package
 /var/jb/bin/cat /var/jb/var/log/apt/term.log
 /var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n tree
-/var/jb/bin/ls -la /var/jb/usr/bin/tree
+/var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
 /var/jb/usr/bin/tree -L 1 /var/jb

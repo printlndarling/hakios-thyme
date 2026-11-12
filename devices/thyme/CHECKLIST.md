@@ -68,7 +68,7 @@ returns NULL.
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
 `8810c930e3e06cd8a73a24afe6c774eff9c2a10ab85dfbbbfe442013b1caf201` and
 `root-sileo.apfs`
-`ee5105413a7427265ab6513f08f5b4713c14ea7231250632e1eca98863a91335`
+`9ad7191b55d70a9777b28df7b850a3fe34b9ca51252fa40792ed635ac6010af7`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for).
 
