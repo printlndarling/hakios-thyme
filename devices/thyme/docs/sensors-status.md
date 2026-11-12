@@ -942,3 +942,27 @@ minutes is not served until the listener is restarted; the framework's own
 reads so far (the five nested calls for `/fw/sensors/soc0/hw_platform`)
 happen well inside that window, so the next run can go longer and look for
 the registry parser's own reads.
+
+The 300 s run did that (`logs/191949-run.log`): the listener stops at its
+126 s timeout, and the DSP has **no protection-domain failure through the
+whole 300 s** and stops cleanly -- the framework's start-up no longer hangs,
+even with the listener gone for the last three minutes. It also makes no
+file call after `hw_platform`: those five nested calls are all it asks for.
+So the registry parser's reads are not simply later in the start-up; the
+registry sensor is not started by the framework's own boot at all. Its QMI
+instance still answers the group write with result 5, and the SUID lookups
+still produce no event -- the next question is what starts it.
+
+With the framework alive the SNS exchanges do complete, though. The SUID
+lookups now produce events (`logs/193745-run.log`, a short run so the whole
+section stays in the log): 40 `has SUID` lines, 40 result-0 responses, zero
+result 5 and zero protection-domain failures, from the phone's own 65/62/69
+byte requests. The events carry the request's placeholder SUID (`0xab`x16)
+instead of a real one -- the same statement as the empty registry: the SUID
+service answers from the SUIDs the running sensor instances registered, and
+no instance exists yet. The delayed `sns_cm` write is refused the same way:
+five writes at +45..53 s answer result 5 (`logs/194241-run.log`) and item 424
+stays clean. So both paths wait for the registry sensor's own instance, and
+the framework's boot does not start it; what starts it -- its direct channel
+(`libsns_registry_skel.so`, the handle-2 module the driver already decodes)
+or its file parser -- is the next thing to try.
