@@ -1146,3 +1146,83 @@ around `0x20000000`. Android's own MHI must reach memory through a
 configuration this kernel has not reproduced; the next diagnostic is a
 register-level comparison of the two RCs (PCIe0, whose endpoint's DMA works,
 against PCIe2) rather than another variation on the doorbell.
+
+That comparison is in (`logs/124133-run.log`): PCIe0's and PCIe2's routing
+registers are identical -- SID configuration 0, AXI master write halt
+`0x80000014`, slave address space `0x4000000`, root port command `0x100006` --
+and the one difference is the BDF-to-SID table's entry for the endpoint's own
+BDF. PCIe0's hash slot holds `0x01000100` (BDF 1:0.0, SID offset 1 of
+`0x1c00`); PCIe2's holds `0x60040d47`, whose BDF field is `0x6004` -- a stale
+entry the boot chain left, not this endpoint's. The SMMU dump names the other
+side of the same fact: SMR 5 is stream `0x1c01` (the wifi's) with S2CR type
+translate into context 3, and nothing matches the modem's `0x1d01` outside a
+run that programs the table itself.
+
+Both facts reshape the reading. The PBL's own window check -- its image must
+lie inside the MHIDATA window this driver programs, `0x20000000`-`0x3ffffffe`
+-- explains the two refusal classes without either proving the read
+delivered: an address outside the window is `0xef120700`, one inside it is
+`0xef0e0003`. `pcie2_img=5` now takes `pcie2_addr` as its target, so the
+write test can move to `0x30000000`, inside the window and away from its
+first page.
+
+`0x30000000` stalls exactly as `0x20000000` does (`logs/124702-run.log`,
+"loading the file into it" and nothing more): the pool window is not writable
+from the AP at any offset, so it cannot carry the image. The discriminator
+that remains is whether the PBL judges *content* at all: with the image
+zeroed in place and the same address and size (`pcie2_bhi_bad=1=2`) through
+the driver's own SMMU context, a different error code than the real image's
+would mean the read delivers and the content is checked; the same code would
+mean the refusal is about the transfer or the address.
+
+That run (`logs/125116-run.log`) answers `0xef0e0003` for the zeroed image,
+exactly the real image's answer: at that address the PBL does not distinguish
+content, or the read never delivers. And the fault-type probe
+(`pcie2_sid=6`) hung the kernel instead of answering
+(`logs/125606-run.log.live`), twice, while plain runs on the same kernel pass.
+The free-space counter says why it was *not* the shared `io_submap`: 24.5 MB
+of it were free at the probe's start (`logs/131406-run.log`), so the block
+was not there, and the loader's periodic fetch means the last logged line
+does not place the hang. The heap window now maps `MODEM_IMAGE_MAP` (640 KB,
+all the image needs) regardless, and the fault probe is rerun with the
+free-space line so a third hang can be placed.
+
+The content discriminator, run with the argument's real name
+(`logs/133940-run.log`, `pcie2_bhi_bad=2 pcie2_sid=5`), changes the reading:
+the zeroed image is refused with `0xef120700` in **0 ms**, while the real
+image through the same translation answers `0xef0e0003` in 30 ms. Content
+changes the answer -- so the BDF table and the driver's match register are in
+effect, the SMMU translates this traffic, the PBL reads the image, and the
+two codes mean different things: a fast `0xef120700` is "there is no image
+here" (zeros where the ELF header should be), and `0xef0e0003` is the
+verdict on the real one after reading it. The physical reads' 70-80 ms
+`0xef120700` is that first code from the other direction -- no transfer at
+all. (An earlier run with the wrong argument name had reported the zeroed
+image answering like the real one; nothing had been zeroed.)
+
+The wall has moved to the image's validation. The next probe flips one byte
+at offset `0x8000` of the real image (`pcie2_bhi_bad=4`): if the verdict
+stays `0xef0e0003`, that part of the image is not authenticated and the
+refusal is about something else; if it changes, the PBL's signature check is
+the wall and the file in the scene is not the image the phone's fuse
+expects.
+
+It changes: one flipped byte at `0x8000` makes the verdict `0xef0a0105` in
+10 ms (`logs/134522-run.log`, `pcie2_bhi_bad=4 pcie2_sid=5`). Three codes now
+name three stages -- a header that is not an image is `0xef120700` (0 ms), an
+image whose body was altered is `0xef0a0105` (10 ms), and the phone's own
+untouched image is `0xef0e0003` (30 ms). So the real image *passes* the PBL's
+integrity check; the transfer, the SMMU translation and the signature all
+work, and `0xef0e0003` is a refusal after them. What the PBL validates next
+is the remaining question; the next run hands it the ELF's own extent
+(`0x83f9c`, where the last program header ends) instead of the file's size
+`0x85cd8`, in case the size is what it judges.
+
+It does judge it, and the file's own size is the right one: `0x83f9c` is
+refused with `0xef0e0002` in 0 ms (`logs/135000-run.log`), the same code a
+zero size gets, while `0x85cd8` passes to the next stage. So the image, its
+size and its signature are all as the PBL expects, and `0xef0e0003` is a
+refusal *after* all three -- the last stage this kernel can vary by
+changing the image is now closed, and what the PBL validates beyond it is
+either the state it is handed (the MHI registers, the doorbell protocol) or
+something inside the SBL's start that a host cannot see.

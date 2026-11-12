@@ -616,6 +616,12 @@ mhi_peek(void)
 /* The window the boot image is placed in: the SLPI's reserved heap, below 4 GB. */
 #define MODEM_IMAGE_PA   0xc0000000u
 #define MODEM_IMAGE_SIZE 0x800000u
+/* What the heap window actually has to hold: the image is 548,056 bytes, and
+ * the io_map of the whole 8 MB heap took a quarter of the 32 MB io_submap
+ * every driver shares -- enough, with the wifi's maps beside it, for
+ * kmem_alloc to block and take the kernel with it (the sid=6 run hung that
+ * way). 640 KB is the image with room. */
+#define MODEM_IMAGE_MAP  0xa0000u
 
 /*
  * pcie2_img=4's buffer: 576 KB of the kernel's own BSS. The kernel image is
@@ -629,6 +635,7 @@ static char modem_image_buf[0x90000] __attribute__((aligned(0x4000)));
 
 extern lck_mtx_t hakios_smmu_lock;
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
+extern uint64_t umi_camera_iomap_free(void);
 
 /* ---- a stage-1 context of the apps SMMU for the modem, with our tables ----
  *
@@ -941,27 +948,53 @@ modem_sid_setup(uint32_t mode)
 	if (mode == 6) {
 		/* S2CR type 2 for the endpoint's stream: if this SMMU calls it a
 		 * fault, the next read of SGFSYNR1 names the stream; if it is a
-		 * bypass, the stream's reads pass and the global fault stays 0 */
+		 * bypass, the stream's reads pass and the global fault stays 0. The
+		 * SMMU is not reset between boots, so an earlier run's SMR for
+		 * 0x1d01 can be there already and would win the match; it is
+		 * repointed in place first, and only a clean table gets a new one. */
+		uint32_t faulted = 0;
+
+		hakios_tl("pcie2: SID: mode 6: mapping the SMMU\n");
 		smmu = smmu_window();
 		if (smmu == 0) {
+			hakios_tl("pcie2: SID: mode 6: the SMMU cannot be mapped\n");
 			return;
 		}
 		regs = (volatile uint32_t *)smmu;
 		matches = regs[0x020 / 4] & 0xff;
 		wide = regs[0x000 / 4] & (1u << 3);
+		hakios_tl("pcie2: SID: mode 6: %u SMRs, %s; taking the SMMU lock\n", matches, wide ? "wide" : "8-bit");
 		lck_mtx_lock(&hakios_smmu_lock);
+		hakios_tl("pcie2: SID: mode 6: the SMMU lock is held\n");
 		for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
 			uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
 			uint32_t used = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+			uint32_t stream = smr & (wide ? 0xffff : 0x7fff);
+			uint32_t mask = (smr >> 16) & (wide ? 0xffff : 0x7fff);
 
-			if (used) {
+			if (!used || mask != 0 || stream != 0x1d01) {
 				continue;
 			}
-			regs[(0x800 + 4 * n) / 4] = wide ? 0x1d01 : ((1u << 31) | 0x1d01);
 			regs[(0xc00 + 4 * n) / 4] = wide ? ((1u << 10) | 0x20000) : 0x20000;
-			hakios_tl("pcie2: SID: SMR %u stream 0x1d01, s2cr read back %#x (type %u)\n", n,
-			    regs[(0xc00 + 4 * n) / 4], (regs[(0xc00 + 4 * n) / 4] >> 16) & 3);
+			hakios_tl("pcie2: SID: SMR %u (0x1d01) turned into a fault in place: s2cr %#x\n", n,
+			    regs[(0xc00 + 4 * n) / 4]);
+			faulted = 1;
 			break;
+		}
+		if (faulted == 0) {
+			for (n = 0; n < matches && 0x800 + 4 * n < 0xc00; n++) {
+				uint32_t smr = regs[(0x800 + 4 * n) / 4], s2cr = regs[(0xc00 + 4 * n) / 4];
+				uint32_t used = wide ? (s2cr & (1u << 10)) : (smr >> 31);
+
+				if (used) {
+					continue;
+				}
+				regs[(0x800 + 4 * n) / 4] = wide ? 0x1d01 : ((1u << 31) | 0x1d01);
+				regs[(0xc00 + 4 * n) / 4] = wide ? ((1u << 10) | 0x20000) : 0x20000;
+				hakios_tl("pcie2: SID: SMR %u stream 0x1d01 into a free slot, s2cr read back %#x (type %u)\n", n,
+				    regs[(0xc00 + 4 * n) / 4], (regs[(0xc00 + 4 * n) / 4] >> 16) & 3);
+				break;
+			}
 		}
 		__asm__ volatile("dsb sy" ::: "memory");
 		lck_mtx_unlock(&hakios_smmu_lock);
@@ -1196,6 +1229,41 @@ mmu_walk(uint32_t cx, uint64_t ttbr0, uint32_t tcr, uint64_t va)
 }
 
 /*
+ * The two root complexes side by side. PCIe0's endpoint (the wifi) DMAs
+ * through the apps SMMU and works; PCIe2's (the modem) does not, and its
+ * reads are refused above both the iATU and the SMMU. The registers that
+ * decide where an endpoint's traffic goes are read from both here: the
+ * BDF-to-SID table entry its BDF hashes to, the configuration register, the
+ * AXI master write halt, the slave address space, and the root port's own
+ * command word.
+ */
+static void
+pcie2_compare_rc0(void)
+{
+	volatile uint32_t *parf0 = (volatile uint32_t *)ml_io_map(0x01c00000u, 0x10000);
+	volatile uint32_t *dbi0 = (volatile uint32_t *)ml_io_map(0x60000000u, 0x1000);
+	uint8_t hash = 0;
+	const uint8_t bdf[] = { 1, 0 };
+
+	if (parf0 == 0 || dbi0 == 0) {
+		hakios_tl("pcie2: compare: PCIe0's registers cannot be mapped\n");
+		return;
+	}
+	for (unsigned i = 0; i < 2; i++) {
+		hash ^= bdf[i];
+		for (unsigned b = 0; b < 8; b++) {
+			hash = (uint8_t)((hash << 1) ^ ((hash & 0x80) ? 7 : 0));
+		}
+	}
+	hakios_tl("pcie2: compare: PCIe0 SID cfg %#x, AXI halt %#x, slave space %#x, DBI command %#x link %#x\n",
+	    parf0[0x2c00 / 4], parf0[0x1a8 / 4], parf0[0x358 / 4], dbi0[0x4 / 4], dbi0[0x80 / 4]);
+	hakios_tl("pcie2: compare: PCIe0 BDF entry %u = %#x; PCIe2's = %#x\n", hash, parf0[0x2000 / 4 + hash],
+	    rd(PARF + 0x2000 + 4 * hash));
+	hakios_tl("pcie2: compare: PCIe2 SID cfg %#x, AXI halt %#x, slave space %#x, DBI command %#x link %#x\n",
+	    rd(PARF + 0x2c00), rd(PARF + 0x1a8), rd(PARF + 0x358), rd(DBI + 0x4), rd(DBI + 0x80));
+}
+
+/*
  * The PBL's boot interface, the vendor's mhi_fw_load_sbl: the device sits in
  * MHI execution environment PBL (BHI_EXECENV 0) with version 1.2, waiting for
  * sdx55m/sbl1.mbn. The host takes the MHI core through RESET and M0
@@ -1217,6 +1285,11 @@ pcie2_bhi_try(void)
 	if (!PE_parse_boot_argn("pcie2_bhi", &on, sizeof(on)) || on < 1) {
 		return;
 	}
+	/* The 32 MB io_submap every driver shares: an ml_io_map with none of it
+	 * left blocks in kmem_alloc on the kernel map's lock and takes the boot
+	 * with it (two probe runs ended that way). The number says how close the
+	 * boot is before this driver maps anything. */
+	hakios_tl("pcie2: io submap free before the probe: %llu bytes\n", (unsigned long long)umi_camera_iomap_free());
 	/* A deliberately wrong image needs no file and no userland: send zeroed
 	 * bytes from the SLPI heap. If the refusal's error code is the same as
 	 * the real image's, the PBL rejects the transfer before it can be about
@@ -1254,21 +1327,21 @@ pcie2_bhi_try(void)
 
 		PE_parse_boot_argn("pcie2_img", &img, sizeof(img));
 		if (img == 5) {
-			/* the one physical window the PBL's reads have been seen to
-			 * deliver from: 0x20000000. The image is copied straight into
-			 * it through an uncached mapping, so what the PBL reads there IS
-			 * the file. */
-			/* write-combining: the plain IO mapping's non-posted writes stall
-			 * on this window (the CPU waits for an acknowledgement that never
-			 * comes), while posted, combined writes do not need one. */
-			memory = ml_io_map_wcomb(0x20000000u, MODEM_IMAGE_SIZE);
+			/* the image copied straight into a physical address inside the MHI
+			 * window, through a write-combining mapping: 0x20000000 by
+			 * default, or pcie2_addr if the probe names another (the window's
+			 * base answered reads, but takes no writes from the AP). */
+			uint32_t pool = 0x20000000u;
+
+			PE_parse_boot_argn("pcie2_addr", &pool, sizeof(pool));
+			memory = ml_io_map_wcomb(pool, MODEM_IMAGE_MAP);
 			if (memory == 0) {
-				hakios_tl("pcie2: BHI: cannot map 0x20000000\n");
+				hakios_tl("pcie2: BHI: cannot map %#x\n", pool);
 				return;
 			}
-			hakios_tl("pcie2: BHI: 0x20000000 mapped at %#x; loading the file into it\n", (uint32_t)memory);
+			hakios_tl("pcie2: BHI: %#x mapped at %#x; loading the file into it\n", pool, (uint32_t)memory);
 			for (i = 0; i < 30; i++) {
-				if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_SIZE, &size) == 0) {
+				if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_MAP, &size) == 0) {
 					break;
 				}
 				delay(1000000);
@@ -1277,9 +1350,9 @@ pcie2_bhi_try(void)
 				hakios_tl("pcie2: BHI: no /redwood/fw/modem/sbl1.mbn after 30 s\n");
 				return;
 			}
-			phys = 0x20000000u;
+			phys = pool;
 			__asm__ volatile("dsb sy" ::: "memory");
-			hakios_tl("pcie2: BHI: the image copied into 0x20000000, %zu bytes\n", size);
+			hakios_tl("pcie2: BHI: the image copied into %#x, %zu bytes\n", pool, size);
 			goto image_ready;
 		}
 		if (img == 4) {
@@ -1328,13 +1401,13 @@ pcie2_bhi_try(void)
 			}
 			hakios_tl("pcie2: BHI: no 1 MB of contiguous kernel memory; the SLPI heap instead\n");
 		}
-		memory = ml_io_map(MODEM_IMAGE_PA, MODEM_IMAGE_SIZE);
+		memory = ml_io_map(MODEM_IMAGE_PA, MODEM_IMAGE_MAP);
 		if (memory == 0) {
 			hakios_tl("pcie2: BHI: cannot map the image window\n");
 			return;
 		}
 		for (i = 0; i < 30; i++) {
-			if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_SIZE, &size) == 0) {
+			if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_MAP, &size) == 0) {
 				break;
 			}
 			delay(1000000);
@@ -1368,6 +1441,17 @@ image_ready:
 		}
 		__asm__ volatile("dsb sy" ::: "memory");
 		hakios_tl("pcie2: BHI: bad image mode 2: the whole %zu-byte image zeroed\n", size);
+	}
+	if (bad == 4 && size > 0x8000) {
+		/* one byte flipped deep inside the real image: whether the PBL's
+		 * verdict changes says whether its check covers the image's body
+		 * (signature) or only looks at the header */
+		volatile uint8_t *bytes = (volatile uint8_t *)memory;
+		uint8_t old = bytes[0x8000];
+
+		bytes[0x8000] = (uint8_t)(old ^ 0x5a);
+		__asm__ volatile("dsb sy" ::: "memory");
+		hakios_tl("pcie2: BHI: bad image mode 4: byte 0x8000 %#x -> %#x\n", old, bytes[0x8000]);
 	}
 
 	bhioff = rd(MHI_BAR + 0x28);
@@ -1688,6 +1772,7 @@ image_ready:
 		hakios_tl("pcie2: iATU %u: ctrl1 %#x ctrl2 %#x bar %#x/%#x lar %#x tar %#x/%#x\n", r, rd(b + 0x0),
 		    rd(b + 0x4), rd(b + 0xc), rd(b + 0x8), rd(b + 0x10), rd(b + 0x18), rd(b + 0x14));
 	}
+	pcie2_compare_rc0();
 
 	/* The apps SMMU's streams for the modem: the RC's BDF-to-SID table is
 	 * not programmed here, so the endpoint's DMAs arrive with whatever SID
@@ -1714,9 +1799,11 @@ image_ready:
 				}
 				stream = smr & (wide ? 0xffff : 0x7fff);
 				mask = (smr >> 16) & (wide ? 0xffff : 0x7fff);
-				/* the modem's two SIDs, and SID 0, are what matter */
+				/* the modem's two SIDs, SID 0 and the wifi's two -- the
+				 * comparison says which streams the SMMU actually matches */
 				if (((0x1d00 ^ stream) & ~mask) != 0 && ((0x1d01 ^ stream) & ~mask) != 0 &&
-				    ((0x0000 ^ stream) & ~mask) != 0) {
+				    ((0x0000 ^ stream) & ~mask) != 0 && ((0x1c00 ^ stream) & ~mask) != 0 &&
+				    ((0x1c01 ^ stream) & ~mask) != 0) {
 					continue;
 				}
 				hakios_tl("pcie2: apps SMMU: SMR %u stream %#x mask %#x s2cr %#x (kind %u context %u)\n", n,
