@@ -7921,7 +7921,9 @@ diag_ask_mask(void)
 	diag_store32(tx_mode + 8, 1);                   /* version 1 */
 	tx_mode[12] = (uint8_t)stream;
 	tx_mode[13] = 0;                                /* DIAG_BUFFERING_MODE_STREAMING */
-	glink_send(&glink.channel[CHANNEL_DIAG], tx_mode, sizeof(tx_mode));
+	if (glink_send(&glink.channel[CHANNEL_DIAG], tx_mode, sizeof(tx_mode)) != 0) {
+		printf("slpi: diag: the channel did not take the TX-mode ask (stream %u)\n", stream);
+	}
 
 	bzero(ask, sizeof(ask));
 	diag_store32(ask + 0, 9);                       /* DIAG_CTRL_MSG_EQUIP_LOG_MASK */
@@ -7932,9 +7934,13 @@ diag_ask_mask(void)
 	diag_store32(ask + 11, DIAG_MASK_LOGS - 1);     /* num_items: the last log code */
 	diag_store32(ask + 15, size);                   /* log_mask_size */
 	memset(ask + DIAG_LOG_MASK_HEADER, 0xff, size); /* every log of the range */
-	glink_send(&glink.channel[CHANNEL_DIAG], ask, sizeof(ask));
-	printf("slpi: diag: asked for logs 0..%u of equipment %u on stream %u (%u bytes)\n",
-	    DIAG_MASK_LOGS - 1, equip, stream, (unsigned)sizeof(ask));
+	if (glink_send(&glink.channel[CHANNEL_DIAG], ask, sizeof(ask)) != 0) {
+		printf("slpi: diag: the channel did not take the log mask ask (equipment %u, stream %u)\n", equip,
+		    stream);
+	} else {
+		printf("slpi: diag: asked for logs 0..%u of equipment %u on stream %u (%u bytes)\n",
+		    DIAG_MASK_LOGS - 1, equip, stream, (unsigned)sizeof(ask));
+	}
 	diag_mask_tries++;
 	diag_asked_at = now_us();
 }

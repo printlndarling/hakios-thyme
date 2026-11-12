@@ -7,8 +7,9 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown
-artefact, and it is: in all **46 run logs** that carry this stack the fault
-comes within ~12 s of the run's last kernel timestamp (median 12 s; measured
+artefact, and it is: **47 run logs carry this stack** (`grep -l 0x1d0cd50ec
+logs/0*-run.log`), and in the 46 of them whose run's end can be measured the
+fault comes within ~12 s of the last kernel timestamp (median 12 s; measured
 with the `tl:` microsecond lines around the fault, since the instrument lines
 between the last kernel stamp and the crash carry no stamp of their own). It
 was, however, an unnamed artefact. It has a name now.
@@ -31,7 +32,7 @@ Why the allocation fails is the run's ending: `hakios_gpu_stop()` gives the GPU
 back (`gpu_kept = false`, "the run is about to end") a couple of seconds before
 the shutdown finishes, the UI is still drawing, and the next `kMsmGemNew` is
 refused with `kIOReturnNotReady` -- the one refusal the DRM shim mapped to a
-plain EIO with no line in the log, which is why 46 runs showed a NULL buffer
+plain EIO with no line in the log, which is why the runs showed a NULL buffer
 and none of the driver's own allocation-failure lines (`no memory for a
 buffer`, `no handles left`, `a buffer ... cannot be entered ...`). Handing the
 GPU back earlier than the clients stop drawing is also why the fault lands
@@ -65,9 +66,9 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`35e40355ce9bc340dfb2498a14dc93c8e2be253ff9d4c79e79dd9493c765db03` and
+`5bac645878b84e9509a1c999b7978da24f6caa410d4381add216d9a926f2e0ae` and
 `root-sileo.apfs`
-`5a9e199c30da0e980a0009c9789340e844f8e955503e5b05779c1015c666b766`
+`1517c88dc33b91001517566957489397a0fcbeeafb2ae63a8a9dba53d1737e9f`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for).
 

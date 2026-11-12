@@ -1066,5 +1066,5 @@ is as before. Whatever the router sends back is printed by `diag_input()` (the
 first 60 packets, hex and text), which has never had a packet. The open
 question is the router's answer, not the channel: a run with `diag_mask=1`
 either shows it (and then the sensor framework's own lines) or shows that this
-channel is not how its log leaves the DSP. Kernel `d6cd1241` carries it; the
+channel is not how its log leaves the DSP. Kernel `33a17d7a` carries it; the
 kernel baseline is not rebaselined for an unverified change.

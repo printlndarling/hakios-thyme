@@ -7,7 +7,7 @@
 +      /* An allocation that fails must not take the process down: with
 +       * set->bo NULL, fd_bo_mark_for_dump() wrote bo->reloc_flags at address
 +       * 0x18 and the window server died (HakiOS on thyme, the same stack in
-+       * 44 runs).  Leave the group out instead -- fd6_state_emit() disables an
++       * 47 runs).  Leave the group out instead -- fd6_state_emit() disables an
 +       * empty one -- and let the next frame try the allocation again.
 +       */
 +      if (unlikely(!set->bo)) {
