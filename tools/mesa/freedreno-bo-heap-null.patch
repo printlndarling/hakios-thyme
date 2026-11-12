@@ -1,0 +1,20 @@
+--- a/src/freedreno/drm/freedreno_bo_heap.c
++++ b/src/freedreno/drm/freedreno_bo_heap.c
+@@ -233,6 +233,17 @@
+       heap->blocks[idx] = fd_bo_new(
+             heap->dev, FD_BO_HEAP_BLOCK_SIZE, heap->flags | _FD_BO_HINT_HEAP,
+             "heap-%x-block-%u", heap->flags, idx);
++      /* An allocation that fails must not fault: the ring path marked the NULL
++       * block for dump (bo->reloc_flags, address 0x18) and the reference after
++       * it would have followed -- HakiOS on thyme, in the same teardown window
++       * as fd6_build_bindless_state's NULL.  Give the range back and fail.
++       */
++      if (!heap->blocks[idx]) {
++         util_vma_heap_free(&heap->heap, s->offset, size);
++         free(s);
++         simple_mtx_unlock(&heap->lock);
++         return NULL;
++      }
+       if (heap->flags == RING_FLAGS)
+          fd_bo_mark_for_dump(heap->blocks[idx]);
+    }

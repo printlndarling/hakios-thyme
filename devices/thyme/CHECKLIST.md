@@ -69,9 +69,9 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`027e152ec2ddf0ad4d70901c337edf0a430885d432e1c7e45df57152f48de86b` and
+`87b7e62795aff2ea36ab1284a74db27b738b61a15465740e7e948b57e3d5c88a` and
 `root-sileo.apfs`
-`9ad7191b55d70a9777b28df7b850a3fe34b9ca51252fa40792ed635ac6010af7`
+`1dd2dcd1c7c77139d60db743bc935739a49fbd60294e0dc03dfc5d9f3126964d`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for). An image's
 hash is of that build only: `/etc/motd` carries the build's date and time
@@ -88,6 +88,40 @@ sheet's list and does nothing -- waits 45 s for the download and the install,
 and then prints apt's term.log, dpkg's record of `tree` and the binary itself.
 Before this, no run had ever asked Sileo to install anything; the queue was
 only queued and looked at.
+
+### The first run on the named fault line, and the second NULL it found (2026-11-13)
+
+`logs/050709-run.log` is the first run whose window-server fault names itself:
+
+    hakios: signal 11 at 0x18, pc libOSMesa.8.dylib+0x746660, lr libOSMesa.8.dylib+0x747a7c
+    hakios:   from libOSMesa.8.dylib+0x745db4
+    ... (eight frames, all in libOSMesa)
+
+The bindless NULL is gone (its guard holds), and the crash is a **second**
+unchecked allocation in the same teardown window. The offsets, byte-matched
+back to the build's objects, are `fd_bo_heap_alloc` (freedreno_bo_heap.c) ->
+`fd_ringbuffer` -> `fd_batch` -> `fd_batch_cache` -> `fd_context`: the flush
+after the GPU is given back allocates a ringbuffer from the heap, the heap's
+`fd_bo_new` for its block fails, and `fd_bo_mark_for_dump(heap->blocks[idx])`
+writes to 0x18 on the NULL -- the same fault address as the first, from
+freedreno_bo_heap.c:237 rather than fd6_image.cc. `fd_bo_ref` on the next line
+would have followed.
+
+The fix is `tools/mesa/freedreno-bo-heap-null.patch`: when the block's
+`fd_bo_new` fails, the range goes back to the vma heap, the `sa_bo` is freed,
+the lock is dropped, and the allocation returns NULL. Built, not yet seen on
+the phone.
+
+The run also showed two things about the runner itself. The Sileo scene did
+nothing at all: `/var/jb/bin/sh: No such file or directory` -- the system
+image it uploaded was `devices/thyme/prebuilt/system.apfs`, which has no `/jb`,
+so init had no prefix to graft. The image that carries one is
+`out/thyme-boot/system-jb.apfs` (built with `SYSTEM=1` from `jb/`), and
+`devices/thyme/sileo.sh` now defaults to it. And the end-of-run summary died
+on its first empty section: `set -e` aborts on a failing `$(grep ...)`; each
+capture now ends `|| true`. (adb itself had to be given a second server port,
+`ANDROID_ADB_SERVER_PORT=5039`: the one running since the day before answered
+no client.)
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
