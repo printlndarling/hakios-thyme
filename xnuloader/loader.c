@@ -210,7 +210,7 @@ put_char(char c)
 	}
 }
 
-/* printf subset: %s %x %d (64-bit values), %% */
+/* printf subset: %s %x %d (64-bit values; %d is signed), %% */
 static void
 print(const char *fmt, ...)
 {
@@ -232,6 +232,14 @@ print(const char *fmt, ...)
 			unsigned base = (*fmt == 'x') ? 16 : 10;
 			char tmp[24];
 			int i = 0;
+			/* a negative current (the phone discharging) printed as a
+			   sixty-four bit unsigned number, 18446744073709551406 mA
+			   for -210 mA; the magnitude is taken in unsigned arithmetic
+			   so the most negative value is right too */
+			if (*fmt == 'd' && (int64_t)v < 0) {
+				put_char('-');
+				v = 0 - v;
+			}
 			do {
 				tmp[i++] = "0123456789abcdef"[v % base];
 				v /= base;
