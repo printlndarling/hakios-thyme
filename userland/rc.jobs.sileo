@@ -50,6 +50,12 @@
 # tap that lands on a late permission alert (and dismisses it) costs nothing and
 # the next one lands on the button.
 /redwood/bin/rwtouch tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5
+# The queue still empties (DownloadManager.reloadData(recheckPackages: true) ->
+# recheckTotalOps() -> removeAllItems() on an apt error). Reproduce that apt run
+# from here, against the index Sileo made: /var/jb/usr/bin/ls -la and an
+# apt-get simulate name what it objects to.
+/var/jb/usr/bin/ls -la /var/jb/var/lib/apt/sileolists
+/var/jb/usr/bin/apt-get install -s -f -oDir::State::lists=/var/jb/var/lib/apt/sileolists/ tree
 # close the package sheet: a drag from the grabber itself (y 0.060, measured; the header
 # below it belongs to the scrolling page), twice
 /redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.80 500 wait 6
