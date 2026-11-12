@@ -1036,22 +1036,28 @@ The sensor framework's log goes to the DSP's diag router, whose GLINK channel
 "DIAG" the driver opens (`CHANNEL_DIAG`, ours 5). In every run that reaches it
 the DSP acknowledges our open -- `< open-ack 5 0` in `logs/000351-run.log` --
 and then sends nothing: the router forwards logs only for the equipment IDs a
-client has asked for, and the ask is diag's "log config" request (command
-0x73): a command byte, a count of items, and per item an equipment id, a mask
-size and the mask. Nothing in the phone's files or the firmware strings says
-which shape this router takes, so the driver now tries the three it is known
-in, two seconds apart, as soon as the channel is open:
+client has asked for, and the ask is the control message diagchar sends to a
+peripheral. Its layout was taken from the msm kernels' diagfwd_cntl.h and
+diag_masks.h (struct `diag_ctrl_log_mask`, `LOG_MASK_CTRL_HEADER_LEN` 11,
+`DIAG_CTRL_MASK_VALID` 3), and the DSP firmware carries the matching strings
+for that path (`Assertion equip_id <= LOG_EQUIP_ID_MAX failed`,
+`diag_ctrl_update_log_mask: update log mask - mask_len = %d, stream_id = %d,
+status = %d, equip_id = %d`):
 
-1. the clear-every-mask request diagchar itself sends, eight bytes
-   `73 00 00 00 00 00 00 00`;
-2. and 3. one item -- `73`, a count of 1 at bytes 4..7 -- with equipment id 0
-   and then 1, a 64-byte mask of 0xFF (every log of the range).
+    u32 pkt_id = 9        (DIAG_CTRL_MSG_EQUIP_LOG_MASK)
+    u32 len    = 11 + mask size          (what follows these eight bytes)
+    u8  stream_id = 1
+    u8  status    = 3                    (a valid mask)
+    u8  equip_id  = 0, then 1
+    u32 num_items = 511                  (the last log code the mask covers)
+    u32 log_mask_size = 64
+    ...64 bytes of 0xFF                  (every log of the range)
 
-Boot-arg `diag_mask=1` turns it on; without it nothing is sent and the driver
-is as before. Whatever the router sends back is printed by `diag_input()`
-(the first 60 packets, hex and text), which has never had a packet. The
-mask's shape is therefore the open question, not the channel: a run with
-`diag_mask=1` either shows the router's answer (and then the sensor
-framework's own lines) or shows that this channel is not how its log leaves
-the DSP. Kernel `3a819963` carries it; the kernel baseline is not rebaselined
-for an unverified change.
+The driver sends it for equipment 0 and then 1, two seconds apart, once the
+channel is open. Boot-arg `diag_mask=1` turns it on; without it nothing is
+sent and the driver is as before. Whatever the router sends back is printed by
+`diag_input()` (the first 60 packets, hex and text), which has never had a
+packet. The open question is the router's answer, not the channel: a run with
+`diag_mask=1` either shows it (and then the sensor framework's own lines) or
+shows that this channel is not how its log leaves the DSP. Kernel `3922bbfa`
+carries it; the kernel baseline is not rebaselined for an unverified change.
