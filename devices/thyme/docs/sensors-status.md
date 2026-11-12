@@ -1053,11 +1053,13 @@ status = %d, equip_id = %d`):
     u32 log_mask_size = 64
     ...64 bytes of 0xFF                  (every log of the range)
 
-The driver sends it for equipment 0 and then 1, two seconds apart, once the
-channel is open. Boot-arg `diag_mask=1` turns it on; without it nothing is
-sent and the driver is as before. Whatever the router sends back is printed by
-`diag_input()` (the first 60 packets, hex and text), which has never had a
-packet. The open question is the router's answer, not the channel: a run with
-`diag_mask=1` either shows it (and then the sensor framework's own lines) or
-shows that this channel is not how its log leaves the DSP. Kernel `3922bbfa`
-carries it; the kernel baseline is not rebaselined for an unverified change.
+The driver sends it every five seconds, the two equipment IDs in turn, once
+the channel is open -- a protection domain that restarts comes back without
+the mask, and this run has restarts in it. Boot-arg `diag_mask=1` turns it on;
+without it nothing is sent and the driver is as before. Whatever the router
+sends back is printed by `diag_input()` (the first 60 packets, hex and text),
+which has never had a packet. The open question is the router's answer, not the
+channel: a run with `diag_mask=1` either shows it (and then the sensor
+framework's own lines) or shows that this channel is not how its log leaves the
+DSP. Kernel `ce27c3ef` carries it; the kernel baseline is not rebaselined for
+an unverified change.

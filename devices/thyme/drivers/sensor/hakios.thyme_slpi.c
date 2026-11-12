@@ -7883,15 +7883,15 @@ diag_input(const uint8_t *data, uint32_t length)
  *
  * The DSP's own strings for this path are in the firmware ("Assertion equip_id <=
  * LOG_EQUIP_ID_MAX", "diag_ctrl_update_log_mask: update log mask - mask_len ... stream_id
- * ... status ... equip_id ..."), so this is the message it parses.  Every packet the
- * router sends back is printed by diag_input().  Boot-arg diag_mask=1 (default 0:
- * nothing is sent).
+ * ... status ... equip_id ...", "Invalid stream_id %d"), so this is the message it parses.
+ * It is sent again every few seconds, the two equipment IDs in turn, because a protection
+ * domain that restarts comes back without the mask.  Every packet the router sends back
+ * is printed by diag_input().  Boot-arg diag_mask=1 (default 0: nothing is sent).
  */
 static uint32_t diag_mask_ask;
 static uint32_t diag_mask_tries;
 static uint64_t diag_asked_at;
-#define DIAG_ASK_EQUIPS 2                       /* equipment 0, then 1 */
-#define DIAG_ASK_MS     2000
+#define DIAG_ASK_MS     5000                    /* re-asserted: a PD restart forgets the mask */
 #define DIAG_MASK_LOGS  512                     /* log codes the mask covers */
 #define DIAG_LOG_MASK_HEADER 19                 /* pkt_id..log_mask_size, packed */
 
@@ -7905,12 +7905,9 @@ static void
 diag_ask_mask(void)
 {
 	uint8_t ask[DIAG_LOG_MASK_HEADER + DIAG_MASK_LOGS / 8];
-	uint32_t equip = diag_mask_tries;               /* 0, then 1 */
+	uint32_t equip = diag_mask_tries & 1;           /* equipment 0 and 1 in turn */
 	uint32_t size = DIAG_MASK_LOGS / 8;
 
-	if (diag_mask_tries >= DIAG_ASK_EQUIPS) {
-		return;
-	}
 	bzero(ask, sizeof(ask));
 	diag_store32(ask + 0, 9);                       /* DIAG_CTRL_MSG_EQUIP_LOG_MASK */
 	diag_store32(ask + 4, 11 + size);               /* LOG_MASK_CTRL_HEADER_LEN + mask */
@@ -7980,7 +7977,7 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 			}
 			kfree_data(packet, sizeof(*packet) + packet->length);
 		}
-		if (diag_mask_ask != 0 && diag_mask_tries < DIAG_ASK_EQUIPS && glink.channel[CHANNEL_DIAG].open &&
+		if (diag_mask_ask != 0 && glink.channel[CHANNEL_DIAG].open &&
 		    (diag_mask_tries == 0 || now_us() - diag_asked_at >= (uint64_t)DIAG_ASK_MS * 1000)) {
 			diag_ask_mask();
 		}

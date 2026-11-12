@@ -37,7 +37,11 @@ case "$ARGS" in
 *"battery_stop=10"*) ;;
 *) echo "sileo: warning: battery_stop=25 is not in ram.args; the guard is whatever it names" >&2 ;;
 esac
-if [ -n "${EXTRA_ARGS:-}" ]; then
+# The DSP's diag router is asked for the sensor framework's log in the same run
+# (docs/sensors-status.md): one boot answers both the install question and
+# whether that channel carries anything. EXTRA_ARGS="" runs without it.
+EXTRA_ARGS=${EXTRA_ARGS-diag_mask=1}
+if [ -n "$EXTRA_ARGS" ]; then
 	ARGS="$ARGS $EXTRA_ARGS"
 fi
 
