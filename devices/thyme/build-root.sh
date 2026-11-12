@@ -18,6 +18,9 @@ export BLUETOOTH=1
 export ADSP=1
 export GL=1
 export RC_JOBS
+# A caller's EXTRA (files for /redwood/bin, paths relative to userland/) passes
+# through: the Sileo scene carries sileo-seed.sh that way.
+export EXTRA="${EXTRA:-}"
 /bin/bash ./build.sh
 
 cd "$ROOT"

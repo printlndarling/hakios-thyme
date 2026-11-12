@@ -22,6 +22,11 @@
 /redwood/bin/net_test joinfile /redwood/fw/network
 /redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
 /var/jb/usr/bin/apt-get update
+# Sileo reads <repo>_Release for the repository's name and apt writes
+# <repo>_InRelease; without the former the page shows "Untitled Repo" and the
+# queue path loses its source. The seed copies apt's bytes under Sileo's name
+# (userland/sileo-seed.sh, staged in /redwood/bin).
+/var/jb/bin/sh /redwood/bin/sileo-seed.sh
 /redwood/bin/rwtouch wait 25 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
 # a cold launch can stay in the background (the 21:04 run's pid lived but the
