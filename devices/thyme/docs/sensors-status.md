@@ -966,3 +966,21 @@ stays clean. So both paths wait for the registry sensor's own instance, and
 the framework's boot does not start it; what starts it -- its direct channel
 (`libsns_registry_skel.so`, the handle-2 module the driver already decodes)
 or its file parser -- is the next thing to try.
+
+A read of a concrete group is refused the same way: `sns_registry_probe=1`
+asks all eight candidate SUIDs for `sns_cm` at +45 s and every answer is
+result 5 (`logs/200506-run.log`), while the *name* lookups through the same
+service answer 0 and produce events. The client service therefore has no
+instance to route a registry request to: the framework's core services (the
+SUID service among them) are up and no sensor instance is. The file service
+also stays at the same five nested calls and reports no unserved method, so
+the parser is not being reached rather than being refused.
+
+The registry sensor's start is therefore the one remaining gate for the whole
+sensor stack, and everything visible from the AP says it never starts: no
+registry file call, no `sns_registry` module call, no group read or write
+accepted, no sensor SUID registered. The DSP's own log is what can say why;
+its QSH/diag ring is not in the AP's shared memory (`slpi_smem_dump=1` over
+the live framework still shows only GLINK and version strings,
+`logs/195649-run.log`), so the DIAG channel's log mask is the remaining
+source.
