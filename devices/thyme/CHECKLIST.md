@@ -66,11 +66,16 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`8810c930e3e06cd8a73a24afe6c774eff9c2a10ab85dfbbbfe442013b1caf201` and
+`027e152ec2ddf0ad4d70901c337edf0a430885d432e1c7e45df57152f48de86b` and
 `root-sileo.apfs`
 `9ad7191b55d70a9777b28df7b850a3fe34b9ca51252fa40792ed635ac6010af7`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
-`libair.a`, which `build.sh`'s HakiosMetal step then asks for).
+`libair.a`, which `build.sh`'s HakiosMetal step then asks for). An image's
+hash is of that build only: `/etc/motd` carries the build's date and time
+(`build.sh` line 181), so two builds of the same tree differ. Both images were
+read back with `tools/apfs/check-image.py IMAGE userland/root`: apfsck `-cw`
+clean, and every one of the 924/925 entries matches its source file's contents
+(FNV-1a) -- the image is what was built, not only what was meant.
 
 The Sileo scene now presses the queue's Confirm too: the popup bar opens the
 downloads sheet, whose Confirm is the footer's full-width button (20..355 of a
