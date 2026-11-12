@@ -1462,30 +1462,52 @@ image_ready:
 	 * the SBL is loaded (CCABAP/ECABAP/CRCBAP, 0x58-0x6c). They are not
 	 * used until MHI is up, but they are part of the state Android leaves
 	 * behind; the image's own IOVA stands in for all three until there are
-	 * real context structures. And mhi_set_mhi_state(MHI_STATE_RESET) --
-	 * write MHICTRL's reset bit and wait for the device to clear it -- is
-	 * the vendor's way of telling a PBL/SBL device that the host is taking
-	 * it over; it is tried here before the boot interface is touched.
+	 * real context structures.
+	 *
+	 * The MHICTRL reset handshake (mhi_set_mhi_state(MHI_STATE_RESET)) is
+	 * NOT part of the vendor's pre-load path -- its SBL load never touches
+	 * MHICTRL -- and this driver's write left the reset bit set (the device
+	 * never cleared it), a state Android never has when the doorbell rings.
+	 * It is off by default now and pcie2_reset=1 asks for it.
 	 */
-	wr(MHI_BAR + 0x58, (uint32_t)(phys & ~0xfffu));
-	wr(MHI_BAR + 0x5c, (uint32_t)(phys >> 32));
-	wr(MHI_BAR + 0x60, (uint32_t)(phys & ~0xfffu));
-	wr(MHI_BAR + 0x64, (uint32_t)(phys >> 32));
-	wr(MHI_BAR + 0x68, (uint32_t)(phys & ~0xfffu));
-	wr(MHI_BAR + 0x6c, (uint32_t)(phys >> 32));
 	{
-		uint32_t control = rd(MHI_BAR + 0x38);
+		/* pcie2_mhiraw=1: leave the MHI registers exactly as Android does
+		 * before the load. The vendor writes these only after the SBL has
+		 * run, so the PBL may well see them as foreign state. */
+		uint32_t mhiraw = 0;
 
-		if (!(control & 0x2)) {
-			wr(MHI_BAR + 0x38, control | 0x2);
-			for (i = 0; i < 100 && (rd(MHI_BAR + 0x38) & 0x2); i++) {
-				delay(1000);
-			}
-			hakios_tl("pcie2: MHI: reset bit %s (control %#x, status %#x)\n",
-			    (rd(MHI_BAR + 0x38) & 0x2) ? "did not clear" : "cleared", rd(MHI_BAR + 0x38),
-			    rd(MHI_BAR + 0x48));
+		PE_parse_boot_argn("pcie2_mhiraw", &mhiraw, sizeof(mhiraw));
+		if (mhiraw == 0) {
+			wr(MHI_BAR + 0x58, (uint32_t)(phys & ~0xfffu));
+			wr(MHI_BAR + 0x5c, (uint32_t)(phys >> 32));
+			wr(MHI_BAR + 0x60, (uint32_t)(phys & ~0xfffu));
+			wr(MHI_BAR + 0x64, (uint32_t)(phys >> 32));
+			wr(MHI_BAR + 0x68, (uint32_t)(phys & ~0xfffu));
+			wr(MHI_BAR + 0x6c, (uint32_t)(phys >> 32));
 		} else {
-			hakios_tl("pcie2: MHI: already in reset (control %#x)\n", control);
+			hakios_tl("pcie2: MHI: the context bases are left as they were (pcie2_mhiraw=1)\n");
+		}
+	}
+	{
+		uint32_t reset = 0, control = rd(MHI_BAR + 0x38);
+
+		PE_parse_boot_argn("pcie2_reset", &reset, sizeof(reset));
+		if (reset) {
+			if (!(control & 0x2)) {
+				wr(MHI_BAR + 0x38, control | 0x2);
+				for (i = 0; i < 100 && (rd(MHI_BAR + 0x38) & 0x2); i++) {
+					delay(1000);
+				}
+				hakios_tl("pcie2: MHI: reset bit %s (control %#x, status %#x)\n",
+				    (rd(MHI_BAR + 0x38) & 0x2) ? "did not clear" : "cleared", rd(MHI_BAR + 0x38),
+				    rd(MHI_BAR + 0x48));
+			} else {
+				hakios_tl("pcie2: MHI: already in reset (control %#x)\n", control);
+			}
+		} else if (control & 0x2) {
+			/* an earlier run's reset write may still be sitting there */
+			hakios_tl("pcie2: MHI: control %#x still has the reset bit; writing 0\n", control);
+			wr(MHI_BAR + 0x38, 0);
 		}
 	}
 
@@ -1550,16 +1572,26 @@ image_ready:
 	 * use, and the image is placed inside it. */
 #define MODEM_IOVA_BASE 0x20000000u
 #define MODEM_IOVA_STOP 0x3ffffffeu
-	wr(MHI_BAR + 0x80, MODEM_IOVA_BASE);
-	wr(MHI_BAR + 0x84, 0);
-	wr(MHI_BAR + 0x88, MODEM_IOVA_STOP);
-	wr(MHI_BAR + 0x8c, 0);
-	wr(MHI_BAR + 0x98, MODEM_IOVA_BASE);
-	wr(MHI_BAR + 0x9c, 0);
-	wr(MHI_BAR + 0xa0, MODEM_IOVA_STOP);
-	wr(MHI_BAR + 0xa4, 0);
-	hakios_tl("pcie2: MHI: windows base %#x stop %#x, image at %#llx size %zu\n", MODEM_IOVA_BASE,
-	    MODEM_IOVA_STOP, (unsigned long long)phys, size);
+	{
+		uint32_t mhiraw = 0;
+
+		PE_parse_boot_argn("pcie2_mhiraw", &mhiraw, sizeof(mhiraw));
+		if (mhiraw == 0) {
+			wr(MHI_BAR + 0x80, MODEM_IOVA_BASE);
+			wr(MHI_BAR + 0x84, 0);
+			wr(MHI_BAR + 0x88, MODEM_IOVA_STOP);
+			wr(MHI_BAR + 0x8c, 0);
+			wr(MHI_BAR + 0x98, MODEM_IOVA_BASE);
+			wr(MHI_BAR + 0x9c, 0);
+			wr(MHI_BAR + 0xa0, MODEM_IOVA_STOP);
+			wr(MHI_BAR + 0xa4, 0);
+			hakios_tl("pcie2: MHI: windows base %#x stop %#x, image at %#llx size %zu\n", MODEM_IOVA_BASE,
+			    MODEM_IOVA_STOP, (unsigned long long)phys, size);
+		} else {
+			hakios_tl("pcie2: MHI: the windows are left as they were (pcie2_mhiraw=1), image at %#llx\n",
+			    (unsigned long long)phys);
+		}
+	}
 
 	/* the image, and the doorbell (the mapping is uncached: no flush needed) */
 	{

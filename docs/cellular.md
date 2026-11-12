@@ -1226,3 +1226,32 @@ refusal *after* all three -- the last stage this kernel can vary by
 changing the image is now closed, and what the PBL validates beyond it is
 either the state it is handed (the MHI registers, the doorbell protocol) or
 something inside the SBL's start that a host cannot see.
+
+The MHICTRL reset was the next suspect: the driver's write left the reset bit
+set (the device never cleared it), while the vendor's pre-load path never
+touches MHICTRL. With the handshake skipped (`logs/140444-run.log`, MHICTRL
+back to 0 as the boot chain left it) the verdict does not move: `0xef0e0003`
+in 30 ms again. The other pre-load difference is next -- the driver also
+writes the three context bases and the MHI windows before the doorbell, which
+the vendor writes only after the SBL has run; `pcie2_mhiraw=1` leaves them
+alone, so the doorbell is rung with the exact register state Android rings it
+with.
+
+That run too is in (`logs/141022-run.log`): the same `0xef0e0003` in 30 ms.
+The phone's own device tree, carved out of the vendor_boot image that was
+pulled before the install work
+(`backups/thyme-20261103-before-install/vendor_boot_a.img`), confirms every
+parameter this driver took from the reference: `qcom,smmu-sid-base = <0x1d00>`
+with `iommu-map` BDF `0x0100` -> SID `0x1d01`, `qcom,iommu-dma = "fastmap"`
+over the pool `0x20000000 0x1fffffff` with a coherent pagetable (so the MHI's
+DMA *is* translated, as this driver now serves it), `qcom,boot-option = <1>`
+(no probe-time enumeration), and **no sbl-size property at all**, so Android
+hands the PBL the file's own size as well. Everything a non-secure host can
+set now matches.
+
+The cellular thread stops here for the moment: image, size, signature,
+address, SMMU translation and the pre-load MHI state all match Android's, and
+the refusal lies beyond them -- in the secure world the phone's own esoc
+stack shares with TZ, or inside the SBL's start, neither of which this kernel
+can observe. Picking it up again would mean reverse-engineering the secure
+side of the modem's boot, a project of its own.
