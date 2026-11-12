@@ -705,3 +705,32 @@ the two advertise calls. The next probe prints around the second advertise
 and the listen loop to place it; `slpi-run.sh` now takes `BASE_ARGS` like the
 modem probe (the loader's 607-character cmdline had room here, but not
 always).
+
+### The asks match the phone and no longer crash the process (2026-11-12)
+
+With `slpi_pause=0 slpi_listen=1` -- the steps' 2200 ms pauses off and the
+listen at one second -- the whole path fits in the log the loader keeps: the
+three SUID requests (65, 62 and 69 bytes: `registry`, `accel`,
+`SNS_REG_INIT`) go out to node 9 port 12 as QMI 512 with TLV `0x10` = 1, the
+DSP acks every one with result 0/error 0, and the answers stay silent --
+`registry silent, accelerometer silent`, `"SNS_REG_INIT" silent`
+(`logs/150750-run.log`, kernel `7fa5e99b`). No protection-domain failure
+follows, item 424 stays empty, and the steps end by stopping the DSP
+cleanly; where earlier kernels lost the sensor process a few seconds after
+any request, this one does not.
+
+That leaves the missing SUID events as the SNS gate: the DSP accepts the
+lookup and does not answer it. The next run takes the document's next
+ordering, `fastrpc_early=1`, so the reverse tunnel's listener is up when the
+sensor process starts and reads its registry.
+
+The early ordering ran (`logs/151721-run.log`, `fastrpc_early=1`, 50 s so the
+whole path stays inside the log): "FastRPC early: the channel is open; the
+listener comes before the listen", then the same three asks, the same
+result-0 answers, and the same silence -- `registry silent, accelerometer
+silent`, `"SNS_REG_INIT" silent`. The FastRPC records no request from the
+DSP at all (the only line is the loader's 8 MB heap), so the reverse tunnel
+is up and unused. The gate is unchanged and now measured from both orders:
+the sensor process neither answers the SUID lookups nor asks the tunnel for
+its registry, which is the framework init the boot-phase disassembly was
+following.
