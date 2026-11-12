@@ -762,3 +762,19 @@ takes the first pointer into r3 (`{ r0 = #0x0; r3 = r0 }`, then
 the string it compares. The call sites are at `0xb0155dd0`, `0xb0157110`,
 `0xb01686b0`, `0xb016b148`, `0xb016b4f4` and `0xb016cc44`; naming which of
 them is the signal path, and what pointer is NULL there, is the next read.
+
+Reading them narrows it: the site at `0xb0157110` is a name-keyed list walk
+(`r23 = memw(r18+#0xc)`, compare `r22` with the entry's name at `+4` and its
+length at `+8`, then `r23 = memw(r23+#0)`), but every path into it sets `r22`
+from either the stack (`r29+#0x20`) or `r16` with a null check, so its key is
+not the NULL. The other four compare against fixed globals with fixed lengths
+(27, 26, 20 and 12 bytes) and take their first pointer from an argument. The
+servreg registration itself matches mainline (`TLV 0x01` one byte enable,
+`TLV 0x02` the path with its NUL), and the region around the registry
+descriptor's code (`0xb22d2b04`, `0xb22d2b74`) is code, not a uuid table.
+
+That points the NULL back at the sensor process's own missing state: the
+signal path compares a name it expects to have from its registry, and the
+registry is precisely what this PD never gets. The crash and the empty
+registry are one gate, and the registry's SUID -- or a way to make the
+reverse tunnel deliver the files -- stays the piece to find.
