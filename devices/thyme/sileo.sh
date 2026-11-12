@@ -23,7 +23,11 @@ export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
 export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
 export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
-SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
+# The system image with the package manager's prefix as /jb, which init grafts
+# onto /var/jb (out/thyme-boot/system-jb.apfs, made by userland/build.sh SYSTEM=1
+# with tools/mk-jb.sh's tree in jb/). The prebuilt image has no /jb, and the
+# scene then dies at its first line: "/var/jb/bin/sh: No such file or directory".
+SYSTEM_IMAGE=${SYSTEM_IMAGE:-out/thyme-boot/system-jb.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-sileo.apfs}
 # The scene's GET taps come ~610 s after the demo job starts, which is ~740 s
 # of kernel time (boot included): the 01:01 run reached them at 737 s of a
@@ -87,15 +91,15 @@ RUNLOG=$(sed -n 's/.*\[\(logs\/[0-9]*-run\.log\)\].*/\1/p' "$LOG" | tail -1)
 if [ -n "$RUNLOG" ] && [ -f "$RUNLOG" ]; then
 	echo "sileo: what the run showed ($RUNLOG):"
 	echo "sileo: --- the DSP's diag channel"
-	found=$(grep -n 'slpi: diag:' "$RUNLOG" | tail -6)
+	found=$(grep -n 'slpi: diag:' "$RUNLOG" | tail -6 || true)
 	echo "${found:-sileo:     (nothing)}"
 	echo "sileo: --- refusals the DRM shim named"
-	found=$(grep -n 'hakios-drm: method\|hakios-drm: 16 refusals' "$RUNLOG" | tail -6)
+	found=$(grep -n 'hakios-drm: method\|hakios-drm: 16 refusals' "$RUNLOG" | tail -6 || true)
 	echo "${found:-sileo:     (nothing)}"
 	echo "sileo: --- apt and dpkg on tree"
-	found=$(grep -n 'Setting up tree\|dpkg-query\|/usr/bin/tree\|E: ' "$RUNLOG" | tail -10)
+	found=$(grep -n 'Setting up tree\|dpkg-query\|/usr/bin/tree\|E: ' "$RUNLOG" | tail -10 || true)
 	echo "${found:-sileo:     (nothing)}"
 	echo "sileo: --- the window server's fault"
-	found=$(grep -n 'signal 11 at 0x18' "$RUNLOG" | tail -2)
+	found=$(grep -n 'signal 11 at 0x18' "$RUNLOG" | tail -2 || true)
 	echo "${found:-sileo:     (none)}"
 fi
