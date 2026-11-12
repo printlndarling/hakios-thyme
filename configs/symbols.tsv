@@ -91,6 +91,7 @@ CPUMASK	arg	cpumask	Loader	l	loader.c
 DDR	arg	ddr	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
 DDR_REST	arg	ddr_rest	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	DDR bandwidth vote left while the test rests (zero sends BCM_COMMIT)
 DDR_VOTE	arg	ddr_vote	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	initial DDR bandwidth vote in the command database (default 0x3fff)
+DIAG_MASK	arg	diag_mask	User space	k	hakios.thyme_slpi.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
 FASTRPC_ASSIGN	arg	fastrpc_assign	User space	k	hakios.thyme_slpi.c	
 FASTRPC_ATTACH0	arg	fastrpc_attach0	User space	k	hakios.thyme_slpi.c	
@@ -120,6 +121,7 @@ FASTRPC_LISTENER_TID	arg	fastrpc_listener_tid	User space	k	hakios.thyme_slpi.c
 FASTRPC_OPEN_AFTER	arg	fastrpc_open_after	User space	k	hakios.thyme_slpi.c	
 FASTRPC_OPEN_ASYNC	arg	fastrpc_open_async	User space	k	hakios.thyme_slpi.c	
 FASTRPC_OPEN_PD	arg	fastrpc_open_pd	User space	k	hakios.thyme_slpi.c	
+FASTRPC_OPEN_REGISTRY	arg	fastrpc_open_registry	User space	k	hakios.thyme_slpi.c	
 FASTRPC_OPEN_WAIT	arg	fastrpc_open_wait	User space	k	hakios.thyme_slpi.c	
 FASTRPC_PD	arg	fastrpc_pd	User space	k	hakios.thyme_slpi.c	
 FASTRPC_PHONE	arg	fastrpc_phone	User space	k	hakios.thyme_slpi.c	
@@ -268,11 +270,17 @@ PANEL_SEQ	arg	panel_seq	GPU and display	k	hakios.thyme_display.c
 PANEL_TE_DCS	arg	panel_te_dcs	GPU and display	k	hakios.thyme_display.c	
 PANEL_TE_PROBE	arg	panel_te_probe	GPU and display	k	hakios.thyme_display.c	count the edges of the panel's TE line itself
 PANEL_TE_RATE	arg	panel_te_rate	GPU and display	k	hakios.thyme_display.c	count the edges of the panel's TE line (the device tree's platform-te-gpio, pin 66) for about a second
+PCIE2_ADDR	hex	pcie2_addr	User space	k	hakios.thyme_pcie2.c	hand the PBL an address other than the file's
 PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c	
-PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	
+PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	zero the real image in place, to keep the file's address and size while its content is wrong
+PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IMGSZ	arg	pcie2_imgsz	User space	k	hakios.thyme_pcie2.c	hand the PBL a size other than the file's
+PCIE2_INB	arg	pcie2_inb	User space	k	hakios.thyme_pcie2.c	
 PCIE2_KEEP	arg	pcie2_keep	User space	k	hakios.thyme_pcie2.c	leave the endpoint's PERST alone
+PCIE2_MHIRAW	arg	pcie2_mhiraw	User space	k	hakios.thyme_pcie2.c	leave the MHI registers exactly as Android does before the load
 PCIE2_POWER	arg	pcie2_power	User space	k	hakios.thyme_pcie2.c	
+PCIE2_RESET	arg	pcie2_reset	User space	k	hakios.thyme_pcie2.c	
 PCIE2_SID	arg	pcie2_sid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_SURVEY	arg	pcie2_survey	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TEST	arg	pcie2_test	User space	k	hakios.thyme_pcie2.c	
@@ -307,21 +315,30 @@ SLPI_KEEP	arg	slpi_keep	User space	k	hakios.thyme_slpi.c
 SLPI_LISTEN	arg	slpi_listen	User space	k	hakios.thyme_slpi.c	
 SLPI_NEW	arg	slpi_new	User space	k	hakios.thyme_slpi.c	
 SLPI_PAUSE	arg	slpi_pause	User space	k	hakios.thyme_slpi.c	
+SLPI_PHASE	arg	slpi_phase	User space	k	hakios.thyme_slpi.c	
 SLPI_RETURN	arg	slpi_return	User space	k	hakios.thyme_slpi.c	
+SLPI_SLEEP	arg	slpi_sleep	User space	k	hakios.thyme_slpi.c	
+SLPI_SLEEP_VALUE	arg	slpi_sleep_value	User space	k	hakios.thyme_slpi.c	
 SLPI_SMEM_DUMP	arg	slpi_smem_dump	User space	k	hakios.thyme_slpi.c	
 SLPI_STEP	arg	slpi_step	User space	k	hakios.thyme_slpi.c	
 SLPI_WAIT	arg	slpi_wait	User space	k	hakios.thyme_slpi.c	
+SLPI_WATCH_ITEM	arg	slpi_watch_item	User space	k	hakios.thyme_slpi.c	read shared-memory item N every 20 s once step 10 has run
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
 SMALL_CORES_AFTER	arg	small_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
 SNS	arg	sns	User space	k	hakios.thyme_slpi.c	
 SNS_ACCEL_DIRECT	arg	sns_accel_direct	User space	k	hakios.thyme_slpi.c	
+SNS_ASK_NAME	arg	sns_ask_name	User space	k	hakios.thyme_slpi.c	
 SNS_CLIENT_PROBE	arg	sns_client_probe	User space	k	hakios.thyme_slpi.c	
+SNS_CLIENT_TRIES	arg	sns_client_tries	User space	k	hakios.thyme_slpi.c	
 SNS_GYRO_DIRECT	arg	sns_gyro_direct	User space	k	hakios.thyme_slpi.c	
 SNS_QUIET	arg	sns_quiet	User space	k	hakios.thyme_slpi.c	the listener and the file service stay, but no SNS message goes out
 SNS_RAW	arg	sns_raw	User space	k	hakios.thyme_slpi.c	
+SNS_REGISTRY_CLIENT	arg	sns_registry_client	User space	k	hakios.thyme_slpi.c	
 SNS_REGISTRY_PROBE	arg	sns_registry_probe	User space	k	hakios.thyme_slpi.c	
 SNS_REGISTRY_UPLOAD	arg	sns_registry_upload	User space	k	hakios.thyme_slpi.c	
 SNS_REGISTRY_WRITE	arg	sns_registry_write	User space	k	hakios.thyme_slpi.c	
+SNS_START_DELAY	arg	sns_start_delay	User space	k	hakios.thyme_slpi.c	wait N seconds before the first sensor message
+SNS_UPLOAD_ROUNDS	arg	sns_upload_rounds	User space	k	hakios.thyme_slpi.c	
 SNS_WRITE_TRIES	arg	sns_write_tries	User space	k	hakios.thyme_slpi.c	
 SOC_CMD_DB	hex	soc_cmd_db	Cellular	k	hakios.mpss.c	
 SOC_GSI_BASE	hex	soc_gsi_base	Cellular	k	hakios.ipa.c	

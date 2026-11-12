@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 499 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 516 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -121,7 +121,7 @@ CONFIG_HAKIOS_THYME_HAPTIC=y
 # ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and ... [hakios.thyme_touch.c, hakios.thyme_touch_boost.c, hakios.thyme_rpmh.c, hakios.thyme_keys.c]
 CONFIG_HAKIOS_THYME_INPUT=y
 
-# the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and GDSC, the PHY's own sequence from the phone's DTB, ... [hakios.thyme_pcie2.c; requires CONFIG_HAKIOS_MODEM]
+# the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and GDSC, the PHY's own sequence from the phone's DTB, ... [hakios.thyme_pcie2.c]
 CONFIG_HAKIOS_THYME_MODEM_PCIE=y
 
 # THYME board address overrides, EPSS/RPMh CPU frequency control and TSENS thermal governors (cpufreq=1, thermal=1). [hakios.thyme_board.c, hakios.thyme_cpufreq.c, hakios.thyme_thermal.c]
@@ -1213,7 +1213,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (113)
+# User space (130)
 #
 
 # read by inject_sb.c (user space)
@@ -1266,6 +1266,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by inject_sb.c (user space)
 # CONFIG_CC_FADE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_DIAG_MASK is not set
 
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_FASTRPC_ASSIGN is not set
@@ -1352,6 +1355,9 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_FASTRPC_OPEN_PD is not set
 
 # read by hakios.thyme_slpi.c (kernel)
+# CONFIG_FASTRPC_OPEN_REGISTRY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
 # CONFIG_FASTRPC_OPEN_WAIT is not set
 
 # read by hakios.thyme_slpi.c (kernel)
@@ -1429,20 +1435,38 @@ CONFIG_MODEM_AGAIN=y
 # read by inject.c (user space)
 # CONFIG_METAL_WATCH is not set
 
+# hand the PBL an address other than the file's
+# CONFIG_PCIE2_ADDR is not set
+
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_BHI is not set
 
-# read by hakios.thyme_pcie2.c (kernel)
+# zero the real image in place, to keep the file's address and size while its content is wrong
 # CONFIG_PCIE2_BHI_BAD is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_EXID is not set
 
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_IMG is not set
 
+# hand the PBL a size other than the file's
+# CONFIG_PCIE2_IMGSZ is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_INB is not set
+
 # leave the endpoint's PERST alone
 # CONFIG_PCIE2_KEEP is not set
 
+# leave the MHI registers exactly as Android does before the load
+# CONFIG_PCIE2_MHIRAW is not set
+
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_POWER is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_RESET is not set
 
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_SID is not set
@@ -1496,7 +1520,16 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SLPI_PAUSE is not set
 
 # read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_PHASE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SLPI_RETURN is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_SLEEP is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SLPI_SLEEP_VALUE is not set
 
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SLPI_SMEM_DUMP is not set
@@ -1507,6 +1540,9 @@ CONFIG_MODEM_AGAIN=y
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SLPI_WAIT is not set
 
+# read shared-memory item N every 20 s once step 10 has run
+# CONFIG_SLPI_WATCH_ITEM is not set
+
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS is not set
 
@@ -1514,7 +1550,13 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SNS_ACCEL_DIRECT is not set
 
 # read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_ASK_NAME is not set
+
+# read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS_CLIENT_PROBE is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_CLIENT_TRIES is not set
 
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS_GYRO_DIRECT is not set
@@ -1526,6 +1568,9 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_SNS_RAW is not set
 
 # read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_REGISTRY_CLIENT is not set
+
+# read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS_REGISTRY_PROBE is not set
 
 # read by hakios.thyme_slpi.c (kernel)
@@ -1533,6 +1578,12 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS_REGISTRY_WRITE is not set
+
+# wait N seconds before the first sensor message
+# CONFIG_SNS_START_DELAY is not set
+
+# read by hakios.thyme_slpi.c (kernel)
+# CONFIG_SNS_UPLOAD_ROUNDS is not set
 
 # read by hakios.thyme_slpi.c (kernel)
 # CONFIG_SNS_WRITE_TRIES is not set
