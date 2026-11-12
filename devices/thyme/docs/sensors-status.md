@@ -1073,3 +1073,13 @@ question is the router's answer, not the channel: a run with `diag_mask=1`
 either shows it (and then the sensor framework's own lines) or shows that this
 channel is not how its log leaves the DSP. Kernel `472562b3` carries it; the
 kernel baseline is not rebaselined for an unverified change.
+
+If the DIAG ask comes back empty, the framework has a second, private road:
+its own logs are ULOG, and the firmware's `sns_dae_sensor.c` carries a
+`ulog_read_cb` and a `DAE_ULOG_READ` operation (`sns_dae.proto` /
+`sns_dae_ccd.proto`, `SNS_DAE_MSGID_SNS_DAE_SET_STATIC_CONFIG`) -- a *sensor*
+in the framework that streams ULOG to a client. Reading that road means
+creating the DAE sensor through the registry the framework's own client path
+uses, i.e. exactly the step this document's registry section says is still
+refused, so it is not a shortcut around the open problem: it is a second
+client for the same gate.
