@@ -36,8 +36,10 @@
 /redwood/bin/rwtouch wait 12
 /var/jb/usr/bin/uiopen sileo://package/tree
 # the alert is dismissed by the two background lines (the whole page-load
-# window); the page has long loaded by now
-/redwood/bin/rwtouch wait 200
+# window); the page has long loaded by now. 130 s keeps the whole scene inside
+# the battery guard's reach at a low charge (it ended a 600 s run at 25 % after
+# 316 s, before the final dpkg-query)
+/redwood/bin/rwtouch wait 130
 # GET -> QUEUE
 /redwood/bin/rwtouch tap 0.86 0.37 wait 8
 # close the package sheet: a drag from the grabber itself (y 0.060, measured; the header
