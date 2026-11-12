@@ -53,11 +53,14 @@ disables an empty group, and the next frame retries) instead of dereferencing
 it; a failed `fd_bo_map` is handled the same way. (2)
 `tools/mesa/hakios-drm/hakios.drm.c`: every kern_return_t the shim did not name
 became a silent EIO; it now prints `hakios-drm: method 0x.. refused: 0x..`
-once per method and code, so `kIOReturnNotReady` has a line next time. The
+once per method and code (and says once when its 16-pair table is full and
+further refusals go unnamed), so `kIOReturnNotReady` has a line next time. The
 renderer's fault line is still named for real crashes:
-`say_the_fault()` (`userland/src/inject.c`) notes every loaded image and its
-range at the end of `hakios_init()` (after `opengl_es()`, so OSMesa is in the
-list) and prints `pc libOSMesa.8.dylib+0x2a1e4` with one
+`say_the_fault()` (`userland/src/inject.c`) notes every loaded image that is
+not the shared cache's -- dyld lists the cache's 2,710 first, and those
+addresses are already named by the unslid number -- at the end of
+`hakios_init()` (after `opengl_es()`, so OSMesa is in the list), and prints
+`pc libOSMesa.8.dylib+0x7462e4` (this crash's own offset) with one
 `hakios:   from NAME+0xOFF` per frame, read without calling dyld from the
 signal handler. The guard is in the built object, not only the source: in
 `a6xx_fd6_image.cc.o`'s `fd6_build_bindless_state` the call to `fd_bo_new` is
