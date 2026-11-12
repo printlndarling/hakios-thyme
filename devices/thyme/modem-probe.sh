@@ -35,7 +35,11 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-modemprobe.apfs}
-ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# The loader composes the first ~180 characters itself and its buffer is 607
+# (BOOT_LINE_LENGTH 608): everything past that is cut, silently, at the tail --
+# which is where the probe's own arguments sit. BASE_ARGS exists so a probe
+# that needs room can drop the daily args it does not use.
+ARGS=${BASE_ARGS:-$(tr -d '\n' < devices/thyme/ram.args)}
 BHI=${BHI:-1}
 IMG=${IMG:-1}
 EXTRA_ARGS=${EXTRA_ARGS:-}
@@ -57,11 +61,15 @@ if [ "$(./xl state)" != android ]; then
 	[ "$(./xl state)" = android ] || { echo "modem-probe: Android did not come back" >&2; exit 1; }
 fi
 
+CMDLINE="$ARGS pcie2_test=1 pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS}"
+echo "modem-probe: pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS:-}"
+echo "modem-probe: our kernel arguments are ${#CMDLINE} characters (about 420 fit before the loader cuts)"
+[ "${#CMDLINE}" -le 420 ] || echo "modem-probe: WARNING: the tail of these arguments may not reach the kernel" >&2
+
 ./xl enter
 ./xl ramdisk "$SYSTEM_IMAGE"
-echo "modem-probe: pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS:-}"
 XL_SECS=$XL_SECS XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} XL_RAMDISK="$SCENE" \
-	XL_CMDLINE="$ARGS pcie2_test=1 pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS}" \
+	XL_CMDLINE="$CMDLINE" \
 	./xl run
 
 LOG=$(ls -t logs/*-run.log | head -1)

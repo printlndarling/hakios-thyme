@@ -930,3 +930,208 @@ actually map the address the PBL is given is now a table walk: its `TTBR0` and
 `TCR` are readable, and the next probe resolves the image's IOVA through them
 -- if it is mapped, the read reached memory and what refuses is the PBL; if it
 is not, the SMMU refused the translation without a record this kernel can see.
+
+That walk is in (`logs/101633-run.log`, kernel `0fb8d134`): context 3 reads
+`TTBR0 0x300019395c000`, `TCR 0x803519` (39-bit, 4 KB grain), and the level-1
+entries for `0xc0000000` (entry 3) and `0x20000000` (entry 0) are both zero --
+both addresses are unmapped, so a read translated by this context would fault.
+No context's FSR records anything, and nor does the secure global fault
+register. Together the two readings say the modem's read does not traverse
+context 3 at all: the SMMU is not in this read's path, and the refusal is not
+a translation fault. What the PBL reads at `0xc0000000` is then the image
+itself (or nothing, if it never reads), and the remaining question narrows to
+whether the doorbell's machinery touches host memory at all.
+
+`pcie2_imgsz=N` was added to hand the PBL a size other than the file's, and a
+run with N=0 answers that (`logs/102248-run.log`, kernel `c3d7cf78`): with
+nothing to read the doorbell is answered in 0 ms with a *different* error --
+`0xef0e0002` instead of `0xef120700`, dbg `0xc0000000 0 0` -- and the AER
+correctable status stays **0**, no advisory event. The file's size is refused
+with `0xef120700` and the advisory bit set. So the doorbell and its argument
+check are accepted; the advisory event is the PBL's read of host memory
+failing, and the two codes are two different refusals -- size 0 an argument
+error, a real size the read.
+
+The read fails at the root complex even though no SMMU context translates it,
+so the question is now which addresses the endpoint can read at all.
+`pcie2_addr=N` was added; the next run reads `0x80000000`, the start of DRAM,
+with the same file. An advisory event there too would mean the endpoint's
+reads fail wherever they go; none would mean the read completes elsewhere and
+`0xc0000000`, the SLPI's carveout, is refused specifically.
+
+That run is in (`logs/102908-run.log`, kernel `5ad487a9`,
+`pcie2_addr=0x80000000`): the same `0xef120700` in 0 ms, the AER advisory bit
+set again, and the walk shows `0x80000000` unmapped in context 3 as well
+(level 2 entry 0). So when no SMMU context translates the read, the endpoint's
+read fails wherever it is pointed -- the failure is in this path, not in the
+SLPI's carveout. What has not been measured with the AER yet is the
+*translated* read: `pcie2_sid=5`, where the driver builds a stage-1 context,
+maps the image into it and hands the PBL an IOVA. The next run does that with
+the walk and the AER read in place, which says both whether our context is the
+one that matches and whether its translation makes the read complete.
+
+That run (`logs/103343-run.log`, kernel `5ad487a9`, `pcie2_sid=5`) did report
+the refusal -- `0xef120700` with IOVA `0x20000000`, the AER advisory bit set
+again -- but stopped printing after the AER line: its diagnostics map the SMMU
+window a second time, and this kernel's `io_map` allocates from a 32 MB
+`io_submap` shared by every driver with `KMA_NOFAIL`, so a full submap blocks
+in `kmem_alloc` instead of failing. The modem driver's own regions had taken
+ten of those megabytes for the whole TLMM aperture (it touches five pin
+pages), plus the SLPI heap's eight. The SMMU window is now mapped once
+(`smmu_window()`) and the TLMM entries are the five pages, so the next sid=5
+run can print the walk of our own context and the AER under its translation.
+
+That run is in (`logs/104158-run.log`, kernel `e2728cce`): the driver's own
+context 5 has `TTBR0 0x50001a8890000`, and the walk resolves `0x20000000` to
+`physical 0xc0000000` (`page 0xc0000e43`) -- the translation it built is
+exactly the image. The stream table now prints, and it is
+`SMR 0 stream 0` (translate, context 0) and `SMR 6 stream 0x1d01` (translate,
+context 5): our SMR is the one that matches the modem's stream, and the boot
+chain left none of its own for it. And yet the doorbell is refused in 0 ms
+with `0xef120700` and the AER advisory bit is set, with a valid translation
+in place. So the read does not complete even when the SMMU maps it correctly:
+what refuses the PBL's reads is on this PCIe2 path itself, not in the image's
+address or its translation. The next run points the same doorbell at
+`0xf8000000`, ordinary kernel DRAM below 4 GB and outside every carveout:
+the advisory bit there would say the path refuses every read, and its absence
+would say the read completes in normal DRAM and the carveouts are what this
+master may not touch.
+
+That run is in (`logs/104658-run.log`, kernel `e2728cce`,
+`pcie2_addr=0xf8000000`): the advisory bit is set there too. So every read
+fails -- in the SLPI's heap, at the start of DRAM, and in ordinary kernel DRAM
+below 4 GB alike. With no translation in the path for any of them, what is
+left is the apps SMMU's own policy: an unmatched stream is a fault (SCR0 bit
+10), and the fault would be recorded -- but the driver has been reading the
+*secure* global fault status. Qualcomm's split puts the non-secure aliases at
++0x400 (the vendor's `arm-smmu.c`: "nsCR0: 0x400, nsGFSR: 0x448,
+nsGFSYNR0: 0x450"), so the record of an unmatched modem stream would have
+been sitting in registers no run has read. The driver now clears nsGFSR
+before the doorbell and prints it with nsGFSYNR0-2 after it; the next run says
+whether the modem's traffic matches an SMR at all, and if it does not, names
+the stream ID the RC actually attaches.
+
+That run is in (`logs/105425-run.log`, kernel `077bdba3`): the non-secure
+GFSR reads 0 and so do GFSYNR0-2 -- and the aliases are inactive here
+anyway: SCR0 at 0x400 reads 0 while 0x0 reads 0x2d0406, so the ordinary
+offsets the driver reads are the non-secure ones. There is no fault record
+anywhere: not in a context, not in a global status. The SMMU never sees the
+modem's read at all.
+
+The wifi driver's own bring-up says why. Its `umi_pcie_enable_dma` notes that
+"SM8250 defaults to BDF-to-SID bypass. A table alone does not route requests
+through the owned context; explicitly enable translation" and clears bit 0 of
+`PARF + 0x2c00`, then writes 6 to the root port's command register (`DBI + 4`,
+"allow protected endpoint transactions upstream") before setting the
+endpoint's bus master. The modem driver had neither write: no run ever
+un-bypassed the BDF-to-SID table or enabled the root port's upstream path.
+Both are now part of the sid path, with the configuration register printed
+before and after, and the next run repeats `pcie2_sid=5` with them.
+
+That run is in (`logs/110112-run.log`, kernel `ab052a6f`, `pcie2_sid=5`): the
+root port command reads `0x100006` (memory and bus master) after the write,
+the BDF-to-SID configuration reads 0 before the update, and the doorbell's
+answer changes -- `0xef0e0003` after **30 ms**, dbg `0x20000000 0 0x85cd8`,
+where every earlier run got `0xef120700` in 0 ms. The AER advisory bit is
+**clear**: no error at the root complex. The endpoint's read is being
+forwarded now; the refusal has moved from "the read does not complete" to a
+different, later one -- `0xef0e` is the class of the size-0 argument refusal
+(`0xef0e0002`), so the PBL is now judging what it received, not failing to
+receive it. The next run repeats the doorbell without `pcie2_sid`, at the
+physical address: whether it keeps the new answer says whether the
+translation matters at all.
+
+The plain run with the same fix is in (`logs/110531-run.log`): it keeps
+`0xef120700`, but takes **80 ms** now and its AER advisory bit is clear too.
+The physical read of the SLPI heap is forwarded and fails later, in the
+fabric, without a port-level error. Two paths, two later refusals -- the
+physical one keeps `0xef120700`, the translated one answers `0xef0e0003` --
+so what the PBL reports depends on what it received. The next run places the
+image in kernel memory (`pcie2_img=2`) and points the doorbell at its
+physical address: if a plain DRAM read completes, its errcode says what a
+successful read yields, and the heap's `0xef120700` is then about the heap
+and not about the image.
+
+That run is in (`logs/111100-run.log`, `pcie2_img=2`): the image sits at
+`0x1_93eac000` in ordinary kernel DRAM and the doorbell is answered with the
+same `0xef120700`, after 70 ms, no AER. So the physical reads fail the same
+way in DRAM as in the heap -- what this master may not do is read host memory
+untranslated at all -- and the translated read is the one that gets further.
+The next run puts the image in kernel memory and sends it through the driver's
+own context (`pcie2_img=2 pcie2_sid=5`): the Android shape of the transfer,
+a DMA buffer behind the SMMU, none of it in a carveout.
+
+That run is in (`logs/112011-run.log`, `pcie2_img=2 pcie2_sid=5`): the walk
+resolves the IOVA to `0x193cac000`, the kernel buffer itself, and the doorbell
+answers `0xef0e0003` after 30 ms with no AER -- the same answer the heap's
+translated read gave. So the answer follows the *path*, not the memory:
+translated reads, whatever they point at, get `0xef0e0003` in about 30 ms;
+physical ones get `0xef120700` in 70-80 ms.
+
+That pattern has a simple reading: the PBL's reads may bypass the SMMU
+entirely, so `0x20000000` is read as a *physical* address -- ordinary DRAM
+below 4 GB, readable, holding whatever was there and not the image -- and the
+PBL then rejects the content with a code of the same class as the argument
+refusal (`0xef0e...`), while a read of the heap or of DRAM above 4 GB fails to
+deliver at all (`0xef12...`). The discriminating run points the doorbell at
+`0x20000000` with no SMMU context: a bypassed DMA should repeat `0xef0e0003`,
+and that settles both questions -- the SMMU is not in the modem's boot path,
+and `0xef0e0003` is what the PBL says about data it has read.
+
+It did: `logs/112602-run.log`, `pcie2_addr=0x20000000`, no SMMU context,
+answers `0xef0e0003` in 30 ms with no AER -- the translated run's answer
+exactly. The SMMU is not in the modem's boot path: the IOVA was read as a
+physical address in ordinary, readable DRAM, and the PBL rejected what it
+found. The pattern is now complete:
+
+- readable physical DRAM below 4 GB -> a transfer happens, then a content
+  refusal (`0xef0e0003`);
+- the SLPI heap at `0xc0000000`, or DRAM above 4 GB -> no transfer
+  (`0xef120700` after 70-80 ms).
+
+So the image must sit in DRAM below 4 GB that this master can read.
+`pcie2_img=3` allocates the buffer with `max_pnum` = `0x40000` (4 GB at 16 KB
+pages, exclusive), and the next run points the doorbell at it.
+
+That run got nothing: `kmem_alloc_contig` could not find 1 MB below 4 GB
+("no 1 MB of contiguous kernel memory" twice, `logs/113653-run.log`), and
+fell back to the heap. `pcie2_img=4` instead puts the image in 576 KB of the
+kernel's own BSS: the kernel image is loaded below 4 GB, so that buffer's
+physical address is too, and the loader has already shown the range is usable
+DRAM. The next run points the doorbell at it -- the first time the PBL is
+handed the image itself in memory this master may read.
+
+That run (`logs/114320-run.log`, `pcie2_img=4`) answers `0xef120700` after
+70 ms with no AER: the kernel's own BSS at `0xf7f94000` is readable to the AP
+but not to the endpoint, so the readable window is narrower than "below
+4 GB". `pcie2_img=5` copies the image into `0x20000000` itself, the one
+physical window the PBL's reads have been seen to deliver from, through an
+uncached mapping. Its first run (`logs/114942-run.log`) never reached the
+doorbell -- the thread stopped between the MHI survey and the image copy while
+the rest of the run went on. A log line now separates the mapping from the
+file load, so the next run says which of the two stalls.
+
+That run is in (`logs/115612-run.log`): the mapping succeeded ("0x20000000
+mapped at 0x62b60000") and the file load into it hung -- an uncached write to
+that address stalls the writing CPU while the rest of the system runs on. So
+`0x20000000` answers the PBL's reads but does not take the AP's writes: a
+read-only window, not a buffer, and the image cannot be placed there this
+way. How far the readable window reaches is the next question; `0x80000000`
+is being read with the root port enabled, which its earlier run predates.
+
+It is not readable either (`logs/120100-run.log`: `0xef120700`, 80 ms, no
+AER), so the window is not "DRAM below 4 GB" but the region around
+`0x20000000` -- the DT's `qcom,iommu-dma-addr-pool` base, likely the one
+window the boot chain's access control leaves open to this master. The AP's
+plain IO write into it stalls (non-posted), so `pcie2_img=5` now maps it
+write-combining: posted writes do not wait for the acknowledgement that never
+comes, and if the window is DRAM behind the RC's access control the image
+lands.
+
+It does not (`logs/120618-run.log`): the load into `0x20000000` hangs the same
+way. The DSB after the writes waits for an acknowledgement that never comes,
+posted or not, so that window answers reads and not writes -- it is not a
+place the image can be put. What remains for the next attempt: whether another
+address inside the pool (`0x30000000`, say) answers reads and takes writes,
+or a way to bring the apps SMMU into the path, since the translated read
+bypassed it exactly as the physical ones do.

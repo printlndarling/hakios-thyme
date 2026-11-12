@@ -213,7 +213,16 @@ static struct {
 	{ 0x64001000, 0x1000, 0 },   /* iATU */
 	{ 0x64100000, 0x100000, 0 }, /* endpoint configuration (ECAM, bus 1) */
 	{ 0x64300000, 0x1000, 0 },   /* the MHI BAR the phone assigns to the SDX55M */
-	{ 0x0f000000, 0xa00000, 0 }, /* TLMM: west +0x100000, south +0x500000, north +0x900000 */
+	/* TLMM, only the south-tile pin pages this driver touches (1, 3, 56, 57,
+	 * 85). The whole 16 MB aperture mapped here took ten megabytes of the
+	 * 32 MB io_submap that every driver shares; with the SLPI heap's 8 MB it
+	 * left the later diagnostics' maps to block in kmem_alloc (KMA_NOFAIL)
+	 * instead of failing -- the sid=5 probe went silent that way. */
+	{ 0x0f501000, 0x1000, 0 },
+	{ 0x0f503000, 0x1000, 0 },
+	{ 0x0f538000, 0x1000, 0 },
+	{ 0x0f539000, 0x1000, 0 },
+	{ 0x0f555000, 0x1000, 0 },
 };
 
 static vm_offset_t
@@ -566,6 +575,11 @@ mhi_peek(void)
 	 * sets: the BHI engine's reads of host memory are the endpoint's DMA,
 	 * and a device whose bus master enable is clear does not start one. */
 	wr(CONF + 4, (command & 0xffff0000u) | 0x0006u);
+	/* The root port's own command register, one level up: the wifi driver
+	 * writes 6 here ("allow protected endpoint transactions upstream")
+	 * before its stream works, and this driver never did. */
+	wr(DBI + 4, (rd(DBI + 4) & 0xffff0000u) | 0x0006u);
+	hakios_tl("pcie2: MHI: root port command %#x\n", rd(DBI + 4));
 	iatu_config(1, 0x00, MHI_BAR, MHI_BAR + 0xfff, MHI_BAR);
 
 	cfg = rd(MHI_BAR + 0x10);
@@ -603,7 +617,18 @@ mhi_peek(void)
 #define MODEM_IMAGE_PA   0xc0000000u
 #define MODEM_IMAGE_SIZE 0x800000u
 
+/*
+ * pcie2_img=4's buffer: 576 KB of the kernel's own BSS. The kernel image is
+ * loaded below 4 GB (0xf7004000 on this phone), so this buffer's physical
+ * address is too, and the loader has already proven that range is DRAM the
+ * AP may use. It is what the PBL's reads need: readable physical memory below
+ * 4 GB -- a flexible allocation lands above it, and none of the low pages are
+ * free to kmem_alloc_contig.
+ */
+static char modem_image_buf[0x90000] __attribute__((aligned(0x4000)));
+
 extern lck_mtx_t hakios_smmu_lock;
+extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
 
 /* ---- a stage-1 context of the apps SMMU for the modem, with our tables ----
  *
@@ -646,6 +671,21 @@ static struct {
 } modem_space;
 
 static vm_offset_t smmu_va;
+
+/*
+ * The apps SMMU's register window, mapped once for the whole run: a second
+ * ml_io_map of the same range does not return -- the sid=5 probe's
+ * diagnostics stopped at it (no SGFSR line, no iATU dump after the AER
+ * print), and the same silence hid the apps-SMMU stream dump in another run.
+ */
+static vm_offset_t
+smmu_window(void)
+{
+	if (smmu_va == 0) {
+		smmu_va = (vm_offset_t)ml_io_map(SMMU_BASE, 0x100000);
+	}
+	return smmu_va;
+}
 
 static uint64_t *
 smmu_table(uint32_t n)
@@ -716,7 +756,7 @@ modem_smmu_map(vm_offset_t buffer, size_t size)
 	uint64_t root;
 
 	if (smmu_va == 0) {
-		smmu_va = ml_io_map(SMMU_BASE, 0x100000);
+		smmu_va = smmu_window();
 	}
 	if (smmu_va == 0) {
 		hakios_tl("pcie2: SMMU: cannot map the block\n");
@@ -902,7 +942,7 @@ modem_sid_setup(uint32_t mode)
 		/* S2CR type 2 for the endpoint's stream: if this SMMU calls it a
 		 * fault, the next read of SGFSYNR1 names the stream; if it is a
 		 * bypass, the stream's reads pass and the global fault stays 0 */
-		smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+		smmu = smmu_window();
 		if (smmu == 0) {
 			return;
 		}
@@ -931,7 +971,7 @@ modem_sid_setup(uint32_t mode)
 		/* a probe: 0x1d01 matched but pointed at context 0, which is off
 		 * -- if the endpoint's reads reach the SMMU at all, this makes
 		 * the SMMU record the fault and the stream */
-		smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+		smmu = smmu_window();
 		if (smmu == 0) {
 			return;
 		}
@@ -956,7 +996,7 @@ modem_sid_setup(uint32_t mode)
 		return;
 	}
 
-	smmu = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+	smmu = smmu_window();
 	if (smmu == 0) {
 		hakios_tl("pcie2: SID: the apps SMMU cannot be mapped\n");
 		return;
@@ -1078,6 +1118,83 @@ modem_context_fsr(bool clear)
 	    cb[SMMU_CB_FSR / 4], cb[SMMU_CB_FSR / 4] & 0xc000011eu, cb[0x60 / 4]);
 }
 
+/* A table page for the walk below, mapped once per probe: the same page comes
+ * up again for each level and each address, and a second ml_io_map of a range
+ * already mapped is refused (one diagnostic went silent that way). */
+static vm_offset_t
+mmu_table_map(uint64_t pa, uint64_t *seen_pa, vm_offset_t *seen_va, int *seen)
+{
+	for (int i = 0; i < *seen; i++) {
+		if (seen_pa[i] == pa) {
+			return seen_va[i];
+		}
+	}
+	if (*seen >= 8 || pa < 0x80000000ull || pa >= 0x300000000ull) {
+		return 0;                       /* not a DRAM page this probe reads */
+	}
+	seen_va[*seen] = (vm_offset_t)ml_io_map((vm_offset_t)pa, 0x1000);
+	if (seen_va[*seen] == 0) {
+		return 0;
+	}
+	seen_pa[(*seen)++] = pa;
+	return seen_va[*seen - 1];
+}
+
+/*
+ * Walk a context's stage-1 tables for one address: the boot chain's SMR 5
+ * translates the modem's stream through context 3, so what the PBL reads is
+ * decided by context 3's tables. 39-bit VA, 4 KB granule, three levels, the
+ * layout TCR 0x803519 names (T0SZ 25). A block descriptor at level 1 or 2 is
+ * a valid leaf; an invalid one at any level is the translation fault the
+ * SMMU should have recorded.
+ */
+static void
+mmu_walk(uint32_t cx, uint64_t ttbr0, uint32_t tcr, uint64_t va)
+{
+	static const uint32_t shifts[3] = { 30, 21, 12 };
+	uint64_t seen_pa[8];
+	vm_offset_t seen_va[8];
+	int seen = 0, level;
+	uint64_t table = ttbr0 & 0x0000fffffffff000ull;
+	uint32_t t0sz = tcr & 0x3f;
+
+	if ((tcr & (3u << 14)) != 0 || 64 - t0sz != 39) {
+		hakios_tl("pcie2: SMMU: context %u: TCR %#x is not the 39-bit 4 KB form; no walk\n", cx, tcr);
+		return;
+	}
+	for (level = 0; level < 3; level++) {
+		uint32_t index = (uint32_t)((va >> shifts[level]) & 0x1ff);
+		vm_offset_t page = mmu_table_map(table, seen_pa, seen_va, &seen);
+		uint64_t desc, mask;
+
+		if (page == 0) {
+			hakios_tl("pcie2: SMMU: context %u: %#llx: table page %#llx not readable\n", cx,
+			    (unsigned long long)va, (unsigned long long)table);
+			return;
+		}
+		desc = ((volatile uint64_t *)page)[index];
+		if ((desc & 3) == 0) {
+			hakios_tl("pcie2: SMMU: context %u: %#llx: level %d entry %u is %#llx: a translation fault\n",
+			    cx, (unsigned long long)va, level + 1, index, (unsigned long long)desc);
+			return;
+		}
+		mask = ~((1ull << shifts[level]) - 1) & 0x0000fffffffff000ull;
+		if ((desc & 3) == 1) {              /* a block at level 1 or 2 */
+			hakios_tl("pcie2: SMMU: context %u: %#llx: level %d block %#llx -> physical %#llx\n", cx,
+			    (unsigned long long)va, level + 1, (unsigned long long)desc,
+			    (unsigned long long)((desc & mask) | (va & ((1ull << shifts[level]) - 1))));
+			return;
+		}
+		if (level == 2) {                   /* the page itself */
+			hakios_tl("pcie2: SMMU: context %u: %#llx: page %#llx -> physical %#llx\n", cx,
+			    (unsigned long long)va, (unsigned long long)desc,
+			    (unsigned long long)((desc & mask) | (va & 0xfff)));
+			return;
+		}
+		table = desc & 0x0000fffffffff000ull;
+	}
+}
+
 /*
  * The PBL's boot interface, the vendor's mhi_fw_load_sbl: the device sits in
  * MHI execution environment PBL (BHI_EXECENV 0) with version 1.2, waiting for
@@ -1136,10 +1253,64 @@ pcie2_bhi_try(void)
 		uint32_t img = 1;
 
 		PE_parse_boot_argn("pcie2_img", &img, sizeof(img));
-		if (img == 2) {
+		if (img == 5) {
+			/* the one physical window the PBL's reads have been seen to
+			 * deliver from: 0x20000000. The image is copied straight into
+			 * it through an uncached mapping, so what the PBL reads there IS
+			 * the file. */
+			/* write-combining: the plain IO mapping's non-posted writes stall
+			 * on this window (the CPU waits for an acknowledgement that never
+			 * comes), while posted, combined writes do not need one. */
+			memory = ml_io_map_wcomb(0x20000000u, MODEM_IMAGE_SIZE);
+			if (memory == 0) {
+				hakios_tl("pcie2: BHI: cannot map 0x20000000\n");
+				return;
+			}
+			hakios_tl("pcie2: BHI: 0x20000000 mapped at %#x; loading the file into it\n", (uint32_t)memory);
+			for (i = 0; i < 30; i++) {
+				if (root_file_into("modem/sbl1.mbn", memory, MODEM_IMAGE_SIZE, &size) == 0) {
+					break;
+				}
+				delay(1000000);
+			}
+			if (i == 30) {
+				hakios_tl("pcie2: BHI: no /redwood/fw/modem/sbl1.mbn after 30 s\n");
+				return;
+			}
+			phys = 0x20000000u;
+			__asm__ volatile("dsb sy" ::: "memory");
+			hakios_tl("pcie2: BHI: the image copied into 0x20000000, %zu bytes\n", size);
+			goto image_ready;
+		}
+		if (img == 4) {
+			/* the kernel's own BSS, below 4 GB with the kernel image */
+			memory = (vm_offset_t)modem_image_buf;
+			for (i = 0; i < 30; i++) {
+				if (root_file_into("modem/sbl1.mbn", memory, sizeof(modem_image_buf), &size) == 0) {
+					break;
+				}
+				delay(1000000);
+			}
+			if (i == 30) {
+				hakios_tl("pcie2: BHI: no /redwood/fw/modem/sbl1.mbn after 30 s\n");
+				return;
+			}
+			phys = kvtophys(memory);
+			flush_dcache(memory, (unsigned)size, 0);
+			hakios_tl("pcie2: BHI: the kernel's own buffer at %#x, physical %#llx\n", (uint32_t)memory,
+			    (unsigned long long)phys);
+			goto image_ready;
+		}
+		if (img == 2 || img == 3) {
 			vm_size_t bytes = 0x100000; /* 1 MB; sbl1.mbn is 548,056 */
+			/* img=3 asks for the allocation below 4 GB: the PBL's reads
+			 * have turned out to be physical and to deliver only in the DRAM
+			 * this master may read -- the heap at 0xc0000000 is not, and the
+			 * flexible allocation lands above 4 GB. 0x40000 pages of 16 KB
+			 * is 4 GB, and max_pnum is exclusive. */
+			ppnum_t max_pnum = (img == 3) ? 0x40000 : 0;
 
-			if (kmem_alloc_contig(kernel_map, &memory, bytes, PAGE_MASK, 0, 0,
+			if (kmem_alloc_contig(kernel_map, &memory, bytes, PAGE_MASK, max_pnum, 0,
 			    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) == KERN_SUCCESS) {
 				for (i = 0; i < 30; i++) {
 					if (root_file_into("modem/sbl1.mbn", memory, bytes, &size) == 0) {
@@ -1273,6 +1444,19 @@ image_ready:
 		} else if (sid != 0) {
 			modem_sid_setup(sid);
 		}
+		/*
+		 * SM8250 defaults the BDF-to-SID table to bypass: a table, and even
+		 * a matching SMR, does nothing until the configuration register's
+		 * bit 0 is clear. The wifi's umi_pcie_enable_dma clears exactly this
+		 * bit and sets the root port's command to memory+bus master before
+		 * its stream works; neither write was in this driver, which is why
+		 * no SMMU context ever saw the modem's traffic.
+		 */
+		if (sid != 0) {
+			hakios_tl("pcie2: SID: BDF-to-SID configuration before %#x\n", rd(PARF + 0x2c00));
+			update(PARF + 0x2c00, 1, 0);
+			hakios_tl("pcie2: SID: BDF-to-SID configuration after %#x\n", rd(PARF + 0x2c00));
+		}
 	}
 
 	/* What the device may read. The vendor's mhi_init_mmio gives both
@@ -1324,6 +1508,19 @@ image_ready:
 	__asm__ volatile("dsb sy" ::: "memory");
 	hakios_tl("pcie2: AER: before the doorbell: uncorr %#x corr %#x root %#x\n", rd(DBI + 0x104),
 	    rd(DBI + 0x110), rd(DBI + 0x130));
+	/* ... and the apps SMMU's non-secure global fault status (+0x400 alias,
+	 * nsGFSR 0x448): cleared so a fault after the doorbell is this read's,
+	 * and read after it to name the stream when nothing matches it. */
+	{
+		volatile uint32_t *smmu = (volatile uint32_t *)smmu_window();
+
+		if (smmu != 0) {
+			smmu[0x448 / 4] = 0xffffffff;
+			__asm__ volatile("dsb sy" ::: "memory");
+			hakios_tl("pcie2: SMMU: NS GFSR cleared: %#x (SCR0 at 0x0 %#x, at 0x400 %#x)\n", smmu[0x448 / 4],
+			    smmu[0x000 / 4], smmu[0x400 / 4]);
+		}
+	}
 	/*
 	 * pcie2_inb=1: an inbound window for the image's address range (region
 	 * 2, ctrl1 0x01 = inbound memory; the outbound regions 0 and 1 are the
@@ -1345,6 +1542,36 @@ image_ready:
 			iatu_config(2, 0x01, base, base + 0x7fffff, base);
 			hakios_tl("pcie2: iATU 2: inbound %#x..%#x -> %#x, ctrl1 %#x ctrl2 %#x\n", base, base + 0x7fffff,
 			    base, rd(IATU + 2 * 0x200), rd(IATU + 2 * 0x200 + 0x4));
+		}
+	}
+	/*
+	 * pcie2_addr=N: hand the PBL an address other than the file's. The file
+	 * stays where it is; only the doorbell's address changes. Reading a
+	 * different address and watching the AER says whether a read completes
+	 * anywhere: the advisory event with the file's address and none with
+	 * another is the difference between a path that refuses everything and
+	 * one that refuses only this region.
+	 */
+	{
+		uint32_t addr = 0;
+
+		if (PE_parse_boot_argn("pcie2_addr", &addr, sizeof(addr))) {
+			hakios_tl("pcie2: BHI: the probe's image address %#x, not the file's %#llx\n", addr,
+			    (unsigned long long)phys);
+			phys = addr;
+		}
+	}
+	/*
+	 * pcie2_imgsz=N: hand the PBL a size other than the file's. With N=0 the
+	 * doorbell is rung with nothing to read at all -- if the refusal and the
+	 * AER advisory event are the same, neither is about reading host memory.
+	 */
+	{
+		uint32_t imgsz = 0;
+
+		if (PE_parse_boot_argn("pcie2_imgsz", &imgsz, sizeof(imgsz))) {
+			hakios_tl("pcie2: BHI: the probe's image size %#x, not the file's %zu\n", imgsz, size);
+			size = imgsz;
 		}
 	}
 	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
@@ -1395,7 +1622,7 @@ image_ready:
 	    rd(DBI + 0x124));
 	/* the stream the SMMU refused, if it refused one: SGFSYNR1 is the ID;
 	 * a translation fault inside a context lands in that context's FSR */
-	vm_offset_t smmu_win = (vm_offset_t)ml_io_map(0x15000000, 0x100000);
+	vm_offset_t smmu_win = smmu_window();
 	{
 		volatile uint32_t *regs = (volatile uint32_t *)smmu_win;
 
@@ -1407,6 +1634,15 @@ image_ready:
 
 			hakios_tl("pcie2: SMMU: SGFSR %#x, SGFSYNR0 %#x, SGFSYNR1 %#x (the stream), CB0 FSR %#x FAR %#x\n",
 			    regs[0x48 / 4], regs[0x50 / 4], regs[0x54 / 4], regs[cb0 + 0x58 / 4], regs[cb0 + 0x60 / 4]);
+			/* the non-secure aliases: Qualcomm's SMMU splits secure and NS,
+			 * and nsGFSR is 0x448, nsGFSYNR0 0x450 (the vendor's
+			 * arm-smmu.c: "secure aliases ... nsCR0: 0x400, nsGFSR: 0x448,
+			 * nsGFSYNR0: 0x450"). The 0x48 read above is the secure copy the
+			 * AP may not see; if the endpoint's stream matches no SMR, this
+			 * is where its ID is recorded. */
+			hakios_tl("pcie2: SMMU: NS GFSR %#x, GFSYNR0 %#x, GFSYNR1 %#x, GFSYNR2 %#x (SCR0 at 0x0 %#x, at 0x400 %#x)\n",
+			    regs[0x448 / 4], regs[0x450 / 4], regs[0x454 / 4], regs[0x458 / 4], regs[0x000 / 4],
+			    regs[0x400 / 4]);
 			if (modem_space.on) {
 				uint32_t our = (pages + modem_space.context) * page / 4;
 
@@ -1423,10 +1659,21 @@ image_ready:
 
 				for (uint32_t cx = 0; cx < nctx; cx++) {
 					uint32_t at = (pages + cx) * page / 4;
+					uint32_t sctlr = regs[at + SMMU_CB_SCTLR / 4];
+					uint64_t ttbr0 = ((uint64_t)regs[at + SMMU_CB_TTBR0 / 4 + 1] << 32) |
+					    regs[at + SMMU_CB_TTBR0 / 4];
 
-					if ((regs[at + SMMU_CB_SCTLR / 4] & 1) || regs[at + SMMU_CB_FSR / 4]) {
-						hakios_tl("pcie2: SMMU: context %u: SCTLR %#x FSR %#x FAR %#x\n", cx,
-						    regs[at + SMMU_CB_SCTLR / 4], regs[at + SMMU_CB_FSR / 4], regs[at + 0x60 / 4]);
+					if ((sctlr & 1) || regs[at + SMMU_CB_FSR / 4]) {
+						hakios_tl("pcie2: SMMU: context %u: SCTLR %#x FSR %#x FAR %#x TTBR0 %#llx TCR %#x\n", cx,
+						    sctlr, regs[at + SMMU_CB_FSR / 4], regs[at + 0x60 / 4], (unsigned long long)ttbr0,
+						    regs[at + SMMU_CB_TCR / 4]);
+					}
+					if (sctlr & 1) {
+						/* what the PBL's two addresses resolve to in this context */
+						mmu_walk(cx, ttbr0, regs[at + SMMU_CB_TCR / 4], phys);
+						if (phys != 0x20000000u) {
+							mmu_walk(cx, ttbr0, regs[at + SMMU_CB_TCR / 4], 0x20000000u);
+						}
 					}
 				}
 			}
