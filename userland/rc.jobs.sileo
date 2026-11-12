@@ -50,18 +50,27 @@
 # tap that lands on a late permission alert (and dismisses it) costs nothing and
 # the next one lands on the button.
 /redwood/bin/rwtouch tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5 tap 0.86 0.37 wait 5
-# The queue still empties (DownloadManager.reloadData(recheckPackages: true) ->
-# recheckTotalOps() -> removeAllItems() on an apt error). Reproduce that apt run
-# from here, against the index Sileo made: /var/jb/usr/bin/ls -la and an
-# apt-get simulate name what it objects to.
+# What Sileo's own apt run answers, against the index Sileo made (its
+# DependencyResolver's sileolists): the listing and an apt-get simulate name it.
+# (The queue that looked "cleared" was the run ending mid-scene, not an apt
+# error -- CHECKLIST, 2026-11-13.)
 /var/jb/usr/bin/ls -la /var/jb/var/lib/apt/sileolists
 /var/jb/usr/bin/apt-get install -s -f -oDir::State::lists=/var/jb/var/lib/apt/sileolists/ tree
 # close the package sheet: a drag from the grabber itself (y 0.060, measured; the header
 # below it belongs to the scrolling page), twice
 /redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.80 500 wait 6
 /redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.85 700 wait 6
-# the queue's popup bar above the tab bar
-/redwood/bin/rwtouch tap 0.5 0.862 wait 12
+# The queue's popup bar above the tab bar opens the downloads sheet; its
+# Confirm is the footer's full-width button (x 20..355 of a 375-wide view,
+# 50 points high) at the bottom of the sheet, so it is tried at a few heights:
+# a tap that misses falls on the sheet's list, which does nothing. The nav
+# bar's Cancel, above, is never where these taps land.
+/redwood/bin/rwtouch tap 0.5 0.862 wait 10
+/redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
+# the download and the install take a moment of their own
+/redwood/bin/rwtouch wait 45
+# what apt did, and what became of the package
 /var/jb/bin/cat /var/jb/var/log/apt/term.log
 /var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n tree
+/var/jb/bin/ls -la /var/jb/usr/bin/tree
 /var/jb/usr/bin/tree -L 1 /var/jb

@@ -67,9 +67,18 @@ returns NULL.
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
 `35e40355ce9bc340dfb2498a14dc93c8e2be253ff9d4c79e79dd9493c765db03` and
 `root-sileo.apfs`
-`1c08ae200bd4725ac9361ed7d5e9893195b9870e82081fc10c63ce5533806e7a`
+`5a9e199c30da0e980a0009c9789340e844f8e955503e5b05779c1015c666b766`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for).
+
+The Sileo scene now presses the queue's Confirm too: the popup bar opens the
+downloads sheet, whose Confirm is the footer's full-width button (20..355 of a
+375-wide view, 50 points high), so `rc.jobs.sileo` taps the sheet's lower
+heights (0.93, 0.88, 0.84) after the bar -- a tap that misses falls on the
+sheet's list and does nothing -- waits 45 s for the download and the install,
+and then prints apt's term.log, dpkg's record of `tree` and the binary itself.
+Before this, no run had ever asked Sileo to install anything; the queue was
+only queued and looked at.
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
