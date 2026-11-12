@@ -1053,13 +1053,18 @@ status = %d, equip_id = %d`):
     u32 log_mask_size = 64
     ...64 bytes of 0xFF                  (every log of the range)
 
-The driver sends it every five seconds, the two equipment IDs in turn, once
-the channel is open -- a protection domain that restarts comes back without
-the mask, and this run has restarts in it. Boot-arg `diag_mask=1` turns it on;
-without it nothing is sent and the driver is as before. Whatever the router
-sends back is printed by `diag_input()` (the first 60 packets, hex and text),
-which has never had a packet. The open question is the router's answer, not the
-channel: a run with `diag_mask=1` either shows it (and then the sensor
-framework's own lines) or shows that this channel is not how its log leaves the
-DSP. Kernel `ce27c3ef` carries it; the kernel baseline is not rebaselined for
-an unverified change.
+Before each mask goes the TX-mode message diagchar sends first (struct
+`diag_ctrl_peripheral_tx_mode`, pkt_id 17: `{version 1, stream_id, tx_mode 0}`
+-- 0 is `DIAG_BUFFERING_MODE_STREAMING`), because a router in a buffering mode
+would hold the logs back. Both are sent every five seconds, once the channel is
+open, with stream 1 and 0 and equipment 0 and 1 in turn: a protection domain
+that restarts comes back without either, and the firmware's `Invalid stream_id
+%d` says the stream's value matters while this router's valid one is not known.
+
+Boot-arg `diag_mask=1` turns it on; without it nothing is sent and the driver
+is as before. Whatever the router sends back is printed by `diag_input()` (the
+first 60 packets, hex and text), which has never had a packet. The open
+question is the router's answer, not the channel: a run with `diag_mask=1`
+either shows it (and then the sensor framework's own lines) or shows that this
+channel is not how its log leaves the DSP. Kernel `d6cd1241` carries it; the
+kernel baseline is not rebaselined for an unverified change.

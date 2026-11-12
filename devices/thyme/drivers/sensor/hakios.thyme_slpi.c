@@ -7884,9 +7884,14 @@ diag_input(const uint8_t *data, uint32_t length)
  * The DSP's own strings for this path are in the firmware ("Assertion equip_id <=
  * LOG_EQUIP_ID_MAX", "diag_ctrl_update_log_mask: update log mask - mask_len ... stream_id
  * ... status ... equip_id ...", "Invalid stream_id %d"), so this is the message it parses.
- * It is sent again every few seconds, the two equipment IDs in turn, because a protection
- * domain that restarts comes back without the mask.  Every packet the router sends back
- * is printed by diag_input().  Boot-arg diag_mask=1 (default 0: nothing is sent).
+ * Before each mask goes the TX-mode message diagchar sends first (struct
+ * diag_ctrl_peripheral_tx_mode, pkt_id 17: version 1, stream_id, tx_mode 0 =
+ * DIAG_BUFFERING_MODE_STREAMING), since a router in buffering mode would hold the logs
+ * back.  Both are sent again every few seconds -- a protection domain that restarts comes
+ * back without either -- with stream 1 and 0 and equipment 0 and 1 in turn, because the
+ * firmware says "Invalid stream_id" exists and this router's valid one is not known.
+ * Every packet the router sends back is printed by diag_input().  Boot-arg diag_mask=1
+ * (default 0: nothing is sent).
  */
 static uint32_t diag_mask_ask;
 static uint32_t diag_mask_tries;
@@ -7904,22 +7909,32 @@ diag_store32(uint8_t *at, uint32_t value)
 static void
 diag_ask_mask(void)
 {
+	uint8_t tx_mode[14];                            /* pkt_id..tx_mode, packed */
 	uint8_t ask[DIAG_LOG_MASK_HEADER + DIAG_MASK_LOGS / 8];
-	uint32_t equip = diag_mask_tries & 1;           /* equipment 0 and 1 in turn */
+	uint32_t stream = (diag_mask_tries & 1) != 0 ? 0 : 1;
+	uint32_t equip = (diag_mask_tries >> 1) & 1;
 	uint32_t size = DIAG_MASK_LOGS / 8;
+
+	bzero(tx_mode, sizeof(tx_mode));
+	diag_store32(tx_mode + 0, 17);                  /* DIAG_CTRL_MSG_CONFIG_PERIPHERAL_TX_MODE */
+	diag_store32(tx_mode + 4, 6);                   /* version, stream_id and tx_mode follow */
+	diag_store32(tx_mode + 8, 1);                   /* version 1 */
+	tx_mode[12] = (uint8_t)stream;
+	tx_mode[13] = 0;                                /* DIAG_BUFFERING_MODE_STREAMING */
+	glink_send(&glink.channel[CHANNEL_DIAG], tx_mode, sizeof(tx_mode));
 
 	bzero(ask, sizeof(ask));
 	diag_store32(ask + 0, 9);                       /* DIAG_CTRL_MSG_EQUIP_LOG_MASK */
 	diag_store32(ask + 4, 11 + size);               /* LOG_MASK_CTRL_HEADER_LEN + mask */
-	ask[8] = 1;                                     /* stream_id */
+	ask[8] = (uint8_t)stream;
 	ask[9] = 3;                                     /* DIAG_CTRL_MASK_VALID */
 	ask[10] = (uint8_t)equip;
 	diag_store32(ask + 11, DIAG_MASK_LOGS - 1);     /* num_items: the last log code */
 	diag_store32(ask + 15, size);                   /* log_mask_size */
 	memset(ask + DIAG_LOG_MASK_HEADER, 0xff, size); /* every log of the range */
 	glink_send(&glink.channel[CHANNEL_DIAG], ask, sizeof(ask));
-	printf("slpi: diag: asked for logs 0..%u of equipment %u (%u bytes)\n",
-	    DIAG_MASK_LOGS - 1, equip, (unsigned)sizeof(ask));
+	printf("slpi: diag: asked for logs 0..%u of equipment %u on stream %u (%u bytes)\n",
+	    DIAG_MASK_LOGS - 1, equip, stream, (unsigned)sizeof(ask));
 	diag_mask_tries++;
 	diag_asked_at = now_us();
 }
