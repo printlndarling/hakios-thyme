@@ -1135,3 +1135,14 @@ place the image can be put. What remains for the next attempt: whether another
 address inside the pool (`0x30000000`, say) answers reads and takes writes,
 or a way to bring the apps SMMU into the path, since the translated read
 bypassed it exactly as the physical ones do.
+
+The inbound iATU window was also retried on the fixed root port
+(`logs/123204-run.log`, `pcie2_inb=1`): region 2 enabled over
+`0xc0000000..0xc07fffff` and the heap read still answers `0xef120700` after
+80 ms. So the window the RC offers is not the mechanism either: the refusing
+party is above both the iATU and the SMMU -- the SID-based access control the
+boot chain leaves for this endpoint, which only lets it read the pool region
+around `0x20000000`. Android's own MHI must reach memory through a
+configuration this kernel has not reproduced; the next diagnostic is a
+register-level comparison of the two RCs (PCIe0, whose endpoint's DMA works,
+against PCIe2) rather than another variation on the doorbell.
