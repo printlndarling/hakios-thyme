@@ -33,6 +33,8 @@
 #include <fcntl.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
 #include <notify.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -241,29 +243,108 @@ static int (*orig_function_supported)(void *context);
  * drawn -- the shadow under a card of the switcher of running applications.
  */
 /*
+ * Naming where a fault is. A fault line that says "libOSMesa.8.dylib+0x2a1e4" names a place in a
+ * library we build and keep the symbols of; one that says only a number, the shared cache's slide
+ * taken off, names nothing at all unless it happens to be cache code. backboardd has died this way
+ * in 47 runs, always in the same non-cache image and always in a worker thread whose start routine
+ * is in the shared cache -- and every one of those lines had to be thrown away for want of a name.
+ *
+ * The images are noted once, after the program's own startup has loaded what it loads (the GL
+ * library and OSMesa under it are there by then: opengl_es() runs before this), and the signal
+ * handler reads only that list: dyld's own locks may be held by whatever thread was starting a
+ * dlopen when the other one faulted, and asking dyld from a signal handler could hang the process
+ * instead of letting it die.
+ */
+#define FAULT_IMAGES 48
+static struct {
+	const char *name;
+	uintptr_t start, end;
+} fault_images[FAULT_IMAGES];
+static unsigned fault_image_count;
+
+static void
+note_images(void)
+{
+	uint32_t count = _dyld_image_count();
+
+	for (uint32_t i = 0; i < count && fault_image_count < FAULT_IMAGES; i++) {
+		const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(i);
+		const char *path = _dyld_get_image_name(i);
+		uintptr_t image_slide = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
+		uintptr_t low = UINTPTR_MAX, high = 0;
+		const struct load_command *command;
+
+		if (header == NULL || header->magic != MH_MAGIC_64 || path == NULL) {
+			continue;
+		}
+		command = (const struct load_command *)(header + 1);
+		for (uint32_t c = 0; c < header->ncmds; c++) {
+			if (command->cmdsize < sizeof(struct load_command)) {
+				break;
+			}
+			if (command->cmd == LC_SEGMENT_64) {
+				const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
+				uintptr_t start = (uintptr_t)segment->vmaddr + image_slide;
+
+				if (segment->vmsize != 0 && start < low) {
+					low = start;
+				}
+				if (segment->vmsize != 0 && start + (uintptr_t)segment->vmsize > high) {
+					high = start + (uintptr_t)segment->vmsize;
+				}
+			}
+			command = (const struct load_command *)((const char *)command + command->cmdsize);
+		}
+		if (low < high) {
+			const char *base = strrchr(path, '/');
+
+			fault_images[fault_image_count].name = base != NULL ? base + 1 : path;
+			fault_images[fault_image_count].start = low;
+			fault_images[fault_image_count].end = high;
+			fault_image_count++;
+		}
+	}
+}
+
+/* "libOSMesa.8.dylib+0x2a1e4" for an address in a loaded image, the unslid number otherwise. */
+static void
+describe_address(uintptr_t address, char *buffer, size_t size)
+{
+	for (unsigned i = 0; i < fault_image_count; i++) {
+		if (address >= fault_images[i].start && address < fault_images[i].end) {
+			snprintf(buffer, size, "%s+%#lx", fault_images[i].name, address - fault_images[i].start);
+			return;
+		}
+	}
+	snprintf(buffer, size, "%#lx (in no loaded image; unslid)", address - slide);
+}
+
+/*
  * Where the window server died. Its crash reports never arrive here -- the kernel says "Failed to
  * send exception EXC_CORPSE_NOTIFY" and that is the end of it -- so a SIGSEGV in CoreAnimation has
- * been a silent restart every half a minute with nothing to go on. This turns one into a line: the
- * address it touched and where it was, both as they would be in the shared cache as built, which
- * "ipsw dyld a2s" turns into a name. Then the signal is let through to kill the process as before.
+ * been a silent restart every half a minute with nothing to go on. This turns one into a line with
+ * a name in it. Then the signal is let through to kill the process as before.
  */
 static void
 say_the_fault(int signal_number, siginfo_t *info, void *context_in)
 {
 	ucontext_t *context = context_in;
 	uintptr_t pc = 0, lr = 0;
+	char described[96];
 
 	if (context != NULL && context->uc_mcontext != NULL) {
 		pc = (uintptr_t)context->uc_mcontext->__ss.__pc;
 		lr = (uintptr_t)context->uc_mcontext->__ss.__lr;
 	}
+	describe_address(pc, described, sizeof(described));
+	say("hakios: signal %d at %p, pc %s", signal_number, info != NULL ? info->si_addr : NULL, described);
+	describe_address(lr, described, sizeof(described));
+	say(", lr %s\n", described);
 	/*
 	 * And who called, by walking the frame pointers: on arm64 each frame holds the previous one
 	 * at [fp] and its return address at [fp + 8]. The crash itself is usually in a library
 	 * function -- strdup of a null name, say -- and the frame that matters is two or three up.
 	 */
-	char frames[8 * 20 + 1] = "";
-	size_t used = 0;
 	uintptr_t fp = context != NULL && context->uc_mcontext != NULL ? (uintptr_t)context->uc_mcontext->__ss.__fp : 0;
 
 	for (unsigned i = 0; i < 8 && fp != 0 && (fp & 7) == 0; i++) {
@@ -272,11 +353,10 @@ say_the_fault(int signal_number, siginfo_t *info, void *context_in)
 		if (ret == 0) {
 			break;
 		}
-		used += (size_t)snprintf(frames + used, sizeof(frames) - used, " %#lx", ret - slide);
+		describe_address(ret, described, sizeof(described));
+		say("hakios:   from %s\n", described);
 		fp = next > fp ? next : 0;      /* the chain only ever goes up the stack */
 	}
-	say("hakios: signal %d at %p, pc %#lx, lr %#lx, called from%s (unslid)\n", signal_number,
-	    info != NULL ? info->si_addr : NULL, pc - slide, lr - slide, frames);
 	signal(signal_number, SIG_DFL);
 	raise(signal_number);
 }
@@ -1467,4 +1547,6 @@ hakios_init(void)
 	} else if (strncmp(name, "containermanagerd", 17) == 0) {
 		container_manager_fixes();
 	}
+	/* for say_the_fault: every image this process has loaded by now, by name (see above) */
+	note_images();
 }

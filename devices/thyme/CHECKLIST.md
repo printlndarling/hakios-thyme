@@ -4,6 +4,54 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## The window server's mid-run restarts, and a fault line with a name in it (2026-11-13)
+
+`backboardd` dying with `signal 11 at 0x18` was taken for the return's known
+teardown artefact. It is two different faults. The teardown one (its six-frame
+stack, no pthread tail) does come at the end of a run, after the GPU is given
+back. The other one is mid-run: **47 run logs carry it** (`grep -l 0x1d0cd50ec
+logs/0*-run.log`), each with ~4,000 lines of the run still to come after it --
+`logs/092254-run.log` (2026-11-06) through `logs/012034-run.log` (2026-11-13,
+01:11:37, seventeen seconds after the Sileo GET tap). Each one kills the window
+server and SpringBoard restarts around it (backboardd pid 15 -> 599); a Sileo
+queue queued in the app's memory does not survive that, which is what emptied
+the queue in the 01:01 run -- not an apt error, as the earlier reading had it
+(the `apt-get -sqf ... install --reinstall tree=2.0.1` that the tap spawned is
+in that log and its result was never seen).
+
+What the stack says: the eight frames are identically spaced in every run, so
+they are all in **one non-cache image**, and the outermost two are
+`libsystem_pthread.dylib+0x30ec` and `+0x172c` (resolved against
+`sysimage/20F66__iPhone10,3_6/dyld_shared_cache_arm64` with
+`tools/dyld-cache-image.py`; the image table is `imagesOffset`/`imagesCount` at
+header 0x1C0 in this cache format). So it is a worker thread: pthread's start
+trampoline called a body function in that image, which faulted on a null+0x18
+read. The frame span is ~3 MB, so the image has at least that much code; the
+main executable is 1.2 MB and the only image we load that is large enough is
+`libOSMesa.8.dylib` (13.4 MB of text, pulled in by `libhakios.gl.dylib` when
+`opengl_es()` runs). Whether it *is* OSMesa was checked rather than assumed:
+taking every BL/BLR in the shipped library's `__text` (109,424 call sites in
+2,024,369 instructions), the set of slides that makes each of the seven return
+addresses land just after a call intersects to exactly **one** value,
+`0xb71f4004`. That value is 4 bytes off a 4 KB page, and a real slide cannot be
+-- so either the frames are not OSMesa's or one call in the chain is not a BL
+(a tail call through a register, or a `br` stub). The named fault line settles
+it on the next occurrence; nothing here is claimed as the crash's name yet.
+
+The fault line now names it: `say_the_fault()` (`userland/src/inject.c`) notes
+every loaded image and its address range once, at the end of `hakios_init()`
+(after `opengl_es()`, so OSMesa is in the list), and prints
+`hakios: signal 11 at 0x18, pc libOSMesa.8.dylib+0x2a1e4, lr ...` followed by
+one `hakios:   from NAME+0xOFF` per frame. The list is read from the signal
+handler without calling dyld (its locks may be held by another thread at the
+moment of the fault). Addresses in no image still print unslid, as before.
+Built as `434b92e304af2cd916a9369ab265c9a2c07b23cd6dea13cd80f9a38d3e9912c1`
+(`out/thyme-boot/root-wirelessfull.apfs`) and, for the run that carries the
+Sileo diagnostic too, `8732cae7ef40111cd30c3de125842d210a895caf6e6a72ad1f491cb3d07fdcb6`
+(`root-sileo.apfs`). The next occurrence on the phone names the function, and
+the same build's teardown line will show whether the return's SIGSEGV is the
+same image.
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
