@@ -58,7 +58,13 @@ renderer's fault line is still named for real crashes:
 range at the end of `hakios_init()` (after `opengl_es()`, so OSMesa is in the
 list) and prints `pc libOSMesa.8.dylib+0x2a1e4` with one
 `hakios:   from NAME+0xOFF` per frame, read without calling dyld from the
-signal handler. The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
+signal handler. The guard is in the built object, not only the source: in
+`a6xx_fd6_image.cc.o`'s `fd6_build_bindless_state` the call to `fd_bo_new` is
+followed by `cbz x0, <cleanup>` at 0x1f8 and the call to `fd_bo_map` by the
+same at 0x208, both to a block that decrements the ringbuffer's reference and
+returns NULL.
+
+The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
 `35e40355ce9bc340dfb2498a14dc93c8e2be253ff9d4c79e79dd9493c765db03` and
 `root-sileo.apfs`
 `1c08ae200bd4725ac9361ed7d5e9893195b9870e82081fc10c63ce5533806e7a`
