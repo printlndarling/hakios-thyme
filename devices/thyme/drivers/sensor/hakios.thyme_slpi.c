@@ -6171,10 +6171,16 @@ fastrpc_listener_thread(void *parameter, __unused wait_result_t result)
 			if (!fastrpc_listener_wanted) {
 				break;
 			}
-			/* nothing was handed over in two minutes: say what the DSP last died of, if it did */
+			/*
+			 * Nothing was handed over in two minutes. The DSP still holds the call;
+			 * issuing another next2 on the same thread leaves two calls outstanding
+			 * at the run's teardown, and the DSP's frpc thread then dies in its
+			 * return path (frpc_dsp, PC=0xb20c2dac; logs/185125-run.log,
+			 * logs/185755-run.log). The listener stops here instead.
+			 */
 			fastrpc_last_words();
-			sleep_ms(5000);
-			continue;
+			printf("slpi: fastrpc: the listener's wait timed out; it stops waiting\n");
+			break;
 		}
 		if (fastrpc_call_retval != 0) {
 			/* nothing is waiting in the DSP's listener yet */

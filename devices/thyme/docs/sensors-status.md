@@ -919,6 +919,26 @@ client path. The first run with the messages on top of the live framework
 exception at `PC=0xb20c2dac` (`slpi.b20`: segment vaddr `0xb2062b80`,
 offset `0x6022c`) and the err handler follows
 (`irq115:0x1072:sns_err_handler.c:180:Crash`); its two SNS answers are
-result 5. The file reads themselves are still served (the same five nested
-calls, `hw_platform` again), so the SNS message path and the FastRPC reply
-path meet badly -- the next thing to read is the function at `b20c2dac`.
+result 5.
+
+That crash is **not** the SNS path's, and the correction is the important
+part. Each half is clean alone (`logs/183840-run.log` the `sns_cm` write
+only, `logs/184512-run.log` message 1 and the config only: zero
+protection-domain failures), and a `sns=0` run of the same **150 s** length
+crashes at the same `PC=0xb20c2dac` (`logs/185755-run.log`, and the combined
+run reproduces it, `logs/185125-run.log`). Its ktime is `[271-275 s]`,
+after a 150 s run -- the teardown, not the run -- and the shape is the
+listener's `next2`: the call waits 120 s, times out, and the driver issues
+another one, so at the stop the DSP holds two calls on one thread and its
+frpc thread dies in a `trap0` return stub next to the libc string routines
+(`0xb20c2da8`/`0xb20c2dac`). The 110-120 s runs never cross the timeout and
+stop cleanly.
+
+The listener now stops at its first timeout instead of re-issuing
+(`hakios.thyme_slpi.c`, `fastrpc_listener_thread`), and the 150 s run has
+zero protection-domain failures and a clean 20.6 ms stop
+(`logs/190531-run.log`). The cost is that a request arriving after two
+minutes is not served until the listener is restarted; the framework's own
+reads so far (the five nested calls for `/fw/sensors/soc0/hw_platform`)
+happen well inside that window, so the next run can go longer and look for
+the registry parser's own reads.
