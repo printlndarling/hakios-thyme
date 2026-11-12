@@ -584,8 +584,10 @@ struct smp2p {
 #define DSP_STOP_ACK            (1u << 3)
 #define DSP_SHUTDOWN_ACK        (1u << 7)
 
-/* Our entry (dt: the child "master-kernel" of qcom,smp2p-dsps; "qcom,force-stop" of qcom,lpass@3700000). */
+/* Our entries (dt: the children "master-kernel" and "sleepstate-out" of qcom,smp2p-dsps;
+ * "qcom,force-stop" of qcom,lpass@3700000 is the first). */
 #define OUR_ENTRY_STOP          "master-kernel"
+#define OUR_ENTRY_SLEEP         "sleepstate"
 #define DSP_STOP                (1u << 0)
 
 static bool
@@ -669,6 +671,13 @@ show_crash_reason(void)
  * statement of where it stalled.
  */
 static uint32_t slpi_watch_item;
+
+/*
+ * slpi_sleep=0 leaves the AP's "sleepstate" entry out of the dsps SMP2P block.
+ * The phone's dt has it (qcom,smp2p-dsps), and the sensor framework's
+ * sns_sig_remote_proc_state thread reads it; the entry is there by default.
+ */
+static uint32_t slpi_sleep = 1;
 
 static void
 watch_item_thread(__unused void *parameter, __unused wait_result_t result)
@@ -1845,7 +1854,7 @@ step_our_item(void)
 {
 	struct smem_partition header;
 	struct smp2p ours;
-	uint32_t cacheline = 0, size = 0, partition, name[4] = { 0 };
+	uint32_t cacheline = 0, size = 0, partition, entries, name[4] = { 0 };
 
 	announce("look for an SMP2P item of ours (430) in our partition with the sensor DSP, make it if there is none, and fill it in");
 	partition = smem_partition(SMEM_US, SMEM_SLPI, &cacheline, &size);
@@ -1868,7 +1877,8 @@ step_our_item(void)
 		}
 		printf("slpi: %u: item %u made, at %#lx\n", step, ITEM_SMP2P_OURS, SMEM_PHYS + our_item);
 	}
-	/* zeroes; from processor 0 to 2, room for 16 entries, "master-kernel" at zero, feature bit 0; last the version */
+	/* zeroes; from processor 0 to 2, room for 16 entries, "master-kernel" at zero and
+	 * "sleepstate" at one, feature bit 0; last the version */
 	snprintf(last_write, sizeof(last_write), "step %u filled in our SMP2P item", step);
 	for (uint32_t at = 0; at < sizeof(ours); at += 4) {
 		smem_poke(our_item + at, 0);
@@ -1880,7 +1890,22 @@ step_our_item(void)
 	for (uint32_t word = 0; word < 4; word++) {
 		smem_poke(our_item + SMP2P_AT_NAME(0) + 4 * word, name[word]);
 	}
-	smem_poke(our_item + SMP2P_AT_COUNTS, 16 | 1u << 16);
+	/* The phone's dt gives the dsps block four entries: "master-kernel", "slave-kernel",
+	 * "sleepstate" and "sleepstate_see" (qcom,smp2p-dsps). The DSP makes the two that are
+	 * its own; the two of the AP's come from here, and the sensor framework's
+	 * sns_sig_remote_proc_state thread reads "sleepstate" -- without it the framework's
+	 * remote-process-state sensor never gets an entry. slpi_sleep=0 leaves it out. */
+	entries = 1;
+	if (slpi_sleep != 0) {
+		memset(name, 0, sizeof(name));
+		strlcpy((char *)name, OUR_ENTRY_SLEEP, sizeof(name));
+		for (uint32_t word = 0; word < 4; word++) {
+			smem_poke(our_item + SMP2P_AT_NAME(1) + 4 * word, name[word]);
+		}
+		smem_poke(our_item + SMP2P_AT_VALUE(1), 0);
+		entries = 2;
+	}
+	smem_poke(our_item + SMP2P_AT_COUNTS, 16 | entries << 16);
 	smem_poke(our_item + SMP2P_AT_VERSION, SMP2P_RESTART_ACKS << 8);
 	settle();
 	smem_poke(our_item + SMP2P_AT_VERSION, SMP2P_RESTART_ACKS << 8 | SMP2P_VERSION);
@@ -1888,7 +1913,8 @@ step_our_item(void)
 	smp2p_agreed = smp2p_restart_acks = smp2p_restart_acked = false;
 	need(&ipcc);
 	wr(ipcc.base + IPCC_SEND, IPCC_SLPI << 16 | IPCC_SMP2P);
-	if (!smem_peek(our_item, &ours, sizeof(ours)) || ours.magic != SMP2P_MAGIC || smp2p_entry(&ours, OUR_ENTRY_STOP) < 0) {
+	if (!smem_peek(our_item, &ours, sizeof(ours)) || ours.magic != SMP2P_MAGIC || smp2p_entry(&ours, OUR_ENTRY_STOP) < 0
+	    || (slpi_sleep != 0 && smp2p_entry(&ours, OUR_ENTRY_SLEEP) < 0)) {
 		printf("slpi: %u: OUR ITEM DOES NOT READ BACK AS WRITTEN\n", step);
 		return false;
 	}
@@ -2957,6 +2983,9 @@ static unsigned sns_txn = 1, sns_samples;
 static uint8_t sns_client_byte;         /* the TLV 0x10 byte: 0 as sensh sends it, and what the service says to others */
 static uint32_t sns_raw;                 /* boot-arg sns_raw: print every SNS event payload as bytes */
 static uint32_t sns_client_probe;        /* boot-arg sns_client_probe: the phone's client request (message 1) before the config */
+static uint32_t sns_client_tries = 1;    /* boot-arg sns_client_tries: repeat message 1 until one is answered 0 */
+static uint32_t sns_upload_rounds = 1;   /* boot-arg sns_upload_rounds: send the group files again, the registry comes up late */
+static volatile uint32_t sns_ok_count;   /* QMI 0x20 responses that came back result 0 */
 
 static bool
 sns_server(uint32_t *node, uint32_t *port)
@@ -3411,6 +3440,9 @@ sns_input(const uint8_t *data, uint32_t length)
 		} else if (type == 0x11 && message == 0x20) {
 			uint16_t result = l >= 2 ? (uint16_t)(data[at] | data[at + 1] << 8) : 0xffff;
 
+			if (result == 0) {
+				sns_ok_count++;
+			}
 			printf("slpi: sns: < response: result %u\n", result);
 		}
 		at += l;
@@ -3862,13 +3894,35 @@ sns_start(void)
 		 * manager reads, and a repeat of an already-stored group is harmless.
 		 */
 		for (uint32_t i = 0; i < (sns_write_tries != 0 ? sns_write_tries : 1); i++) {
+			uint32_t before = sns_ok_count;
+
 			sns_registry_write_cm(sns_registry_suid_real);
 			sleep_ms(2000);
+			if (sns_ok_count != before) {
+				printf("slpi: sns: the registry TOOK the sns_cm group (result 0) on write %u\n", i + 1);
+				break;
+			}
 		}
 	}
 	if (sns_registry_upload) {
-		sns_registry_upload_all(sns_registry_suid_real);
-		sleep_ms(2000);
+		/*
+		 * The registry sensor's instance is not there when the steps reach
+		 * it (a write at +1.2 s is answered result 5, "no resources"), and
+		 * how long it takes is not the same run to run. Repeating the whole
+		 * set rides that out; a group written twice is harmless.
+		 */
+		uint32_t rounds = sns_upload_rounds != 0 ? sns_upload_rounds : 1;
+
+		for (uint32_t r = 0; r < rounds; r++) {
+			uint32_t before = sns_ok_count;
+
+			sns_registry_upload_all(sns_registry_suid_real);
+			sleep_ms(2000);
+			if (sns_ok_count != before) {
+				printf("slpi: sns: the registry took a group (result 0) in round %u\n", r + 1);
+				break;
+			}
+		}
 	}
 	if (sns_accel_direct || sns_gyro_direct) {
 		memcpy(sns_suid, sns_gyro_direct ? sns_gyro_suid : sns_accel_suid, sizeof(sns_suid));
@@ -3881,12 +3935,24 @@ sns_start(void)
 			 * `12 02 10 00`, to each sensor's SUID before configuring it
 			 * (root strace of android.hardware.sensors@1.0-service). It is
 			 * the client request the client manager is created for; without
-			 * it every config is answered result 5.
+			 * it every config is answered result 5. The manager comes up
+			 * some seconds after the sensor process, so sns_client_tries
+			 * repeats the request until one is answered 0.
 			 */
 			static const uint8_t client_inner[4] = { 0x12, 0x02, 0x10, 0x00 };
+			uint32_t tries = sns_client_tries != 0 ? sns_client_tries : 1;
+			bool answered = false;
 
-			sns_qmi_send(1, sns_suid, client_inner, sizeof(client_inner));
-			printf("slpi: sns: the phone's client request (message 1) sent\n");
+			for (uint32_t i = 0; i < tries && !answered; i++) {
+				uint32_t before = sns_ok_count;
+
+				sns_qmi_send(1, sns_suid, client_inner, sizeof(client_inner));
+				printf("slpi: sns: the phone's client request (message 1) sent%s\n", i == 0 ? "" : " again");
+				sleep_ms(1000);
+				answered = sns_ok_count != before;
+			}
+			printf("slpi: sns: the client request %s\n",
+			    answered ? "WAS ANSWERED 0: the client manager is up" : "was never answered 0");
 			sleep_ms(200);
 		}
 		sns_config();
@@ -7891,9 +7957,12 @@ step_qrtr(void)
 	PE_parse_boot_argn("slpi_smem_dump", &slpi_smem_dump, sizeof(slpi_smem_dump));
 	PE_parse_boot_argn("sns_quiet", &sns_quiet, sizeof(sns_quiet));
 	PE_parse_boot_argn("slpi_watch_item", &slpi_watch_item, sizeof(slpi_watch_item));
+	PE_parse_boot_argn("slpi_sleep", &slpi_sleep, sizeof(slpi_sleep));
 	PE_parse_boot_argn("sns_registry_upload", &sns_registry_upload, sizeof(sns_registry_upload));
 	PE_parse_boot_argn("sns_raw", &sns_raw, sizeof(sns_raw));
 	PE_parse_boot_argn("sns_client_probe", &sns_client_probe, sizeof(sns_client_probe));
+	PE_parse_boot_argn("sns_client_tries", &sns_client_tries, sizeof(sns_client_tries));
+	PE_parse_boot_argn("sns_upload_rounds", &sns_upload_rounds, sizeof(sns_upload_rounds));
 	PE_parse_boot_argn("servreg", &servreg_on, sizeof(servreg_on));
 	PE_parse_boot_argn("slpi_dump_item", &dump_item, sizeof(dump_item));
 	PE_parse_boot_argn("slpi_dump_hex", &dump_hex, sizeof(dump_hex));
@@ -8005,7 +8074,7 @@ step_qrtr(void)
 		/* the crash item holds more than its first line: registers and a stack, as bytes */
 		dump_smem_hex(dump_hex);
 	}
-	if (sns_on && slpi_watch_item != 0) {
+	if (slpi_watch_item != 0) {
 		thread_t watch;
 
 		if (kernel_thread_start(watch_item_thread, NULL, &watch) == KERN_SUCCESS) {

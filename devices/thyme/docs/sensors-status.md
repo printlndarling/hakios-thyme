@@ -778,3 +778,83 @@ signal path compares a name it expects to have from its registry, and the
 registry is precisely what this PD never gets. The crash and the empty
 registry are one gate, and the registry's SUID -- or a way to make the
 reverse tunnel deliver the files -- stays the piece to find.
+
+### The missing entry: the AP's "sleepstate" in the dsps SMP2P block (2026-11-12)
+
+The section above left the crash and the empty registry as one gate. The crash is
+not the registry's: it is one SMP2P entry the phone's kernel creates and this one
+did not.
+
+The phone's device tree (`/soc/qcom,smp2p-dsps`, `qcom,smem = <0x1e1 0x1ae>` --
+the pair 481/430 this driver already uses) has four children: `master-kernel`,
+`slave-kernel`, `sleepstate` (the child `sleepstate-out`, the AP's sleep state)
+and `sleepstate_see` (the child `qcom,sleepstate-in`). The two "in" entries are
+the DSP's own and the DSP makes them; the two "out" entries belong to the AP's
+half, and Android's `qcom_smp2p` driver creates both at probe. Item 430 here
+carried only `master-kernel`, so the DSP's sensor framework never found the
+`sleepstate` entry the phone always has -- and its remote-process-state sensor
+(`sns_remote_proc_state_sensor.c`, the thread `sns_sig_remote_proc_state`) is
+exactly the consumer of it.
+
+`step_our_item()` now writes `sleepstate` as entry 1 (`slpi_sleep=0` leaves it
+out for an A/B). The item reads back as
+
+    our item reads back: SMP2P version 1, features 0x1, from processor 0 to 3,
+    flags 0, 2 of 16 entries: master-kernel = 0; sleepstate = 0;
+
+and the DSP's first reaction is measurable at +146 ms: it adds its
+`sleepstate_see` entry then, where every earlier boot added it at 2.2 s
+(`logs/162243-run.log`: "the DSP's item changes: SMP2P version 1, features 0x1,
+from processor 3 to 0, flags 0, 3 of 16 entries: smp2p = 0; slave-kernel = 0x6;
+sleepstate_see = 0;").
+
+The exception at `PC=0xb01c1f2c` is gone. `slpi_watch_item=424` reads item 424
+during that boot at +20, +149, +169 and +189 s and never sees the
+`EX:kernel:0x0:sns_sig_remote_:0x2062` text; what it holds is the SFR driver's
+own boot note, "SFR Init: wdog or kernel error suspected.", which is what an
+unclean stop of the previous boot (here: the forced TrustZone shutdown the step
+10 teardown reports) leaves behind. The strncmp that crashed was not comparing a
+registry name: `b01c1f20` is the ordinary `strncmp(r0, r1, r2)` (r3 takes the
+incoming r0; the packet's r0 = 0 is the return value), and its 38 call sites in
+slpi.b04 include the DAL device-name compares and the SMP2P entry-name walk --
+the frame is the sensor library asking its own signal service to register the
+entry, which did not exist. That corrects the closing paragraph above: the empty
+registry was a symptom of the crashed framework, not its cause.
+
+With `sns=1` the same run answers the three SUID reads with **result 0** and
+does not print a single `result 5` (`logs/162659-run.log`), where the upload run
+before the entry answered every message 5 (`logs/160654-run.log`).
+
+What the entry did *not* change is the registry write path. The 189 groups still
+answer 5 when they are sent at +1.2 s after the DSP's start
+(`logs/163203-run.log`), and message 1 with the accelerometer's phone SUID is
+still answered 5 in the same position (`logs/163822-run.log`). The sensor
+framework is no longer dead, but the client manager's instance is not up yet
+when the steps reach it; the driver now repeats message 1 (`sns_client_tries`)
+and the whole group set (`sns_upload_rounds`) and stops at the first result 0,
+which is the next measurement.
+
+That measurement, on a boot short enough that the loader kept the whole log
+(`logs/170433-run.log`): eight `sns_cm` writes over sixteen seconds and four
+client requests, and not one result 0 ("the client request was never answered
+0"). So the client manager is not created in the first twenty seconds. The
+189-group upload answers 5 the same way at +1.2 s whether the framework has the
+entry or not, and its 3103-byte group is rejected at the QMI layer (result 1,
+error 19, `logs/164410-run.log`); a full set sent in one burst does not change
+the outcome.
+
+The other thing the same boot shows is that the sensor PD does not stay up on
+its own: about two minutes after its start its own user watchdog ends it
+(`EF:sensor_process:0x1:TMR_CLNT_1:...:dog_virtual_user.c:240:U`, then
+`irq115:...:sns_err_handler.c:180:Crash`) with or without the upload. servreg
+restarts the PD and it comes back with its services re-announced; the restarted
+process accepts the stop when the run ends (`logs/165848-run.log`: "THE SENSOR
+DSP ACKNOWLEDGES THE STOP after 20.6 ms").
+
+The DSP makes no apps_std call at all in any boot after the entry (the count is
+0 in `logs/162243-run.log`, `logs/162659-run.log` and `logs/165017-run.log`), so
+its registry parser -- `sns_registry_parser.c`'s "Config dir '%s' not
+available" and "Unable to open '%s' %i (%s)" -- is not reached, and the file
+service is not what holds the registry up yet. The framework blocks before the
+registry parse, and its user-PD watchdog ends it; what it waits for is the next
+thing to find.
