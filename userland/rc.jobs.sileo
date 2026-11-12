@@ -4,11 +4,19 @@
 # network (Wi-Fi has an address and a name resolves: before that, apt finds no repository), a fresh
 # index, the half minute LaunchServices wants before it registers the prefix's applications (with the root
 # on the flash: prep.sh, uicache), and then the whole way a person goes: the package's own page is opened by URL (no typing),
-# GET puts it in the queue, Confirm installs it. At the end, what dpkg has to say about it.
-# The first line used to be /redwood/bin/sound_test springboard; on 2026-11-11 it
-# never returned, so none of the commands below ran (logs/111316-run.log). The
-# apt path does not need it, and the 2026-11-08 online run that passed
-# (logs/012326-run.log) did not have it.
+# GET puts it in the queue, and Sileo's queue is the popup bar above the tab bar.
+#
+# 2026-11-12, from Sileo's own source (github.com/Sileo/Sileo): the QUEUE button only
+# calls DownloadManager.add(package, queue: .installations); the queue is the
+# LNPopupController popup bar the TabBarController shows when operationCount() > 0
+# (TabBarController.updatePopup), and tapping the bar presents
+# DownloadsTableViewController, whose confirmButton is the "Confirm" step. The bar
+# sits above the tab bar, so the package page -- presented as a page sheet -- has
+# to go first: a drag from its grabber row dismisses it, while a drag from the
+# header scrolls the page instead (the 2026-11-08 runs and this evening's
+# timeline run both dragged the header and the sheet stayed). The grabber row
+# measures y 0.060 of the screen in the timeline screenshots; 0.033 is above the
+# card entirely and does nothing.
 /var/jb/bin/sh /var/jb/prep.sh
 /redwood/bin/net_test wait 120 joinfile /redwood/fw/network
 /redwood/bin/net_test joinfile /redwood/fw/network
@@ -16,12 +24,28 @@
 /var/jb/usr/bin/apt-get update
 /redwood/bin/rwtouch wait 25 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 25 tap 0.29 0.585 wait 3
-/redwood/bin/rwtouch wait 40
+# a cold launch can stay in the background (the 21:04 run's pid lived but the
+# home screen was in front): ask again. The permission alert's moment depends
+# on when the page actually loads (the 21:52 run's alert was up five minutes
+# after boot, after every fixed tap had passed), so a background line taps its
+# "Don't Allow" every few seconds for two and a half minutes while the page
+# loads; once the alert is gone those taps land on the description text, which
+# does nothing.
+/redwood/bin/rwtouch wait 15 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 145 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 12
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 120 tap 0.29 0.585 wait 4
-/redwood/bin/rwtouch tap 0.86 0.367 wait 15
-/redwood/bin/rwtouch tap 0.86 0.368 wait 45
+# the alert is dismissed by the two background lines (the whole page-load
+# window); the page has long loaded by now
+/redwood/bin/rwtouch wait 200
+# GET -> QUEUE
+/redwood/bin/rwtouch tap 0.86 0.37 wait 8
+# close the package sheet: a drag from the grabber itself (y 0.060, measured; the header
+# below it belongs to the scrolling page), twice
+/redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.80 500 wait 6
+/redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.85 700 wait 6
+# the queue's popup bar above the tab bar
+/redwood/bin/rwtouch tap 0.5 0.862 wait 12
 /var/jb/bin/cat /var/jb/var/log/apt/term.log
 /var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/tree -L 1 /var/jb
