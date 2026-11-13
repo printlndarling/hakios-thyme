@@ -1113,3 +1113,35 @@ fastboot endpoint wedged after the failed attempts (`fastboot reboot` answers
 waits for a power cycle. What to look for when it runs: the channel's
 `< open-ack 5 0`, the `slpi: diag: asked for logs ... on stream ...` lines
 every five seconds, and any `slpi: diag: N bytes` reply.
+
+## The one registry file the image does not have (2026-11-13)
+
+Every sensor log of the registry upload says the same, and it was read past
+until now:
+
+    slpi: sns: 189 registry group files in the image
+    slpi: sns: sensors/persist/registry/registry/sensors_registry: no such file in the image
+    slpi: sns: 188 of 189 registry groups written
+
+The count in the first line is the driver's table, not what it found; the
+second names the one file missing, and it is **the registry's own index** --
+the group that lists which groups exist and who owns them. The other 188 are
+group data (calibration, placements, configs). The DSP's registry sensor
+reads this index at start-up, and the firmware says what happens without it:
+`sns_registry_sensor.c:Error initializing registry rc=%d`, `Failure creating
+registry group` -- and every registry client then gets result 5, "no
+instance", which is exactly the gate this document has been circling.
+
+The file lives on the phone's **persist partition**, `/persist/sensors/registry/registry/sensors_registry`
+(the vendor path `/mnt/vendor/persist/sensors/...` is the same place). It is
+per-device calibration state and is in no public tree, which is why it never
+made it into `fw-sensors/`. Next, with the phone in Android and root:
+
+    adb shell su -c 'ls -la /persist/sensors/registry/registry/sensors_registry'
+    adb shell su -c 'cat /persist/sensors/registry/registry/sensors_registry' > /tmp/sensors_registry
+
+(read only: nothing is written to the phone). Staged as
+`fw-sensors/persist/registry/registry/sensors_registry`, `userland/build.sh`
+puts it in the image as `/fw/sensors/persist/registry/registry/sensors_registry`,
+the upload should reach 189 of 189, and the registry sensor has what it reads
+first.
