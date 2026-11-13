@@ -2233,6 +2233,11 @@ static struct {
 	bool up, broken;
 	uint32_t features;
 	bool agreed;
+	/* what the link's control messages did, for the teardown summary: the
+	 * boot log keeps its first 256 KB and its last 1 MB, and these lines
+	 * fall between them in a long run. */
+	uint32_t sent[16];
+	uint32_t seen[16];
 	struct glink_channel channel[CHANNELS];
 	uint32_t said, heard, trace;
 	char others[4][33];                     /* the channels the DSP opens that nobody here speaks (for the log) */
@@ -2380,6 +2385,9 @@ glink_say(unsigned command, uint32_t param1, uint32_t param2, const void *more, 
 	struct glink_message message = { .command = (uint16_t)command, .param1 = (uint16_t)param1, .param2 = param2 };
 	bool sent = glink_put(&message, sizeof(message), more, more_length);
 
+	if (command < 16) {
+		glink.sent[command]++;
+	}
 	if (glink.trace > 0 || !sent) {
 		glink.trace -= glink.trace > 0;
 		printf("slpi: glink: > %s %u %#x%s\n", glink_name(command), param1, param2, sent ? "" : ": NO ROOM IN OUR QUEUE, not sent");
@@ -2456,6 +2464,9 @@ glink_pump(void)
 			return;
 		}
 		glink.heard++;
+		if (message.command < 16) {
+			glink.seen[message.command]++;
+		}
 		if (glink.trace > 0 && message.command != GLINK_DATA && message.command != GLINK_DATA_MORE &&
 		    message.command != GLINK_INTENT && message.command != GLINK_DONE_REUSE) {
 			glink.trace--;
@@ -2468,6 +2479,16 @@ glink_pump(void)
 			}
 			glink_advance(length);
 			glink_say(GLINK_VERSION_ACK, GLINK_VERSION_1, glink.features, NULL, 0);
+			/*
+			 * The VERSION sent when the link started can go out before the
+			 * DSP listens for it: its ACK then never comes, glink.agreed
+			 * stays false and the DIAG channel below is never asked for.
+			 * Send ours again now that the DSP is talking; its ACK is what
+			 * asks for that channel.
+			 */
+			if (!glink.agreed && !glink.broken) {
+				glink_say(GLINK_VERSION, GLINK_VERSION_1, glink.features, NULL, 0);
+			}
 			break;
 		case GLINK_VERSION_ACK:
 			glink_advance(length);
@@ -2512,7 +2533,7 @@ glink_pump(void)
 			printf("slpi: glink: the DSP opens \"%s\" as its channel %u: acknowledged, and opened from our side as channel %u\n",
 			    name, message.param1, channel->ours);
 			channel->theirs = message.param1;
-			glink_say(GLINK_OPEN_ACK, channel->theirs, 0, NULL, 0);
+			glink_say(GLINK_OPEN_ACK, channel->theirs, channel->ours, NULL, 0);
 			if (!channel->asked) {
 				uint32_t size = (uint32_t)strlen(channel->name) + 1;
 
@@ -2527,11 +2548,37 @@ glink_pump(void)
 			for (unsigned c = 0; c < CHANNELS; c++) {
 				if (message.param1 == glink.channel[c].ours) {
 					glink.channel[c].acknowledged = true;
+					/*
+					 * GLINK's OPEN_ACK carries the acking side's
+					 * channel id in param2. A channel opened from
+					 * this side has no `theirs` otherwise, and the
+					 * open check below then never fires: the DIAG
+					 * channel stayed closed for exactly this.
+					 */
+					if (glink.channel[c].theirs == 0 && message.param2 != 0) {
+						glink.channel[c].theirs = message.param2;
+					}
 				}
 			}
 			break;
 		case GLINK_INTENT:
 			channel = glink_theirs(message.param1);
+			if (channel == NULL) {
+				/*
+				 * This DSP sends no channel id in OPEN_ACK (param2 is 0), so a
+				 * channel opened from this side learns the DSP's id from the
+				 * first intent it sends on that channel.
+				 */
+				for (unsigned c = 0; c < CHANNELS; c++) {
+					if (glink.channel[c].acknowledged && glink.channel[c].theirs == 0) {
+						channel = &glink.channel[c];
+						channel->theirs = message.param1;
+						printf("slpi: glink: the DSP's channel %u is \"%s\", from its first intent\n",
+						    message.param1, channel->name);
+						break;
+					}
+				}
+			}
 			for (uint32_t i = 0; channel != NULL && i < message.param2; i++) {
 				glink_peek(words, 8 + 8 * i, 8);
 				for (unsigned n = 0; n < sizeof(channel->their_intents) / sizeof(channel->their_intents[0]); n++) {
@@ -3029,6 +3076,10 @@ static uint32_t sns_registry_client;     /* boot-arg sns_registry_client: messag
 static uint32_t sns_start_delay;         /* boot-arg sns_start_delay: seconds to wait before the first sensor message */
 static uint32_t sns_upload_rounds = 1;   /* boot-arg sns_upload_rounds: send the group files again, the registry comes up late */
 static volatile uint32_t sns_ok_count;   /* QMI 0x20 responses that came back result 0 */
+static uint32_t sns_bad_count;           /* ... and those that did not */
+static uint32_t sns_last_result;        /* the last of either, for the teardown summary */
+static uint32_t sns_registry_written;   /* group files the registry upload sent */
+static uint32_t sns_registry_total;     /* ... of this many */
 
 static bool
 sns_server(uint32_t *node, uint32_t *port)
@@ -3471,6 +3522,10 @@ sns_input(const uint8_t *data, uint32_t length)
 			break;
 		}
 		if (type == 0x02 && message == 0x20 && l >= 4) {
+			sns_last_result = data[at] | data[at + 1] << 8;
+			if (sns_last_result != 0) {
+				sns_bad_count++;
+			}
 			printf("slpi: sns: < QMI result %u, error %u\n", data[at] | data[at + 1] << 8,
 			    data[at + 2] | data[at + 3] << 8);
 		} else if (type == 0x02) {
@@ -3888,6 +3943,8 @@ sns_registry_upload_all(const uint8_t suid[16])
 	char path[160];
 	uint32_t count = (uint32_t)(sizeof(sns_registry_files) / sizeof(sns_registry_files[0])), wrote = 0;
 
+	sns_registry_total = count;
+
 	printf("slpi: sns: %u registry group files in the image\n", count);
 	for (uint32_t i = 0; i < count; i++) {
 		snprintf(path, sizeof(path), "sensors/persist/registry/registry/%s", sns_registry_files[i]);
@@ -3902,6 +3959,7 @@ sns_registry_upload_all(const uint8_t suid[16])
 		}
 		sleep_ms(2);
 	}
+	sns_registry_written = wrote;
 	printf("slpi: sns: %u of %u registry groups written\n", wrote, count);
 }
 
@@ -7861,11 +7919,20 @@ battmgr_stop(void)
 static volatile bool link_wanted, link_runs;
 
 static uint32_t diag_packets;
+/* Counted for the teardown summary: the boot log keeps its first 256 KB
+ * and its last 1 MB, and the DIAG lines fall between them in a long run. */
+static uint32_t diag_asks;
+static uint8_t diag_first[32];
+static uint32_t diag_first_len;
 
 /* Whatever the DSP's diag router sends on "DIAG": hex and text, the first handful of packets only. */
 static void
 diag_input(const uint8_t *data, uint32_t length)
 {
+	if (diag_packets == 0 && length != 0) {
+		diag_first_len = length < sizeof(diag_first) ? length : sizeof(diag_first);
+		memcpy(diag_first, data, diag_first_len);
+	}
 	if (diag_packets >= 60) {
 		return;
 	}
@@ -7972,6 +8039,7 @@ diag_ask_mask(void)
 		    diag_equips[which].last_code, equip, stream, length);
 	}
 	diag_mask_tries++;
+	diag_asks++;
 	diag_asked_at = now_us();
 }
 
@@ -8051,6 +8119,24 @@ link_stop(void)
 		printf("slpi: link: %s; GLINK said %u and heard %u messages, QRTR sent %u and received %u datagrams, APR %u and %u "
 		    "packets; its doorbells heard: GLINK %u, SMP2P %u\n", link_runs ? "THE THREAD DOES NOT END" : "down", glink.said,
 		    glink.heard, qrtr_out, qrtr_in, apr_out, apr_in, doorbell.glink, doorbell.smp2p);
+		printf("slpi: diag: %u asks, %u replies, the channel was %s; glink agreed %d, DIAG asked %d ack %d theirs %u; "
+		    "sent ver %u vack %u open %u oack %u, heard ver %u vack %u open %u oack %u; the DSP opened \"%s\" "
+		    "\"%s\" \"%s\" \"%s\"", diag_asks, diag_packets,
+		    glink.channel[CHANNEL_DIAG].open ? "open" : "closed", glink.agreed,
+		    glink.channel[CHANNEL_DIAG].asked, glink.channel[CHANNEL_DIAG].acknowledged,
+		    glink.channel[CHANNEL_DIAG].theirs, glink.sent[GLINK_VERSION], glink.sent[GLINK_VERSION_ACK],
+		    glink.sent[GLINK_OPEN], glink.sent[GLINK_OPEN_ACK], glink.seen[GLINK_VERSION],
+		    glink.seen[GLINK_VERSION_ACK], glink.seen[GLINK_OPEN], glink.seen[GLINK_OPEN_ACK],
+		    glink.others[0], glink.others[1], glink.others[2], glink.others[3]);
+		if (diag_first_len != 0) {
+			printf("; first reply (%u bytes):", diag_first_len);
+			for (uint32_t i = 0; i < diag_first_len; i++) {
+				printf(" %02x", diag_first[i]);
+			}
+		}
+		printf("\n");
+		printf("slpi: sns: %u responses with result 0, %u with another (last %u); registry %u of %u written\n",
+		    sns_ok_count, sns_bad_count, sns_last_result, sns_registry_written, sns_registry_total);
 	}
 	lck_mtx_lock(&glink_lock);
 	glink.up = false;

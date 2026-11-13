@@ -1173,3 +1173,56 @@ should start by rebuilding the loader from clean (`devices/thyme/build-loader.sh
 and, if the loader still leaves after an upload, treat it as a loader defect
 and bisect the image (the last known-good one ran the 09:04 Sileo session as
 loader `4df5f9e0`).
+
+## The probe boots the DSP; the DIAG channel stays acked but unnamed (2026-11-14)
+
+The probe had never reached its measurement. Its scene was the daily
+`root-wirelessfull`, which carries no `fw/slpi.*`: step 2 stops with "nothing
+written" (the image is not found), which the 13 November note read as a loader
+session problem. The scene with the firmware is `root-slpitest.apfs`, built
+without the audio firmware by `docs/slpi-fastrpc.md`'s recipe (31.7 MB; with
+the 16.3 MB kernel, 48 MB of payload, under the loader's 64 MiB).
+`devices/thyme/diag-probe.sh` now defaults to it and prints the teardown
+summaries.
+
+With the DSP up, the DIAG channel is still not open, and the boot log cannot
+show why: the loader keeps its first 256 KB and its last 1 MB, and a full
+day's log fills the middle within seconds. The driver now counts the GLINK
+handshake and the SNS results and prints them at teardown (`slpi: diag:` and
+`slpi: sns:` lines). The run of 02:22 (`logs/022234-run.log`, kernel
+`dc059dbe0ce7`, scene `634f5a7281a7`) says:
+
+```
+slpi: diag: 0 asks, 0 replies, the channel was closed; glink agreed 1,
+DIAG asked 1 ack 1 theirs 0; sent ver 2 vack 1 open 3 oack 2, heard ver 1
+vack 2 open 4 oack 3; the DSP opened "mhi_sat" "LOOPBACK_CTL_DSPS" "" ""
+slpi: sns: 20 responses with result 0, 4 with another (last 0);
+registry 189 of 189 written
+```
+
+What this says:
+
+- The versions agree and the DSP **acks** our open of "DIAG", but the
+  `OPEN_ACK`'s second word is 0 and it never sends an intent on the channel,
+  so the driver never learns the DSP's id for it and never marks it open.
+  The driver now writes its own id in the `OPEN_ACK` it sends (GLINK's
+  convention, where it had been 0) and takes the DSP's id from the first
+  intent if the ack has none; this DSP sends neither, so the channel stays
+  acked and unnamed.
+- The DSP opens two channels this driver does not speak, `mhi_sat` and
+  `LOOPBACK_CTL_DSPS`; the four it opens are otherwise the ones the system
+  uses.
+- The registry upload, with `sns_registry_upload=1`, now sends **189 of 189**
+  groups (the empty `sensors_registry` index included). The client probe
+  (`sns_client_probe=1`) still sees four non-zero results among 24, so the
+  index alone does not open the registry gate. The summary keeps the last
+  result only; the next build should keep the first non-zero one and the
+  message it answered.
+
+Next, in order: (1) keep the first non-zero SNS result with its message id and
+SUID, so the four refusals have names; (2) decide whether a channel acked
+without an id should be marked open (and its data attributed from the first
+unknown id) or whether this DSP simply has no DIAG channel -- the absence of
+intents suggests the latter; (3) if DIAG is out, the framework's own ULOG road
+is behind the same registry gate, so the registry refusals are the thread to
+follow.

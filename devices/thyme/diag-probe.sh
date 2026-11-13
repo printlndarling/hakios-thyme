@@ -27,6 +27,17 @@ export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
 export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
 export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
+# The sensor DSP firmware is 7.9 MB and the loader's payload area is 64 MiB:
+# the daily scene with it makes a 71.9 MB payload, whose stage fails and can
+# leave the USB endpoint unresponsive (docs/slpi-fastrpc.md). The probe boots
+# the test scene instead, built without the audio firmware by that document's
+# recipe: REST=1 BLUETOOTH=1 GL=1 SLPI=1, copied to root-slpitest.apfs.
+export SCENE=${SCENE:-out/thyme-boot/root-slpitest.apfs}
+[ -f "$SCENE" ] || {
+	echo "diag-probe: no $SCENE; build it: cd userland && REST=1 BLUETOOTH=1 GL=1 SLPI=1 RC_JOBS=rc.jobs.wirelessfull bash build.sh, then cp root.apfs ../out/thyme-boot/root-slpitest.apfs" >&2
+	exit 1
+}
+
 STATE=$(./xl state)
 if [ "$STATE" = loader ] || [ "$STATE" = fastboot ]; then
 	echo "diag-probe: a kernel session is still open ($STATE); cold-resetting to Android"
@@ -62,3 +73,5 @@ found=$(grep -n 'open-ack 5\|slpi: diag:' "$LOG" | head -12 || true)
 echo "${found:-diag-probe:     (no DIAG line at all: was slpi=1 in the command line?)}"
 found=$(grep -n 'slpi: diag: [0-9][0-9]* bytes' "$LOG" | head -6 || true)
 echo "diag-probe: replies from the router: ${found:-(none)}"
+found=$(grep -n 'slpi: diag:.*asks.*replies' "$LOG" | tail -1 || true)
+echo "diag-probe: teardown summary: ${found:-(none: no teardown summary in the log)}"

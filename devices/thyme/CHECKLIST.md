@@ -4,6 +4,29 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
+
+The sensor DIAG probe never reached its measurement because its scene -- the
+daily `root-wirelessfull` -- has no `fw/slpi.*`, so step 2 stopped with
+"nothing written" (no image found); the 13 November note had read that as a
+loader-session failure. The probe now boots the DSP's test scene
+(`root-slpitest.apfs`, built without the audio firmware; 31.7 MB, and 48 MB of
+payload with the kernel, under the loader's 64 MiB), and the DSP comes up on
+every run since (`logs/002337-run.log`, `logs/022234-run.log`).
+
+The DIAG channel is still not open, and the boot log's middle is gone (the
+loader keeps the first 256 KB and the last 1 MB, and the bring-up lines fall
+between), so the driver now counts the GLINK handshake and the SNS results and
+prints them at teardown. The 02:22 run (`logs/022234-run.log`, kernel
+`dc059dbe0ce7`, scene `634f5a7281a7`): versions agree, the DSP **acks** our
+"DIAG" open but reports no channel id (`theirs 0`) and sends no intent on it,
+so the channel stays closed; the DSP also opens `mhi_sat` and
+`LOOPBACK_CTL_DSPS`, which this driver does not speak. The registry upload now
+sends **189 of 189** groups, the empty `sensors_registry` index included; the
+client probe still gets four non-zero results, so the index alone does not open
+the gate. The full account and the next steps are in
+`devices/thyme/docs/sensors-status.md`.
+
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown
