@@ -1252,3 +1252,38 @@ answered 0. The next build keeps all four (QMI id, result, group, SUID) so the
 answer is one run away; the client probe's own result is the one that says
 whether the registry gate moved.
 
+
+### The two result layers, and what the registry really answers (2026-11-14)
+
+An answer carries two results, and the earlier sessions read one for the other:
+the QMI result (TLV 0x02) is the client service's, and it answers 0 to almost
+anything; the SNS result (TLV 0x11) is the framework's own. The registry gate
+was always the second. With `sns_registry_upload=1 sns_client_probe=1
+sns_accel_direct=1` the teardown summary now separates them
+(`logs/034413-run.log`, kernel `3a5eb2dd35d6`, scene `634f5a7281a7`):
+
+```
+slpi: sns: 0 responses with result 0, 4 with another (last 0); registry 189 of 189 written
+slpi: sns: message 1 result 5; config result 5
+slpi: sns: the first SNS refusal: QMI 514 result 5 for SUID 75221e70b441255e59277f00a75427e1 (187 in all)
+```
+
+- **Every registry write is refused at the SNS layer with result 5
+  (ENOINSTANCE)**: 187 of the 189 are recorded that way. "189 of 189 written"
+  counts sends, not acceptance; the four QMI-level refusals of the earlier
+  summary are a separate, smaller fact.
+- Message 1 (the client instance) and the sensor config (513) both answer 5:
+  the framework has no instance to give, so the registry gate has not moved.
+  The upload building its index did not change it.
+- The SUID is the registry's real one in every refusal; the registry service
+  itself is the one without an instance.
+
+The gate is therefore at the framework's own start: the registry sensor never
+initializes (its `rc` and the file reads are the same thread), and every
+message to it -- a write included -- is ENOINSTANCE. What to measure next: the
+file requests the sensor process makes while it initializes, served by the
+driver's reverse tunnel, with the registry index present as it now is (a
+teardown summary of the last file opened and its result, since the boot log's
+middle is lost), and whether that index must have content rather than be the
+empty group the phone's own persist copy holds.
+

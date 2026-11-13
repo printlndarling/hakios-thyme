@@ -31,6 +31,18 @@ kernel `75e99555e03f`). The four refusals are not yet separated from the
 client probe; the next run keeps all of them. The full account and the next
 steps are in `devices/thyme/docs/sensors-status.md`.
 
+
+The SNS answer and the QMI answer are two layers: the QMI result (TLV 0x02)
+answers 0 to almost anything, the SNS result (TLV 0x11) is the framework's own,
+and the gate was always the second. With the upload, the client probe and the
+accelerometer config on, the teardown summary now separates them
+(`logs/034413-run.log`, kernel `3a5eb2dd35d6`): message 1 and the config both
+answer **5** at the SNS layer, and **187 of the 189 registry writes** answer 5
+too -- "189 of 189 written" counts sends, not acceptance. The registry service
+itself is the one without an instance, so the framework's own start is the
+gate; the next step is a summary of the file requests the sensor process makes
+while it initializes, with the index present as it now is.
+
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown
