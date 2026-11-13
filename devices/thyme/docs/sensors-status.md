@@ -1094,18 +1094,24 @@ Two things cost a run each and are worth writing down before the next one:
   kernel ran 562 s but the sensor DSP did not come up: `slpi: THE SENSOR DSP
   DID NOT COME UP: step 2 failed (nothing written)`. `xl reboot` first, then
   the run (which uploads the system image again, about 100 s).
-- **the sensor arguments must not sit at the end of a long command line.**
-  The loader's buffer is 607 characters and it cuts the tail silently in the
-  kernel (the loader log says `WARNING: the kernel command line is
-  TRUNCATED`, the kernel itself cannot see it): that run's args were cut by
-  99 characters, and `diag_mask=1` -- the last of them -- never arrived. The
-  probe's set is short on purpose:
+- **a run always boots the full daily set** (the owner's rule, 13 November:
+  no trimmed or "minimal" argument sets, ever). A probe with only
+  `debug=0x8 slpi=1 sns=1 diag_mask=1` booted a phone with no touch, a wrong
+  charge and no GPU -- CoreAnimation fell back to software drawing and looked
+  frozen -- which reads as a broken build and is not one. So
+  `devices/thyme/diag-probe.sh` takes `devices/thyme/ram.args` whole and adds
+  the three a probe needs (`slpi=1 sns=1 diag_mask=1`), checks the total
+  against the loader's 607 characters (xl adds about 310 of its own), and
+  refuses rather than cut anything: if it ever stops fitting, probe arguments
+  go, not daily ones.
+- **the loader's command line is cut at 607 characters silently.** The kernel
+  cannot see the cut (the loader log says `WARNING: the kernel command line
+  is TRUNCATED`): one run lost 99 characters and `diag_mask=1` -- the last of
+  them -- never arrived. Hence the check above, and the probe's three go last
+  where a loss is visible in the log.
 
-      BASE_ARGS='debug=0x8 slpi=1 sns=1 diag_mask=1' XL_SECS=180 \
-          devices/thyme/slpi-run.sh
-
-  (`slpi=1` is what starts the DSP; `sns=1` alone does not -- the first try
-  without it logged no `slpi:` line at all.)
+(`slpi=1` is what starts the DSP; `sns=1` alone does not -- the first try
+without it logged no `slpi:` line at all.)
 
 The probe itself has not run yet on a fresh session: the phone's loader
 fastboot endpoint wedged after the failed attempts (`fastboot reboot` answers

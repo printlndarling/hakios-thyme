@@ -39,7 +39,20 @@ if [ "$STATE" != android ]; then
 	exit 1
 fi
 
-BASE_ARGS='debug=0x8 slpi=1 sns=1 diag_mask=1' \
+# **The full daily set, never a trimmed one** (the owner's rule, 13 November: a probe with only
+# the sensor arguments booted a phone with no touch, a wrong charge and no GPU and read as a
+# broken build). ram.args as it is, plus the three the probe needs; the length is checked against
+# the loader's 607 characters, and if it ever stops fitting, the probe's own three go, not the
+# daily ones.
+ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+ARGS="$ARGS slpi=1 sns=1 diag_mask=1"
+# xl adds about 310 characters of its own (rd=, the kernel version, the hashes, the epoch).
+if [ $(( ${#ARGS} + 310 )) -gt 607 ]; then
+	echo "diag-probe: the full set with the probe's three is $(( ${#ARGS} + 310 )) characters, over the loader's 607" >&2
+	echo "diag-probe: drop probe arguments, not the daily ones" >&2
+	exit 1
+fi
+BASE_ARGS="$ARGS" \
 XL_SECS=${PROBE_SECS:-180} \
 	devices/thyme/slpi-run.sh
 
