@@ -201,6 +201,72 @@ the Confirm heights, and repeats the round once. `root-sileo.apfs`
 `7865e51ec69c78cba4de91135a9a66f5a4016932fc4e938b6e4f3236e8ef2bdf` (rebuilt
 and read back: apfsck clean, 925 entries).
 
+### The refused ring, and the faults behind it (2026-11-13)
+
+`logs/223305-run.log` is the 22:33 run -- the first with both earlier guards --
+and it carries a third fault in the same teardown window:
+`signal 11 at 0x1c, pc libOSMesa.8.dylib+0x747160`. The offsets, resolved
+against the unstripped build in
+`xnu-deps/build/mesa/build-softpipe-freedreno/src/gallium/targets/osmesa/`
+(the shipped library is that file after `llvm-strip -x`), name the whole stack:
+`util_queue_thread_func` -> `tc_batch_execute` -> `fd_context_flush` ->
+`fd_batch_from_fb` -> `alloc_batch_locked` -> `fd_batch_create` ->
+`subpass_create` -> `fd_submit_new_ringbuffer` -> `fd_submit_sp_new_ringbuffer`
+-> `fd_ringbuffer_sp_init` -> `fd_bo_map+0`. The first load in `fd_bo_map` is
+`bo->alloc_flags`, at 0x1c: the ring's buffer object was NULL.
+
+The refusal is the run's end again, and this time it is named:
+`hakios-drm: method 0x42 (16 bytes) refused: 0xe00002d8` (kIOReturnNotReady),
+the line the previous entry added. `fd_bo_new_ring()` answered NULL and every
+caller between it and the map passed the NULL on; `fd_ringbuffer_sp_init`
+mapped it (its `assert(fd_ring->ring_bo)` compiles out with NDEBUG).
+
+`tools/mesa/freedreno-ringbuffer-null-bo.patch` makes a refused allocation a
+failed call instead of a fault, along every path a run's ending walked. **The
+ring and the batch:** a ring's fields that `destroy()` reads are set before an
+allocation can fail; a NULL `ring_bo` and a failed map fail the ring; the
+submit's failure path returns the slab ring, and a streaming ring's second
+reference, to the pool; a refused primary ring is not referenced; a failed
+subpass or batch is destroyed and the flush reports no batch; the suballoc
+block object rings are cut from is checked before `fd_bo_ref()`.
+`fd_bc_invalidate_batch()` clears a cache slot only if it holds that batch, so
+a batch that failed before `alloc_batch_locked()` put it in the cache (`idx`
+still 0) is destroyed without evicting a live one. **The draw, the clear, the
+blit:** `fd_draw_vbo()`, `fd_clear()` and `fd_launch_grid()` return when the
+batch is refused (on the first ask and where the loop re-asks after a flush),
+as do `fd_emit_string_marker()`, `fd6_clear_buffer()` and
+`fd6_clear_texture()`; `handle_rgba_blit()` fails the blit, and `fd_blit()`
+falls back. **The shader variant:** `upload_shader_variant()` reports a refused
+`fd_bo_new()` instead of calling `fd_bo_mark_for_dump()` on the NULL
+(`bo->reloc_flags`, 0x18), and `ir3_shader_variant()` answers NULL for a
+variant that was not uploaded. `ir3_cache_lookup()` and every caller of
+`get_program_state()` already treat a NULL variant as a failed compile and
+drop the draw, so nothing above needed to change.
+
+Four runs walked the refusal out of the paths that ask Mesa for memory, one
+path per run, each ending where it always does -- the GPU given back, the next
+allocation refused (`0x46`, `0x48`, `0x9`, `0x42` and `0x47`, all
+`0xe00002d8`), the caller using the NULL it was handed:
+
+| run | fault | where |
+|---|---|---|
+| `223305` | `0x1c libOSMesa+0x747160` | `fd_ringbuffer_sp_init` -> `fd_bo_map` |
+| `231821` | `0x48 libOSMesa+0x6bba58` | `batch_draw_tracking`, from `fd_draw_vbo` |
+| `233042` | `0x8 libOSMesa+0x709b10` | `handle_rgba_blit<6>`, from `fd_blit` |
+| `234443` | `0x18 libOSMesa+0x7464cc` | `fd_bo_mark_for_dump`, from `upload_shader_variant` |
+
+The fifth run is the first without a fault: `logs/235606-run.log` (23:56,
+image `794049bd87ff8bc39bed01274fcb9a03c56dabcb1aac07607301c72d7c21e373`,
+kernel `e94dc3019303`, loader `615d9a67c677`) has no `signal 11`, no `exited
+due to SIGSEGV` and no crashed job. It still refuses five methods
+(`0x46`, `0x48`, `0x9`, `0x42`, `0x47`) when the GPU is given back at 299.2 s,
+and the window server keeps rendering -- 1,320 hardware frames logged, the
+last before the give-back -- then loses the frames the device refuses, as it
+should. The run ends with the audio DSP shut down and back to the loader:
+`XL_SECS=185`, the complete `devices/thyme/ram.args`, `root-wirelessfull.apfs`
+built by `devices/thyme/build-root.sh` (Mesa via `tools/mk-mesa.sh AIR=1`; the
+build is not reproducible byte for byte, so the hash names this file only).
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
