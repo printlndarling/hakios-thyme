@@ -71,7 +71,7 @@ returns NULL.
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
 `61be860be080bda8223fae0b892dae03f6a337026eb653eb95ca93915e509fe2` and
 `root-sileo.apfs`
-`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`
+`5ba635525eea3922dce0777b2c8387bd2125fd6b09b182bc77727149098d0a82`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for). An image's
 hash is of that build only: `/etc/motd` carries the build's date and time
@@ -144,7 +144,7 @@ the run. Both scene images rebuilt and read back (apfsck clean, 924/925
 entries): `root-wirelessfull.apfs`
 `61be860be080bda8223fae0b892dae03f6a337026eb653eb95ca93915e509fe2`,
 `root-sileo.apfs`
-`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`.
+`5ba635525eea3922dce0777b2c8387bd2125fd6b09b182bc77727149098d0a82`.
 
 ### GET pressed six times, and the lock screen took the Confirm (2026-11-13)
 
@@ -175,7 +175,26 @@ mangled (`dpkg-query -W -f__`, then a stray ` tree` line that ran and failed):
 the rewrite was generated inside a double-quoted shell string, which expanded
 `${binary:Package}` and the rest to nothing. Restored with the editor, which
 writes the text as it stands; `root-sileo.apfs` rebuilt and read back:
-`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`.
+`5ba635525eea3922dce0777b2c8387bd2125fd6b09b182bc77727149098d0a82`.
+
+### The queue holds the package; the sheet would not close (2026-11-13, 09:02)
+
+The run with the idle timer: **the screen stayed awake** (the 780 s screenshot
+is 9:16 with the page in front, not a lock screen), and **the button says
+QUEUE** -- the package is in Sileo's queue. `dpkg-query` reports "no packages
+found matching tree", which is the honest answer at that point; there is no
+fault in the log.
+
+What did not happen is the sheet closing: the 780 s screenshot still has the
+package page as a page sheet over the tab bar, so the queue's popup bar was
+never reachable and no Confirm was pressed. A 500 ms drag from y 0.060 (the
+grabber chip's upper edge; it measures 0.055..0.075 in that screenshot) did
+not carry it down. The scene now tries three shapes in a row -- a slower
+900 ms drag of the grabber, a drag of the page's top (a scroll view at its top
+hands the drag to the sheet), and a second grabber drag -- and then repeats
+the bar tap and the Confirm taps a second time; a miss costs nothing on the
+page. `root-sileo.apfs`
+`5ba635525eea3922dce0777b2c8387bd2125fd6b09b182bc77727149098d0a82`.
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 

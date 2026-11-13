@@ -46,15 +46,24 @@
 /redwood/bin/rwtouch wait 60 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
 /redwood/bin/rwtouch tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
 /redwood/bin/rwtouch tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
-/redwood/bin/rwtouch tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
 # What Sileo own apt run answers, against the index Sileo made: the listing and a simulate.
 /var/jb/usr/bin/ls -la /var/jb/var/lib/apt/sileolists
 /var/jb/usr/bin/apt-get install -s -f -oDir::State::lists=/var/jb/var/lib/apt/sileolists/ tree
-# close the package sheet: a drag from the grabber (y 0.060), twice
-/redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.80 500 wait 6
-/redwood/bin/rwtouch swipe 0.5 0.060 0.5 0.85 700 wait 6
+# Closing the package sheet. The 09:02 run's 780 s screenshot still showed it open, QUEUE
+# on the button: a 500 ms drag from 0.060 (the grabber's upper edge) did not carry it down.
+# Three shapes now, one after the other, a miss costing nothing: a slow drag of the grabber
+# itself (its chip measures y 0.055..0.075), a drag of the page's top (a scroll view at its
+# top hands the drag to the sheet), and a second grabber drag.
+/redwood/bin/rwtouch swipe 0.5 0.065 0.5 0.75 900 wait 4
+/redwood/bin/rwtouch swipe 0.5 0.30 0.5 0.85 600 wait 4
+/redwood/bin/rwtouch swipe 0.5 0.065 0.5 0.80 900 wait 6
 # the queue popup bar opens the downloads sheet; Confirm is its footer full-width button,
 # tried at a few heights (a miss falls on the sheet list)
+/redwood/bin/rwtouch tap 0.5 0.862 wait 10
+/redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
+# the same round again: if the first bar tap was swallowed by a sheet that closed late, this
+# one lands on the bar the queue still shows
+/redwood/bin/rwtouch swipe 0.5 0.065 0.5 0.75 900 wait 4
 /redwood/bin/rwtouch tap 0.5 0.862 wait 10
 /redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
 # the download and the install take a moment of their own
