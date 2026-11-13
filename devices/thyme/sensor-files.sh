@@ -33,4 +33,25 @@ for name in hw_platform platform_subtype platform_subtype_id platform_version so
 	"$ADB" shell cat "/sys/devices/soc0/$name" | tr -d '\r' > "$DEST/soc0/$name"
 done
 
+# The persist registry's index, sensors_registry, is the one file the scene's
+# fw-sensors tree does not have (docs/sensors-status.md, "The one registry file
+# the image does not have"): the DSP's registry sensor reads it first, and
+# without it the registry never creates its instance -- every registry client
+# gets result 5. It is per-device state on the persist partition, readable with
+# root and read only; the bytes go in as they are (the parser would read a
+# text file, but nothing here may alter it).
+if "$ADB" shell su -c true >/dev/null 2>&1; then
+	mkdir -p "$DEST/persist/registry/registry"
+	for source in /persist/sensors/registry/registry/sensors_registry \
+	              /mnt/vendor/persist/sensors/registry/registry/sensors_registry; do
+		if "$ADB" shell su -c "test -f $source" >/dev/null 2>&1; then
+			"$ADB" shell su -c "cat $source" > "$DEST/persist/registry/registry/sensors_registry"
+			echo "sensor-files: the persist registry index, $source: $(wc -c < "$DEST/persist/registry/registry/sensors_registry") bytes"
+			break
+		fi
+	done
+else
+	echo "sensor-files: no root on the phone; the persist registry index was not pulled"
+fi
+
 echo "sensor-files: $(find "$DEST" -type f | wc -l) files in $DEST"
