@@ -1144,4 +1144,26 @@ made it into `fw-sensors/`. Next, with the phone in Android and root:
 `fw-sensors/persist/registry/registry/sensors_registry`, `userland/build.sh`
 puts it in the image as `/fw/sensors/persist/registry/registry/sensors_registry`,
 the upload should reach 189 of 189, and the registry sensor has what it reads
-first.
+first. (The phone's own copy turns out to be empty, 0 bytes, so the group is
+just the name with no items -- the driver now sends it as one.)
+
+### The loader that leaves after an upload (2026-11-13, evening)
+
+Four attempts on the evening of 13 November ended the same way, and the pattern
+is worth writing down before the next one:
+
+- `xl enter` succeeds (the loader is up, its own image boots);
+- `xl ramdisk` succeeds (2,387 MB, ~100 s);
+- within the moments after the upload the loader is **gone**: the next `xl run`
+  finds the phone in the stock bootloader, and the "send it on to Android"
+  attempts that follow deadlock its USB endpoint (`fastboot reboot` times out);
+  only a power cycle recovers.
+
+The upload and the run were in one command (no idle window between them), so
+this is not the idle-timeout that cost the earlier attempt. The loader itself
+booted a kernel fine in the morning from the same sources; the image was
+rebuilt since (kernel rebuild also rebuilds the loader EFI). The next session
+should start by rebuilding the loader from clean (`devices/thyme/build-loader.sh`)
+and, if the loader still leaves after an upload, treat it as a loader defect
+and bisect the image (the last known-good one ran the 09:04 Sileo session as
+loader `4df5f9e0`).

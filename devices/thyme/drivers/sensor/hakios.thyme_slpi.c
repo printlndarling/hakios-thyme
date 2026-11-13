@@ -3868,6 +3868,20 @@ static const char *const sns_registry_files[] = {
 	"vl53l1_tof_platform.prox.xtalkhisto.xtalk_shape_bin_data",
 };
 
+/* A group with a name and no items: the phone's own sensors_registry is exactly
+ * that (0 bytes on /mnt/vendor/persist/sensors/registry/registry), and it is the
+ * group the framework's registry sensor reads first. */
+static int
+sns_registry_send_empty(const char *name, const uint8_t suid[16])
+{
+	uint8_t payload[512];
+	uint8_t *s = payload;
+
+	s = sns_bytes(s, 1, name, (uint32_t)strlen(name));
+	s = sns_bytes(s, 2, "", 0);
+	return sns_qmi_send(0x202, suid, payload, (uint32_t)(s - payload));
+}
+
 static void
 sns_registry_upload_all(const uint8_t suid[16])
 {
@@ -3879,6 +3893,12 @@ sns_registry_upload_all(const uint8_t suid[16])
 		snprintf(path, sizeof(path), "sensors/persist/registry/registry/%s", sns_registry_files[i]);
 		if (sns_registry_image(path, suid) == 0) {
 			wrote++;
+		} else if (strcmp(sns_registry_files[i], "sensors_registry") == 0) {
+			/* never a file in the image: the phone's is an empty group */
+			if (sns_registry_send_empty(sns_registry_files[i], suid) == 0) {
+				printf("slpi: sns: sensors_registry sent as an empty group\n");
+				wrote++;
+			}
 		}
 		sleep_ms(2);
 	}
