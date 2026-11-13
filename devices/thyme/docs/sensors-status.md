@@ -1083,3 +1083,33 @@ creating the DAE sensor through the registry the framework's own client path
 uses, i.e. exactly the step this document's registry section says is still
 refused, so it is not a shortcut around the open problem: it is a second
 client for the same gate.
+
+## Running the DIAG probe on the phone (2026-11-13)
+
+Two things cost a run each and are worth writing down before the next one:
+
+- **a sensor run needs a fresh loader session.** `xl` warns that a second
+  kernel in one session of the loader "has died at once every time it was
+  tried", and the one time it was tried anyway (`logs/101037-run.log`) the
+  kernel ran 562 s but the sensor DSP did not come up: `slpi: THE SENSOR DSP
+  DID NOT COME UP: step 2 failed (nothing written)`. `xl reboot` first, then
+  the run (which uploads the system image again, about 100 s).
+- **the sensor arguments must not sit at the end of a long command line.**
+  The loader's buffer is 607 characters and it cuts the tail silently in the
+  kernel (the loader log says `WARNING: the kernel command line is
+  TRUNCATED`, the kernel itself cannot see it): that run's args were cut by
+  99 characters, and `diag_mask=1` -- the last of them -- never arrived. The
+  probe's set is short on purpose:
+
+      BASE_ARGS='debug=0x8 slpi=1 sns=1 diag_mask=1' XL_SECS=180 \
+          devices/thyme/slpi-run.sh
+
+  (`slpi=1` is what starts the DSP; `sns=1` alone does not -- the first try
+  without it logged no `slpi:` line at all.)
+
+The probe itself has not run yet on a fresh session: the phone's loader
+fastboot endpoint wedged after the failed attempts (`fastboot reboot` answers
+"AdbWriteEndpointSync failed"), which no software step recovers; the phone
+waits for a power cycle. What to look for when it runs: the channel's
+`< open-ack 5 0`, the `slpi: diag: asked for logs ... on stream ...` lines
+every five seconds, and any `slpi: diag: N bytes` reply.
