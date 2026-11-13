@@ -43,6 +43,17 @@ itself is the one without an instance, so the framework's own start is the
 gate; the next step is a summary of the file requests the sensor process makes
 while it initializes, with the index present as it now is.
 
+
+The FastRPC file service now counts what the sensor process asks for and
+prints the last opens at teardown: without the listener order nothing is asked
+(`0 file requests`); with it the DSP reads `/fw/sensors/soc0/hw_platform`
+(6 bytes) -- the fusion sensor's init, not the registry's. The registry's index
+file is empty, as on the phone, and could never have been served: `apfs_file()`
+and the sensor's file service both refused zero-length files; both now serve
+an empty file as an empty file (kernel `be6ebd2aaca2`). The listener order,
+the full daily set and the probe tags fit the loader's 607-character line; the
+hashes xl appends are what get cut.
+
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown

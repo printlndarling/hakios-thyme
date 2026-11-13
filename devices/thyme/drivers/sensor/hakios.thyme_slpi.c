@@ -5181,6 +5181,33 @@ static struct fastrpc_file_slot fastrpc_files[FASTRPC_FILE_SLOTS];
 static struct fastrpc_dir_slot fastrpc_dirs[FASTRPC_DIR_SLOTS];
 /* Qualcomm's apps_std_imp.c starts its file handles at APPS_FD_BASE = 100 */
 static uint32_t fastrpc_next_fd = 100;
+/*
+ * The files the DSP asks for, kept for the teardown summary: a long run's
+ * boot log loses its middle, and the registry process's own start is what
+ * these reads say.
+ */
+struct fastrpc_file_note {
+	char path[48];
+	int ok;
+	uint32_t size;
+};
+static struct fastrpc_file_note fastrpc_file_notes[8];
+static uint32_t fastrpc_file_notes_at, fastrpc_file_notes_total, fastrpc_file_fails;
+
+static void
+fastrpc_note_file(const char *path, int ok, uint32_t size)
+{
+	struct fastrpc_file_note *n = &fastrpc_file_notes[fastrpc_file_notes_at];
+
+	strlcpy(n->path, path, sizeof(n->path));
+	n->ok = ok;
+	n->size = size;
+	fastrpc_file_notes_at = (fastrpc_file_notes_at + 1) % 8;
+	fastrpc_file_notes_total++;
+	if (!ok) {
+		fastrpc_file_fails++;
+	}
+}
 
 /*
  * The DSP's writable files.  The sensor registry keeps its parsed groups under
@@ -5444,11 +5471,13 @@ fastrpc_file_data(const char *path, uint32_t *size)
 		uint64_t image_size = 0;
 		const uint8_t *image = hakios_image_file("fw", path + sizeof("/fw/") - 1, &image_size, NULL);
 
-		if (image != NULL && image_size != 0 && image_size <= FASTRPC_FILE_LIMIT) {
+		if (image != NULL && image_size <= FASTRPC_FILE_LIMIT) {
 			uint8_t *copy = kalloc_data((size_t)image_size + 1, Z_WAITOK | Z_ZERO);
 
 			if (copy != NULL) {
-				memcpy(copy, image, (size_t)image_size);
+				if (image_size != 0) {
+					memcpy(copy, image, (size_t)image_size);
+				}
 				*size = (uint32_t)image_size;
 				return copy;
 			}
@@ -5916,6 +5945,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			}
 			fastrpc_files[slot].write = true;
 			strlcpy(fastrpc_files[slot].path, path, sizeof(fastrpc_files[slot].path));
+			fastrpc_note_file(path, 1, 0);
 			printf("slpi: fastrpc: apps_std: opened %s for writing as %u\n", path, fastrpc_files[slot].fd);
 			result = 0;
 			break;
@@ -5923,6 +5953,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		data = fastrpc_file_data(path, &file_size);
 		if (data == NULL) {
 			bzero(&fastrpc_files[slot], sizeof(fastrpc_files[slot]));
+			fastrpc_note_file(path, 0, 0);
 			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
 			result = (int32_t)AEE_EFAILED;
 			break;
@@ -5930,6 +5961,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		fastrpc_files[slot].data = data;
 		fastrpc_files[slot].size = file_size;
 		fastrpc_files[slot].offset = 0;
+		fastrpc_note_file(path, 1, file_size);
 		printf("slpi: fastrpc: apps_std: opened %s (%u bytes) as %u\n", path, file_size, fastrpc_files[slot].fd);
 		result = 0;
 		break;
@@ -5964,6 +5996,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		}
 		data = fastrpc_file_data(path, &file_size);
 		if (data == NULL) {
+			fastrpc_note_file(path, 0, 0);
 			printf("slpi: fastrpc: apps_std: cannot read \"%s\"\n", path);
 			result = (int32_t)AEE_EFAILED;
 			break;
@@ -5984,6 +6017,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		if (numbers != NULL) {
 			numbers[0] = fastrpc_files[slot].fd;
 		}
+		fastrpc_note_file(path, 1, file_size);
 		printf("slpi: fastrpc: apps_std: opened %s (%u bytes) as %u\n", path, file_size, fastrpc_files[slot].fd);
 		result = 0;
 		break;
@@ -8232,6 +8266,16 @@ link_stop(void)
 			    i + 1, r->msg, r->result, r->group, r->suid[0], r->suid[1], r->suid[2], r->suid[3],
 			    r->suid[4], r->suid[5], r->suid[6], r->suid[7], r->suid[8], r->suid[9], r->suid[10],
 			    r->suid[11], r->suid[12], r->suid[13], r->suid[14], r->suid[15]);
+		}
+		uint32_t count = fastrpc_file_notes_total < 8 ? fastrpc_file_notes_total : 8;
+		uint32_t first = (fastrpc_file_notes_at + 8 - count) % 8;
+
+		printf("slpi: fastrpc: %u file requests, %u failed; the last %u:\n", fastrpc_file_notes_total,
+		    fastrpc_file_fails, count);
+		for (uint32_t i = 0; i < count; i++) {
+			struct fastrpc_file_note *n = &fastrpc_file_notes[(first + i) % 8];
+
+			printf("slpi: fastrpc: %s %s (%u bytes)\n", n->ok ? "read" : "FAILED", n->path, n->size);
 		}
 	}
 	lck_mtx_lock(&glink_lock);

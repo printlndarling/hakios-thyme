@@ -1287,3 +1287,37 @@ teardown summary of the last file opened and its result, since the boot log's
 middle is lost), and whether that index must have content rather than be the
 empty group the phone's own persist copy holds.
 
+
+### The file service, the empty index, and the 607-character line (2026-11-14)
+
+The sensor process's registry init cannot be seen in a full run's log (its
+middle is lost), so the FastRPC file service now counts what the DSP asks for
+and prints the last eight opens at teardown. The first runs with it
+(`logs/043833-run.log`, kernel `59d68d257658`; `logs/050820-run.log`, kernel
+`be6ebd2aaca2`) say two things:
+
+- **Without the listener order the DSP asks for nothing**: `0 file requests`.
+  With `fastrpc_phone=2 fastrpc_smmu=2 fastrpc_call=9 fastrpc_early=1` (the
+  documented order; `fastrpc_pd` already defaults to 2) it serves
+  `/fw/sensors/soc0/hw_platform` (6 bytes) -- the first file these probes have
+  seen served, and the fusion sensor's own init, not the registry's. The
+  registry's index read has not appeared yet.
+- **The registry's index is an empty file and could never have been served**:
+  the scene's `fw/sensors/persist/registry/registry/sensors_registry` is 0
+  bytes (the phone's persist copy is too), and `apfs_file()` answered EFBIG
+  for a zero-length file while the sensor file service required
+  `image_size != 0`; the read fell through to the root and failed. Both now
+  treat an empty file as a file (a one-byte zeroed buffer with size 0), so a
+  registry that asks for its index gets an empty file rather than ENOENT. The
+  fix is in kernel `be6ebd2aaca2`; the read it fixes has not been asked for
+  yet.
+
+The command line that carries all this holds 607 characters: the loader cuts
+it silently, and xl appends `kernel_sha`, `image_sha` and `loader_sha` after
+the probe's arguments, so at these lengths it is the hashes that are cut
+mid-token (`image_sh`). The probe's own tags sit before them and survive; the
+listener order with the full daily set (343 characters) reaches the kernel
+whole. The probe script's `+310` estimate for xl's share is close to the
+measured ~300, and the script's rule (probe arguments go before daily ones)
+remains the one that matters.
+

@@ -105,7 +105,7 @@ apfs_file(int disk, const uint8_t *base, uint64_t length, const char *dir, const
 	if (error == 0) {
 		error = apfs_inode_size(vol, &ino, &fsize);
 	}
-	if (error == 0 && (fsize == 0 || fsize > 256 * 1024 * 1024)) {
+	if (error == 0 && fsize > 256 * 1024 * 1024) {
 		error = EFBIG;
 	}
 	if (error == 0) {
@@ -126,7 +126,8 @@ apfs_file(int disk, const uint8_t *base, uint64_t length, const char *dir, const
 		}
 	}
 	if (error == 0) {
-		data = kalloc_data((vm_size_t)fsize, Z_WAITOK);
+		/* an empty file is a file: the registry's own index is one */
+		data = kalloc_data(fsize == 0 ? 1 : (vm_size_t)fsize, Z_WAITOK | Z_ZERO);
 		error = data == NULL ? ENOMEM : 0;
 	}
 	memset(&cf, 0, sizeof(cf));
@@ -149,7 +150,7 @@ apfs_file(int disk, const uint8_t *base, uint64_t length, const char *dir, const
 		kept[i].data = data;            /* (last: a reader of the table sees all of it or none) */
 		*size = fsize;
 	} else if (data != NULL) {
-		kfree_data(data, (vm_size_t)fsize);
+		kfree_data(data, fsize == 0 ? 1 : (vm_size_t)fsize);
 		data = NULL;
 	}
 out:
