@@ -72,6 +72,13 @@ mkdir -p logs
 # There is one phone, whichever working copy (tools/new-workspace.sh) talks to it: the locks are
 # outside all of them.
 PHONE=${XDG_RUNTIME_DIR:-/tmp}/darwin-hakios-phone
+# A session whose systemd user session did not start has XDG_RUNTIME_DIR set to a directory that is
+# not there (or not writable): flock's "cannot open" then reads like "another run holds it" -- one
+# evening's uploads were refused that way (13 November). Make it, or fall back to /tmp, and both
+# the lock and the resident-image note stay findable.
+if ! mkdir -p "${PHONE%/*}" 2>/dev/null || [ ! -w "${PHONE%/*}" ]; then
+	PHONE=/tmp/darwin-hakios-phone
+fi
 # adb starts a server of its own the first time, and the server inherits every open descriptor: started during a run it
 # kept the run's lock (descriptor 8, below) for as long as it lived, and every later command said a run was in progress
 # (27 October). So adb never gets that descriptor.
