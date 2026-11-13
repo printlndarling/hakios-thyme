@@ -9,6 +9,7 @@
  * which `ipsw dyld a2s <cache> <address>` turns back into names.
  */
 #include <dispatch/dispatch.h>
+#include <notify.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -410,6 +411,46 @@ stay_awake(void)
 	});
 }
 
+/*
+ * The package page has no way out of itself. Sileo 2.5 opens it as NativePackageViewController, whose
+ * modal "Done" button is commented out in the source, so only the sheet's own drag can close it --
+ * and the scene's injected touches, three shapes of them (a slow grabber drag, a drag of the page's
+ * top, another grabber drag), did not: the 09:23 run's 780 s screenshot still has the sheet over the
+ * tab bar, the package queued, and no way to reach the queue's bar and Confirm.
+ *
+ * So the application closes it itself: a Darwin notification, "com.hakios.close-sheet", which the
+ * scene posts with rwtouch notify, dismisses whatever is presented over the window's root.
+ */
+static void
+close_presented(void)
+{
+	Class application = objc_getClass("UIApplication");
+	id shared, window, root, top;
+
+	if (application == Nil) {
+		return;
+	}
+	shared = ((id (*)(id, SEL))objc_msgSend)((id)application, sel_registerName("sharedApplication"));
+	window = shared != nil ? ((id (*)(id, SEL))objc_msgSend)(shared, sel_registerName("keyWindow")) : nil;
+	root = window != nil ? ((id (*)(id, SEL))objc_msgSend)(window, sel_registerName("rootViewController")) : nil;
+	for (top = root; top != nil;) {
+		id presented = ((id (*)(id, SEL))objc_msgSend)(top, sel_registerName("presentedViewController"));
+
+		if (presented == nil) {
+			break;
+		}
+		top = presented;
+	}
+	if (root == nil || top == nil || top == root) {
+		say("hakios: Sileo: close-sheet asked, nothing is presented\n",
+		    sizeof("hakios: Sileo: close-sheet asked, nothing is presented\n") - 1);
+		return;
+	}
+	((void (*)(id, SEL, BOOL, id))objc_msgSend)(top, sel_registerName("dismissViewControllerAnimated:completion:"), YES, nil);
+	say("hakios: Sileo: close-sheet: the page on top was dismissed\n",
+	    sizeof("hakios: Sileo: close-sheet: the page on top was dismissed\n") - 1);
+}
+
 __attribute__((constructor))
 static void
 hakios_app_init(void)
@@ -443,6 +484,14 @@ hakios_app_init(void)
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
 		dispatch_async(dispatch_get_main_queue(), ^{ stay_awake(); });
+		{
+			int token = 0;
+
+			notify_register_dispatch("com.hakios.close-sheet", &token, dispatch_get_main_queue(), ^(int which) {
+				(void)which;
+				close_presented();
+			});
+		}
 		/*
 		 * Whether the process may use the network at all. Sileo's URL session
 		 * says "offline" for every task while apt, from the same Wi-Fi, fetches
