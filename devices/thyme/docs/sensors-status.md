@@ -1226,3 +1226,29 @@ unknown id) or whether this DSP simply has no DIAG channel -- the absence of
 intents suggests the latter; (3) if DIAG is out, the framework's own ULOG road
 is behind the same registry gate, so the registry refusals are the thread to
 follow.
+
+### The first refusal has a name: a registry write of "ccd_ttw" (2026-11-14)
+
+With the registry upload on (`sns_registry_upload=1`) and the client probe
+(`sns_client_probe=1`), the teardown summary keeps the first non-zero answer
+with the request that caused it:
+
+```
+slpi: sns: 20 responses with result 0, 4 with another (last 0); registry 189 of 189 written
+slpi: sns: the first refusal: QMI 514 answered 1 for SUID 75221e70b441255e59277f00a75427e1
+slpi: sns: ... while writing the group "ccd_ttw"
+```
+
+QMI 514 is 0x202, the registry write; the SUID is the registry's real one
+(low `0x5e2541b4701e2275`, high `0xe12754a7007f2759`, as bytes); result 1 is
+SNS_EFAILED. So the writes are not refused wholesale: the upload reaches
+`ccd_ttw` after the groups before it, and four of the 189 answer non-zero.
+`ccd_ttw` is one of the contextual (CCD) groups, not the sensor calibration
+the client manager needs.
+
+The four refusals are not yet separated from the client probe: message 1 may
+be one of them, or the registry upload may have opened the gate and message 1
+answered 0. The next build keeps all four (QMI id, result, group, SUID) so the
+answer is one run away; the client probe's own result is the one that says
+whether the registry gate moved.
+

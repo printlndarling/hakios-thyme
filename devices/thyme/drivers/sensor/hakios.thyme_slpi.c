@@ -3079,6 +3079,13 @@ static volatile uint32_t sns_ok_count;   /* QMI 0x20 responses that came back re
 static uint32_t sns_bad_count;           /* ... and those that did not */
 static uint32_t sns_last_result;        /* the last of either, for the teardown summary */
 static uint32_t sns_registry_written;   /* group files the registry upload sent */
+static uint32_t sns_last_msg;            /* the last request sent, for naming a refusal */
+static uint8_t sns_last_suid[16];
+static uint32_t sns_first_bad_msg;       /* the first QMI 0x20 answer with a non-zero result */
+static uint32_t sns_first_bad_result;
+static uint8_t sns_first_bad_suid[16];
+static const char *sns_last_group;       /* the registry group file being written, if any */
+static char sns_first_bad_group[40];
 static uint32_t sns_registry_total;     /* ... of this many */
 
 static bool
@@ -3248,6 +3255,8 @@ sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint3
 		}
 		heap = true;
 	}
+	sns_last_msg = msg_id;
+	memcpy(sns_last_suid, suid, sizeof(sns_last_suid));
 	proto_length = sns_request(msg_id, suid, payload, payload_length, proto, capacity);
 	if (proto_length == 0 || proto_length + 32 > (heap ? capacity + 32 : sizeof(qmi_stack))) {
 		error = EINVAL;
@@ -3525,6 +3534,14 @@ sns_input(const uint8_t *data, uint32_t length)
 			sns_last_result = data[at] | data[at + 1] << 8;
 			if (sns_last_result != 0) {
 				sns_bad_count++;
+				if (sns_first_bad_result == 0) {
+					sns_first_bad_result = sns_last_result;
+					sns_first_bad_msg = sns_last_msg;
+					memcpy(sns_first_bad_suid, sns_last_suid, sizeof(sns_first_bad_suid));
+					if (sns_last_group != NULL) {
+						strlcpy(sns_first_bad_group, sns_last_group, sizeof(sns_first_bad_group));
+					}
+				}
 			}
 			printf("slpi: sns: < QMI result %u, error %u\n", data[at] | data[at + 1] << 8,
 			    data[at + 2] | data[at + 3] << 8);
@@ -3948,6 +3965,7 @@ sns_registry_upload_all(const uint8_t suid[16])
 	printf("slpi: sns: %u registry group files in the image\n", count);
 	for (uint32_t i = 0; i < count; i++) {
 		snprintf(path, sizeof(path), "sensors/persist/registry/registry/%s", sns_registry_files[i]);
+		sns_last_group = sns_registry_files[i];
 		if (sns_registry_image(path, suid) == 0) {
 			wrote++;
 		} else if (strcmp(sns_registry_files[i], "sensors_registry") == 0) {
@@ -8137,6 +8155,18 @@ link_stop(void)
 		printf("\n");
 		printf("slpi: sns: %u responses with result 0, %u with another (last %u); registry %u of %u written\n",
 		    sns_ok_count, sns_bad_count, sns_last_result, sns_registry_written, sns_registry_total);
+		if (sns_first_bad_result != 0) {
+			printf("slpi: sns: the first refusal: QMI %u answered %u for SUID "
+			    "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+			    sns_first_bad_msg, sns_first_bad_result, sns_first_bad_suid[0], sns_first_bad_suid[1],
+			    sns_first_bad_suid[2], sns_first_bad_suid[3], sns_first_bad_suid[4], sns_first_bad_suid[5],
+			    sns_first_bad_suid[6], sns_first_bad_suid[7], sns_first_bad_suid[8], sns_first_bad_suid[9],
+			    sns_first_bad_suid[10], sns_first_bad_suid[11], sns_first_bad_suid[12], sns_first_bad_suid[13],
+			    sns_first_bad_suid[14], sns_first_bad_suid[15]);
+			if (sns_first_bad_group[0] != 0) {
+				printf("slpi: sns: ... while writing the group \"%s\"\n", sns_first_bad_group);
+			}
+		}
 	}
 	lck_mtx_lock(&glink_lock);
 	glink.up = false;

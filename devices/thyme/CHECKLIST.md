@@ -24,8 +24,12 @@ so the channel stays closed; the DSP also opens `mhi_sat` and
 `LOOPBACK_CTL_DSPS`, which this driver does not speak. The registry upload now
 sends **189 of 189** groups, the empty `sensors_registry` index included; the
 client probe still gets four non-zero results, so the index alone does not open
-the gate. The full account and the next steps are in
-`devices/thyme/docs/sensors-status.md`.
+the gate. With the upload and the client probe both on, the first refusal is
+named: QMI 514 (the registry write) answered 1 while writing the group
+`ccd_ttw`, so the writes are not refused wholesale (`logs/024810-run.log`,
+kernel `75e99555e03f`). The four refusals are not yet separated from the
+client probe; the next run keeps all of them. The full account and the next
+steps are in `devices/thyme/docs/sensors-status.md`.
 
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
