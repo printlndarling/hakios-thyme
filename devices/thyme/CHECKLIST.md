@@ -69,9 +69,9 @@ same at 0x208, both to a block that decrements the ringbuffer's reference and
 returns NULL.
 
 The images carrying both: `out/thyme-boot/root-wirelessfull.apfs`
-`b3b2ffaf1d63b8d324d2739e0732b9b19ec72af530fecc1b6292f8ecd68ae5f9` and
+`61be860be080bda8223fae0b892dae03f6a337026eb653eb95ca93915e509fe2` and
 `root-sileo.apfs`
-`4539e9a532337b956dcadf213467e9c2eb7cacb92713a2d71df353682a151738`
+`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`
 (Mesa via `tools/mk-mesa.sh AIR=1`; without `AIR=1` the rebuild leaves out
 `libair.a`, which `build.sh`'s HakiosMetal step then asks for). An image's
 hash is of that build only: `/etc/motd` carries the build's date and time
@@ -142,9 +142,40 @@ tapping whenever the alert appears, and the GET is alternated with a
 dismissal round so a tap swallowed by a late alert costs one round instead of
 the run. Both scene images rebuilt and read back (apfsck clean, 924/925
 entries): `root-wirelessfull.apfs`
-`b3b2ffaf1d63b8d324d2739e0732b9b19ec72af530fecc1b6292f8ecd68ae5f9`,
+`61be860be080bda8223fae0b892dae03f6a337026eb653eb95ca93915e509fe2`,
 `root-sileo.apfs`
-`4539e9a532337b956dcadf213467e9c2eb7cacb92713a2d71df353682a151738`.
+`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`.
+
+### GET pressed six times, and the lock screen took the Confirm (2026-11-13)
+
+The 08:40 run is the first whose scene reached its end, and it settled three
+things at once.
+
+**The teardown faults are gone.** `logs/084005-run.log` has no
+`signal 11 at 0x18` at all: the bindless guard and the heap guard hold, and
+the run ends with an orderly return.
+
+**GET works.** The helper's log shows Sileo running `apt-get -sqf ... install
+--reinstall tree=2.0.1` six times -- once per GET round -- each against its
+own `sileolists` index, i.e. the tap queued the package and the resolver
+answered. `dpkg` was never asked to install, and `/var/jb/var/log/apt/term.log`
+does not exist: the Confirm was never pressed.
+
+**The screen had locked.** The 600 s and 690 s screenshots are the lock screen
+(8:51 and 8:52), so everything after the GET rounds -- the sheet dismissal,
+the queue's bar, the Confirm taps -- landed on it. The taps were still being
+delivered (their log lines are there); the idle timer had blanked and locked
+the device regardless.
+
+`libhakios.app.dylib` (injected into Sileo) now sets
+`UIApplication.idleTimerDisabled` as soon as the application object exists,
+repeating the ask on the main queue until it does -- an app in front that says
+so keeps SpringBoard from locking. The scene's last lines also came out
+mangled (`dpkg-query -W -f__`, then a stray ` tree` line that ran and failed):
+the rewrite was generated inside a double-quoted shell string, which expanded
+`${binary:Package}` and the rest to nothing. Restored with the editor, which
+writes the text as it stands; `root-sileo.apfs` rebuilt and read back:
+`34b57d059e778b0614f99358d39204bc31c3a14769f1568682845d8750252716`.
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 

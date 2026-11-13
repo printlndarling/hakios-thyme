@@ -382,6 +382,34 @@ watch(const char *name, const char *selector, IMP ours, void *theirs)
 	}
 }
 
+/*
+ * The screen must not go to sleep under a scene. The 08:40 run's package page was driven for
+ * six GET rounds and then found locked at 600 s (8:51's lock screen), so the taps that follow
+ * -- the sheet's dismissal, the queue's bar, Confirm -- all landed on the lock screen and
+ * nothing was installed. An application that says its idle timer is off keeps SpringBoard from
+ * locking while it is in front; UIApplication is not there yet when this library loads, so the
+ * ask is repeated on the main queue until it is.
+ */
+static void
+stay_awake(void)
+{
+	Class application = objc_getClass("UIApplication");
+
+	if (application != Nil) {
+		id shared = ((id (*)(id, SEL))objc_msgSend)((id)application, sel_registerName("sharedApplication"));
+
+		if (shared != nil) {
+			((void (*)(id, SEL, BOOL))objc_msgSend)(shared, sel_registerName("setIdleTimerDisabled:"), YES);
+			say("hakios: Sileo: the idle timer is off; the screen stays awake under the scene\n",
+			    sizeof("hakios: Sileo: the idle timer is off; the screen stays awake under the scene\n") - 1);
+			return;
+		}
+	}
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+		stay_awake();
+	});
+}
+
 __attribute__((constructor))
 static void
 hakios_app_init(void)
@@ -414,6 +442,7 @@ hakios_app_init(void)
 	}
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
+		dispatch_async(dispatch_get_main_queue(), ^{ stay_awake(); });
 		/*
 		 * Whether the process may use the network at all. Sileo's URL session
 		 * says "offline" for every task while apt, from the same Wi-Fi, fetches
