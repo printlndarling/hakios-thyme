@@ -23,6 +23,20 @@
 /var/jb/bin/sh /redwood/bin/sileo-seed.sh
 /redwood/bin/rwtouch wait 25 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
+# The owner's black-box path, while Sileo (and WebKit) are open and their surfaces are live:
+# Settings flung to the bottom, home, and again; then the search field and the keyboard. The
+# textures of the whole session are live here, which is the state the owner's session was in.
+/redwood/bin/rwtouch wait 25
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 5
+/redwood/bin/rwtouch button home wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.2 0.5 0.9 200 wait 3 tap 0.5 0.12 wait 8
+/redwood/bin/rwtouch wait 10 button home wait 5
+
 # The alert Don-t-Allow is at (0.32, 0.601). Eleven taps a line (~44 s), lines staggered 40 s
 # apart from +15 to +515: whichever moment the page loads and the alert appears, one of them is
 # tapping. Once it is gone the taps land on the description text, which does nothing.

@@ -1206,6 +1206,7 @@ frame_begin(struct eagl *e)
  * never), and only a surface all zero is said, with enough to know which.
  */
 static unsigned audit_every = 60;
+static unsigned zero_screen;            /* audits in a row in which the display's surface was all zero */
 static void
 surface_audit(struct eagl *e)
 {
@@ -1243,6 +1244,36 @@ surface_audit(struct eagl *e)
 				    "its seed %u (ours %u), %s, %u fills\n", e->frames + 1, IOSurfaceGetID(surface), image->texture,
 				    image->width, image->height, row, (unsigned)IOSurfaceGetSeed(surface), image->seed,
 				    image->shared ? "its memory" : "copied", image->uploaded);
+			}
+		}
+	}
+	{
+		/*
+		 * The display's own surface, which everything drawn ends up in: if it adds up to
+		 * nothing while frames are being drawn, the screen is black. Three audits in a row
+		 * (about three seconds) before it is said, so a frame between clears does not set it off.
+		 */
+		struct image *screen = e->colour != 0 ? image_of(e, e->colour) : NULL;
+		const uint8_t *base;
+		size_t row, size, step, samples = 0, not_zero = 0;
+		IOSurfaceRef surface;
+
+		if (screen != NULL && screen->target && (surface = screen->surface) != NULL &&
+		    (base = IOSurfaceGetBaseAddress(surface)) != NULL) {
+			row = IOSurfaceGetBytesPerRow(surface);
+			size = row * (size_t)(screen->height - 1) + (size_t)screen->width * 4;
+			step = size / 512 + 1;
+			for (size_t at = 0; at < size && samples < 512; at += step, samples++) {
+				not_zero += base[at] != 0;
+			}
+			if (not_zero == 0 && e->frames > 600) {
+				zero_screen++;
+				if (zero_screen == 3 || zero_screen % 300 == 0) {
+					say("hakios-gl: frame %u: THE DISPLAY IS BLACK: surface %u, %d x %d, %zu bytes a row, %u audits so far\n",
+					    e->frames + 1, IOSurfaceGetID(surface), screen->width, screen->height, row, zero_screen);
+				}
+			} else if (not_zero != 0) {
+				zero_screen = 0;
 			}
 		}
 	}

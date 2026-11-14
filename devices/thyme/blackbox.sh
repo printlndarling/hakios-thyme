@@ -56,6 +56,9 @@ CAPTURE_PID=$!
 trap 'kill "$CAPTURE_PID" 2>/dev/null || true' EXIT HUP INT TERM
 
 LOG="logs/blackbox-$(date +%H%M%S).log"
+# A screenshot and the log share the loader's staged buffer; with a log follow running the
+# two race and a follow can fetch the framebuffer into the log (see CHECKLIST, 2026-11-14).
+XL_FOLLOW= \
 XL_SECS="$BLACKBOX_SECS" \
 XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} \
 XL_RAMDISK="$SCENE" \

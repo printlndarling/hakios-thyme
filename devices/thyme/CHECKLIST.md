@@ -560,6 +560,32 @@ to be told apart: the next Sileo run wants to be longer than the download takes
 (1200 s), and the termination itself (who waits on what for five seconds) is
 the thing to look at.
 
+A black screen was caught with the table at 1024 and not full: the 1200 s Sileo
+scene's 360-second screenshot (`logs/sileo-360.png`, xl time; kernel `bac1b423`,
+image `0d3c1094`) is black but for the battery icon and the home indicator, and
+the session's table census (238 of 1024 live at its highest, no "there is room
+for" line) rules the old failure out. It came about eight seconds after the
+scene's second `uiopen sileo://package/tree` -- the application was already
+running -- and the page was drawn again at 390 s. The focused scenes
+(`devices/thyme/blackflash.sh`, `rc.jobs.blackflash`: Sileo opened then Settings
+over it; then Sileo opened again by the same URL) did **not** reproduce it:
+Settings and Sileo drew correctly in every screenshot, the audits found only
+the one small all-zero surface, and neither `THE DISPLAY IS BLACK` nor a
+table-full line came. What is left to find is whether that black window is the
+application's own first frame after a relaunch (the owner's reopened Sileo
+after the watchdog killed it) or a frame of the compositor's; the audit now
+samples the display's own surface as well (`THE DISPLAY IS BLACK`, three audits
+in a row), so a reproduction will say which.
+
+The runs also showed how not to take logs with screenshots: `xl` follows the
+log every 10 s by default, and a follow and a screenshot share the loader's one
+staged buffer, so a follow can fetch the framebuffer into the log -- two runs
+left 9.6 and 9.9 MB of pixels (`logs/163925-run.log`,
+`logs/171417-run.log`). The screenshot runners now set `XL_FOLLOW=` and stop
+their screenshots 40 s before the end (`devices/thyme/sileo.sh`,
+`blackbox.sh`, `blackflash.sh`).
+
+
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 

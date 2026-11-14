@@ -1,0 +1,13 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.blackflash).
+# The black window seen when an application is opened again while it runs: Sileo opened, left to
+# draw, opened again by the same URL (the 16:52 run's black at 360 s came 8 s after exactly
+# this), then Settings over it. Screenshots every few seconds are the runner's
+# (devices/thyme/blackflash.sh), which also drops touch_lat so the run fits the log ring.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 40
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 60
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 40 button home wait 10
+/redwood/bin/rwtouch wait 20
