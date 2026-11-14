@@ -360,6 +360,24 @@ The next thing to chase is the join's 61: what the station driver refuses and
 when, across a successful and a refused boot — a daily-use issue in its own
 right, and the last thing between the scene and an end-to-end install.
 
+The join was then put to an A/B on the same scene (`SILEO_SECS=200`,
+`EXTRA_ARGS="wifi_wide=0"`, `logs/125826-run.log`, kernel `82d113234e63`): both
+joins on that boot reached the same 2.4 GHz BSS and **the access point
+accepted** authentication and association (`join returned 0`), while the
+12:35 boot had refused authentication twice with status 1. The refusal is
+therefore intermittent, not a property of the channel. One oddity is left to
+settle: the A/B asked for 20 MHz and the log still says "the channel is taken,
+40 MHz wide", although `wifi_wide=0` is in the kernel command line -- either
+the option is not read where it looks (a runtime print will say) or the width
+is chosen elsewhere.
+
+Next, in order: a runtime print of `lx_os_option("wifi_wide")` at the join to
+settle the oddity; then the intermittent authentication refusal itself -- the
+AP answers status 1 to our open-system authentication on some boots and 0 on
+others, with the same MAC and the same frames, so the next step is to repeat
+joins within one boot and, on a refusal, try the other BSS of the same name
+(the 5 GHz one, whose joins have never been refused).
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
