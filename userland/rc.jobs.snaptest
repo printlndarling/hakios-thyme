@@ -1,16 +1,16 @@
 # Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.snaptest).
-# Sileo opened, then left (home); where SplashBoard keeps its pictures -- the containers
-# searched for a SplashBoard or a Snapshots directory, the global one listed -- and what is in
-# them read as files (snap_test). The runner is devices/thyme/launchtest.sh
-# (SCENE=out/thyme-boot/root-snaptest.apfs).
+# Sileo opened and left, its snapshot directory listed and its pictures read as files
+# (snap_test: average colour, opacity, near-black count); then the same for Settings. The real
+# path is /var/mobile/... -- /private/var/mobile/... is not the same directory in this root.
+# The runner is devices/thyme/launchtest.sh (SCENE=out/thyme-boot/root-snaptest.apfs).
 /redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
 /redwood/bin/rwtouch wait 30 button home wait 15
-/var/jb/usr/bin/find /private/var/mobile/Containers/Data/Application -name SplashBoard -print
-/var/jb/usr/bin/find /private/var/mobile/Containers/Data/Application -name Snapshots -print
-/var/jb/usr/bin/ls -la /private/var/mobile/Library/SplashBoard/Snapshots
-/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/ls -la /var/mobile/Library/SplashBoard/Snapshots
+/var/jb/usr/bin/ls -la /var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore
+/redwood/bin/snap_test /var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore
 /var/jb/usr/bin/uiopen prefs:
 /redwood/bin/rwtouch wait 20 button home wait 10
-/var/jb/usr/bin/uiopen prefs:
-/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/ls -la /var/mobile/Library/SplashBoard/Snapshots/com.apple.Preferences
+/redwood/bin/snap_test /var/mobile/Library/SplashBoard/Snapshots/com.apple.Preferences
+/redwood/bin/rwtouch wait 10

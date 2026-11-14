@@ -623,41 +623,35 @@ look at next: what Sileo's snapshot and launch image hold, with `snap_test`
 (`userland/src/snap_test.c`) on `Library/SplashBoard/Snapshots/
 org.coolstar.SileoStore` inside the run.
 
-What fills a launch was looked at directly (`rc.jobs.snaptest`, image
-`04897d98`, kernel `bac1b423`; run without screenshots so the log is the whole
-ring). `/private/var/mobile/Library/SplashBoard/Snapshots` exists and holds
-**one application: `com.apple.mobilecal`** -- in a boot where Sileo was opened
-and left, and Settings opened twice and left, neither `org.coolstar.SileoStore`
-nor `com.apple.Preferences` has a snapshot directory at all (`snap_test` finds
-nothing to read). `splashboardd` itself never starts: its job is a Mach service
-(`com.apple.splashboard.launchimage`) that nothing requests in these runs. So
-there is no launch picture to cover an application whose first frame is slow,
-and the black a reopened application shows is its own window before that frame.
-Sileo does declare a launch storyboard (`UILaunchStoryboardName = LaunchScreen`
-in its Info.plist); rendering one is SpringBoard's own code, and nothing of ours
-touches it. The measured Settings cold launch is two seconds end to end, so
-this only shows for a heavy application -- Sileo's page after a respring took
-tens of seconds. Next: whether SpringBoard can be made to keep and show
-snapshots here at all (the manifest's format hook is already ours:
-`snapshot_output_format()` in `userland/src/inject_sb.c`), or whether the first
-frame of an application like Sileo can be made sooner.
+Where launch pictures live, and what they hold (`rc.jobs.snaptest` with the
+save hook in `inject_sb.c`; images `e684c024` and `f56675a5`, kernel
+`bac1b423`): SpringBoard's manifest is asked for snapshots and **does write
+them** -- `-[XBApplicationSnapshotManifestImpl
+_imageAccessQueue_saveData:forSnapshot:]` receives real JPEG data (238,704 and
+153,287 bytes for a scene and its downscaled variant) and, after the call, the
+file is there:
 
-How far SpringBoard gets with a snapshot is now visible in the log: the format
-hook is called (**12 times** in one blackflash run), each time with a real
-`XBApplicationSnapshot` -- `identifier` a UUID, `contentType: SceneContent`,
-`referenceSize: {375, 812}`, `Portrait`, `Light`, and a second `downscaled`
-variant of another UUID. So the manifest is asked; what never happens is the
-picture landing on disk. In the same boot: the global
-`Library/SplashBoard/Snapshots` holds only `com.apple.mobilecal` (the Calendar
-widget extension), and a `find` over every application container finds **no**
-`SplashBoard` or `Snapshots` directory at all -- neither Sileo nor Settings has
-one. Asking for PNG instead of JPEG changed nothing (`5733fdd8`), so the
-encoder is not the reason. The remaining suspects are SpringBoard's write path
-(container, path, permissions) and the app scene's content capture; that widget
-extensions' snapshots do land while applications' do not is the shape of the
-clue. The format hook now says the first twelve calls with each snapshot's
-description (`snap_test`'s scene is `rc.jobs.snaptest`, run with no
-screenshots).
+```text
+/var/mobile/Library/SplashBoard/Snapshots/com.apple.Preferences/sceneID:com.apple.Preferences-default/<uuid>@3x.jpeg
+/var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore/sceneID:org.coolstar.SileoStore-default/<uuid>@3x.jpeg
+```
+
+`snap_test` reads them back: Settings' snapshot is 1125 x 2436, average
+243 242 245, opacity 255, **0 of 64 near black** (a dark-mode one averages
+26 25 26). An earlier reading of this section said no launch picture exists;
+that was wrong -- it looked under `/private/var/mobile/...`, which in this root
+is not the same directory as `/var/mobile/...`, so the pictures were elsewhere
+all along. The format hook now names the first twelve calls with each
+snapshot's description, and the save hook says the container path (always
+`/var/mobile/Library/SplashBoard/Snapshots/<bundle>`), the save's size and
+whether the directory and the file are there after it. Sileo's directory was
+not there fifteen seconds after its first visit in the last run even though its
+saves do land (the hook saw them in the run before); the listing has to follow
+the save, not the home press. What remains is what the owner's black reopen
+means if the launch picture is not black: Sileo's own snapshot at that moment
+(its respring fades the window to alpha 0 before `exit(0)`), or SpringBoard not
+showing the picture for that launch. The scene reads the JPEGs of both
+applications with `snap_test`.
 
 
 The screenshot runners were also corrected: the kernel returns at `XL_SECS`

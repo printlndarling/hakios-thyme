@@ -302,6 +302,103 @@ set_setup_required_reason(id self, SEL selector, long reason)
 
 static const char *text_of(id object);          /* (defined below: a description as text) */
 static unsigned snapshot_asked;                /* calls of _outputFormatForSnapshot: (said first few) */
+static void (*original_snapshot_save)(id self, SEL sel, id data, id snapshot);
+static unsigned snapshot_saves;                /* calls of _imageAccessQueue_saveData:forSnapshot: */
+
+static void
+snapshot_save(id self, SEL sel, id data, id snapshot)
+{
+	snapshot_saves++;
+	if (snapshot_saves <= 10) {
+		id path = snapshot != NULL ? ((id (*)(id, SEL))objc_msgSend)(snapshot, sel_registerName("path")) : nil;
+		unsigned long length = data != NULL ?
+		    ((unsigned long (*)(id, SEL))objc_msgSend)(data, sel_registerName("length")) : 0;
+		id container = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("containerPath"));
+		id identity = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("containerIdentity"));
+
+		say("hakios: SpringBoard: snapshot save %u: %lu bytes, snapshot %s, path %s, containerPath %s, identity %s\n",
+		    snapshot_saves, length, text_of(snapshot), text_of(path), text_of(container), text_of(identity));
+	}
+	if (original_snapshot_save != NULL) {
+		original_snapshot_save(self, sel, data, snapshot);
+	}
+	if (snapshot_saves <= 10) {
+		id after = snapshot != NULL ? ((id (*)(id, SEL))objc_msgSend)(snapshot, sel_registerName("path")) : nil;
+		id container = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("containerPath"));
+		struct stat st;
+		int dir = container != NULL && stat(((const char * (*)(id, SEL))objc_msgSend)(container, sel_registerName("UTF8String")), &st) == 0;
+		int file = after != NULL && stat(((const char * (*)(id, SEL))objc_msgSend)(after, sel_registerName("UTF8String")), &st) == 0;
+
+		say("hakios: SpringBoard: snapshot save %u after: path %s, the directory %s, the file %s\n", snapshot_saves,
+		    text_of(after), dir ? "is there" : "is NOT there", file ? "is there" : "is NOT there");
+	}
+}
+
+static IMP
+replace_method_any(const char *class_name, const char *selector, IMP replacement)
+{
+	Class cls = objc_getClass(class_name);
+	Method method = cls != NULL ? class_getInstanceMethod(cls, sel_registerName(selector)) : NULL;
+	IMP original = method != NULL ? method_getImplementation(method) : NULL;
+
+	if (original == NULL) {
+		say("hakios: -[%s %s]: not found\n", class_name, selector);
+		return NULL;
+	}
+	say("hakios: -[%s %s] at %#lx: replaced\n", class_name, selector, (uintptr_t)original - slide);
+	method_setImplementation(method, replacement);
+	return original;
+}
+
+static bool
+snapshot_interesting(const char *name)
+{
+	return strstr(name, "snapshot") != NULL || strstr(name, "Snapshot") != NULL || strstr(name, "save") != NULL ||
+	    strstr(name, "write") != NULL || strstr(name, "URL") != NULL || strstr(name, "path") != NULL ||
+	    strstr(name, "Path") != NULL || strstr(name, "container") != NULL || strstr(name, "image") != NULL ||
+	    strstr(name, "Image") != NULL || strstr(name, "data") != NULL;
+}
+
+static void
+snapshot_names(void)
+{
+	static const char *classes[] = { "XBApplicationSnapshot", "XBApplicationSnapshotManifestImpl", "XBApplicationSnapshotManifest" };
+
+	for (unsigned c = 0; c < sizeof(classes) / sizeof(classes[0]); c++) {
+		Class cls = objc_getClass(classes[c]);
+		unsigned count = 0, said = 0;
+		Method *methods;
+		Ivar *ivars;
+
+		if (cls == Nil) {
+			say("hakios: SpringBoard: no class %s\n", classes[c]);
+			continue;
+		}
+		methods = class_copyMethodList(cls, &count);
+		say("hakios: SpringBoard: %s: %u methods\n", classes[c], count);
+		for (unsigned i = 0; i < count && said < 60; i++) {
+			const char *name = sel_getName(method_getName(methods[i]));
+
+			if (snapshot_interesting(name)) {
+				say("hakios:   - %s\n", name);
+				said++;
+			}
+		}
+		free(methods);
+		count = 0;
+		ivars = class_copyIvarList(cls, &count);
+		said = 0;
+		for (unsigned i = 0; i < count && said < 40; i++) {
+			const char *name = ivar_getName(ivars[i]);
+
+			if (snapshot_interesting(name)) {
+				say("hakios:   . %s\n", name);
+				said++;
+			}
+		}
+		free(ivars);
+	}
+}
 static long
 snapshot_output_format(__unused id self, __unused SEL selector, id snapshot)
 {
@@ -2286,6 +2383,9 @@ hakios_springboard_init(void)
 	    "_setSetupRequiredReason:", 0x1c4cdd3a4UL, (IMP)set_setup_required_reason);
 	snapshot_format = replace_method_of_kind('+', "XBApplicationSnapshotManifestImpl", "_outputFormatForSnapshot:",
 	    0x1f1c91480UL, (IMP)snapshot_output_format);
+	snapshot_names();
+	original_snapshot_save = (void (*)(id, SEL, id, id))replace_method_any("XBApplicationSnapshotManifestImpl",
+	    "_imageAccessQueue_saveData:forSnapshot:", (IMP)snapshot_save);
 	plain_vibrancy();
 	ui_lite();
 	wallpaper_cache();
