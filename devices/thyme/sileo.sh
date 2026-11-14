@@ -56,12 +56,11 @@ fi
 echo "sileo: ${SILEO_SECS} s of the Sileo scene, a screenshot every ${STEP} s"
 echo "sileo: our kernel arguments are ${#ARGS} characters (the loader gives 607)"
 
-STATE=$(./xl state)
-if [ "$STATE" != loader ]; then
-	echo "sileo: entering the loader and uploading the system image (one time)"
-	./xl enter
-	./xl ramdisk "$SYSTEM_IMAGE"
-fi
+# A loader that has just been booted has no system image staged, and there is no way to ask
+# it: entering is idempotent (it only boots the loader image when not already there) and the
+# upload costs about two minutes, so both are done for every run.
+./xl enter
+./xl ramdisk "$SYSTEM_IMAGE"
 
 (
 	elapsed=0
