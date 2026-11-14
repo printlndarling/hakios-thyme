@@ -415,6 +415,18 @@ reach a join (its log has the driver set up and the station ready, but no
 `lx: iOS join reached`), and the run before this change joined on its first
 answer at 20 MHz (`logs/135413-run.log`).
 
+The retry itself had a fault, found by the 15:42 run of the same Sileo scene
+(`logs/154241-run.log`, kernel `48755a68`): `lx_os_sleep()` is called **with the
+layer's lock held** (`wifi/lx/include/lx_os.h`), and the two sleeps added with
+the retry did not take `lx_os_lock()`. A join refusal came at 144 s, the code
+slept without the lock, and the kernel panicked in
+`station_join -> lx_os_sleep -> lck_mtx_sleep_deadline -> lck_mtx_assert`:
+`Mutex 0xfffffff008051b10 is unexpectedly not owned by thread` (`lck_mtx.c:168`;
+`sta_runs -> boundary_join -> station_join` in the backtrace). Both sleeps now
+run under `lx_os_lock()`/`lx_os_unlock()` (kernel `bac1b423`), and the same
+scene is the test: it met the refusal at 144 s before.
+
+
 ### Black boxes in text and icons: the texture a detector watches (2026-11-14)
 
 Reported by the owner: fonts sometimes become black boxes in Settings, the

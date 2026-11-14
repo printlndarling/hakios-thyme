@@ -1775,7 +1775,9 @@ station_join(struct lx_radio *radio, const struct hakios_sta_join *what)
 			 * catching its breath (the 12:35 refusals were answered
 			 * status 1 at once): ask again a moment later.
 			 */
+			lx_os_lock();
 			lx_os_sleep(&radio->answer, 200 * 1000000ull);
+			lx_os_unlock();
 		}
 		radio->answer = ANSWER_NONE;
 		if ((skb = frame_new(radio, 30, &frame)) == NULL) {
@@ -1798,7 +1800,9 @@ station_join(struct lx_radio *radio, const struct hakios_sta_join *what)
 	answer = ANSWER_NONE;
 	for (unsigned attempt = 0; attempt < 3 && answer != ANSWER_ASSOCIATED; attempt++) {
 		if (attempt != 0) {
+			lx_os_lock();
 			lx_os_sleep(&radio->answer, 200 * 1000000ull);
+			lx_os_unlock();
 		}
 		radio->answer = ANSWER_NONE;
 		if ((skb = frame_new(radio, 28 + 300, &frame)) == NULL) {
