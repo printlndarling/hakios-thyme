@@ -3093,6 +3093,19 @@ struct sns_bad_record {
 	char group[24];
 };
 static struct sns_bad_record sns_bad_records[8];
+/*
+ * What each transaction asked, so an answer is named by its own request:
+ * the registry upload sends 189 writes back to back, and "the last one
+ * sent" would put every answer in the last group's name.
+ */
+struct sns_txn_note {
+	uint16_t txn;
+	uint32_t msg;
+	uint8_t suid[16];
+	char group[24];
+};
+static struct sns_txn_note sns_txn_notes[32];
+static uint32_t sns_txn_notes_at;
 static uint32_t sns_bad_records_count;
 static uint32_t sns_msg1_result, sns_msg1_seen;   /* message 1: the client instance */
 static uint32_t sns_client_bad;           /* SNS responses (TLV 0x11) with a non-zero result */
@@ -3277,6 +3290,19 @@ sns_qmi_send(uint32_t msg_id, const uint8_t suid[16], const void *payload, uint3
 	}
 	p = qmi;
 	*p++ = 0;                       /* request */
+	{
+		struct sns_txn_note *n = &sns_txn_notes[sns_txn_notes_at];
+
+		n->txn = (uint16_t)sns_txn;
+		n->msg = msg_id;
+		memcpy(n->suid, suid, sizeof(n->suid));
+		n->group[0] = 0;
+		if (sns_last_group != NULL) {
+			strlcpy(n->group, sns_last_group, sizeof(n->group));
+			sns_last_group = NULL;      /* one group per call: consumed here */
+		}
+		sns_txn_notes_at = (sns_txn_notes_at + 1) % 32;
+	}
 	*p++ = (uint8_t)(sns_txn & 0xff);
 	*p++ = (uint8_t)(sns_txn >> 8);
 	sns_txn++;
@@ -3516,8 +3542,12 @@ sns_event(const uint8_t *data, uint32_t length)
 static void
 sns_input(const uint8_t *data, uint32_t length)
 {
-	uint16_t message, qmi_length;
+	uint16_t message, qmi_length, txn;
 	uint32_t at;
+	struct sns_txn_note *note = NULL;
+	uint32_t resp_msg;
+	const uint8_t *resp_suid;
+	const char *resp_group;
 
 	if (length < 7) {
 		return;
@@ -3527,6 +3557,16 @@ sns_input(const uint8_t *data, uint32_t length)
 	if (qmi_length > length - 7) {
 		qmi_length = (uint16_t)(length - 7);
 	}
+	txn = (uint16_t)(data[1] | data[2] << 8);
+	for (uint32_t i = 0; i < sizeof(sns_txn_notes) / sizeof(sns_txn_notes[0]); i++) {
+		if (sns_txn_notes[i].msg != 0 && sns_txn_notes[i].txn == txn) {
+			note = &sns_txn_notes[i];
+			break;
+		}
+	}
+	resp_msg = note != NULL ? note->msg : sns_last_msg;
+	resp_suid = note != NULL ? note->suid : sns_last_suid;
+	resp_group = note != NULL ? note->group : sns_last_group;
 	if (sns_enabled) {
 		printf("slpi: sns: < QMI %u, %u bytes:", message, length);
 		for (uint32_t i = 0; i < length && i < 40; i++) {
@@ -3549,20 +3589,20 @@ sns_input(const uint8_t *data, uint32_t length)
 				sns_bad_count++;
 				if (sns_first_bad_result == 0) {
 					sns_first_bad_result = sns_last_result;
-					sns_first_bad_msg = sns_last_msg;
-					memcpy(sns_first_bad_suid, sns_last_suid, sizeof(sns_first_bad_suid));
-					if (sns_last_group != NULL) {
-						strlcpy(sns_first_bad_group, sns_last_group, sizeof(sns_first_bad_group));
+					sns_first_bad_msg = resp_msg;
+					memcpy(sns_first_bad_suid, resp_suid, sizeof(sns_first_bad_suid));
+					if (resp_group != NULL) {
+						strlcpy(sns_first_bad_group, resp_group, sizeof(sns_first_bad_group));
 					}
 				}
 				if (sns_bad_records_count < 8) {
 					struct sns_bad_record *r = &sns_bad_records[sns_bad_records_count++];
 
-					r->msg = sns_last_msg;
+					r->msg = resp_msg;
 					r->result = sns_last_result;
-					memcpy(r->suid, sns_last_suid, sizeof(r->suid));
-					if (sns_last_group != NULL) {
-						strlcpy(r->group, sns_last_group, sizeof(r->group));
+					memcpy(r->suid, resp_suid, sizeof(r->suid));
+					if (resp_group != NULL) {
+						strlcpy(r->group, resp_group, sizeof(r->group));
 					}
 				}
 			}
@@ -3578,10 +3618,10 @@ sns_input(const uint8_t *data, uint32_t length)
 		} else if (type == 0x11 && message == 0x20) {
 			uint16_t result = l >= 2 ? (uint16_t)(data[at] | data[at + 1] << 8) : 0xffff;
 
-			if (sns_last_msg == 1) {
+			if (resp_msg == 1) {
 				sns_msg1_result = result;
 				sns_msg1_seen = 1;
-			} else if (sns_last_msg == 513) {
+			} else if (resp_msg == 513) {
 				sns_conf_result = result;
 				sns_conf_seen = 1;
 			}
@@ -3591,8 +3631,8 @@ sns_input(const uint8_t *data, uint32_t length)
 				sns_client_bad++;
 				if (sns_client_bad_result == 0) {
 					sns_client_bad_result = result;
-					sns_client_bad_msg = sns_last_msg;
-					memcpy(sns_client_bad_suid, sns_last_suid, sizeof(sns_client_bad_suid));
+					sns_client_bad_msg = resp_msg;
+					memcpy(sns_client_bad_suid, resp_suid, sizeof(sns_client_bad_suid));
 				}
 			}
 			printf("slpi: sns: < response: result %u\n", result);

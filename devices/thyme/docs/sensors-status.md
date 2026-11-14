@@ -1347,3 +1347,15 @@ kernel `b384781c80fe`; the phone has not run them yet -- on 14 November the
 host's ADB server wedged (two stale `adb.exe` processes that could not be ended
 without elevation; the client answers "could not read ok from ADB Server" on
 every port), so device work waits for that server to be restarted.
+
+The refusals above were attributed to "the last request sent" -- the registry
+upload sends its writes back to back, so that reading could only name one of
+them. The driver now keeps each transactions
+
+The refusals above were attributed to "the last request sent" -- the registry
+upload sends its writes back to back, so that reading could only name one of
+them. The driver now keeps each transaction's message, SUID and group
+(`sns_txn_notes`) and matches the answer by the transaction id in the QMI
+header, so the next device run names each refused group by its own request and
+the `187` becomes a per-group list. Built into kernel `82d113234e63`; the phone
+run waits for the host's ADB server to be restarted.
