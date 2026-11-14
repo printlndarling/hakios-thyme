@@ -114,3 +114,35 @@ tools/metal-cache-seed.sh                # reads darwin (read only, adb + root) 
 ```
 
 and copy `userland/hakios-metal-cache` to WSL's `userland/` before the next `userland/build.sh`.
+
+## When the adb server wedges
+
+Seen on 14 November 2026: every adb command, from Git Bash and from WSL,
+answered
+
+```text
+* daemon not running; starting now at tcp:5037
+could not read ok from ADB Server
+* failed to start daemon
+adb.exe: failed to check server version: cannot connect to daemon
+```
+
+while `fastboot devices` kept working (no device, but no error). Two `adb.exe`
+processes were still in the task list (one of 20 KB, one of ~5 MB), and
+
+```text
+taskkill /F /IM adb.exe
+ERROR: The process "adb.exe" with PID ... could not be terminated.
+Reason: Access is denied.
+```
+
+from a normal and from an elevated-in-name-only shell. A second server on
+another port (`ANDROID_ADB_SERVER_PORT=5039`) failed the same way: adb's server
+holds a global mutex, so a stale one blocks every new server, not only the
+default port.
+
+What fixes it: end the stale `adb.exe` processes from an **administrator**
+terminal (`taskkill /F /IM adb.exe`, then `adb start-server`), or restart the
+machine. Nothing on the phone needs to be touched, and `fastboot` remains
+usable throughout. Re-plugging the phone does not help: the server, not the
+USB device, is what is stuck.
