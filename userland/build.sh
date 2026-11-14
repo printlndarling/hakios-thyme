@@ -236,6 +236,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -lproc -o obj/killby src/killby.c
 		$DYN -framework CoreFoundation -framework CoreGraphics -framework CoreText -o obj/font_test src/font_test.c
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
+		# a scene that must not be suspended by the system idle sleep (src/sleep_hold.c)
+		$DYN -framework IOKit -o obj/sleep_hold src/sleep_hold.c
 		# (with an entitlement for "battery_test open URL", if ldid is there: src/battery_test.c)
 		$DYN -framework CoreFoundation -framework IOKit -lsqlite3 -o obj/battery_test src/battery_test.c &&
 			{ ${LDID:-ldid} -Ssrc/battery_test.entitlements obj/battery_test 2>/dev/null ||
@@ -378,6 +380,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/metal_test ] && cp obj/metal_test root/bin/
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
+	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
 	[ -f obj/keychain_test ] && cp obj/keychain_test root/bin/
 	[ -f obj/wifipw_test ] && cp obj/wifipw_test root/bin/

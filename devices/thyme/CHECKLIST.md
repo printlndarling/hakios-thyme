@@ -2363,3 +2363,16 @@ join attempt fell at the teardown, when the driver was already going down (`Devi
 configured`). So the previous run's download failure is the sleep behaviour, not the
 dependency path: with the link up, Sileo's queue, apt's resolver and dpkg carry seven
 packages through.
+
+### Holding the idle sleep from a scene (2026-11-15, later)
+
+A scene cannot wake a sleeping phone, and the system sleeps about a minute after boot when
+nothing holds the display: three Wi-Fi attempts were suspended whole (`logs/064236-run.log`,
+`logs/065221-run.log`). `userland/src/sleep_hold.c` asks IOPMrootDomain's user client for the
+same setting powerd changes -- method 0 (kPMSetAggressiveness), type kPMMinutesToSleep (3),
+value 0 ("never") -- holds it for a given number of seconds and puts the previous value back
+on exit; `rc.jobs.wifidrop` now starts with `sleep_hold 400 &`. It is built into the image and
+compiled (`root-wifidrop` `697e8820`), but **not yet run on the phone**: the phone went off at
+about 10 % after the dependency run and was not reachable afterwards. The first run will show
+whether an unprivileged job's call is accepted (powerd, also in the user session, makes the
+same call), and whether the drop test finally runs its join and its `leave`.
