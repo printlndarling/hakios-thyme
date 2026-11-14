@@ -747,6 +747,18 @@ in 1 ms and waiting 43-48 ms on the application -- stands; measuring it again
 wants a longer wait before the strokes, or the owner's own hand on a boot with
 `appprof=1`.
 
+The wallpaper experiments were re-tested against the current GL path, same
+image and kernel (`logs/043448-run.log` with `wallpaper_freeze=1`,
+`logs/044509-run.log` without; image `3c836b60`, kernel `bac1b423`): with the
+argument the Settings scrolls ran at **58-60 frames a second** and the unlock at
+43.9 (38% over 16.7 ms, slow frames drawn in 20.5 ms), while the same scene
+without it ran **86-90** and 57.2 as before; and the freeze did not even engage
+-- the log says `the wallpaper's window _SBWallpaperSecureWindow is not frozen`.
+So the argument stays off: whatever its path does to the wallpaper's window
+costs more than the composition it means to save (the old Metal-path note in
+`inject_sb.c` came from the same idea; it does not carry over to this path).
+
+
 `net.inet.tcp.keepinit = 2000 ms`. The loader's fastboot was also recovered
 once with `fastboot -s xnuloader reboot` (the endpoint accepted it when it would
 not boot), and the scene runners now always upload the system image: a loader
