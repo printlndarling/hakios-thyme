@@ -674,6 +674,27 @@ application-side (Sileo's list), while the stock Settings list runs at 88 frames
 a second; profiling the application's own frame work (its main-thread drawing,
 image work and layout) is the next step there, not the window server.
 
+**Sileo's install flow completed on the phone** (run
+`logs/011937-run.log.live.*`, kernel `bac1b423`, scene `018844379f`, run with
+XL_FOLLOW=5 XL_FOLLOW_KEEP=1 so the whole middle is kept): the scene's taps went
+GET -> queue -> Confirm -> the analytics consent -> Complete, a dpkg run's
+`term.log` entry is stamped 01:25:23, and the scene's own check answers
+**`tree_2.0.1_install ok installed`**, with `/var/jb/usr/bin/tree` in place
+(109,184 bytes) and `tree -L 1 /var/jb` running. This is the first end-to-end
+install through Sileo's UI on the current kernel; the earlier attempts stopped
+at the queue.
+
+The owner was on the phone during the same run: they switched Sileo's language
+to Chinese, confirmed the restart, and Sileo opened **black for a long while**
+before drawing ("开屏时卡黑屏好久", then it went in). The log has the restart
+(Sileo[629] `exit(0)` at 01:28:29, and spawns at 01:28:30, 01:29:29, 01:30:32 as
+they opened it again) with **no 0xdead10cc** -- the container link holds -- and
+no frame ended while the screen was black, so the opaque-black audit had nothing
+to sample. The black is the application's own launch before its first frame;
+why that first frame takes minutes after a language change (its reload, its
+localization, its repository work) is the question to answer next.
+
+
 
 
 
