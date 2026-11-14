@@ -1,11 +1,15 @@
 # Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.langtest).
-# Sileo opened; its notification alert dismissed ("Don't Allow"), its settings sheet opened by
-# the avatar (top right), and the sheet scrolled down to where the language rows are. The runner
-# is devices/thyme/launchtest.sh (SCENE=out/thyme-boot/root-langtest.apfs), a screenshot every
-# two seconds, to find the Change Language row's coordinates before the language taps are
-# scripted.
+# The owner's black-screen path, end to end: Sileo opened, its alert dismissed, its settings
+# sheet opened by the avatar and scrolled to Language, the language screen opened, Apply Changes
+# tapped, and the alert's destructive button (the relaunch) tapped -- Sileo then fades its
+# window and exits; the URL opens it again. The runner takes a screenshot every two seconds and
+# the window server's audit says in the log whether the display was opaque black.
 /redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
 /redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4
 /redwood/bin/rwtouch tap 0.9 0.14 wait 12 swipe 0.5 0.8 0.5 0.3 300 wait 2 swipe 0.5 0.8 0.5 0.3 300 wait 2
-/redwood/bin/rwtouch wait 30
+/redwood/bin/rwtouch tap 0.30 0.841 wait 12
+/redwood/bin/rwtouch tap 0.77 0.10 wait 6 tap 0.677 0.565 wait 10
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 40

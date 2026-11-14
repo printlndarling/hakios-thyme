@@ -576,6 +576,21 @@ avatar (top right) can open the settings list -- a tap at the avatar with the
 alert up is swallowed (`logs/launch-130.png`). The next scene taps
 `Don't Allow` (0.32, 0.601) first.
 
+The language path is scripted end to end now (`rc.jobs.langtest`): the alert's
+buttons are side by side, **Cancel at (0.32, 0.565) and Restart Sileo at
+(0.677, 0.565)**, and the right-hand one fires. On image `e684c024`-era build
+(run `logs/223147-run.log`): Sileo[178] exited `exit(0)` at 22:33:44, Sileo[211]
+was spawned at 22:34:04, and at the 170-second screenshot its Featured page was
+drawn (white, content still loading). **No black gap in this instance.** The
+black seen before -- and by the owner -- belongs to the instance that follows a
+*hung* termination: in run `logs/204041-run.log` Sileo[911] was killed with
+0x8badf00d and its successor [912] was still black 2 min 15 s later. A SIGKILL
+control needs a kill utility (`/usr/bin/killall` does not exist in this image);
+a small `killby` on libproc is the next step, and the snapshot filter (skip a
+nearly black save so the last good picture stays) is what to try if a black
+snapshot is being shown.
+
+
 
 
 The owner was on the phone during that run and used it as a person would:
