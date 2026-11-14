@@ -716,6 +716,19 @@ is not interposable) and is left in place, unused; the sysctl is what works,
 and it bounds every connect of the system, not just Sileo's -- a host that has
 not answered in five seconds would not have answered in seventy-five.
 
+With the cap at five seconds the profile still showed several blocking
+connects in a row at launch (whole five-second windows in `__connect`, 210 of
+250 samples, between windows of the run loop), so the cap was lowered to **two
+seconds** (`net.inet.tcp.keepinit = 2000 ms`, `logs/031957-run.log`): the first
+windows now have `__connect` at about 85 of 250 (1.7 s) beside `mach_msg2` at
+120, and the windows after them are the run loop alone (243-248 of 250). An
+interposer for `connectx` (the call CFNetwork makes) was added with a log of the
+destination it gives up on, but it is not being called either -- like `connect`,
+the call does not go through a symbol the dyld interposers can reach -- so the
+sysctl remains what bounds the launch. What the user sees on a boot with this
+image is the next measurement: the same language restart, timed in screenshots.
+
+
 
 
 
