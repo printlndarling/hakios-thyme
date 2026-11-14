@@ -468,6 +468,7 @@ close_presented(void)
  * Boot-arg appprof=1; a summary every five seconds for two minutes.
  */
 static mach_port_t appprof_main;        /* (the main thread's port, taken in the constructor) */
+static unsigned appprof_rounds = 24;     /* five seconds a round: appprof_secs=N changes it (max 900 s) */
 
 static void *
 appprof_thread(__unused void *argument)
@@ -476,7 +477,7 @@ appprof_thread(__unused void *argument)
 	unsigned counts[96], used;
 	char line[900];
 
-	for (unsigned round = 0; round < 24; round++) {
+	for (unsigned round = 0; round < appprof_rounds; round++) {
 		used = 0;
 		memset(counts, 0, sizeof(counts));
 		for (unsigned sample = 0; sample < 250; sample++) {
@@ -554,6 +555,20 @@ appprof_start(void)
 	arguments[size] = 0;
 	if (strstr(arguments, "appprof=1") == NULL) {
 		return;
+	}
+	{
+		const char *asked = strstr(arguments, "appprof_secs=");
+
+		if (asked != NULL) {
+			unsigned long seconds = strtoul(asked + strlen("appprof_secs="), NULL, 10);
+
+			if (seconds >= 5) {
+				appprof_rounds = (unsigned)(seconds / 5);
+				if (appprof_rounds > 180) {
+					appprof_rounds = 180;
+				}
+			}
+		}
 	}
 	if (pthread_create(&thread, NULL, appprof_thread, NULL) == 0) {
 		pthread_detach(thread);
