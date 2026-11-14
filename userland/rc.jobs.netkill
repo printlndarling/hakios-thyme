@@ -1,0 +1,15 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.netkill).
+# The container layout behind the dead10cc kill, then the kill itself: Wi-Fi joined by the scene,
+# Sileo opened with the network on, /var and /var/jb looked at, Sileo killed with SIGKILL by
+# killby, and opened again by URL. The runner is devices/thyme/launchtest.sh
+# (SCENE=out/thyme-boot/root-netkill.apfs), a screenshot every two seconds.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/ls -ld /var /var/mobile /var/jb /var/jb/var /var/jb/var/mobile
+/redwood/bin/killby Sileo
+/redwood/bin/rwtouch wait 8
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 40
