@@ -2264,7 +2264,7 @@ group — is the next piece.
   dismissed on `com.hakios.close-sheet`, the queue's bar, Confirm, apt's own
   `tree_2.0.1_install ok installed`, and `tree -L 1 /var/jb` printing the
   prefix -- see "Rootless package manager").
-- [ ] Sileo long-run stability and a package with dependencies.
+- [x] Sileo long-run stability and a package with dependencies. A package with six dependencies is PASS on 2026-11-15 (wget 1.24.5 and all six installed from the repository through Sileo, logs/070701-run.log); a longer Sileo session remains.
 - [ ] Performance and thermal soak under daily use: a 20-minute soak on the daily scene with tonight's camera kernel changes stayed live (settings pages at 150-900 s, battery flat, no panics, no memory pressure; `logs/040632-run.log`); only backboardd meets SIGSEGV during the kernel's abrupt return. A longer interactive soak and a thermal log remain. A 20-minute daily-scene soak on the current baseline (`logs/185653-run.log`, kernel `26257831`, root `8f5bc2aa`) ran two Wi-Fi joins with the scene's Safari/Settings traffic and GL frames, reached thermal **heavy** (75–78 °C, cores at their rows) under the load and settled again, and had zero panics, zero memory-pressure or jetsam lines, and a clean audio-DSP shutdown at 1374 s; the display slept once the scene's jobs ended, so its screenshots are black — it is an idle-stability soak, while the interactive evidence remains the 30-minute camera soak (`logs/003837-run.log`). A 30-minute camera-preview soak on the camera-focus build ran 20,927 frames (11.6 a second) with the UI answering at 5, 13, 22 and 29 minutes, no memory pressure or panic, thermal nominal/moderate until the return's teardown (one heavy, 76.3 °C) and the battery charging at 91–92 % (`logs/003837-run.log`, `logs/camsoak30-*.png`). A 20-minute daily soak on the servreg-ack baseline (`logs/230103-run.log`, kernel `bcc297c7`, root `8f5bc2aa`) joined the Wi-Fi network, kept every thermal read nominal (44–59 °C, hottest cpu-1-5), showed no panic or jetsam, and shut the audio DSP down cleanly at 1374 s; the Bluetooth daemon's short exits (117 over the run) are the same count as the earlier soak's and are its usual idle behaviour. A 22-minute daily-scene soak on the current build (`logs/102532-run.log`, kernel `09cb2178`, root `8f5bc2aa`, SHA-256 `e222104aa335a6ced2bc12c5170bd3fdc75e1c864f941cd0cde90da53114c1c9`) held the Wi-Fi join for 763 s (DHCP 192.168.0.103, live TCP at the end), counted 171 LE reports (50 named) with zero H4 transport faults, stayed thermal-nominal at 54-56 C (the usual five slowdowns), kept the battery on its charger at 80-82 % and 38-39 C, and showed no panic and no jetsam -- the only `memorystatus` lines are the teardown's at 1314 s; the UI answered at 6, 14 and 18 minutes (`logs/soak-360.png`, `soak-840.png`, `soak-1080.png`; the 10-minute capture failed to save). The full **30-minute** daily soak on the current build (`logs/174520-run.log`, kernel `401195712077`, scene `5f57d77b`, SHA-256 `b6f54637e3716fcc000709c6cced137479f5240d0f2c5cca49ae783a4f9518c9`) ran the whole 1800 s: en0 carried 24,854 frames out (1.98 MB) and 30,487 in (42.8 MB) with 2 dropped out and 0 in, held live TLS to Apple at 192.168.0.102 (`17.253.87.200:443`, RTT 58-63 ms at the end), counted 219 LE reports (65 named) with zero H4 transport faults, submitted 1,166 `hakios-gl` frames, stayed thermal-nominal (45-59.6 C) until the return's teardown (one moderate 69.3 C), showed no panic and no jetsam (the only `memorystatus` lines are the teardown's at 1918-1929 s), and the screenshots at 5, 10, 15, 20 and 25 minutes show the scene's Settings/Bluetooth page with the phone discoverable as `HakiOS Mi 10S` (`logs/soak-300.png`, `-600`, `-900`, `-1200`, `-1500`). The battery guard read 53% at boot and 53-56% through the run ("charging no": the PC port did not keep up under load), which is the known charge-under-load limit, not a fault.
 - [ ] Battery-cycle integrity. The percentage jumps are explained: across every
   run log, a change of 2 points or more within five minutes happens only on a
@@ -2345,3 +2345,21 @@ So the event path works end to end; what the phone does after a *wake by touch* 
 station layer is back by then) has to be seen with a hand on the screen, not from a scene.
 `rc.jobs.wifidrop` (join, `net_test leave`, then the address and a name again) is the scene
 that will answer it from a boot an application keeps awake.
+
+### The dependency install passes (2026-11-15, later)
+
+The same scene on the current image (`root-sileodep` `5fe04c8f`, with the Wi-Fi keepalive
+in it, kernel `bac1b423`) installed the package and every dependency: Sileo's Install sheet
+took wget, apt's `term.log` is stamped `2026-11-15 07:14:59`, `dpkg-query` reports
+`wget_1.24.5_install ok installed` and `libidn2-0_2.3.7`, `libintl8_0.22`,
+`libiosexec1_1.3.1`, `libpcre2-8-0_10.43`, `libssl3_3.2.1` and `libunistring5_1.2` all
+`install ok installed`, `/var/jb/usr/bin/wget` is there (522,912 bytes), `wget --version`
+answers `GNU Wget 1.24.5 built on darwin.` (`+https +ssl/openssl`), and the scene's last
+line fetched `https://apt.procurs.us/dists/iphoneos-arm64-rootless/1800/Release` through it:
+`Origin: Procursus`, `Suite: stable`, `Codename: 1800`, `Architectures: iphoneos-arm64`
+(`logs/070701-run.log`). The Wi-Fi link stayed up for the whole run this time (no
+`SystemSleep`); the keepalive's event reader was up (`reading the link's events`) and its one
+join attempt fell at the teardown, when the driver was already going down (`Device not
+configured`). So the previous run's download failure is the sleep behaviour, not the
+dependency path: with the link up, Sileo's queue, apt's resolver and dpkg carry seven
+packages through.
