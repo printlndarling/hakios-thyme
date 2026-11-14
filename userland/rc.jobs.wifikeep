@@ -1,0 +1,12 @@
+# The Wi-Fi keepalive scene (RC_JOBS=rc.jobs.wifikeep): join once, then leave the phone alone
+# long enough for the display, and then the system, to sleep -- wifid says so: "link down due to
+# SystemSleep" -- and touch the screen again. com.hakios.wifi-keepalive runs beside this: its
+# lines should show the radio not running at the sleep, a join when the system wakes, and the
+# address and a name coming back after it.
+/redwood/bin/net_test wait 30 joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/redwood/bin/rwtouch wait 300
+/redwood/bin/rwtouch tap 0.5 0.5
+/redwood/bin/net_test wait 30
+/redwood/bin/net_test waitaddr en0 60
+/redwood/bin/net_test resolve apt.procurs.us

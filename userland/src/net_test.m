@@ -34,6 +34,11 @@
  *                         /redwood/fw/network) through the same Apple80211 ASSOCIATE request.
  *                         An optional third line pins the BSSID. Only lengths and whether an
  *                         access point was selected are printed.
+ *   keepalive [FILE] [SECONDS]
+ *                         every SECONDS (default 15), ask SCNetworkReachability whether the
+ *                         network is reachable and, when it is not, join the network of FILE
+ *                         again: the link the system's sleep takes down is never joined again
+ *                         by wifid, which has no network of ours in its preferences.
  *
  * The interface QEMU's network gives (en0, drivers/net/hakios.net.c) has no IOKit object behind it,
  * and configd makes its network services out of those. (The phone's radio has one now:
@@ -771,6 +776,67 @@ joinfile(const char *path)
 	close(s);
 }
 
+
+/* ---- the join that brings the link back ------------------------------------------------------- */
+
+/*
+ * keepalive [FILE] [SECONDS]: the scenes join the network once, and nothing joins it again. When
+ * the system sleeps (wifid logs the link down "due to SystemSleep") and wakes, wifid has no
+ * network of ours among its preferences to re-join, so the radio stays down until the next boot.
+ * This loop is that missing re-join. What it asks is SCNetworkReachability -- configd's own
+ * answer, which follows the driver's link events -- and not the radio's state number: the state
+ * request reads 0 (INIT) whenever the station layer is not standing, which it also is not while
+ * the driver is simply carrying a joined link, and joining on that reading bounced a link that
+ * was up (logs/060142-run.log, 155 s). A join that does not take is retried after a minute, not
+ * every turn, and the first look waits for the scene's own join.
+ */
+static int
+network_reachable(void)
+{
+	SCNetworkReachabilityRef target = SCNetworkReachabilityCreateWithName(NULL, "apt.procurs.us");
+	SCNetworkReachabilityFlags flags = 0;
+	int reachable = 0;
+
+	if (target != NULL) {
+		if (SCNetworkReachabilityGetFlags(target, &flags)) {
+			reachable = (flags & kSCNetworkReachabilityFlagsReachable) != 0;
+		}
+		CFRelease(target);
+	}
+	return reachable;
+}
+
+static void
+keepalive(const char *path, unsigned seconds)
+{
+	FILE *probe;
+	int last = 1;                            /* a first look that says nothing */
+
+	probe = fopen(path, "r");
+	if (probe == NULL) {
+		printf("net_test: keepalive: no %s; there is nothing to join, waiting\n", path);
+		for (;;) {
+			sleep(3600);
+		}
+	}
+	fclose(probe);
+	sleep(90);                               /* the scene joins on its own; do not race it */
+	for (;;) {
+		int reachable = network_reachable();
+
+		if (reachable != last) {
+			printf("net_test: keepalive: the network is %s\n", reachable ? "reachable" : "NOT reachable");
+			last = reachable;
+		}
+		if (!reachable) {
+			joinfile(path);
+			sleep(seconds < 60 ? 60 : seconds);
+			continue;
+		}
+		sleep(seconds);
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -816,6 +882,17 @@ main(int argc, char **argv)
 				wrongjoin();
 			} else if (strcmp(step, "joinfile") == 0) {
 				joinfile(i + 1 < argc ? argv[++i] : "/redwood/fw/network");
+			} else if (strcmp(step, "keepalive") == 0) {
+				const char *file = "/redwood/fw/network";
+				unsigned seconds = 15;
+
+				if (i + 1 < argc) {
+					file = argv[++i];
+				}
+				if (i + 1 < argc) {
+					seconds = (unsigned)atoi(argv[++i]);
+				}
+				keepalive(file, seconds < 5 ? 15 : seconds);
 			} else {
 				fprintf(stderr, "net_test: bad step \"%s\"\n", step);
 				return 1;

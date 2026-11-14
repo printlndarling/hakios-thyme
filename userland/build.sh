@@ -490,7 +490,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the system image, so mkjobs.py judges "is this daemon's program there" by the listing of the volume
 	# and not by what select-system.py extracted here (--root-volume; seven jobs turn on the difference,
 	# fairplayd among them).
-	cp com.hakios.demo.plist com.hakios.wifi.plist root/LaunchDaemons/
+	cp com.hakios.demo.plist com.hakios.wifi.plist com.hakios.wifi-keepalive.plist root/LaunchDaemons/
 	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
 	VOLUME=""
 	[ -n "$FLASHBOOT" ] && [ -f $DARWIN/rootfs.slt ] && VOLUME="--root-volume $DARWIN/rootfs.slt"

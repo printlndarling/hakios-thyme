@@ -2292,3 +2292,41 @@ own start remains the open piece, and no AP-side log channel reaches it (see
 devices/thyme/docs/sensors-status.md).
 
 Later the same day, a second probe with `fastrpc_early=1 sns_quiet=1` and no SNS message at all repeated the crash (34 reports from 244.7 s, `0 file requests`), while every boot carrying the FastRPC chain (`fastrpc_smmu=2 fastrpc_call=9`) has none: the crash tracks the absent listener session, not the messages (docs/sensors-status.md).
+
+## The sleep that takes the network down, and the keepalive that brings it back (2026-11-15)
+
+The dependency-install scene (`rc.jobs.sileodep`: wget and its six dependencies, image
+`root-sileodep` `34a15896`, kernel `bac1b423`) reached Sileo's Install sheet with wget in
+it and failed at the download: five
+`hakios: Sileo: task after 10 s: state 3, status -1, error The Internet connection appears to be offline.`
+lines, then `dpkg-query: no packages found matching wget`, no
+`/var/jb/var/log/apt/term.log`, and no binary. The same log names the cause: at 05:35:22,
+180 s after the scene joined the network, wifid ended the Wi-Fi session
+`due to SystemSleep` (`SessionDuration=180`), and the link never came back --
+`net: en0's link (the phone's radio (ath11k)) is down` at 1155 s, its frame counters
+frozen at their join-time values. The taps at 05:39 woke the screen (the sheet is in the
+720 s and 750 s screenshots), but nothing re-joined the network: wifid has no network of
+ours among its preferences, so the scene's one join is the only one there is. That is the
+"forgets the Wi-Fi" the owner reported, seen from the inside. The scene itself was sound:
+the page opened, GET queued wget, `com.hakios.close-sheet` dismissed the sheet, the queue
+bar opened the Install sheet, and only the download failed on the network (the same
+choreography installed tree on 13 November).
+
+The keepalive is now in every image: `net_test keepalive` (src/net_test.m) joins
+`/redwood/fw/network` again when the link is not reachable, and
+`com.hakios.wifi-keepalive.plist` runs it from boot. The first version asked the radio
+for its state (Apple80211's STATE) and joined when it did not read 4 (RUN): its join
+worked -- `logs/060142-run.log` has the ASSOCIATE at 155.4 s and the link back at
+155.76 -- but that reading is wrong for the purpose. GET STATE reads 0 whenever the
+station layer is not standing, which it also is not while the driver is simply carrying a
+joined link; the join on that reading bounced a link that was up, and a join it asked for
+at 83 s was refused `Device not configured` (ENXIO: no station). It now asks
+SCNetworkReachability instead (configd's own answer, which follows the driver's link
+events), waits 90 s before its first look so it does not race the scene's own join, and
+retries a join that does not take after a minute.
+
+That version's end-to-end test did not run: the phone was at 22 %, and the battery guard
+ended the run at 203 s (`battguard: the charge is 22%, at or below battery_stop=25 three
+looks in a row`), before the scene's 300 s idle and its tap. The re-join after a sleep is
+therefore implemented and compiled but **not yet verified on the phone**; `rc.jobs.wifikeep`
+with `battery_stop=10` (the phone charged first) is what will verify it.

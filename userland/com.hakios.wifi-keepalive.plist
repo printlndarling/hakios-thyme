@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.hakios.wifi-keepalive</string>
+	<!-- the join the system's sleep undoes: this asks the radio for its state and joins the
+	     network of /redwood/fw/network again when it is not running (src/net_test.m, "keepalive") -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/redwood/bin/net_test</string>
+		<string>keepalive</string>
+		<string>/redwood/fw/network</string>
+		<string>15</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/dev/console</string>
+	<key>StandardErrorPath</key>
+	<string>/dev/console</string>
+</dict>
+</plist>
