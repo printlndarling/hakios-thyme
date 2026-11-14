@@ -337,6 +337,29 @@ should. The run ends with the audio DSP shut down and back to the loader:
 built by `devices/thyme/build-root.sh` (Mesa via `tools/mk-mesa.sh AIR=1`; the
 build is not reproducible byte for byte, so the hash names this file only).
 
+### The install sheet at 750 s, and the join that was refused (2026-11-14)
+
+The first Sileo scene with the close-sheet notification and the idle-timer fix
+(`logs/123501-run.log`, kernel `82d113234e63`, scene `7865e51ec69c`, 900 s)
+reached the end of the UI flow: the 750 s screenshot is Sileo's **Install**
+sheet with `tree` in it and "Error: The Internet connection appears to be off"
+(`logs/sileo-750.png`; the 810/870 shots are the same sheet). So GET, the
+queue, the sheet's dismissal, the popup bar and Confirm all work now; the
+install is stopped by the network, not by the scene.
+
+The run's own Wi-Fi says why: `lx: station driver join returned 61` at both
+join attempts (`net_test: joinfile: attempt 1/2 result 2`), while the same
+kernel's earlier runs joined the same AP successfully (`join returned 0`,
+`logs/235830-run.log`, `logs/235606-run.log`). The radio has no MAC from
+Android (`wifi_mac` absent; the stable local address `02:54:48:59:4d:45` is
+used everywhere), so the MAC is not the difference. The join is flaky: the
+Sileo TCP connections sat in `SYN_SENT` (`192.168.0.105:49278 <-> 38.233:80`)
+and the sheet's download could never start.
+
+The next thing to chase is the join's 61: what the station driver refuses and
+when, across a successful and a refused boot — a daily-use issue in its own
+right, and the last thing between the scene and an end-to-end install.
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
