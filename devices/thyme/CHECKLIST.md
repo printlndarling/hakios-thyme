@@ -2376,3 +2376,9 @@ compiled (`root-wifidrop` `697e8820`), but **not yet run on the phone**: the pho
 about 10 % after the dependency run and was not reachable afterwards. The first run will show
 whether an unprivileged job's call is accepted (powerd, also in the user session, makes the
 same call), and whether the drop test finally runs its join and its `leave`.
+
+The scene's gestures, read by `tools/frames.py` from the same log, mostly ran at 80-90
+frames a second on the panel (the GET and Confirm taps at 86-90, over-16.7 ms shares of
+0-2%); the one slow stretch is the queue at 596.9 s: 69 frames at 36.5 a second, 48% over
+16.7 ms and 41% over 33 ms, with the window server waiting 42.5 ms on the application and
+the copy 1.8 ms -- the application's own commits, the same shape as Sileo's scroll.
