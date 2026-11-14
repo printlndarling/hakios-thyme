@@ -623,6 +623,34 @@ look at next: what Sileo's snapshot and launch image hold, with `snap_test`
 (`userland/src/snap_test.c`) on `Library/SplashBoard/Snapshots/
 org.coolstar.SileoStore` inside the run.
 
+What fills a launch was looked at directly (`rc.jobs.snaptest`, image
+`04897d98`, kernel `bac1b423`; run without screenshots so the log is the whole
+ring). `/private/var/mobile/Library/SplashBoard/Snapshots` exists and holds
+**one application: `com.apple.mobilecal`** -- in a boot where Sileo was opened
+and left, and Settings opened twice and left, neither `org.coolstar.SileoStore`
+nor `com.apple.Preferences` has a snapshot directory at all (`snap_test` finds
+nothing to read). `splashboardd` itself never starts: its job is a Mach service
+(`com.apple.splashboard.launchimage`) that nothing requests in these runs. So
+there is no launch picture to cover an application whose first frame is slow,
+and the black a reopened application shows is its own window before that frame.
+Sileo does declare a launch storyboard (`UILaunchStoryboardName = LaunchScreen`
+in its Info.plist); rendering one is SpringBoard's own code, and nothing of ours
+touches it. The measured Settings cold launch is two seconds end to end, so
+this only shows for a heavy application -- Sileo's page after a respring took
+tens of seconds. Next: whether SpringBoard can be made to keep and show
+snapshots here at all (the manifest's format hook is already ours:
+`snapshot_output_format()` in `userland/src/inject_sb.c`), or whether the first
+frame of an application like Sileo can be made sooner.
+
+The screenshot runners were also corrected: the kernel returns at `XL_SECS`
+minus the boot time (60-90 s), so a capture loop that stopped only 10-40 s
+before `XL_SECS` was still taking screenshots when the log was fetched, and two
+logs came out as megabytes of framebuffer. All four now stop 90 s early
+(`SILEO_SECS - 90`, and the same in `blackbox.sh`, `blackflash.sh`,
+`launchtest.sh`), and diagnostics that need the whole log run with no
+screenshots at all.
+
+
 
 
 

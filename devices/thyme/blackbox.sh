@@ -46,7 +46,7 @@ fi
 
 (
 	elapsed=0
-	while [ "$elapsed" -lt $((BLACKBOX_SECS - 10)) ]; do
+	while [ "$elapsed" -lt $((BLACKBOX_SECS - 90)) ]; do
 		sleep "$BLACKBOX_STEP"
 		elapsed=$((elapsed + BLACKBOX_STEP))
 		./xl screenshot "logs/blackbox-${elapsed}.png" || true

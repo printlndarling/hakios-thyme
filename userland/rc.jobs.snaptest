@@ -1,0 +1,20 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.snaptest).
+# Sileo opened, then left (home); what SplashBoard keeps -- the directory tree and what is in
+# it, for Sileo and for Settings -- read as files (snap_test). The runner is
+# devices/thyme/launchtest.sh (SCENE=out/thyme-boot/root-snaptest.apfs), screenshots every
+# two seconds.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 30 button home wait 15
+/var/jb/usr/bin/ls -la /private/var/mobile/Library/
+/var/jb/usr/bin/ls -la /private/var/mobile/Library/SplashBoard
+/var/jb/usr/bin/ls -la /private/var/mobile/Library/SplashBoard/Snapshots
+/var/jb/usr/bin/ls -la /private/var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore
+/var/jb/usr/bin/ls -la /private/var/mobile/Library/SplashBoard/Snapshots/com.apple.Preferences
+/redwood/bin/snap_test /private/var/mobile/Library/SplashBoard/Snapshots/org.coolstar.SileoStore
+/redwood/bin/snap_test /private/var/mobile/Library/SplashBoard/Snapshots/com.apple.Preferences
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 20 button home wait 10
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 30

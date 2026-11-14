@@ -65,7 +65,7 @@ fi
 
 (
 	elapsed=0
-	while [ "$elapsed" -lt $((SILEO_SECS - 30)) ]; do
+	while [ "$elapsed" -lt $((SILEO_SECS - 90)) ]; do
 		sleep "$STEP"
 		elapsed=$((elapsed + STEP))
 		./xl screenshot "logs/sileo-${elapsed}.png" || true

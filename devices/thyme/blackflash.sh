@@ -45,7 +45,7 @@ fi
 
 (
 	elapsed=0
-	while [ "$elapsed" -lt $((BLACKFLASH_SECS - 40)) ]; do
+	while [ "$elapsed" -lt $((BLACKFLASH_SECS - 90)) ]; do
 		sleep "$BLACKFLASH_STEP"
 		elapsed=$((elapsed + BLACKFLASH_STEP))
 		./xl screenshot "logs/blackflash-${elapsed}.png" || true

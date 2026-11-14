@@ -41,7 +41,7 @@ fi
 
 (
 	elapsed=0
-	while [ "$elapsed" -lt $((LAUNCH_SECS - 40)) ]; do
+	while [ "$elapsed" -lt $((LAUNCH_SECS - 90)) ]; do
 		sleep "$LAUNCH_STEP"
 		elapsed=$((elapsed + LAUNCH_STEP))
 		./xl screenshot "logs/launch-${elapsed}.png" || true
