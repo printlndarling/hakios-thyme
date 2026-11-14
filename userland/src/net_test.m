@@ -42,6 +42,8 @@
  *                         itself (a join of ours bounces it for a moment) is left alone.
  *   leave                 leave the network (Apple80211's DISASSOCIATE), for the scene that
  *                         takes the link away to see the keepalive bring it back.
+ *   power 0|1             put the radio's power off or on (Apple80211's POWER), for the scene
+ *                         that tests the station layer's own re-join of the standing network.
  *
  * The interface QEMU's network gives (en0, drivers/net/hakios.net.c) has no IOKit object behind it,
  * and configd makes its network services out of those. (The phone's radio has one now:
@@ -925,6 +927,30 @@ leave(void)
 	close(s);
 }
 
+
+/* The radio's power: Apple80211's POWER request (19), {version, radios, state[4]}, as wifid sends it. */
+static void
+radio_power(int on)
+{
+	struct {
+		uint32_t version, radios, state[4];
+	} asked = { 0, 1, { on ? 1u : 0u, 0, 0, 0 } };
+	struct apple80211req request = { .name = "en0" };
+	int s = socket(AF_INET, SOCK_DGRAM, 0), error;
+
+	if (s < 0) {
+		printf("net_test: power: socket: %s\n", strerror(errno));
+		return;
+	}
+	request.type = 19;
+	request.length = sizeof(asked);
+	request.data = (void *)&asked;
+	error = ioctl(s, SIOCSA80211, &request);
+	printf("net_test: power %d: the kernel %s the request%s%s\n", on, error == 0 ? "takes" : "refuses",
+	    error == 0 ? "" : ": ", error == 0 ? "" : strerror(errno));
+	close(s);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -983,6 +1009,8 @@ main(int argc, char **argv)
 				keepalive(file, seconds < 5 ? 15 : seconds);
 			} else if (strcmp(step, "leave") == 0) {
 				leave();
+			} else if (strcmp(step, "power") == 0 && i + 1 < argc) {
+				radio_power(atoi(argv[++i]) != 0);
 			} else {
 				fprintf(stderr, "net_test: bad step \"%s\"\n", step);
 				return 1;

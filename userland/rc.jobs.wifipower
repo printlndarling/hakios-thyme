@@ -1,0 +1,15 @@
+# The Wi-Fi power-cycle test (RC_JOBS=rc.jobs.wifipower): join, then put the radio's power off
+# and on, as the system's sleep does. The station layer keeps the last join as its "standing"
+# network and joins it again when the radio comes back on (hakios.thyme_sta.c, the power-on
+# branch); nothing in userland asks for a join after the power comes back. sleep_hold keeps the
+# system from suspending the job (a sleeping system runs no scene), and the last lines are the
+# proof: the address and a name, with no joinfile between them.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/net_test wait 30 joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/redwood/bin/net_test power 0
+/redwood/bin/net_test wait 5
+/redwood/bin/net_test power 1
+/redwood/bin/net_test wait 10
+/redwood/bin/net_test waitaddr en0 60
+/redwood/bin/net_test resolve apt.procurs.us

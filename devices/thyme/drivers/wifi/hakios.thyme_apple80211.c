@@ -556,7 +556,14 @@ set_join(const struct apple80211req *request, char *said, size_t said_size)
 	lck_mtx_lock(&apple80211_lock);
 	join_result = 0;
 	lck_mtx_unlock(&apple80211_lock);
-	error = hakios_sta_ask_join(what);
+	/*
+	 * A join from userland is the standing one: the station layer keeps it and joins it again
+	 * whenever the radio is powered on (hakios.thyme_sta.c, the power-on branch), so a Wi-Fi
+	 * power cycle -- the one the system's sleep makes -- brings the network back without
+	 * userland having to ask again. It used to be consumed by this request, and then nothing
+	 * re-joined after the sleep (CHECKLIST, 2026-11-15).
+	 */
+	error = hakios_sta_ask_join_standing(what);
 out:
 	if (asked != NULL) {
 		memset_s(asked, sizeof(*asked), 0, sizeof(*asked));

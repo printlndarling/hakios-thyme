@@ -2382,3 +2382,17 @@ frames a second on the panel (the GET and Confirm taps at 86-90, over-16.7 ms sh
 0-2%); the one slow stretch is the queue at 596.9 s: 69 frames at 36.5 a second, 48% over
 16.7 ms and 41% over 33 ms, with the window server waiting 42.5 ms on the application and
 the copy 1.8 ms -- the application's own commits, the same shape as Sileo's scroll.
+
+### A userland join is the standing network now (2026-11-15, later)
+
+The station layer already re-joins the "standing" network whenever the radio is powered on
+(`hakios.thyme_sta.c`, the power-on branch), but only a boot-arg join used to set it: a join
+from userland (net_test, wifid) was consumed by the request and left `standing` empty, so a
+Wi-Fi power cycle had nothing to re-join. `hakios.thyme_apple80211.c`'s set_join now asks
+for the standing form (`hakios_sta_ask_join_standing`), which keeps the network and still
+falls back to the previous one if the join does not come through. Kernel `dd3f6368` carries
+it (built; the driver file compiled with no errors). `net_test` gained a `power 0|1` step and
+`rc.jobs.wifipower` uses it -- join, an address and a name, the radio's power off and on,
+then an address and a name again with no joinfile between them -- which answers whether the
+station layer's own re-join covers what the system's sleep does. Both are **built but not yet
+run**: the phone has been off USB since the dependency run.
