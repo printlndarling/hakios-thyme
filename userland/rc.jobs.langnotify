@@ -1,0 +1,15 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.langnotify).
+# The language-change restart, without the settings UI: Wi-Fi joined by the scene, Sileo opened
+# and left to load, then com.hakios.language-de posted -- the injected library writes what the
+# language screen writes to UserDefaults and exits as its Apply Changes does -- and Sileo opened
+# again. The runner is devices/thyme/launchtest.sh (SCENE=out/thyme-boot/root-langnotify.apfs),
+# a screenshot every two seconds; appprof=1 samples the main thread of the new instance.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 40
+/redwood/bin/rwtouch notify com.hakios.language-de
+/redwood/bin/rwtouch wait 6
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 90

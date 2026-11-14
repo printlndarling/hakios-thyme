@@ -29,6 +29,9 @@
 #include <dlfcn.h>
 #include <sys/sysctl.h>
 #include <pthread.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <sys/select.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -559,6 +562,95 @@ appprof_start(void)
 	}
 }
 
+/*
+ * The main thread of a launch that never draws: Sileo's restart after a language change or
+ * an install blocks it in a plain connect() to a host that does not answer, for as long as
+ * the system's SYN retries take (a minute and more); the sampled program counter sat in
+ * __connect for whole summaries. Every internet connect of this process is made
+ * non-blocking with a three-second wait instead, so an unreachable host fails and the
+ * application goes on to its first frame. The wait is well above a local network's round
+ * trip and only ever cuts off a connect that was not completing anyway.
+ */
+#define CONNECT_WAIT_SECONDS 3
+
+static int (*real_connect)(int, const struct sockaddr *, socklen_t);
+
+static int
+bounded_connect(int fd, const struct sockaddr *address, socklen_t length)
+{
+	int flags, result;
+
+	if (real_connect == NULL) {
+		real_connect = (int (*)(int, const struct sockaddr *, socklen_t))dlsym(RTLD_NEXT, "connect");
+	}
+	if (real_connect == NULL) {
+		errno = ENOSYS;
+		return -1;
+	}
+	if (address == NULL || (address->sa_family != AF_INET && address->sa_family != AF_INET6)) {
+		return real_connect(fd, address, length);
+	}
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) != 0) {
+		return real_connect(fd, address, length);
+	}
+	(void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+	result = real_connect(fd, address, length);
+	if (result < 0 && errno == EINPROGRESS) {
+		fd_set writes, errors;
+		struct timeval timeout = { CONNECT_WAIT_SECONDS, 0 };
+		int selected;
+
+		FD_ZERO(&writes);
+		FD_ZERO(&errors);
+		FD_SET(fd, &writes);
+		FD_SET(fd, &errors);
+		selected = select(fd + 1, NULL, &writes, &errors, &timeout);
+		if (selected > 0) {
+			int error = 0;
+			socklen_t width = sizeof(error);
+
+			(void)getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &width);
+			if (error == 0) {
+				result = 0;
+			} else {
+				errno = error;
+				result = -1;
+			}
+		} else if (selected == 0) {
+			char words[160];
+			char where[64] = "?";
+			int k;
+
+			if (address->sa_family == AF_INET) {
+				const struct sockaddr_in *four = (const struct sockaddr_in *)address;
+				uint8_t *bytes = (uint8_t *)&four->sin_addr.s_addr;
+
+				snprintf(where, sizeof(where), "%u.%u.%u.%u:%u", bytes[0], bytes[1], bytes[2], bytes[3],
+				    ntohs(four->sin_port));
+			} else {
+				const struct sockaddr_in6 *six = (const struct sockaddr_in6 *)address;
+				char text[INET6_ADDRSTRLEN] = "?";
+
+				(void)inet_ntop(AF_INET6, &six->sin6_addr, text, sizeof(text));
+				snprintf(where, sizeof(where), "[%s]:%u", text, ntohs(six->sin6_port));
+			}
+			k = snprintf(words, sizeof(words), "hakios: %s: connect to %s not answered in %d s; given up\n",
+			    who, where, CONNECT_WAIT_SECONDS);
+			say(words, (size_t)(k > 0 ? k : 0));
+			errno = ETIMEDOUT;
+			result = -1;
+		}
+	}
+	(void)fcntl(fd, F_SETFL, flags);
+	return result;
+}
+
+__attribute__((used)) static struct { const void *replacement; const void *replacee; }
+connect_interposer __attribute__((section("__DATA,__interpose"))) = {
+	{ (const void *)bounded_connect, (const void *)connect },
+};
+
 __attribute__((constructor))
 static void
 hakios_app_init(void)
@@ -599,6 +691,20 @@ hakios_app_init(void)
 			notify_register_dispatch("com.hakios.close-sheet", &token, dispatch_get_main_queue(), ^(int which) {
 				(void)which;
 				close_presented();
+			});
+		}
+		{
+			int token = 0;
+
+			notify_register_dispatch("com.hakios.language-de", &token, dispatch_get_main_queue(), ^(int which) {
+				const char *words = "hakios: Sileo: language set to de, exiting as its Apply Changes does\n";
+
+				(void)which;
+				CFPreferencesSetAppValue(CFSTR("UseSystemLanguage"), kCFBooleanFalse, CFSTR("org.coolstar.SileoStore"));
+				CFPreferencesSetAppValue(CFSTR("SelectedLanguage"), CFSTR("de"), CFSTR("org.coolstar.SileoStore"));
+				CFPreferencesAppSynchronize(CFSTR("org.coolstar.SileoStore"));
+				say(words, sizeof("hakios: Sileo: language set to de, exiting as its Apply Changes does\n") - 1);
+				exit(0);
 			});
 		}
 		/*

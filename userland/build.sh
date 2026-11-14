@@ -258,7 +258,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.tweaks.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.tweaks.dylib src/inject_tweaks.c
 		# ... and inside an application, to say what killed it (src/inject_app.c)
-		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -lobjc \
+		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.app.dylib src/inject_app.c
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.bluetooth.dylib \
 			-framework CoreFoundation -framework IOKit -lobjc \

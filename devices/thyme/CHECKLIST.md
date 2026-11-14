@@ -694,6 +694,29 @@ to sample. The black is the application's own launch before its first frame;
 why that first frame takes minutes after a language change (its reload, its
 localization, its repository work) is the question to answer next.
 
+The main thread was caught in the act (`appprof=1` samples it 50 times a
+second; `logs/015743-run.log.live.*`): after every restart, and for both the
+language change and the install's respring, Sileo's main thread sat in
+**`__connect`** for whole two-minute windows (249 or 250 of 250 samples every
+five seconds) -- a blocking connect at launch to a host that does not answer,
+held for the system's initial-retransmit window (75 seconds by default). While
+it is held nothing draws, which is the black the owner sees.
+
+`init` now sets **`net.inet.tcp.keepinit = 5000` ms** (the boot log says
+`net.inet.tcp.keepinit = 5000 ms`, `logs/024525-run.log`), and the same restart
+-- triggered without the settings UI by the injected library's
+`com.hakios.language-de` notification, which writes what the language screen
+writes to UserDefaults and exits as its Apply Changes does -- shows the
+difference: the first five-second summary still has connect at 211 of 250, the
+next ones are the run loop (`mach_msg2` 239-248 of 250), and the screenshots go
+from the old page through about two seconds of launch transition to the new
+page. The black that was minutes is now a launch transition. The dyld
+interposer of `connect` added before this did not apply (CFNetwork's own call
+is not interposable) and is left in place, unused; the sysctl is what works,
+and it bounds every connect of the system, not just Sileo's -- a host that has
+not answered in five seconds would not have answered in seventy-five.
+
+
 
 
 

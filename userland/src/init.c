@@ -1523,6 +1523,26 @@ configure_inject(void)
 #define MAX_VNODES      32768
 
 static void
+configure_tcp(void)
+{
+	int milliseconds = 5000;
+
+	/*
+	 * A connect that cannot get through holds the caller for the system's initial-retransmit
+	 * window, 75 seconds by default. Sileo does its repository work with a blocking connect on
+	 * the main thread at launch, and until that returns nothing is drawn (the black the owner
+	 * sees on every restart). Five seconds is well beyond a local network's round trip, and a
+	 * host that has not answered the first retransmissions by then will not: the application
+	 * gets ETIMEDOUT and goes on to its first frame.
+	 */
+	if (sysctlbyname("net.inet.tcp.keepinit", NULL, NULL, &milliseconds, sizeof(milliseconds)) == 0) {
+		printf("  net.inet.tcp.keepinit = %d ms\n", milliseconds);
+	} else {
+		printf("  net.inet.tcp.keepinit: %s\n", strerror(errno));
+	}
+}
+
+static void
 configure_vnodes(void)
 {
 	unsigned long long memsize = 0;
@@ -1597,6 +1617,7 @@ main(int argc, char **argv, char **envp)
 	chmod("/dev/console", 0666);
 	configure_inject();
 	configure_vnodes();
+	configure_tcp();
 	run_rc(in_image("/etc/rc"));
 	printf("\n=== init: done ===\n");
 	reboot(RB_HALT);
