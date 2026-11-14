@@ -1207,6 +1207,7 @@ frame_begin(struct eagl *e)
  */
 static unsigned audit_every = 60;
 static unsigned zero_screen;            /* audits in a row in which the display's surface was all zero */
+static unsigned black_screen;           /* ... and in which it was opaque black (rgb 0, alpha not) */
 static void
 surface_audit(struct eagl *e)
 {
@@ -1260,11 +1261,22 @@ surface_audit(struct eagl *e)
 
 		if (screen != NULL && screen->target && (surface = screen->surface) != NULL &&
 		    (base = IOSurfaceGetBaseAddress(surface)) != NULL) {
+			size_t black = 0, pixels = 0, pixel_step, at;
+
 			row = IOSurfaceGetBytesPerRow(surface);
 			size = row * (size_t)(screen->height - 1) + (size_t)screen->width * 4;
 			step = size / 512 + 1;
-			for (size_t at = 0; at < size && samples < 512; at += step, samples++) {
-				not_zero += base[at] != 0;
+			for (size_t s = 0; s < size && samples < 512; s += step, samples++) {
+				not_zero += base[s] != 0;
+			}
+			/*
+			 * And the same surface read as pixels: opaque black (blue, green and red zero, opacity
+			 * not) is what a black window on the screen is made of -- a surface of nothing at all
+			 * is transparent and was not what the owner saw.
+			 */
+			pixel_step = (size_t)screen->width * (size_t)screen->height / 512 + 1;
+			for (at = 0; at + 3 < size && pixels < 512; at += pixel_step * 4, pixels++) {
+				black += base[at] == 0 && base[at + 1] == 0 && base[at + 2] == 0 && base[at + 3] != 0;
 			}
 			if (not_zero == 0 && e->frames > 600) {
 				zero_screen++;
@@ -1274,6 +1286,16 @@ surface_audit(struct eagl *e)
 				}
 			} else if (not_zero != 0) {
 				zero_screen = 0;
+			}
+			if (pixels != 0 && black * 100 >= pixels * 95 && e->frames > 600) {
+				black_screen++;
+				if (black_screen == 3 || black_screen % 300 == 0) {
+					say("hakios-gl: frame %u: THE DISPLAY IS OPAQUE BLACK: surface %u, %d x %d, %u of %u pixels, %u audits so far\n",
+					    e->frames + 1, IOSurfaceGetID(surface), screen->width, screen->height, (unsigned)black, (unsigned)pixels,
+					    black_screen);
+				}
+			} else if (black * 100 < pixels * 95 || pixels == 0) {
+				black_screen = 0;
 			}
 		}
 	}

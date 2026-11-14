@@ -78,8 +78,11 @@
 /redwood/bin/rwtouch notify com.hakios.close-sheet wait 4
 /redwood/bin/rwtouch tap 0.5 0.862 wait 10
 /redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
-# the download and the install take a moment of their own
-/redwood/bin/rwtouch wait 45
+# Sileo's download asks for analytics consent (a full-width Accept above the home bar), and
+# the install's end offers Complete (the downloads sheet's footer button); taps for both,
+# spaced so one lands whatever moment each appears.
+/redwood/bin/rwtouch wait 20 tap 0.5 0.875 wait 8 tap 0.5 0.875 wait 10 tap 0.5 0.875 wait 10
+/redwood/bin/rwtouch wait 30 tap 0.5 0.86 wait 8 tap 0.5 0.86 wait 8
 # what apt did, and what became of the package
 /var/jb/bin/cat /var/jb/var/log/apt/term.log
 /var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n tree

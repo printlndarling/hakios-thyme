@@ -545,6 +545,13 @@ first answer, so the retry-sleep path was not exercised), and the window
 server's new end-of-run crash (`libOSMesa.8.dylib+0x71cea0`) came again, at the
 same place.
 
+**The owner's verdict, using that build themselves: the black boxes are gone**
+-- no font or icon turned black in their session (2026-11-14). Two things
+remain from it: a felt drop in frame rate, and Sileo *sometimes* opening black
+after it was closed. The frame lines (`glframes=1`, `tools/frames.py`) are the
+tool for the first; the launch picture above is the subject of the second.
+
+
 The owner was on the phone during that run and used it as a person would:
 they joined the network, tapped Download in Sileo, and Sileo went away; it
 went away with **0x8badf00d**: `[application<org.coolstar.SileoStore>:593]

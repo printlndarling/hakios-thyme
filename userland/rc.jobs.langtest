@@ -1,0 +1,9 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.langtest).
+# The owner's black-screen path: Sileo opened, its Settings (the avatar, top right), then a look
+# at what the settings list offers. The runner is devices/thyme/launchtest.sh
+# (SCENE=out/thyme-boot/root-langtest.apfs), a screenshot every two seconds, to find the rows'
+# coordinates before the language taps are scripted.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 25 tap 0.9 0.14 wait 15
+/redwood/bin/rwtouch wait 20

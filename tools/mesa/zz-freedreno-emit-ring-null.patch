@@ -1,0 +1,98 @@
+--- a/src/gallium/drivers/freedreno/a6xx/fd6_emit.cc
++++ b/src/gallium/drivers/freedreno/a6xx/fd6_emit.cc
+@@ -56,6 +56,8 @@
+ 
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       emit->ctx->batch->submit, 4 * dwords, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    for (int32_t j = 0; j < cnt; j++) {
+       OUT_PKT4(ring, REG_A6XX_VFD_FETCH(j), 3);
+@@ -230,6 +232,8 @@
+    unsigned ndwords = (CHIP >= A7XX) ? 10 : 8;
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       ctx->batch->submit, ndwords * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    if (CHIP >= A7XX) {
+       OUT_REG(ring,
+@@ -278,6 +282,8 @@
+ 
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       emit->ctx->batch->submit, (1 + (2 * num_viewports)) * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    OUT_PKT4(ring, REG_A6XX_GRAS_SC_SCREEN_SCISSOR_TL(0), 2 * num_viewports);
+    for (unsigned i = 0; i < num_viewports; i++) {
+@@ -303,6 +309,8 @@
+ 
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       ctx->batch->submit, 9 * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    unsigned nr = pfb->nr_cbufs;
+ 
+@@ -353,6 +361,8 @@
+    struct pipe_blend_color *bcolor = &ctx->blend_color;
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       ctx->batch->submit, 5 * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    OUT_REG(ring, A6XX_RB_BLEND_RED_F32(bcolor->color[0]),
+            A6XX_RB_BLEND_GREEN_F32(bcolor->color[1]),
+@@ -375,6 +385,8 @@
+ 
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       ctx->batch->submit, 9 * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    uint32_t sample_locations = 0;
+    for (int i = 0; i < 4; i++) {
+--- a/src/gallium/drivers/freedreno/a6xx/fd6_const.cc
++++ b/src/gallium/drivers/freedreno/a6xx/fd6_const.cc
+@@ -185,6 +185,8 @@
+    struct fd_context *ctx = emit->ctx;
+    struct fd_ringbuffer *constobj = fd_submit_new_ringbuffer(
+       ctx->batch->submit, 0x1000, FD_RINGBUFFER_STREAMING);
++   if (!constobj)
++      return NULL;
+ 
+    /* VS sizes are in bytes since that's what STLW/LDLW use, while the HS
+     * size is dwords, since that's what LDG/STG use.
+@@ -444,6 +446,8 @@
+ 
+    struct fd_ringbuffer *dpconstobj = fd_submit_new_ringbuffer(
+          ctx->batch->submit, size_dwords * 4, FD_RINGBUFFER_STREAMING);
++   if (!dpconstobj)
++      return NULL;
+ 
+    /* VS still works the old way*/
+    if (emit->vs->need_driver_params) {
+--- a/src/gallium/drivers/freedreno/a6xx/fd6_program.cc
++++ b/src/gallium/drivers/freedreno/a6xx/fd6_program.cc
+@@ -1291,6 +1291,8 @@
+    } else {
+       struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+          emit->ctx->batch->submit, 18 * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+       emit_interp_state(ring, state, emit->rasterflat,
+                         emit->sprite_coord_mode, emit->sprite_coord_enable);
+--- a/src/gallium/drivers/freedreno/a6xx/fd6_image.cc
++++ b/src/gallium/drivers/freedreno/a6xx/fd6_image.cc
+@@ -164,6 +164,8 @@
+ 
+    struct fd_ringbuffer *ring = fd_submit_new_ringbuffer(
+       ctx->batch->submit, 16 * 4, FD_RINGBUFFER_STREAMING);
++   if (!ring)
++      return NULL;
+ 
+    /* Don't re-use a previous descriptor set if appending the
+     * fb-read descriptor, as that can change across batches.
