@@ -1359,3 +1359,35 @@ them. The driver now keeps each transaction's message, SUID and group
 header, so the next device run names each refused group by its own request and
 the `187` becomes a per-group list. Built into kernel `82d113234e63`; the phone
 run waits for the host's ADB server to be restarted.
+
+### The transaction-matched refusals, and the module the DSP never opens (2026-11-14)
+
+A 400-second run with the listener order and the registry upload
+(`logs/122016-run.log`, kernel `82d113234e63`) gives the first per-transaction
+reading:
+
+```
+slpi: sns: 20 responses with result 0, 4 with another (last 0); registry 189 of 189 written
+slpi: sns: the first SNS refusal: QMI 514 result 5 for SUID 75221e70b441255e59277f00a75427e1 (185 in all)
+slpi: sns: refusal 1: QMI 514 result 1 group "ccd_ttw" ...
+slpi: fastrpc: 1 module opens (last "apps_std"), 4 apps_std calls
+slpi: fastrpc: 1 file requests, 0 failed; the last 1:
+slpi: fastrpc: read /fw/sensors/soc0/hw_platform (6 bytes)
+```
+
+- The four QMI-level refusals are the same groups the last-sent reading named
+  (`ccd_ttw`, `sns_diag_sensor_datatyp`, `sns_reg_config`,
+  `sx933x_0_platform.regis`), now matched to their own transactions.
+- 185 of the 189 writes answer **5 at the SNS layer, per transaction**: the
+  registry service really is without an instance, not an artefact of the
+  reading.
+- The DSP asked the AP for one remote module, `apps_std` (the file service),
+  four times; it **never asked for `sns_registry`** (the property service), and
+  read one file, `hw_platform`. The framework's registry/property path is
+  therefore never reached: what stalls is before it, in the sensor process's
+  own start, and a 400-second window does not change it.
+
+Next: the sensor process's start itself -- what it waits for after the platform
+file (the client manager's instance), rather than the tunnel, the file service
+or the registry files, all of which are now shown to be up and unasked.
+

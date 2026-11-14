@@ -63,6 +63,17 @@ loader's 607-character line: with the hashes out the line arrives whole
 (589 of 607, `logs/062852-run.log`, kernel `be6ebd2aaca2`), and xl's `inputs:`
 line still names the kernel, image and loader.
 
+
+The first per-transaction reading (400 s, listener + registry upload,
+`logs/122016-run.log`, kernel `82d113234e63`) confirms the four QMI-level
+refusals are `ccd_ttw`, `sns_diag_sensor_datatyp`, `sns_reg_config` and
+`sx933x_0_platform.regis`, and shows 185 of 189 writes answering 5 at the SNS
+layer per transaction: the registry service is really without an instance. The
+DSP asked the AP for one remote module, `apps_std`, four times, and never for
+`sns_registry`; with one file read (`hw_platform`), the framework's
+registry/property path is never reached -- what stalls is the sensor process's
+own start, before the tunnel or the registry files.
+
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown
