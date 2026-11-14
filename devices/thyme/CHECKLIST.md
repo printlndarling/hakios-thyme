@@ -628,6 +628,18 @@ application directories, Sileo's among them. What is left to see is the
 suspension: opening Sileo, leaving it and opening it again should no longer log
 0xdead10cc, and the warm relaunch should draw without the black cold start.
 
+The suspension was then exercised on the phone (`rc.jobs.suspendtest`, scene
+`9feb8ac`, image with the link; Wi-Fi joined by the scene, Sileo opened, sent to
+the background twice and opened again each time): **no 0xdead10cc at all**, one
+`Sileo` process for the whole run (`pid 184`, one spawn line), and that process's
+connection to the repository stayed open **225.5 seconds**, across both
+backgroundings (`logs/002521-run.log`). With the containers on the real
+/var/mobile, runningboardd suspends the app instead of killing it, and the
+reopen is a warm resume -- the cold launch that came with every dead10cc kill,
+and the black that went with it, is gone for this path. The near-black snapshot
+filter (`a black snapshot was not saved`) saw nothing to do in these runs.
+
+
 
 
 
