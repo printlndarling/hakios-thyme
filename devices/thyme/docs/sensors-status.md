@@ -1391,3 +1391,50 @@ Next: the sensor process's start itself -- what it waits for after the platform
 file (the client manager's instance), rather than the tunnel, the file service
 or the registry files, all of which are now shown to be up and unasked.
 
+
+## The DIAG road is closed: the router acks but never opens its side (2026-11-15)
+
+A 400-second probe on the full daily argument set plus `slpi=1 sns=1 diag_mask=1`
+(`logs/050305-run.log`, kernel `bac1b4236d3a`, scene `1f0519454f1a`) answered the
+question this document left open on 13 November, and the answer is no: the driver
+asked the DSP for the "DIAG" channel once, the DSP acknowledged the open -- and
+nothing more. The teardown summary is exact:
+
+    slpi: diag: 0 asks, 0 replies, the channel was closed; glink agreed 1,
+    DIAG asked 1 ack 1 theirs 0; sent ver 2 vack 1 open 3 oack 2, heard ver 1
+    vack 2 open 4 oack 3; the DSP opened "mhi_sat" "LOOPBACK_CTL_DSPS" "" ""
+
+The open-ack carried no channel id and the router never offered an intent on the
+channel, so `theirs` stayed 0, the channel never became open both ways, and
+`glink_send` -- which needs one of the DSP's receive intents -- had nothing to
+write the log-mask ask into. The ask never left the AP; the router was never
+asked. This is not "the router heard us and stayed silent" but "the router never
+made the channel data-capable": on this firmware the DSP's diag router is not
+reachable over GLINK from the AP's side, and its log cannot be had that way.
+
+The same boot also showed the sensor process failing by itself, which is worth
+recording beside the stall: at 244.9 s the servreg notifier reported the domain
+`sensor_process` failed with `TMR_CLNT_1:0x6089:dog_virtual_user.c:240:U` (the
+framework's timer-client watchdog), then seventeen
+`irq115:...:sns_err_handler.c:180:Crash` reports as it restarted, each about
+30 ms apart, and another watchdog at 285 s. This boot's arguments carried
+neither `fastrpc_early=1` nor `sns_registry_upload=1` (the probe adds only its
+three sensor tags to the daily set), and the teardown counters show what that
+costs: `0 module opens (last "")`, `0 apps_std calls`, `0 file requests`,
+`20 responses with result 0`, `registry 0 of 0 written`. The framework never
+reached its file-service stage in this boot, so it did not even show the
+`hw_platform` stall; it died in its own start. The 12:20 boot's stall and this
+boot's crash are two behaviours of the same unfinished start, and neither is
+caused by AP-side messages: even the 20 answers it gave were results 0.
+
+What remains is the framework's start itself, with no new AP-side window into
+it: the DIAG router is closed (above), the SMEM items hold no text
+(`slpi_smem_dump=1`), the DDR window is not readable (the mapping hung the
+loader), and the ULOG/DAE road is a second client for the same registry gate.
+The next experiment is therefore not another log channel but a controlled
+comparison of what the DSP sees at start: with `fastrpc_early=1` and no SNS
+messages at all (`sns_quiet=1`), vary one file-service condition per boot (the
+presence and content of `hw_platform`, the platform file's directory listing,
+the listener's readiness time) and read the servreg failure reports -- the
+DSP's own crash strings (`dog_virtual_user.c`, `sns_err_handler.c`) are the only
+diagnostic text it gives the AP.

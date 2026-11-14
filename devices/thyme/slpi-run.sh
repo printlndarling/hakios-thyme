@@ -29,12 +29,11 @@ echo "slpi-run: our kernel arguments are ${#ARGS} characters (about 420 fit befo
 [ -f "$SYSTEM_IMAGE" ] || { echo "slpi-run: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
 [ -f "$SCENE" ] || { echo "slpi-run: no scenario image: $SCENE" >&2; exit 1; }
 
-STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
-	echo "slpi-run: entering the loader and uploading the system image (one time)"
-	./xl enter
-	./xl ramdisk "$SYSTEM_IMAGE"
-fi
+# A loader that has just been booted has no system image staged, and there is no way to ask
+# it: entering is idempotent (it only boots the loader image when not already there) and the
+# upload costs about two minutes, so both are done for every run.
+./xl enter
+./xl ramdisk "$SYSTEM_IMAGE"
 
 XL_SECS=${XL_SECS:-40} \
 XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-0} \

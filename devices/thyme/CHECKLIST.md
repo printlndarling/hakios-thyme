@@ -2275,3 +2275,18 @@ group — is the next piece.
   phone is still the open part. The loader printed a discharging phone's
   current as `I=18446744073709551406 mA` (-210 mA through an unsigned `%d`);
   its `print` now handles `%d` as signed (`xnuloader/loader.c`).
+
+## The sensor DSP's DIAG channel is not a road to its log (2026-11-15)
+
+A 400-second probe on the full daily set plus `slpi=1 sns=1 diag_mask=1`
+(`logs/050305-run.log`, kernel `bac1b4236d3a`, scene `1f0519454f1a`) shows the
+DIAG channel's open acknowledged but its DSP side never opened
+(`DIAG asked 1 ack 1 theirs 0`, `0 asks, 0 replies`): the log-mask ask never
+went out, because the driver's send needs one of the DSP's receive intents and
+the router never offered one. The same boot's sensor process crashed and
+restarted seventeen times from `TMR_CLNT_1 ... dog_virtual_user.c:240` and
+`irq115 ... sns_err_handler.c:180:Crash`, with `0 module opens`,
+`0 file requests` and `registry 0 of 0 written` -- it died in its own start,
+before the file-service stage the 12:20 boot stalled at. The sensor framework's
+own start remains the open piece, and no AP-side log channel reaches it (see
+devices/thyme/docs/sensors-status.md).
