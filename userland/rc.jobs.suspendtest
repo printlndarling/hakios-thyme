@@ -1,0 +1,16 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.suspendtest).
+# The suspension the /var/jb/var/mobile link was for: Wi-Fi joined by the scene, Sileo opened,
+# sent to the background twice and opened again each time. With the containers on the real
+# /var/mobile, runningboardd should suspend it (no 0xdead10cc) and the next open should be a warm
+# resume, not a cold launch. The runner is devices/thyme/launchtest.sh
+# (SCENE=out/thyme-boot/root-suspendtest.apfs), a screenshot every two seconds; the last
+# background and open are timed to land in the log's kept tail.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 30 button home wait 25
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 100 button home wait 20
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 40
