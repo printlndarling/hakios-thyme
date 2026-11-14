@@ -399,6 +399,14 @@ The joins in this run and its retry were accepted (status 0) on the same
 2.4 GHz BSS; the refusal of 12:35 therefore stays intermittent and
 unexplained, and the width is now out of the list of suspects.
 
+The board branch now asks the boot arguments first (`lx_os_option()`,
+kernel `870017e8`): a name the command line gives is answered with that value,
+and only what it does not name comes from the board's defaults. The run with
+`wifi_wide=0` then printed `the width: wifi_wide 0`, took the channel **20 MHz
+wide around 2437 MHz**, and both joins were accepted (`logs/135413-run.log`).
+The option now does what it says; an ordinary run, which names none of these,
+keeps the board's defaults exactly as before.
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel

@@ -238,6 +238,17 @@ unsigned
 lx_os_option(const char *name)
 {
 	if (umi_wifi_is_board()) {
+		uint32_t given = 0;
+
+		/*
+		 * A boot argument names a value explicitly and wins over the
+		 * board's defaults, which answer only what it does not name.
+		 * Before this the board branch answered first, and a probe's
+		 * wifi_wide=0 was silently 1 on this phone.
+		 */
+		if (PE_parse_boot_argn(name, &given, sizeof(given))) {
+			return given;
+		}
 		if (strcmp(name, "wifi_umi") == 0) return 1;
 		if (strcmp(name, "wifi_lx") == 0) return 2;
 		if (strcmp(name, "wifi_irq") == 0) return 0;
