@@ -1,0 +1,16 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.sileoframes).
+# The felt frame drops, in the application they are felt in: Wi-Fi joined by the scene, Sileo
+# opened with the network on, its notification alert dismissed, and its Featured page scrolled
+# up and down eight strokes each way -- with the window server's frame lines (glframes=1) and
+# the touch timing lines (touch_lat=1). The runner is a direct xl run with XL_FOLLOW=5
+# XL_FOLLOW_KEEP=1, so the live logs keep the middle; tools/frames.py reads them.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 30 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 2
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch wait 20

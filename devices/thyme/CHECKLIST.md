@@ -659,6 +659,22 @@ The same run ended with **no window-server SIGSEGV** (the earlier
 that crashed, and this run's teardown exercises the same path -- one clean run
 is not a proof, but the crash has not come back since.
 
+The same measurement inside Sileo (`rc.jobs.sileoframes`, network joined by the
+scene, `glframes=1`, `touch_lat=1`, kept live logs; `logs/010605-run.log`): its
+notification alert must be dismissed before anything below it reacts -- five
+taps at (0.32, 0.601) six seconds apart moved nothing, and the first seven
+scroll strokes after them drew **0 frames** as well; from the eighth stroke on
+the page moved, and then its list committed at **about 20 frames a second**
+(27 to 33 frames per stroke, 100% of steps over 16.7 ms and 74-100% over 33 ms),
+with the window server drawing in 1 ms and **43 to 48 ms of "idle before"** --
+the application is the limit, not the compositor. The unlock animation in the
+same run ran at 52.7 frames a second with 31% over 16.7 ms and an average draw
+of 20.8 ms, heavier than the earlier run's 57/23%/16.6 ms. So the felt drops are
+application-side (Sileo's list), while the stock Settings list runs at 88 frames
+a second; profiling the application's own frame work (its main-thread drawing,
+image work and layout) is the next step there, not the window server.
+
+
 
 
 
