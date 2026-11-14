@@ -590,6 +590,27 @@ a small `killby` on libproc is the next step, and the snapshot filter (skip a
 nearly black save so the last good picture stays) is what to try if a black
 snapshot is being shown.
 
+A second termination reason explains the black reopen better than a black
+snapshot: runningboardd killed Sileo with **0xdead10cc** -- "was suspended with
+locked system files:
+/var/jb/var/mobile/Containers/Data/Application/.../Library/Caches/Sileo/Database/sileo.sqlite3,
+not in allowed directories: /var/mobile/Containers/Data/Application/.../tmp,
+/var/mobile/Containers/Data/Application/..., /var/mobile/Library/Caches/org.coolstar.SileoStore"
+(`logs/230240-run.log`, 23:07:03). The application's data container here is
+under **/var/jb**, while that check allows only the real /var/mobile paths: every
+backgrounding of Sileo while its database is open is a dead10cc kill, and every
+reopen is a cold launch -- the owner sees the app close by itself and then black
+until the cold launch draws. The owner's black with the network on fits an
+application busy with repository work (its database open) when it leaves the
+screen. The next probe is the container path itself: whether /var/jb/var/mobile
+is a real directory in the running root (a symlink to /var/mobile would put the
+containers where the check expects them), and whether every scene joins Wi-Fi
+by itself -- the owner noted the scenes often did not; `rc.jobs.netopen` now
+does (the same net_test lines as rc.jobs.sileo), and langtest/killtest should
+follow. After the owner's retest, the language path drew without black once;
+with the network on, opening Sileo was black again.
+
+
 
 
 

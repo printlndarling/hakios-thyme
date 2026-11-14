@@ -33,6 +33,9 @@
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#include <dirent.h>
+#include <limits.h>
 #include <IOSurface/IOSurfaceRef.h>
 #include <time.h>
 #include <IOKit/IOKitLib.h>
@@ -303,6 +306,87 @@ set_setup_required_reason(id self, SEL selector, long reason)
 static const char *text_of(id object);          /* (defined below: a description as text) */
 static unsigned snapshot_asked;                /* calls of _outputFormatForSnapshot: (said first few) */
 static void (*original_snapshot_save)(id self, SEL sel, id data, id snapshot);
+
+/*
+ * A snapshot of a window that had already faded out (Sileo fades its window to alpha 0
+ * before exit(0)) decodes to black everywhere. Saving it replaces the last good picture
+ * with a black one, and the launch that follows shows black until the application's first
+ * frame. Such a save is skipped, so the earlier picture stays.
+ */
+static bool
+snapshot_is_black(id data)
+{
+	CGImageSourceRef source;
+	CGImageRef image;
+	uint8_t pixels[8 * 8 * 4];
+	unsigned dark = 0;
+
+	if (data == NULL) {
+		return false;
+	}
+	source = CGImageSourceCreateWithData((CFDataRef)data, NULL);
+	if (source == NULL) {
+		return false;
+	}
+	image = CGImageSourceCreateImageAtIndex(source, 0, NULL);
+	if (image == NULL) {
+		CFRelease(source);
+		return false;
+	}
+	{
+		CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+		CGContextRef context = CGBitmapContextCreate(pixels, 8, 8, 8, 32, space, kCGImageAlphaPremultipliedLast);
+
+		if (context != NULL) {
+			memset(pixels, 0, sizeof(pixels));
+			CGContextDrawImage(context, CGRectMake(0, 0, 8, 8), image);
+			for (unsigned i = 0; i < 64; i++) {
+				dark += pixels[4 * i] < 8 && pixels[4 * i + 1] < 8 && pixels[4 * i + 2] < 8;
+			}
+			CGContextRelease(context);
+		}
+		CGColorSpaceRelease(space);
+	}
+	CGImageRelease(image);
+	CFRelease(source);
+	return dark == 64;
+}
+
+/* Is there already a picture for this application (any .jpeg under the container)? */
+static bool
+snapshot_has_picture(const char *root, int depth)
+{
+	DIR *dir;
+	struct dirent *entry;
+
+	if (root == NULL || depth > 4 || (dir = opendir(root)) == NULL) {
+		return false;
+	}
+	while ((entry = readdir(dir)) != NULL) {
+		char path[PATH_MAX];
+		struct stat st;
+		size_t length = strlen(entry->d_name);
+
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+			continue;
+		}
+		snprintf(path, sizeof(path), "%s/%s", root, entry->d_name);
+		if (stat(path, &st) != 0) {
+			continue;
+		}
+		if (S_ISDIR(st.st_mode)) {
+			if (snapshot_has_picture(path, depth + 1)) {
+				closedir(dir);
+				return true;
+			}
+		} else if (length > 5 && strcmp(entry->d_name + length - 5, ".jpeg") == 0) {
+			closedir(dir);
+			return true;
+		}
+	}
+	closedir(dir);
+	return false;
+}
 static unsigned snapshot_saves;                /* calls of _imageAccessQueue_saveData:forSnapshot: */
 
 static void
@@ -320,7 +404,16 @@ snapshot_save(id self, SEL sel, id data, id snapshot)
 		    snapshot_saves, length, text_of(snapshot), text_of(path), text_of(container), text_of(identity));
 	}
 	if (original_snapshot_save != NULL) {
-		original_snapshot_save(self, sel, data, snapshot);
+		id container = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("containerPath"));
+		const char *root = container != NULL ?
+		    ((const char * (*)(id, SEL))objc_msgSend)(container, sel_registerName("UTF8String")) : NULL;
+
+		if (snapshot_is_black(data) && snapshot_has_picture(root, 0)) {
+			say("hakios: SpringBoard: a black snapshot was not saved; the earlier picture stays (%s)\n",
+			    root != NULL ? root : "?");
+		} else {
+			original_snapshot_save(self, sel, data, snapshot);
+		}
 	}
 	if (snapshot_saves <= 10) {
 		id after = snapshot != NULL ? ((id (*)(id, SEL))objc_msgSend)(snapshot, sel_registerName("path")) : nil;

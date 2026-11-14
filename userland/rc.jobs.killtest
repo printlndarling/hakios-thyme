@@ -1,13 +1,13 @@
 # Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.killtest).
-# Whether a relaunch after a termination, without any language change or install, is black the
-# way Sileo's respring leaves it: Sileo opened and left to draw, killed with SIGKILL, and opened
-# again by URL. The runner is devices/thyme/launchtest.sh
+# Whether a relaunch after an abrupt termination, with no language change or install, is black
+# the way Sileo's hung exits leave it: Sileo opened and left to draw, killed with SIGKILL by
+# killby, and opened again by URL. The runner is devices/thyme/launchtest.sh
 # (SCENE=out/thyme-boot/root-killtest.apfs), a screenshot every two seconds; the window server's
 # audit says in the log whether the display was opaque black.
 /redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.9 0.14 wait 6
-/usr/bin/killall -9 Sileo
+/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.9 0.14 wait 8
+/redwood/bin/killby Sileo
 /redwood/bin/rwtouch wait 8
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 30
+/redwood/bin/rwtouch wait 40

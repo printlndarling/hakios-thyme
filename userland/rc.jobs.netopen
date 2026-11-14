@@ -1,0 +1,11 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.netopen).
+# The owner's black with the network on: the scene joins Wi-Fi itself (the same net_test lines
+# rc.jobs.sileo uses) and then opens Sileo, so its launch does its repository work while the
+# screen is watched. The runner is devices/thyme/launchtest.sh
+# (SCENE=out/thyme-boot/root-netopen.apfs), a screenshot every two seconds; the window
+# server's audit says whether the display was opaque black.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 60

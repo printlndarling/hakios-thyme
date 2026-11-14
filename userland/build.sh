@@ -232,6 +232,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -o obj/apfs_mmap_test src/apfs_mmap_test.c
 		$DYN -o obj/vol_ls src/vol_ls.c
 		$DYN -framework CoreFoundation -framework CoreGraphics -framework ImageIO -o obj/snap_test src/snap_test.c
+		# a process by name, for the scenes that have to terminate one (no killall in the image)
+		$DYN -lproc -o obj/killby src/killby.c
 		$DYN -framework CoreFoundation -framework CoreGraphics -framework CoreText -o obj/font_test src/font_test.c
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
 		# (with an entitlement for "battery_test open URL", if ldid is there: src/battery_test.c)
@@ -249,7 +251,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# our library for inside stock Darwin programs (the jobs in INJECT are started with it)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.dylib -framework CoreFoundation -framework IOKit -lobjc \
 			-o obj/libhakios.dylib src/inject.c
-		$DYN -dynamiclib -install_name /redwood/lib/libhakios.sb.dylib -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework IOSurface -lobjc \
+		$DYN -dynamiclib -install_name /redwood/lib/libhakios.sb.dylib -framework CoreFoundation -framework CoreGraphics -framework IOKit -framework IOSurface -framework ImageIO -lobjc \
 			-o obj/libhakios.sb.dylib src/inject_sb.c
 		# ... the tweak loader of the package manager's prefix (src/inject_tweaks.c): it goes into a
 		# program either as the one library the kernel inserts or opened by a library of ours
@@ -371,6 +373,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/apfs_mmap_test ] && cp obj/apfs_mmap_test root/bin/
 	[ -f obj/vol_ls ] && cp obj/vol_ls root/bin/
 	[ -f obj/snap_test ] && cp obj/snap_test root/bin/
+	[ -f obj/killby ] && cp obj/killby root/bin/
 	[ -f obj/font_test ] && cp obj/font_test root/bin/
 	[ -f obj/metal_test ] && cp obj/metal_test root/bin/
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
