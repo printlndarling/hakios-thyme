@@ -1525,13 +1525,13 @@ configure_inject(void)
 static void
 configure_tcp(void)
 {
-	int milliseconds = 5000;
+	int milliseconds = 2000;
 
 	/*
 	 * A connect that cannot get through holds the caller for the system's initial-retransmit
-	 * window, 75 seconds by default. Sileo does its repository work with a blocking connect on
-	 * the main thread at launch, and until that returns nothing is drawn (the black the owner
-	 * sees on every restart). Five seconds is well beyond a local network's round trip, and a
+	 * window, 75 seconds by default. Sileo does its repository work with blocking connects on
+	 * the main thread at launch, several in a row, and until they return nothing is drawn (the black
+	 * sees on every restart). Two seconds is well beyond a local network's round trip, and a
 	 * host that has not answered the first retransmissions by then will not: the application
 	 * gets ETIMEDOUT and goes on to its first frame.
 	 */

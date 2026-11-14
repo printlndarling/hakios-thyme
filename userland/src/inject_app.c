@@ -571,7 +571,7 @@ appprof_start(void)
  * application goes on to its first frame. The wait is well above a local network's round
  * trip and only ever cuts off a connect that was not completing anyway.
  */
-#define CONNECT_WAIT_SECONDS 3
+#define CONNECT_WAIT_SECONDS 2
 
 static int (*real_connect)(int, const struct sockaddr *, socklen_t);
 
@@ -646,9 +646,96 @@ bounded_connect(int fd, const struct sockaddr *address, socklen_t length)
 	return result;
 }
 
+static int (*real_connectx)(int, const void *, unsigned, unsigned, const void *, unsigned, size_t *, unsigned *);
+
+static int
+bounded_connectx(int fd, const void *endpoints, unsigned associd, unsigned flags, const void *iov, unsigned iovcnt,
+    size_t *length, unsigned *connid)
+{
+	const struct sockaddr *address = NULL;
+	const void *destination;
+
+	if (real_connectx == NULL) {
+		real_connectx = (int (*)(int, const void *, unsigned, unsigned, const void *, unsigned, size_t *, unsigned *))
+		    dlsym(RTLD_NEXT, "connectx");
+	}
+	if (real_connectx == NULL) {
+		errno = ENOSYS;
+		return -1;
+	}
+	/* (a sa_endpoints_t: source, destination, interface -- only the destination is read here) */
+	if (endpoints != NULL) {
+		uintptr_t *fields = (uintptr_t *)endpoints;
+
+		destination = (const void *)fields[0];
+		if (destination != NULL) {
+			address = (const struct sockaddr *)destination;
+		}
+	}
+	if (address != NULL && (address->sa_family == AF_INET || address->sa_family == AF_INET6)) {
+		int flags_now = fcntl(fd, F_GETFL, 0);
+		int result;
+
+		if (flags_now >= 0 && (flags_now & O_NONBLOCK) == 0) {
+			(void)fcntl(fd, F_SETFL, flags_now | O_NONBLOCK);
+			result = real_connectx(fd, endpoints, associd, flags, iov, iovcnt, length, connid);
+			if (result < 0 && errno == EINPROGRESS) {
+				fd_set writes, errors;
+				struct timeval timeout = { CONNECT_WAIT_SECONDS, 0 };
+				int selected;
+
+				FD_ZERO(&writes);
+				FD_ZERO(&errors);
+				FD_SET(fd, &writes);
+				FD_SET(fd, &errors);
+				selected = select(fd + 1, NULL, &writes, &errors, &timeout);
+				if (selected == 0) {
+					char words[160];
+					char where[64] = "?";
+					int k;
+
+					if (address->sa_family == AF_INET) {
+						const struct sockaddr_in *four = (const struct sockaddr_in *)address;
+						uint8_t *bytes = (uint8_t *)&four->sin_addr.s_addr;
+
+						snprintf(where, sizeof(where), "%u.%u.%u.%u:%u", bytes[0], bytes[1], bytes[2], bytes[3],
+						    ntohs(four->sin_port));
+					} else {
+						const struct sockaddr_in6 *six = (const struct sockaddr_in6 *)address;
+						char text[INET6_ADDRSTRLEN] = "?";
+
+						(void)inet_ntop(AF_INET6, &six->sin6_addr, text, sizeof(text));
+						snprintf(where, sizeof(where), "[%s]:%u", text, ntohs(six->sin6_port));
+					}
+					k = snprintf(words, sizeof(words),
+					    "hakios: %s: connectx to %s not answered in %d s; given up\n", who, where, CONNECT_WAIT_SECONDS);
+					say(words, (size_t)(k > 0 ? k : 0));
+					errno = ETIMEDOUT;
+					result = -1;
+				} else if (selected > 0) {
+					int error = 0;
+					socklen_t width = sizeof(error);
+
+					(void)getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &width);
+					if (error == 0) {
+						result = 0;
+					} else {
+						errno = error;
+						result = -1;
+					}
+				}
+			}
+			(void)fcntl(fd, F_SETFL, flags_now);
+			return result;
+		}
+	}
+	return real_connectx(fd, endpoints, associd, flags, iov, iovcnt, length, connid);
+}
+
 __attribute__((used)) static struct { const void *replacement; const void *replacee; }
 connect_interposer __attribute__((section("__DATA,__interpose"))) = {
 	{ (const void *)bounded_connect, (const void *)connect },
+	{ (const void *)bounded_connectx, (const void *)connectx },
 };
 
 __attribute__((constructor))
