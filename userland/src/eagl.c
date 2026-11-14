@@ -313,6 +313,7 @@ struct eagl {
 	uint64_t upload_bytes, began, attaching, flushing;
 	/* everything so far */
 	unsigned frames, shaders, programs, errors, shared, refused;
+	unsigned zero_fills;            /* fills from a surface that had held something and now sums to nothing */
 	uint64_t all_calls, all_draws, all_triangles, readback_us, wait_us, attach_us, flush_us, frame_us;
 	unsigned most_calls, most_triangles;
 	const char *sources[256];       /* the text of the shaders being made, by name (modulo this) */
@@ -755,6 +756,9 @@ surface_to_texture(struct eagl *e, struct image *image)
 
 		for (size_t at = 0; at < size && samples < 4096; at += step, samples++) {
 			not_zero += base[at] != 0;
+		}
+		if (not_zero == 0) {
+			e->zero_fills++;
 		}
 		if (not_zero == 0 && zero_uploads_said < 20) {
 			zero_uploads_said++;
@@ -1294,9 +1298,9 @@ frame_end(struct eagl *e, bool finished)
 	}
 	if (e->frames <= 40 || e->frames % 20 == 0) {
 		say("hakios-gl: frame %u: %u GL calls, %u draws, %u triangles, %u clears; %u textures refilled from IOSurfaces "
-		    "(%llu KB); %u picture%s copied out, %u drawn in place; %llu us (%llu handing on, %llu waiting, %llu copying "
+		    "(%llu KB), %u zero fills; %u picture%s copied out, %u drawn in place; %llu us (%llu handing on, %llu waiting, %llu copying "
 		    "out), %llu before it for the IOSurfaces\n", e->frames, e->calls, e->draws, e->triangles, e->clears, e->uploads,
-		    e->upload_bytes >> 10, copied, copied == 1 ? "" : "s", in_place, after - e->began, e->flushing, waited - before,
+		    e->upload_bytes >> 10, e->zero_fills, copied, copied == 1 ? "" : "s", in_place, after - e->began, e->flushing, waited - before,
 		    after - waited, e->attaching);
 	}
 	if (e->frames == 30 || e->frames % 200 == 0) {

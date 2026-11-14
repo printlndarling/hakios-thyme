@@ -442,6 +442,19 @@ exercised. Two boot arguments are ready for the reproduction: `glstill=0`
 `gltrace_place=x,y,w,h` (the non-zero byte distribution of each fill in the
 traced frames).
 
+The zero-fill count now rides in the periodic frame line
+(`... N textures refilled from IOSurfaces (KB), Z zero fills; ...`, image
+`b781fd1f`). A ten-minute soak with a screenshot every 120 s ran with it: as far
+as its log survives, frames 1-760 (about 255 s, including the stock Wi-Fi
+Settings page and a join at 80 MHz around 5775 MHz at 254 s) report **0 zero
+fills**, and the 120-second screenshot (`logs/soak-120.png`) is clean.
+
+The log's text stops at 254 s and the rest of `logs/143257-run.log` is binary:
+the soak's screenshots are fetched through the loader's one staged buffer
+(`oem screen` replaces the log in it), so a screenshot taken while the log is
+being followed leaves the framebuffer in the log file. A soak that wants both
+should take its screenshots with no live log fetch (`XL_FOLLOW=`).
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
