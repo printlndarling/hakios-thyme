@@ -1,0 +1,7 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.launchtest).
+# One cold launch, timed: home, Settings opened by URL, left to draw. The runner takes a
+# screenshot every two seconds, so how long the screen is black (or a snapshot) before the
+# first real frame can be counted.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 120

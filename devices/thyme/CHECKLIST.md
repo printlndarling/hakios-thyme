@@ -600,6 +600,30 @@ spawns (`dpkg --print-architecture` and the like), and why a cold launch's
 first frame takes that long; the launch snapshot is what covers the gap, and
 whether it is shown at all is the question to ask of SpringBoard.
 
+A cold launch was timed with screenshots every two seconds
+(`devices/thyme/launchtest.sh`, `rc.jobs.launchtest`, image `2f53abb9`, kernel
+`bac1b423`): launchd spawned `com.apple.Preferences` at 17:31:55.85, backboardd
+put its scene in the foreground at 17:31:56.14, and the 48-second screenshot --
+about two seconds after the spawn -- shows the whole Settings page drawn. There
+is **no black gap** in a Settings cold launch; the screen goes from the home
+page to the drawn page. So the black window the owner saw on reopening Sileo is
+not what a cold launch does in general: it is Sileo's own minute after the respawn
+(the picture at 29 s was the old page, the black at 59 s, the drawn page again at
+89 s), and the question is what fills it -- Sileo's launch image, the snapshot SplashBoard keeps, or the
+application's own window before its first frame.
+
+Sileo's source answers the other half (`Sileo/UI/DownloadsViewController/
+DownloadsTableViewController.swift`, `completeButtonTapped`): the Complete
+button fades the window out and then runs
+`uicache -p <Sileo.app>` and `exit(0)` -- Sileo's own "dumb respring" after an
+install. The `0x8badf00d` in the run is that exit, hanging for more than the
+five seconds SpringBoard's watchdog gives it; and a window that is already at
+alpha 0 when the snapshot is taken is a black snapshot. That is the chain to
+look at next: what Sileo's snapshot and launch image hold, with `snap_test`
+(`userland/src/snap_test.c`) on `Library/SplashBoard/Snapshots/
+org.coolstar.SileoStore` inside the run.
+
+
 
 
 
