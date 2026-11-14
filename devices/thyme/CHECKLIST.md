@@ -415,6 +415,33 @@ reach a join (its log has the driver set up and the station ready, but no
 `lx: iOS join reached`), and the run before this change joined on its first
 answer at 20 MHz (`logs/135413-run.log`).
 
+### Black boxes in text and icons: the texture a detector watches (2026-11-14)
+
+Reported by the owner: fonts sometimes become black boxes in Settings, the
+keyboard and other UIs, and sometimes home-screen icons do too. The UI's text
+and icons are not drawn by a font stack of ours: CoreAnimation renders them
+through `libhakios.gl.dylib` and Mesa, and the window server fills its textures
+from IOSurfaces (`userland/src/eagl.c`, `surface_to_texture()`). A black box is
+therefore most plausibly a texture filled with nothing -- the same surface the
+icons and glyph atlases arrive on.
+
+The fill path now watches for that: after an image's first fill, an upload
+whose sampled bytes are **all zero** prints
+
+```text
+hakios-gl: frame N: texture T filled from surface S with ZERO bytes only (W x H, pixel format 0x..., R bytes a row)
+```
+
+(once per upload, at most 20 times). The first run with it -- the full
+wireless scenario, which opens the stock Wi-Fi Settings page and its list of
+networks (`logs/142224-run.log`, kernel `48755a68`, image `b0b2b43f`) -- printed
+no such line, and its 145-second screenshot (`logs/wirelessregress-wifi.png`)
+shows every label, lock and signal icon drawn correctly: the trigger was not
+exercised. Two boot arguments are ready for the reproduction: `glstill=0`
+(look at every still surface every frame instead of sampling one in eight) and
+`gltrace_place=x,y,w,h` (the non-zero byte distribution of each fill in the
+traced frames).
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel

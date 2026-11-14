@@ -239,6 +239,7 @@ struct image {
 	unsigned looked;                /* ... the frame in which that memory was last looked at, */
 	uint64_t sum;                   /* ... and what it added up to */
 	unsigned unchanged;             /* ... and how many looks in a row found it the same (surface_changed()) */
+	unsigned uploaded;              /* how many times its texture was filled (surface_to_texture()) */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -328,6 +329,7 @@ static int trace_function = -1, trace_function_after = 1;       /* boot-arg gltr
 static int trace_function_met;                                  /* ... CoreAnimation makes of its function N with no program */
 static float trace_place[4];                    /* boot-arg gltrace_place=X0,Y0,X1,Y1: of those frames, only the draws that touch this */
 static int trace_placed, trace_placing;         /* ... is set; ... and this frame is one of them */
+static unsigned zero_uploads_said;              /* (the all-zero fills, said at most this many times) */
 static int trace_look;                          /* boot-arg gltrace_look=1: ... and what each of them left in the middle of itself */
 static int trace_shaders;                       /* boot-arg gltrace_shaders=1: the text of the shaders of every program that draws */
 static int trace_uniforms_on;                   /* boot-arg gltrace_uniforms=1: and what every traced draw gave its program */
@@ -741,6 +743,26 @@ surface_to_texture(struct eagl *e, struct image *image)
 		}
 		base = flipped;
 	}
+	if (image->uploaded != 0) {
+		/*
+		 * A surface that held something and now sums to nothing is what a
+		 * black box is made of: say it, once per upload, so a report of one
+		 * has a line to match. (The first fill of a new surface can be
+		 * legitimately empty.)
+		 */
+		size_t size = row * (size_t)(image->height - 1) + (size_t)image->width * pixel;
+		size_t step = size / 4096 + 1, samples = 0, not_zero = 0;
+
+		for (size_t at = 0; at < size && samples < 4096; at += step, samples++) {
+			not_zero += base[at] != 0;
+		}
+		if (not_zero == 0 && zero_uploads_said < 20) {
+			zero_uploads_said++;
+			say("hakios-gl: frame %u: texture %u filled from surface %u with ZERO bytes only (%d x %d, pixel format %#x, "
+			    "%zu bytes a row)\n", e->frames + 1, image->texture, IOSurfaceGetID(surface), image->width, image->height,
+			    (unsigned)IOSurfaceGetPixelFormat(surface), row);
+		}
+	}
 	glGetIntegerv(GL_UNPACK_ROW_LENGTH, &row_length);
 	glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(row / pixel));
@@ -777,6 +799,7 @@ surface_to_texture(struct eagl *e, struct image *image)
 	IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
 	free(flipped);
 	image->seed = IOSurfaceGetSeed(surface);
+	image->uploaded++;
 	e->uploads++;
 	e->upload_bytes += row * (size_t)image->height;
 }
