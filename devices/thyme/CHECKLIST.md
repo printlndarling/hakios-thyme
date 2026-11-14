@@ -735,6 +735,18 @@ language screen runs) exits Sileo at 04:08:06 and the next instance spawns at
 04:08:13; the screenshots show the old page through 58, one transition at 60-62,
 **one dark frame at 64**, and the drawn page from 66 on -- a black of about two
 seconds, where the owner saw minutes. The boot log has
+
+The scripted scroll inside Sileo was attempted twice more, with the alert
+dismissed over a longer window (`logs/042018-run.log`): the dismissal taps
+themselves draw (112 frames at 73 a second), but the scroll strokes after them
+draw **0 frames**, and the main thread sits in `mach_msg2_trap` for 246-248 of
+250 samples -- the swipes never reached a scrollable page (the content was still
+loading when they ran, or a modal still stood over it). The one measurement that
+did catch Sileo scrolling -- about 20 frames a second, the window server drawing
+in 1 ms and waiting 43-48 ms on the application -- stands; measuring it again
+wants a longer wait before the strokes, or the owner's own hand on a boot with
+`appprof=1`.
+
 `net.inet.tcp.keepinit = 2000 ms`. The loader's fastboot was also recovered
 once with `fastboot -s xnuloader reboot` (the endpoint accepted it when it would
 not boot), and the scene runners now always upload the system image: a loader
