@@ -2396,3 +2396,8 @@ it (built; the driver file compiled with no errors). `net_test` gained a `power 
 then an address and a name again with no joinfile between them -- which answers whether the
 station layer's own re-join covers what the system's sleep does. Both are **built but not yet
 run**: the phone has been off USB since the dependency run.
+
+ runs both tests in sequence from an Android state
+(battery_stop=10, 300 s each, with the loader waits between them) and prints from each log
+the lines that answer the two questions: the power step and the address/resolve after it, the
+keepalive's link event and its join.
