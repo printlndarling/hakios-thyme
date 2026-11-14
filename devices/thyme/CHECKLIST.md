@@ -536,6 +536,31 @@ run's end: after `MESA: error: flush_submit_list:135: submit failed: -5
 `fd6_build_bindless_state` NULL (that one is still quiet), and not the audit,
 which calls no Mesa. Written down for the next investigation.
 
+The same Sileo scene that issued those 221 lines ran again with `IMAGES` = 1024
+(`logs/155640-run.log`, kernel `bac1b423`, image `4f922b92`): **no** "there is
+room for" line, and the table's highest live count was **264** of 1024 (1080 to
+1197 entries forgotten) -- this very workload goes past 256, which is exactly
+why the old table ran out. No panic in that run (its joins were accepted on the
+first answer, so the retry-sleep path was not exercised), and the window
+server's new end-of-run crash (`libOSMesa.8.dylib+0x71cea0`) came again, at the
+same place.
+
+The owner was on the phone during that run and used it as a person would:
+they joined the network, tapped Download in Sileo, and Sileo went away; it
+went away with **0x8badf00d**: `[application<org.coolstar.SileoStore>:593]
+failed to terminate gracefully after 5.0s` (`logs/155640-run.log`, 16:06:24),
+and launchd spawned the next instance at once. Reopening it showed a black
+screen. The audit has all-zero drawn surfaces in that run -- frame 6360, `AUDIT
+6 of 16 drawn surfaces all zero`, among them 1125 x 1905 and two 1101 x 1536,
+each "its memory" with seed 3 and no fills -- the shape a black app screen
+leaves, though the moment is the last minute of a 600 s RAM session (the GPU is
+given back at ~16:06:50 and backboardd takes its SIGSEGV at 16:06:51), so what
+is the end of the session and what is the app exiting on a download are still
+to be told apart: the next Sileo run wants to be longer than the download takes
+(1200 s), and the termination itself (who waits on what for five seconds) is
+the thing to look at.
+
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
