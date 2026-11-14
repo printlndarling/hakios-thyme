@@ -1557,6 +1557,9 @@ station_width(struct lx_radio *radio, struct linuxkpi_ieee80211_channel *primary
 	const uint8_t *vht = element(target->elements, target->elements_length, 192);
 	unsigned offset;
 
+	/* (what the width is decided from: a run that asks for 20 MHz and gets 40 must say why) */
+	lx_tell("lx: the width: wifi_wide %d, the HT element %s, its byte 3 %#x\n", lx_os_option("wifi_wide"),
+	    ht != NULL ? "there" : "absent", ht != NULL ? ht[3] : 0);
 	def->chan = primary;
 	def->width = NL80211_CHAN_WIDTH_20;
 	def->center_freq1 = primary->center_freq;

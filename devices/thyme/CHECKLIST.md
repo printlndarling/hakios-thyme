@@ -378,6 +378,27 @@ others, with the same MAC and the same frames, so the next step is to repeat
 joins within one boot and, on a refusal, try the other BSS of the same name
 (the 5 GHz one, whose joins have never been refused).
 
+The runtime print settled the width (`logs/133626-run.log`, kernel
+`18d1d62be6bd`):
+
+```text
+lx: the width: wifi_wide 1, the HT element there, its byte 3 0x7
+lx: the channel is taken, 40 MHz wide around 2427 MHz: 0
+```
+
+The option reads **1 although the command line says `wifi_wide=0`**. The reason
+is the port's naming: `lx_os_option()` asks `umi_wifi_is_board()`, which is
+`umi_wifi_is_umi()`, and that function checks the device tree for the board
+string **"thyme"** -- true on this phone. Its UMI/thyme branch answers
+`wifi_wide`, `wifi_ba` and the other driver options from the board's defaults
+before any boot argument is parsed, so `wifi_wide=0` (and every other option
+that branch names) cannot take effect on thyme. The width is a board default,
+not a decision from the AP or from the argument.
+
+The joins in this run and its retry were accepted (status 0) on the same
+2.4 GHz BSS; the refusal of 12:35 therefore stays intermittent and
+unexplained, and the width is now out of the list of suspects.
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
