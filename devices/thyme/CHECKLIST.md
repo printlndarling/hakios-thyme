@@ -455,6 +455,75 @@ the soak's screenshots are fetched through the loader's one staged buffer
 being followed leaves the framebuffer in the log file. A soak that wants both
 should take its screenshots with no live log fetch (`XL_FOLLOW=`).
 
+
+### The black boxes, named: a table of 256 textures that runs out (2026-11-14)
+
+The owner sent photographs of the phone while the Sileo scene ran: Settings ->
+Safari with black rectangles where the switch labels and the switches' knobs
+are, and Settings' root list with black squares where the row icons are
+(Battery, Privacy & Security, App Store, Wallet, Passwords, Calendar, Notes,
+Reminders, Freeform) while the text and some icons render. A display
+screenshot at another moment (`logs/blackbox-now.png`, Settings -> News) has the
+same shape: three toggle images and the top-left back area black, the text
+intact. Both photographs were taken in a session whose log
+(`logs/144629-run.log`) has **221** lines
+
+```text
+hakios-gl: more textures with IOSurfaces than there is room for
+```
+
+`struct image images[256]` (`userland/src/eagl.c`) is the table from a texture
+to the IOSurface it shows; `-texImageIOSurface:` and `-attachImage:` answer NO
+once it is full, and the layer's texture is never filled -- which is a black
+box, and one that stays until the layer is made again (scrolled away and
+back). That matches the report exactly: what was drawn before the table filled
+is fine, what is made afterwards is black.
+
+The table is now `IMAGES` = 1024, and `summary()` says how full it is: `... N
+of 1024 images live, M forgotten`. Two more things came with it:
+
+- a surface audit (`glaudit=N` frames, default 60, 0: never) samples every
+  texture the frame drew with, copied or shared, and prints the ones whose
+  source surface adds up to nothing:
+
+  ```text
+  hakios-gl: frame N: a drawn surface is all ZERO: surface S, texture T, W x H, R bytes a row, its seed X (ours Y), copied|its memory, F fills
+  hakios-gl: frame N: AUDIT Z of D drawn surfaces all zero, U drawn textures never filled
+  ```
+
+- a runner and a scene for the owner's reproduction:
+  `devices/thyme/blackbox.sh` and `userland/rc.jobs.blackbox` -- Safari opened
+  first (a web page makes many surfaces), then Settings opened, flung to the
+  bottom six swipes at 60 ms apiece, closed with the home button, four times,
+  then the search field brought down and tapped (the keyboard); screenshots
+  every few seconds, taken with no live log fetch.
+
+Runs: 300 s and 600 s, kernel `48755a68`, images `77ff3175` and `8a60c017`. No
+black boxes in any screenshot (`logs/blackbox-90.png`, `-204.png`, `-480.png`
+are clean), no zero fills, and the table never ran out. Its census at 600 s:
+**124 of 1024 images live, 1283 forgotten** -- the table churns, it does not
+leak, and 256 was small enough for the heavier Sileo session to exhaust. The
+audit's one finding every 60 frames is a single 24 x 132 surface (seed 3, no
+fills) that is all zero while drawn; small and all-zero, it looks like a
+transparent overlay (an all-zero surface drawn with blending is invisible, not
+black), and it was there in both runs.
+
+So: the failure path is real and matches the photographs, and the enlarged
+table removes it for sessions up to 1024 live surfaces (eight times the worst
+live count seen); that the owner's black boxes were this failure is not yet
+proved -- the reproduction did not make one. The next heavy session that
+previously ended with hundreds of these lines should end with none, and the
+owner's fast scroll then decides it.
+
+The same run also ended with a new instance of the window server's crash at the
+run's end: after `MESA: error: flush_submit_list:135: submit failed: -5
+(Operation not supported)` and `hakios-drm: method 0x42 (16 bytes) refused:
+0xe00002d8`, backboardd took `signal 11 at 0x0, pc libOSMesa.8.dylib+0x71cea0`
+(`logs/152739-run.log`; launchd restarted it). The stack is
+`libhakios.gl.dylib+0x10bd8 -> libOSMesa ... -> 0x71cea0`; not the earlier
+`fd6_build_bindless_state` NULL (that one is still quiet), and not the audit,
+which calls no Mesa. Written down for the next investigation.
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel

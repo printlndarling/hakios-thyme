@@ -1,0 +1,28 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# The owner's black-box reproduction, driven by touch injection (RC_JOBS=rc.jobs.blackbox):
+# Safari is opened first (a web page makes many surfaces), closed, and then Settings is opened,
+# flung to the bottom the way a quick finger does it, closed, and again, four times; then the
+# search field is brought down and tapped (the keyboard). The screenshots are the runner's
+# (devices/thyme/blackbox.sh), every few seconds.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen https://www.apple.com
+/redwood/bin/rwtouch wait 45 button home wait 6
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 5
+/redwood/bin/rwtouch button home wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 5
+/redwood/bin/rwtouch button home wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 5
+/redwood/bin/rwtouch button home wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+# the search field, brought down from the top and tapped: the keyboard comes up over it
+/redwood/bin/rwtouch swipe 0.5 0.2 0.5 0.9 200 wait 3 tap 0.5 0.12 wait 8
+/redwood/bin/rwtouch wait 6 button home wait 5

@@ -214,6 +214,7 @@ now_us(void)
 /* ---- a context -------------------------------------------------------------------------------- */
 
 #define SLOTS           0x440           /* entries of the table: more than Darwin's has (checked below) */
+#define IMAGES          1024            /* textures with IOSurfaces there is room for (256 ran out: CHECKLIST) */
 
 /* (a vibrant layer inside a group: see group_draw_begin()) */
 #define GROUP_TEXTURES  8192
@@ -240,6 +241,8 @@ struct image {
 	uint64_t sum;                   /* ... and what it added up to */
 	unsigned unchanged;             /* ... and how many looks in a row found it the same (surface_changed()) */
 	unsigned uploaded;              /* how many times its texture was filled (surface_to_texture()) */
+	unsigned used;                  /* the frame it was last bound for drawing in (surface_audit()) */
+	unsigned audit_said;            /* how many times the audit has said it adds up to nothing */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -250,8 +253,9 @@ struct eagl {
 	id object;                      /* the EAGLContext */
 	struct hakios_gl *gl;
 	unsigned long api;
-	struct image images[256];
+	struct image images[IMAGES];
 	unsigned image_count;
+	unsigned forgotten;             /* entries given back (image_forget()) */
 	GLuint framebuffer;             /* the one bound */
 	GLuint colour;                  /* ... and the texture that is its colour attachment (0: none, or no texture) */
 	GLuint reader;                  /* a framebuffer of ours, to read a texture back */
@@ -503,10 +507,12 @@ summary(struct eagl *e)
 	say("hakios-gl: after %u frames: %llu calls, %llu draws and %llu triangles a frame on average; the most in one: "
 	    "%u calls, %u triangles; %llu us a frame, of which %llu handing the commands on, %llu waiting for the picture "
 	    "to be drawn and %llu copying it out, and before each %llu making textures of IOSurfaces; %u IOSurfaces were "
-	    "the textures' memory, %u had to be copied; %u shaders, %u programs; biggest texture %u x %u; %u errors\n",
+	    "the textures' memory, %u had to be copied; %u shaders, %u programs; biggest texture %u x %u; %u errors; "
+	    "%u of %u images live, %u forgotten\n",
 	    e->frames, e->all_calls / frames, e->all_draws / frames, e->all_triangles / frames, e->most_calls,
 	    e->most_triangles, e->frame_us / frames, e->flush_us / frames, e->wait_us / frames, e->readback_us / frames,
-	    e->attach_us / frames, e->shared, e->refused, e->shaders, e->programs, widest_texture, tallest_texture, e->errors);
+	    e->attach_us / frames, e->shared, e->refused, e->shaders, e->programs, widest_texture, tallest_texture, e->errors,
+	    e->image_count, IMAGES, e->forgotten);
 	for (unsigned i = 0; i < sizeof(formats) / sizeof(formats[0]) && formats[i].count; i++) {
 		say("hakios-gl:   textures: %s %#x/%#x/%#x: %u times, up to %u x %u\n", formats[i].how, formats[i].internal,
 		    formats[i].format, formats[i].type, formats[i].count, formats[i].widest, formats[i].tallest);
@@ -538,7 +544,8 @@ image_new(struct eagl *e, GLuint texture, IOSurfaceRef surface)
 
 	if (image == NULL) {
 		if (e->image_count == sizeof(e->images) / sizeof(e->images[0])) {
-			say("hakios-gl: more textures with IOSurfaces than there is room for\n");
+			say("hakios-gl: more textures with IOSurfaces than there is room for (%u made, %u forgotten)\n",
+			    e->image_count, e->forgotten);
 			return NULL;
 		}
 		image = &e->images[e->image_count++];
@@ -565,6 +572,7 @@ image_forget(struct eagl *e, GLuint texture)
 		}
 		CFRelease(image->surface);
 		*image = e->images[--e->image_count];
+		e->forgotten++;
 	}
 }
 
@@ -1192,6 +1200,59 @@ frame_begin(struct eagl *e)
 }
 
 /*
+ * An audit of the surfaces a frame drew with: a surface that adds up to nothing while its
+ * texture is drawn with is what a black box is made of, and a texture drawn with that was
+ * never filled is the other way to one. Every audit_every frames (boot-arg glaudit=N, 0:
+ * never), and only a surface all zero is said, with enough to know which.
+ */
+static unsigned audit_every = 60;
+static void
+surface_audit(struct eagl *e)
+{
+	unsigned drawn = 0, zero = 0, unfilled = 0;
+
+	for (unsigned i = 0; i < e->image_count; i++) {
+		struct image *image = &e->images[i];
+		IOSurfaceRef surface;
+		const uint8_t *base;
+		size_t row, size, step, samples = 0, not_zero = 0;
+		unsigned pixel;
+
+		if (image->used != e->frames + 1 || image->target) {
+			continue;
+		}
+		drawn++;
+		unfilled += !image->shared && image->uploaded == 0;
+		surface = image->surface;
+		base = IOSurfaceGetBaseAddress(surface);
+		if (base == NULL) {
+			continue;
+		}
+		row = IOSurfaceGetBytesPerRow(surface);
+		pixel = bytes_a_pixel(image->format, image->type);
+		size = row * (size_t)(image->height - 1) + (size_t)image->width * pixel;
+		step = size / 512 + 1;
+		for (size_t at = 0; at < size && samples < 512; at += step, samples++) {
+			not_zero += base[at] != 0;
+		}
+		if (not_zero == 0) {
+			zero++;
+			if (image->audit_said < 3) {
+				image->audit_said++;
+				say("hakios-gl: frame %u: a drawn surface is all ZERO: surface %u, texture %u, %d x %d, %zu bytes a row, "
+				    "its seed %u (ours %u), %s, %u fills\n", e->frames + 1, IOSurfaceGetID(surface), image->texture,
+				    image->width, image->height, row, (unsigned)IOSurfaceGetSeed(surface), image->seed,
+				    image->shared ? "its memory" : "copied", image->uploaded);
+			}
+		}
+	}
+	if (zero != 0) {
+		say("hakios-gl: frame %u: AUDIT %u of %u drawn surfaces all zero, %u drawn textures never filled\n",
+		    e->frames + 1, zero, drawn, unfilled);
+	}
+}
+
+/*
  * glFlush, glFinish: what was drawn must be where the display takes it from. `finished`: the
  * library has been waited for already.
  */
@@ -1247,6 +1308,9 @@ frame_end(struct eagl *e, bool finished)
 		return;
 	}
 	after = now_us();
+	if (audit_every != 0 && (e->frames + 1) % audit_every == 0) {
+		surface_audit(e);
+	}
 	e->in_frame = false;
 	e->frames++;
 	if (latency_lines) {
@@ -1380,10 +1444,13 @@ my_glBindTexture(void *context, GLenum target, GLuint texture)
 	if (target == GL_TEXTURE_2D && e->unit < 8) {
 		e->bound[e->unit] = texture;
 	}
-	if (texture != 0 && e->image_count != 0 && (image = image_of(e, texture)) != NULL && !image->shared &&
-	    (!image->target ? IOSurfaceGetSeed(image->surface) != image->seed || surface_changed(e, image) :
-	    image->wrapped && !image->painted && surface_changed(e, image))) {
-		surface_to_texture(e, image);
+	if (texture != 0 && e->image_count != 0 && (image = image_of(e, texture)) != NULL) {
+		image->used = e->frames + 1;
+		if (!image->shared &&
+		    (!image->target ? IOSurfaceGetSeed(image->surface) != image->seed || surface_changed(e, image) :
+		    image->wrapped && !image->painted && surface_changed(e, image))) {
+			surface_to_texture(e, image);
+		}
 	}
 	EAGL_LEAVE(e, 0x30);
 }
@@ -4339,6 +4406,9 @@ install(void)
 			}
 		}
 		share_surfaces = strstr(arguments, "glcopy=1") == NULL;
+		if ((argument = strstr(arguments, "glaudit=")) != NULL) {
+			audit_every = (unsigned)strtoul(argument + 8, NULL, 10);
+		}
 		blit_targets = strstr(arguments, "glblit=0") == NULL;
 		sync_frames = strstr(arguments, "glsync=0") == NULL;
 		if (strstr(arguments, "glwait=0") != NULL || (strstr(arguments, "glwait=1") == NULL && display_waits())) {
