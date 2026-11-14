@@ -642,6 +642,24 @@ snapshots here at all (the manifest's format hook is already ours:
 `snapshot_output_format()` in `userland/src/inject_sb.c`), or whether the first
 frame of an application like Sileo can be made sooner.
 
+How far SpringBoard gets with a snapshot is now visible in the log: the format
+hook is called (**12 times** in one blackflash run), each time with a real
+`XBApplicationSnapshot` -- `identifier` a UUID, `contentType: SceneContent`,
+`referenceSize: {375, 812}`, `Portrait`, `Light`, and a second `downscaled`
+variant of another UUID. So the manifest is asked; what never happens is the
+picture landing on disk. In the same boot: the global
+`Library/SplashBoard/Snapshots` holds only `com.apple.mobilecal` (the Calendar
+widget extension), and a `find` over every application container finds **no**
+`SplashBoard` or `Snapshots` directory at all -- neither Sileo nor Settings has
+one. Asking for PNG instead of JPEG changed nothing (`5733fdd8`), so the
+encoder is not the reason. The remaining suspects are SpringBoard's write path
+(container, path, permissions) and the app scene's content capture; that widget
+extensions' snapshots do land while applications' do not is the shape of the
+clue. The format hook now says the first twelve calls with each snapshot's
+description (`snap_test`'s scene is `rc.jobs.snaptest`, run with no
+screenshots).
+
+
 The screenshot runners were also corrected: the kernel returns at `XL_SECS`
 minus the boot time (60-90 s), so a capture loop that stopped only 10-40 s
 before `XL_SECS` was still taking screenshots when the log was fetched, and two

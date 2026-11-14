@@ -300,16 +300,23 @@ set_setup_required_reason(id self, SEL selector, long reason)
 #define SNAPSHOT_FORMAT_PNG             0
 #define SNAPSHOT_FORMAT_JPEG            3
 
+static const char *text_of(id object);          /* (defined below: a description as text) */
+static unsigned snapshot_asked;                /* calls of _outputFormatForSnapshot: (said first few) */
 static long
 snapshot_output_format(__unused id self, __unused SEL selector, id snapshot)
 {
 	SEL opaque = sel_registerName("isImageOpaque");
+	BOOL is_opaque = snapshot != NULL && class_getInstanceMethod(object_getClass(snapshot), opaque) != NULL &&
+	    ((BOOL (*)(id, SEL))objc_msgSend)(snapshot, opaque);
 
-	if (snapshot != NULL && class_getInstanceMethod(object_getClass(snapshot), opaque) != NULL &&
-	    ((BOOL (*)(id, SEL))objc_msgSend)(snapshot, opaque)) {
-		return SNAPSHOT_FORMAT_JPEG;
+	snapshot_asked++;
+	if (snapshot_asked <= 12) {
+		id desc = snapshot != NULL ? ((id (*)(id, SEL))objc_msgSend)(snapshot, sel_registerName("description")) : nil;
+
+		say("hakios: SpringBoard: snapshot %u: %s, %s: %s\n", snapshot_asked,
+		    snapshot != NULL ? class_getName(object_getClass(snapshot)) : "nil", is_opaque ? "JPEG" : "PNG", text_of(desc));
 	}
-	return SNAPSHOT_FORMAT_PNG;
+	return is_opaque ? SNAPSHOT_FORMAT_JPEG : SNAPSHOT_FORMAT_PNG;
 }
 
 /* ---- battery state from redwood's Qualcomm charger stack ----------------------------------------- */
