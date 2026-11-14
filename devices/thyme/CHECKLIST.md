@@ -728,6 +728,21 @@ the call does not go through a symbol the dyld interposers can reach -- so the
 sysctl remains what bounds the launch. What the user sees on a boot with this
 image is the next measurement: the same language restart, timed in screenshots.
 
+The two-second cap, end to end on the phone (`logs/040630-run.log`, image
+`b8531f6a`, kernel `bac1b423`, `appprof=1`, a screenshot every two seconds):
+the language change (the injected library's notification, the same code the
+language screen runs) exits Sileo at 04:08:06 and the next instance spawns at
+04:08:13; the screenshots show the old page through 58, one transition at 60-62,
+**one dark frame at 64**, and the drawn page from 66 on -- a black of about two
+seconds, where the owner saw minutes. The boot log has
+`net.inet.tcp.keepinit = 2000 ms`. The loader's fastboot was also recovered
+once with `fastboot -s xnuloader reboot` (the endpoint accepted it when it would
+not boot), and the scene runners now always upload the system image: a loader
+that has just been booted has none staged, and the state cannot tell it from a
+prepared one (two runs had booted a kernel with no system image and returned in
+seconds).
+
+
 
 
 
