@@ -1018,6 +1018,24 @@ mount_writable(void)
 		grafted = graft_tree(jb, to, 1, &dirs, &entries);
 
 		/*
+		 * The prefix's mobile corner is the real one. The applications of the prefix keep
+		 * their data containers under /var/jb/var/mobile/Containers, and the system kills an
+		 * application suspended with a lock on a file outside the real /var/mobile
+		 * (0xdead10cc: Sileo's own database was exactly that; it died every time it left the
+		 * screen, and the next open was a cold launch). A link puts the containers where the
+		 * check looks.
+		 */
+		int mobile_linked = 0;
+
+		if (lstat("/private/var/jb/var/mobile", &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR) {
+			empty_tree("/private/var/jb/var/mobile", 0);
+			if (rmdir("/private/var/jb/var/mobile") == 0 && symlink("/var/mobile", "/private/var/jb/var/mobile") == 0) {
+				mobile_linked = 1;
+			}
+			printf("  /var/jb/var/mobile -> /var/mobile: %s\n", mobile_linked ? "linked" : "NOT linked");
+		}
+
+		/*
 		 * All of it belongs to root, as it does on a phone, but for the user's corner of it: an
 		 * application of the prefix runs as mobile and keeps its data there (Sileo's database).
 		 */
@@ -1034,10 +1052,15 @@ mount_writable(void)
 			                               "/private/var/jb/var/lib/apt/sileolists/partial" };
 
 		for (unsigned i = 0; i < sizeof(mobiles) / sizeof(mobiles[0]); i++) {
+			if (mobile_linked && strncmp(mobiles[i], "/private/var/jb/var/mobile", 26) == 0) {
+				continue;               /* (the real one is already there, and is mobile's) */
+			}
 			mkdir(mobiles[i], 0755);
 			grafted = chown(mobiles[i], 501, 501) == 0 && grafted;
 		}
-		grafted = own_tree("/private/var/jb/var/mobile", 501) && grafted;
+		if (!mobile_linked) {
+			grafted = own_tree("/private/var/jb/var/mobile", 501) && grafted;
+		}
 		/*
 		 * The prefix's own user database. Its programs do not ask Darwin who a user is: they are
 		 * built against libiosexec, which carries an ie_getpwnam of its own and reads

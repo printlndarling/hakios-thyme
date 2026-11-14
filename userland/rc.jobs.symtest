@@ -1,0 +1,7 @@
+# RC_JOBS=rc.jobs.symtest: the containers of the prefix%s applications, after the link.
+
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 140
+/var/jb/usr/bin/ls -ld /var/jb/var/mobile /var/jb/var/mobile/Containers /var/mobile/Containers/Data/Application
+/var/jb/usr/bin/ls /var/mobile/Containers/Data/Application

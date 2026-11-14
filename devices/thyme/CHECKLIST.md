@@ -610,6 +610,25 @@ does (the same net_test lines as rc.jobs.sileo), and langtest/killtest should
 follow. After the owner's retest, the language path drew without black once;
 with the network on, opening Sileo was black again.
 
+The container layout was then read directly (`rc.jobs.probe`, run first so the
+log keeps it): `/var -> private/var`, `/var/jb` a real directory, `/var/jb/var`
+real, **`/var/jb/var/mobile` a real mobile-owned directory** (empty in the image),
+`/var/mobile/Containers` real -- and `/var/jb/var/mobile/Containers` did not exist
+until an application of the prefix was installed and launched. So the dead10cc
+paths came from containers created under the prefix.
+
+`init` now makes the prefix's mobile corner the real one: after the graft it
+empties `/private/var/jb/var/mobile`, removes it and links it to `/var/mobile`
+(log: `  /var/jb/var/mobile -> /var/mobile: linked`), and skips the ownership
+loop and `own_tree` for that corner when it is a link (the real one is already
+mobile's). Verified on the phone (scene `rc.jobs.symtest`, image `a6acdeb1`):
+`ls -ld` shows `lrwxr-xr-x /var/jb/var/mobile -> /var/mobile`, the containers
+directory resolves, and `/var/mobile/Containers/Data/Application` holds 175
+application directories, Sileo's among them. What is left to see is the
+suspension: opening Sileo, leaving it and opening it again should no longer log
+0xdead10cc, and the warm relaunch should draw without the black cold start.
+
+
 
 
 

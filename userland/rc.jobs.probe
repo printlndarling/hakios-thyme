@@ -1,0 +1,4 @@
+# RC_JOBS=rc.jobs.probe: the container layout the dead10cc check sees (run first, so the log keeps it).
+/var/jb/usr/bin/ls -ld /var /var/mobile /var/jb /var/jb/var /var/jb/var/mobile
+/var/jb/usr/bin/ls -ld /var/mobile/Containers /var/mobile/Containers/Data /var/jb/var/mobile/Containers
+/var/jb/usr/bin/readlink /var/jb
