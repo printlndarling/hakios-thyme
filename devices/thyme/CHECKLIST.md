@@ -2330,3 +2330,18 @@ ended the run at 203 s (`battguard: the charge is 22%, at or below battery_stop=
 looks in a row`), before the scene's 300 s idle and its tap. The re-join after a sleep is
 therefore implemented and compiled but **not yet verified on the phone**; `rc.jobs.wifikeep`
 with `battery_stop=10` (the phone charged first) is what will verify it.
+
+Two more runs tried to drive that verification from a scene, and both showed why it
+cannot be: the phone's system sleeps about a minute after boot when no application holds
+the idle timer, and a sleeping system suspends every scene process. In `logs/064236-run.log`
+the scene's `net_test wait 30 joinfile` began at boot and its join only happened at 226 s
+(after the demo job had already ended); in `logs/065221-run.log`, with background taps every
+five seconds from +5 s, the join still never ran and the demo job was still asleep at the
+run's end. The keepalive daemon itself was suspended with them and resumed only at the
+teardown, when it did exactly what it was built to do: the kernel's link-off event arrived,
+it printed `the link is gone; joining /redwood/fw/network again`, and the join was refused
+`Device not configured` -- the station layer was already gone with the driver's shutdown.
+So the event path works end to end; what the phone does after a *wake by touch* (whether the
+station layer is back by then) has to be seen with a hand on the screen, not from a scene.
+`rc.jobs.wifidrop` (join, `net_test leave`, then the address and a name again) is the scene
+that will answer it from a boot an application keeps awake.

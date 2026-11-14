@@ -35,10 +35,13 @@
  *                         An optional third line pins the BSSID. Only lengths and whether an
  *                         access point was selected are printed.
  *   keepalive [FILE] [SECONDS]
- *                         every SECONDS (default 15), ask SCNetworkReachability whether the
- *                         network is reachable and, when it is not, join the network of FILE
- *                         again: the link the system's sleep takes down is never joined again
- *                         by wifid, which has no network of ours in its preferences.
+ *                         read the kernel's data-link events and, when the link goes away and
+ *                         stays away, join the network of FILE again: the link the system's
+ *                         sleep takes down is never joined again by wifid, which has no
+ *                         network of ours in its preferences. A link that comes back by
+ *                         itself (a join of ours bounces it for a moment) is left alone.
+ *   leave                 leave the network (Apple80211's DISASSOCIATE), for the scene that
+ *                         takes the link away to see the keepalive bring it back.
  *
  * The interface QEMU's network gives (en0, drivers/net/hakios.net.c) has no IOKit object behind it,
  * and configd makes its network services out of those. (The phone's radio has one now:
@@ -777,40 +780,80 @@ joinfile(const char *path)
 }
 
 
-/* ---- the join that brings the link back ------------------------------------------------------- */
+/* ---- the link's events, and the join that brings the link back -------------------------------- */
+
+/*
+ * The kernel posts a data-link event when the interface's link goes away (KEV_DL_LINK_OFF) and
+ * when it comes back (KEV_DL_LINK_ON) -- the events SystemConfiguration and wifid act on, so this
+ * is the one signal that is exactly the keepalive question. It is not the radio's STATE request
+ * (0 whenever the station layer is not standing, which it also is not while the driver simply
+ * carries a joined link: joining on that reading bounced a link that was up,
+ * logs/060142-run.log at 155 s), and not SCNetworkReachability, whose answer after a Wi-Fi power
+ * change was not measured.
+ *
+ * The SDK does not carry <sys/kern_event.h>, so the two structures and the ioctl are declared
+ * here as XNU 8796 has them (bsd/sys/kern_event.h, bsd/sys/sys_domain.h).
+ */
+#define HAKIOS_SYSPROTO_EVENT 1
+#define HAKIOS_KEV_VENDOR_APPLE 1
+#define HAKIOS_KEV_NETWORK_CLASS 1
+struct hakios_kev_request {
+	u_int32_t vendor_code, kev_class, kev_subclass;
+};
+struct hakios_kern_event_msg {
+	u_int32_t total_size, vendor_code, kev_class, kev_subclass, id, event_code;
+	u_int32_t event_data[16];
+};
+#define HAKIOS_SIOCSKEVFILT _IOW('e', 2, struct hakios_kev_request)
+
+static int
+link_events(void)
+{
+	struct hakios_kev_request filter = { HAKIOS_KEV_VENDOR_APPLE, HAKIOS_KEV_NETWORK_CLASS, KEV_DL_SUBCLASS };
+	int fd = socket(PF_SYSTEM, SOCK_RAW, HAKIOS_SYSPROTO_EVENT);
+
+	if (fd < 0) {
+		return -1;
+	}
+	if (ioctl(fd, HAKIOS_SIOCSKEVFILT, &filter) != 0) {
+		close(fd);
+		return -1;
+	}
+	if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+/* One event from the socket, if there is one; returns its code, or -1. */
+static int
+link_event(int fd)
+{
+	u_int8_t buffer[512];
+	struct hakios_kern_event_msg *event = (struct hakios_kern_event_msg *)buffer;
+	ssize_t got = read(fd, buffer, sizeof(buffer));
+
+	if (got < (ssize_t)offsetof(struct hakios_kern_event_msg, event_data)) {
+		return -1;
+	}
+	return (int)event->event_code;
+}
 
 /*
  * keepalive [FILE] [SECONDS]: the scenes join the network once, and nothing joins it again. When
  * the system sleeps (wifid logs the link down "due to SystemSleep") and wakes, wifid has no
  * network of ours among its preferences to re-join, so the radio stays down until the next boot.
- * This loop is that missing re-join. What it asks is SCNetworkReachability -- configd's own
- * answer, which follows the driver's link events -- and not the radio's state number: the state
- * request reads 0 (INIT) whenever the station layer is not standing, which it also is not while
- * the driver is simply carrying a joined link, and joining on that reading bounced a link that
- * was up (logs/060142-run.log, 155 s). A join that does not take is retried after a minute, not
- * every turn, and the first look waits for the scene's own join.
+ * This loop is that missing re-join: it reads the kernel's link events; when the link goes away
+ * and is still away five seconds later, it joins the network of FILE again. The wait tells a
+ * real loss from the moment a join of ours takes the link down and puts it back (about 300 ms).
+ * A join that does not take is retried on the next loss event, not in a tight loop.
  */
-static int
-network_reachable(void)
-{
-	SCNetworkReachabilityRef target = SCNetworkReachabilityCreateWithName(NULL, "apt.procurs.us");
-	SCNetworkReachabilityFlags flags = 0;
-	int reachable = 0;
-
-	if (target != NULL) {
-		if (SCNetworkReachabilityGetFlags(target, &flags)) {
-			reachable = (flags & kSCNetworkReachabilityFlagsReachable) != 0;
-		}
-		CFRelease(target);
-	}
-	return reachable;
-}
-
 static void
 keepalive(const char *path, unsigned seconds)
 {
 	FILE *probe;
-	int last = 1;                            /* a first look that says nothing */
+	int fd;
 
 	probe = fopen(path, "r");
 	if (probe == NULL) {
@@ -820,21 +863,66 @@ keepalive(const char *path, unsigned seconds)
 		}
 	}
 	fclose(probe);
-	sleep(90);                               /* the scene joins on its own; do not race it */
-	for (;;) {
-		int reachable = network_reachable();
-
-		if (reachable != last) {
-			printf("net_test: keepalive: the network is %s\n", reachable ? "reachable" : "NOT reachable");
-			last = reachable;
+	fd = link_events();
+	if (fd < 0) {
+		printf("net_test: keepalive: the kernel gives no link events (%s); nothing is joined\n", strerror(errno));
+		for (;;) {
+			sleep(3600);
 		}
-		if (!reachable) {
-			joinfile(path);
-			sleep(seconds < 60 ? 60 : seconds);
+	}
+	printf("net_test: keepalive: reading the link's events; a link that stays away is joined again\n");
+	for (;;) {
+		fd_set read_set;
+		struct timeval timeout = { (time_t)(seconds < 5 ? 5 : seconds), 0 };
+		int selected;
+
+		FD_ZERO(&read_set);
+		FD_SET(fd, &read_set);
+		selected = select(fd + 1, &read_set, NULL, NULL, &timeout);
+		if (selected <= 0) {
 			continue;
 		}
-		sleep(seconds);
+		if (link_event(fd) != KEV_DL_LINK_OFF) {
+			continue;
+		}
+		sleep(5);                        /* a join of ours takes the link down and back in ~300 ms */
+		{
+			int came_back = 0, code;
+
+			while ((code = link_event(fd)) >= 0) {
+				if (code == KEV_DL_LINK_ON) {
+					came_back = 1;
+				}
+			}
+			if (came_back) {
+				continue;
+			}
+		}
+		printf("net_test: keepalive: the link is gone; joining %s again\n", path);
+		joinfile(path);
+		sleep(seconds < 60 ? 60 : seconds);
+		while (link_event(fd) >= 0) {    /* and whatever the join itself made */
+			;
+		}
 	}
+}
+
+/* Leave the network: Apple80211's DISASSOCIATE (22), what wifid sends when it forgets a network. */
+static void
+leave(void)
+{
+	struct apple80211req request = { .name = "en0" };
+	int s = socket(AF_INET, SOCK_DGRAM, 0), error;
+
+	if (s < 0) {
+		printf("net_test: leave: socket: %s\n", strerror(errno));
+		return;
+	}
+	request.type = 22;
+	error = ioctl(s, SIOCSA80211, &request);
+	printf("net_test: leave: the kernel %s the request%s%s\n", error == 0 ? "takes" : "refuses",
+	    error == 0 ? "" : ": ", error == 0 ? "" : strerror(errno));
+	close(s);
 }
 
 int
@@ -893,6 +981,8 @@ main(int argc, char **argv)
 					seconds = (unsigned)atoi(argv[++i]);
 				}
 				keepalive(file, seconds < 5 ? 15 : seconds);
+			} else if (strcmp(step, "leave") == 0) {
+				leave();
 			} else {
 				fprintf(stderr, "net_test: bad step \"%s\"\n", step);
 				return 1;

@@ -1,0 +1,17 @@
+# The Wi-Fi keepalive drop test (RC_JOBS=rc.jobs.wifidrop). The background lines keep the phone
+# awake from the first seconds -- without them the system's idle sleep suspends this whole job
+# before its join (logs/064236-run.log: the join happened only at 226 s) -- while the foreground
+# joins, then takes the link away on purpose (net_test leave). The kernel posts the link-off
+# event; com.hakios.wifi-keepalive reads it, waits five seconds to tell a real loss from a join's
+# own bounce, and joins /redwood/fw/network again. The last lines ask for the address and a name:
+# they are the proof that the link came back by itself.
+/redwood/bin/rwtouch wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 &
+/redwood/bin/rwtouch wait 40 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 &
+/redwood/bin/rwtouch wait 75 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 &
+/redwood/bin/rwtouch wait 110 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 wait 5 tap 0.5 0.5 &
+/redwood/bin/net_test wait 30 joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/redwood/bin/net_test leave
+/redwood/bin/net_test wait 10
+/redwood/bin/net_test waitaddr en0 60
+/redwood/bin/net_test resolve apt.procurs.us
