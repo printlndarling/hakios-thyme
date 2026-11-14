@@ -585,6 +585,22 @@ left 9.6 and 9.9 MB of pixels (`logs/163925-run.log`,
 their screenshots 40 s before the end (`devices/thyme/sileo.sh`,
 `blackbox.sh`, `blackflash.sh`).
 
+The launchd lines around that black frame tell a story of their own
+(`logs/163925-run.log.live`): Sileo[342] **exited with exit(0)** at 16:43:48 --
+the application itself quit, which is the owner's "tapped Download and it went
+away" -- and the scene's next `uiopen sileo://package/tree` brought up
+Sileo[4552] at 16:44:26. The 330-second screenshot (16:44:55) shows the package
+page, the 360-second one is black, and the 390-second one shows the page again:
+the picture at 16:44:55 is most plausibly the old launch snapshot, the black at
+16:45:25 the snapshot taken away before the new instance's first frame, and the
+page at 16:45:55 the first real one -- a cold launch whose first frame is some
+thirty seconds in coming. That is what the owner saw as "reopened and it is a
+black screen". Two things follow: why Sileo exits by itself after its apt
+spawns (`dpkg --print-architecture` and the like), and why a cold launch's
+first frame takes that long; the launch snapshot is what covers the gap, and
+whether it is shown at all is the question to ask of SpringBoard.
+
+
 
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
