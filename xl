@@ -251,8 +251,11 @@ run() { # run <oem command> <label>
 		if [ -n "$rd" ]; then image_sha=$(short_hash "$rd"); else image_sha=none; fi
 		echo "xl: inputs: kernel=$kernel_sha image=$image_sha loader=$loader_sha"
 		# Put the binary identities in the boot log too. The git revision alone says which worktree
-		# asked for the run, not which kernel or ramdisk the loader actually received.
-		args="$args kernel_sha=$kernel_sha image_sha=$image_sha loader_sha=$loader_sha"
+		# asked for the run, not which kernel or ramdisk the loader actually received. They can be
+		# dropped (XL_NO_HASHES=1) when the loader's 607-character command line is needed for probe
+		# arguments: xl's own "inputs:" line above still records them.
+		[ "${XL_NO_HASHES:-0}" = 1 ] ||
+			args="$args kernel_sha=$kernel_sha image_sha=$image_sha loader_sha=$loader_sha"
 		xnuloader/mkpayload.py -o run-payload.bin kernel=$K ${rd:+ramdisk=$rd} --cmdline "loader_return_after=${XL_SECS:-8} epoch=$(date +%s) sb_delay=${XL_SB_DELAY:-8} $args" >/dev/null || return 1
 		FB_TIMEOUT=30 fb stage run-payload.bin | grep -q OKAY || { echo "xl: upload failed"; return 1; }
 	fi

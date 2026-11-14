@@ -54,6 +54,15 @@ an empty file as an empty file (kernel `be6ebd2aaca2`). The listener order,
 the full daily set and the probe tags fit the loader's 607-character line; the
 hashes xl appends are what get cut.
 
+
+The listener order and the grown heap still read only
+`/fw/sensors/soc0/hw_platform` (6 bytes): the registry's index read does not
+appear, so the tunnel being up is not what the registry waits for; the client
+manager's own start is. xl gained `XL_NO_HASHES=1` for probes that need the
+loader's 607-character line: with the hashes out the line arrives whole
+(589 of 607, `logs/062852-run.log`, kernel `be6ebd2aaca2`), and xl's `inputs:`
+line still names the kernel, image and loader.
+
 ## The window server's SIGSEGV at the run's end, named (2026-11-13)
 
 `backboardd` dying with `signal 11 at 0x18` was called the return's teardown

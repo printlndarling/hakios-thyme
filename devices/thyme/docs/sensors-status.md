@@ -1321,3 +1321,20 @@ whole. The probe script's `+310` estimate for xl's share is close to the
 measured ~300, and the script's rule (probe arguments go before daily ones)
 remains the one that matters.
 
+
+### The listener and the heap still read only the platform file (2026-11-14)
+
+With the listener order and `fastrpc_grow_kb=4096`, and xl's hashes dropped to
+make room (`XL_NO_HASHES=1`, a new option; the line arrives as 589 of 607
+characters, nothing cut), the file service still serves one file:
+`/fw/sensors/soc0/hw_platform` (6 bytes) and nothing else
+(`logs/062852-run.log`, kernel `be6ebd2aaca2`). The registry's index read does
+not appear. The tunnel being up is therefore not what the registry waits for;
+what it waits for is on the framework's side (the client manager's start), not
+in the file service.
+
+`XL_NO_HASHES=1` exists because the loader's 607-character command line cuts
+the hashes first; with them out, a probe can spend the room on arguments, and
+xl's own `inputs:` line still names the kernel, image and loader. The option
+is off by default, so an ordinary run is unchanged.
+
