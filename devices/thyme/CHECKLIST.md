@@ -551,6 +551,32 @@ remain from it: a felt drop in frame rate, and Sileo *sometimes* opening black
 after it was closed. The frame lines (`glframes=1`, `tools/frames.py`) are the
 tool for the first; the launch picture above is the subject of the second.
 
+The automated Sileo scene caught the black reopen itself (`logs/204041-run.log`,
+image `b72a9e73`): Sileo[911] was killed with 0x8badf00d at 20:56:26 and
+Sileo[912] spawned at once; at 20:58:41 (the 1080 s screenshot,
+`logs/sileo-1080.png`) the screen was black but for the battery and the home
+bar, and Sileo[912] itself exited `exit(0)` at 20:59:14. The window server's
+audit could not see that black: the surface is *opaque black*, not zero, and
+the check counted zero bytes only. The display check now also reads the surface
+as pixels and says `THE DISPLAY IS OPAQUE BLACK` after three audits of at
+least 95% black pixels.
+
+The same run's pacing, from `tools/frames.py`: over the retained gestures 430
+frame steps, 5% over 16.7 ms and 2% over 33 ms; the slow frames are mostly
+"idle before" (25 to 74 ms) -- the compositor waiting for the application's next
+commit, not drawing slowly (5.3 ms a frame on the big cores, 82-90 frames a
+second while commits come). The owner's felt frame drops are therefore more
+likely the applications' commit cadence than the window server's drawing; the
+next measurement wants a scroll in Settings with `glframes=1` to separate the
+two.
+
+The language-change path (the owner's other repro) is scripted as far as the
+alert gate allows: Sileo's notification alert must be dismissed before its
+avatar (top right) can open the settings list -- a tap at the avatar with the
+alert up is swallowed (`logs/launch-130.png`). The next scene taps
+`Don't Allow` (0.32, 0.601) first.
+
+
 
 The owner was on the phone during that run and used it as a person would:
 they joined the network, tapped Download in Sileo, and Sileo went away; it
