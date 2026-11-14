@@ -57,7 +57,7 @@ echo "sileo: ${SILEO_SECS} s of the Sileo scene, a screenshot every ${STEP} s"
 echo "sileo: our kernel arguments are ${#ARGS} characters (the loader gives 607)"
 
 STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
+if [ "$STATE" != loader ]; then
 	echo "sileo: entering the loader and uploading the system image (one time)"
 	./xl enter
 	./xl ramdisk "$SYSTEM_IMAGE"

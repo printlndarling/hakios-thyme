@@ -37,7 +37,7 @@ echo "blackflash: ${BLACKFLASH_SECS} s, a screenshot every ${BLACKFLASH_STEP} s"
 echo "blackflash: our kernel arguments are ${#ARGS} characters (the loader gives 607)"
 
 STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
+if [ "$STATE" != loader ]; then
 	echo "blackflash: entering the loader and uploading the system image (one time)"
 	./xl enter
 	./xl ramdisk "$SYSTEM_IMAGE"

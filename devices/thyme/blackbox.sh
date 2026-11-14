@@ -38,7 +38,7 @@ echo "blackbox: ${BLACKBOX_SECS} s, a screenshot every ${BLACKBOX_STEP} s"
 echo "blackbox: our kernel arguments are ${#ARGS} characters (the loader gives 607)"
 
 STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
+if [ "$STATE" != loader ]; then
 	echo "blackbox: entering the loader and uploading the system image (one time)"
 	./xl enter
 	./xl ramdisk "$SYSTEM_IMAGE"

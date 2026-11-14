@@ -33,7 +33,7 @@ echo "launchtest: ${LAUNCH_SECS} s, a screenshot every ${LAUNCH_STEP} s"
 echo "launchtest: our kernel arguments are ${#ARGS} characters (the loader gives 607)"
 
 STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
+if [ "$STATE" != loader ]; then
 	echo "launchtest: entering the loader and uploading the system image (one time)"
 	./xl enter
 	./xl ramdisk "$SYSTEM_IMAGE"
