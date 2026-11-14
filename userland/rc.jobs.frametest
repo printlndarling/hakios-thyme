@@ -1,0 +1,13 @@
+# Commands run by the launchd job com.hakios.demo (RC_JOBS=rc.jobs.frametest).
+# The owner's felt frame drops, measured where they are felt: the stock Settings list scrolled
+# up and down, eight strokes each way, with the window server's frame lines (glframes=1) and the
+# touch timing lines (touch_lat=1). The runner is a direct xl run with XL_FOLLOW=5
+# XL_FOLLOW_KEEP=1, so the live logs keep the middle; tools/frames.py reads them.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1 swipe 0.5 0.75 0.5 0.25 250 wait 1 swipe 0.5 0.25 0.5 0.75 250 wait 1
+/redwood/bin/rwtouch wait 20

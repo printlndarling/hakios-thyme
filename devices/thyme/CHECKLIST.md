@@ -639,6 +639,27 @@ reopen is a warm resume -- the cold launch that came with every dead10cc kill,
 and the black that went with it, is gone for this path. The near-black snapshot
 filter (`a black snapshot was not saved`) saw nothing to do in these runs.
 
+The felt frame drops were measured where they are felt (`rc.jobs.frametest`,
+run with `glframes=1`, `touch_lat=1` and XL_FOLLOW=5 XL_FOLLOW_KEEP=1 so the
+live logs keep the middle; `logs/003917-run.log` and its `.live.*`): the stock
+Settings list scrolled up and down eight strokes each way ran at **88 frames a
+second**, with 1-2% of frame steps over 16.7 ms and 0-1% over 33 ms; the window
+server's own drawing was 2-3 ms a frame (3.3 ms on average over the run, big
+cores), the GPU 1-2 ms, the copy 1 ms -- and the slow frames' time sat in **"idle
+before", 13 to 40 ms**: the compositor waiting for the application's next
+commit, not drawing slowly. The unlock animation is the one heavier spot
+(57 frames a second, 23% over 16.7 ms, its slow frames drawn in 16.6 ms). So a
+frame drop in ordinary use is more likely the application's commit cadence (or
+a particular animation) than the compositor; a per-application measurement
+(Sileo, WebKit) is the next one.
+
+The same run ended with **no window-server SIGSEGV** (the earlier
+`libOSMesa+0x71cea0` crash); the ring guards in
+`tools/mesa/zz-freedreno-emit-ring-null.patch` are the change since the runs
+that crashed, and this run's teardown exercises the same path -- one clean run
+is not a proof, but the crash has not come back since.
+
+
 
 
 
