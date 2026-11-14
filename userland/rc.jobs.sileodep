@@ -1,0 +1,99 @@
+# The Sileo dependency install (RC_JOBS=rc.jobs.sileodep): rc.jobs.sileo opens the
+# page of a package that names six dependencies instead of the one tree has, so the
+# queue has to carry seven downloads and apt resolve them; the last lines ask dpkg
+# about each one and run the program.
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# Sileo, the package manager (RC_JOBS=rc.jobs.sileo): the prefix is grafted onto /var/jb by init
+# (tools/mk-jb.sh puts it in the image). The preparation the bootstrap wants once per boot, the
+# network (Wi-Fi has an address and a name resolves: before that, apt finds no repository), a fresh
+# index, the half minute LaunchServices wants before it registers the prefix applications, and then
+# the whole way a person goes: the package page is opened by URL, GET puts it in the queue, and the
+# queue is the popup bar above the tab bar.
+#
+# 2026-11-13, the 05:31 run: the notification permission alert was still up at 300 s, after both
+# dismissal lines had ended -- and those lines ended far earlier than their length suggested:
+# init run_command takes 62 words and stops, so a line of thirty taps ran the first twelve and
+# its trailing & was cut off with the rest. Every line here stays within that (a line ends with
+# & and must still fit 63 words); the dismissals are short lines staggered so one is running
+# whenever the alert may appear; and the GET taps alternate with a dismissal, so a tap swallowed
+# by a late alert costs one round, not the scene.
+/var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test wait 120 joinfile /redwood/fw/network
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/apt-get update
+# Sileo reads <repo>_Release for the repository name and apt writes <repo>_InRelease; the seed
+# copies apt bytes under Sileo name (userland/sileo-seed.sh, staged in /redwood/bin).
+/var/jb/bin/sh /redwood/bin/sileo-seed.sh
+/redwood/bin/rwtouch wait 25 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/var/jb/usr/bin/uiopen sileo://package/wget
+# The owner's black-box path, while Sileo (and WebKit) are open and their surfaces are live:
+# Settings flung to the bottom, home, and again; then the search field and the keyboard. The
+# textures of the whole session are live here, which is the state the owner's session was in.
+/redwood/bin/rwtouch wait 25
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 5
+/redwood/bin/rwtouch button home wait 5
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 8 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1 swipe 0.5 0.86 0.5 0.14 60 wait 1
+/redwood/bin/rwtouch swipe 0.5 0.2 0.5 0.9 200 wait 3 tap 0.5 0.12 wait 8
+/redwood/bin/rwtouch wait 10 button home wait 5
+
+# The alert Don-t-Allow is at (0.32, 0.601). Eleven taps a line (~44 s), lines staggered 40 s
+# apart from +15 to +515: whichever moment the page loads and the alert appears, one of them is
+# tapping. Once it is gone the taps land on the description text, which does nothing.
+/redwood/bin/rwtouch wait 15 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 55 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 95 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 135 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 175 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 215 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 255 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 295 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 335 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 375 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 415 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 455 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 495 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4 &
+/redwood/bin/rwtouch wait 12
+/var/jb/usr/bin/uiopen sileo://package/wget
+# GET -> QUEUE, rounds of a dismissal and then the GET (ten words a round): an alert still up
+# swallows one GET and the next round dismissal clears it.
+/redwood/bin/rwtouch wait 60 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
+/redwood/bin/rwtouch tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
+/redwood/bin/rwtouch tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5 tap 0.32 0.601 wait 3 tap 0.86 0.37 wait 5
+# What Sileo own apt run answers, against the index Sileo made: the listing and a simulate.
+/var/jb/usr/bin/ls -la /var/jb/var/lib/apt/sileolists
+/var/jb/usr/bin/apt-get install -s -f -oDir::State::lists=/var/jb/var/lib/apt/sileolists/ wget
+# Closing the package sheet. Sileo 2.5's NativePackageViewController has its modal Done button
+# commented out in the source, and three shapes of injected drag (slow grabber drag, page-top
+# drag, grabber drag again) did not carry the sheet down -- the 09:23 run's 780 s screenshot
+# still has it over the tab bar. The application closes it itself on this notification
+# (libhakios.app.dylib: close_presented), so what is presented over the root is dismissed.
+/redwood/bin/rwtouch notify com.hakios.close-sheet wait 4
+# the queue popup bar opens the downloads sheet; Confirm is its footer full-width button,
+# tried at a few heights (a miss falls on the sheet list)
+/redwood/bin/rwtouch tap 0.5 0.862 wait 10
+/redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
+# the same round again: if the first bar tap was swallowed by a sheet that closed late, this
+# one lands on the bar the queue still shows
+/redwood/bin/rwtouch notify com.hakios.close-sheet wait 4
+/redwood/bin/rwtouch tap 0.5 0.862 wait 10
+/redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
+# Sileo's download asks for analytics consent (a full-width Accept above the home bar), and
+# the install's end offers Complete (the downloads sheet's footer button); taps for both,
+# spaced so one lands whatever moment each appears.
+/redwood/bin/rwtouch wait 20 tap 0.5 0.875 wait 8 tap 0.5 0.875 wait 10 tap 0.5 0.875 wait 10
+/redwood/bin/rwtouch wait 30 tap 0.5 0.86 wait 8 tap 0.5 0.86 wait 8
+# seven packages download where tree was one, so the Complete button comes later:
+# another round of waits and taps before anything is asked of dpkg
+/redwood/bin/rwtouch wait 45 tap 0.5 0.86 wait 10 tap 0.5 0.86 wait 10 tap 0.5 0.86 wait 10
+# what apt did, and what became of the package and every dependency it named
+/var/jb/bin/cat /var/jb/var/log/apt/term.log
+/var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n wget
+/var/jb/usr/bin/dpkg-query -W -f${binary:Package}_${Version}_${Status}\n libiosexec1 libssl3 libpcre2-8-0 libintl8 libunistring5 libidn2-0
+/var/jb/usr/bin/ls -la /var/jb/usr/bin/wget
+/var/jb/usr/bin/wget --version
+/var/jb/usr/bin/wget -qO- --timeout=20 https://apt.procurs.us/dists/iphoneos-arm64-rootless/1800/Release

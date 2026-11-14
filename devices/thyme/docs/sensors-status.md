@@ -1424,8 +1424,9 @@ costs: `0 module opens (last "")`, `0 apps_std calls`, `0 file requests`,
 `20 responses with result 0`, `registry 0 of 0 written`. The framework never
 reached its file-service stage in this boot, so it did not even show the
 `hw_platform` stall; it died in its own start. The 12:20 boot's stall and this
-boot's crash are two behaviours of the same unfinished start, and neither is
-caused by AP-side messages: even the 20 answers it gave were results 0.
+boot's crash are two behaviours of the same unfinished start, but they are not
+the same cause: the crash tracks the absent FastRPC listener chain, as the
+next section shows.
 
 What remains is the framework's start itself, with no new AP-side window into
 it: the DIAG router is closed (above), the SMEM items hold no text
@@ -1438,3 +1439,25 @@ presence and content of `hw_platform`, the platform file's directory listing,
 the listener's readiness time) and read the servreg failure reports -- the
 DSP's own crash strings (`dog_virtual_user.c`, `sns_err_handler.c`) are the only
 diagnostic text it gives the AP.
+
+## The crash is the absent listener chain, not the messages (2026-11-15, later)
+
+A second 400-second probe, this one with the listener brought up early and **no
+SNS message sent at all** (`fastrpc_early=1 sns_quiet=1`, `logs/051756-run.log`,
+same kernel and scene, a 534-character command line), repeated the crash
+exactly: 34 servreg failure reports from 244.7 s (`TMR_CLNT_1 ...
+dog_virtual_user.c:240`, then `irq115 ... sns_err_handler.c:180:Crash`),
+`0 module opens`, `0 file requests`, `registry 0 of 0`. With silence the
+framework still died, so the messages are not what kills it.
+
+What every surviving boot has and this one lacks is the FastRPC chain: the
+listener session created on the DSP side by `fastrpc_smmu=2 fastrpc_call=9`
+(with `fastrpc_pd=2` or `fastrpc_phone=2`) before the sensor process starts.
+Every boot of the last four days that carried it had **zero** servreg crash
+reports (`logs/094020-run.log`, `logs/114433-run.log`, `logs/122016-run.log`,
+`logs/154557-run.log`, `logs/165607-run.log`, `logs/062852-run.log`,
+`logs/175050-run.log`); the two boots without it -- today's `diag_mask=1`
+probe and this quiet one -- crashed. The "unsteady" sensor process was
+therefore not unsteady: a boot without the chain never serves the framework's
+file calls and the process dies in its start; a boot with it serves
+`hw_platform` and then stalls. The stall is the remaining piece, unchanged.

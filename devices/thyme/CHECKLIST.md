@@ -2290,3 +2290,5 @@ restarted seventeen times from `TMR_CLNT_1 ... dog_virtual_user.c:240` and
 before the file-service stage the 12:20 boot stalled at. The sensor framework's
 own start remains the open piece, and no AP-side log channel reaches it (see
 devices/thyme/docs/sensors-status.md).
+
+Later the same day, a second probe with `fastrpc_early=1 sns_quiet=1` and no SNS message at all repeated the crash (34 reports from 244.7 s, `0 file requests`), while every boot carrying the FastRPC chain (`fastrpc_smmu=2 fastrpc_call=9`) has none: the crash tracks the absent listener session, not the messages (docs/sensors-status.md).
