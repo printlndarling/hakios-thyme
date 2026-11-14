@@ -1338,3 +1338,12 @@ the hashes first; with them out, a probe can spend the room on arguments, and
 xl's own `inputs:` line still names the kernel, image and loader. The option
 is off by default, so an ordinary run is unchanged.
 
+
+The teardown summary now also counts the modules the DSP opens (the handle-0
+remotectl calls; `sns_registry` among them) and its apps_std calls: the
+registry module's own open is what the client manager's start would follow, and
+these numbers say whether it is attempted at all. The counters are built into
+kernel `b384781c80fe`; the phone has not run them yet -- on 14 November the
+host's ADB server wedged (two stale `adb.exe` processes that could not be ended
+without elevation; the client answers "could not read ok from ADB Server" on
+every port), so device work waits for that server to be restarted.

@@ -5193,6 +5193,8 @@ struct fastrpc_file_note {
 };
 static struct fastrpc_file_note fastrpc_file_notes[8];
 static uint32_t fastrpc_file_notes_at, fastrpc_file_notes_total, fastrpc_file_fails;
+static uint32_t fastrpc_module_opens, fastrpc_apps_std_calls;
+static char fastrpc_last_module[32];
 
 static void
 fastrpc_note_file(const char *path, int ok, uint32_t size)
@@ -5737,6 +5739,10 @@ fastrpc_serve_remotectl(uint32_t sc, const uint8_t *blob, uint32_t length, struc
 	if (in[1].size != 0) {
 		const char *name = fastrpc_string(&in[1]);
 
+		if (name != NULL) {
+			fastrpc_module_opens++;
+			strlcpy(fastrpc_last_module, name, sizeof(fastrpc_last_module));
+		}
 		if (name != NULL && strcmp(name, "sns_registry") == 0) {
 			handle = 2;
 		}
@@ -5828,6 +5834,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		printf("slpi: fastrpc: a call for handle %u is not served\n", handle);
 		return result;
 	}
+	fastrpc_apps_std_calls++;
 	while (def < sizeof(fastrpc_apps_std) / sizeof(fastrpc_apps_std[0]) && fastrpc_apps_std[def].method != method) {
 		def++;
 	}
@@ -8270,6 +8277,8 @@ link_stop(void)
 		uint32_t count = fastrpc_file_notes_total < 8 ? fastrpc_file_notes_total : 8;
 		uint32_t first = (fastrpc_file_notes_at + 8 - count) % 8;
 
+		printf("slpi: fastrpc: %u module opens (last \"%s\"), %u apps_std calls\n", fastrpc_module_opens,
+		    fastrpc_last_module, fastrpc_apps_std_calls);
 		printf("slpi: fastrpc: %u file requests, %u failed; the last %u:\n", fastrpc_file_notes_total,
 		    fastrpc_file_fails, count);
 		for (uint32_t i = 0; i < count; i++) {
