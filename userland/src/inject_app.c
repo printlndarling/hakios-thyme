@@ -23,6 +23,12 @@
 #include <execinfo.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
+#include <mach/thread_act.h>
+#include <mach/arm/thread_status.h>
+#include <dlfcn.h>
+#include <sys/sysctl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -451,6 +457,108 @@ close_presented(void)
 	    sizeof("hakios: Sileo: close-sheet: the page on top was dismissed\n") - 1);
 }
 
+/*
+ * The application's main thread, sampled: where its frames and its launch go. Sileo's first
+ * frame after a language change takes a minute or more (a black window), and its scrolling
+ * commits about twenty frames a second while the window server waits -- both are the main
+ * thread's own work, so a sample of its program counter every twenty milliseconds says where.
+ * Boot-arg appprof=1; a summary every five seconds for two minutes.
+ */
+static mach_port_t appprof_main;        /* (the main thread's port, taken in the constructor) */
+
+static void *
+appprof_thread(__unused void *argument)
+{
+	uintptr_t buckets[96];
+	unsigned counts[96], used;
+	char line[900];
+
+	for (unsigned round = 0; round < 24; round++) {
+		used = 0;
+		memset(counts, 0, sizeof(counts));
+		for (unsigned sample = 0; sample < 250; sample++) {
+			arm_thread_state64_t state;
+			mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+			uintptr_t pc = 0;
+
+			if (thread_get_state(appprof_main, ARM_THREAD_STATE64, (thread_state_t)&state, &count) == KERN_SUCCESS) {
+				pc = (uintptr_t)__darwin_arm_thread_state64_get_pc(state);
+			}
+			if (pc != 0) {
+				uintptr_t key = pc & ~(uintptr_t)15;
+				unsigned at;
+
+				for (at = 0; at < used; at++) {
+					if (buckets[at] == key) {
+						break;
+					}
+				}
+				if (at == used && used < 96) {
+					buckets[used++] = key;
+				}
+				if (at < 96) {
+					counts[at]++;
+				}
+			}
+			usleep(20000);
+		}
+		{
+			size_t k = (size_t)snprintf(line, sizeof(line), "hakios: %s prof: %u sites in 5 s;", who, used);
+
+			for (unsigned rank = 0; rank < 8; rank++) {
+				unsigned best = 0, best_count = 0;
+				Dl_info info;
+
+				for (unsigned at = 0; at < used; at++) {
+					if (counts[at] > best_count) {
+						best = at;
+						best_count = counts[at];
+					}
+				}
+				if (best_count == 0) {
+					break;
+				}
+				if (dladdr((void *)buckets[best], &info) != 0 && info.dli_fname != NULL) {
+					const char *base = strrchr(info.dli_fname, '/');
+
+					k += (size_t)snprintf(line + k, sizeof(line) - k, " %s+%#lx %u;",
+					    info.dli_sname != NULL ? info.dli_sname : (base != NULL ? base + 1 : info.dli_fname),
+					    info.dli_sname != NULL ? (unsigned long)(buckets[best] - (uintptr_t)info.dli_saddr) :
+					                            (unsigned long)(buckets[best] - (uintptr_t)info.dli_fbase), best_count);
+				} else {
+					k += (size_t)snprintf(line + k, sizeof(line) - k, " %#lx %u;", (unsigned long)buckets[best], best_count);
+				}
+				counts[best] = 0;
+			}
+			k += (size_t)snprintf(line + k, sizeof(line) - k, "\n");
+			say(line, k);
+		}
+	}
+	return NULL;
+}
+
+static void
+appprof_start(void)
+{
+	char arguments[1024];
+	size_t size = sizeof(arguments) - 1;
+	pthread_t thread;
+
+	appprof_main = mach_thread_self();      /* (this runs on the main thread) */
+	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
+		return;
+	}
+	arguments[size] = 0;
+	if (strstr(arguments, "appprof=1") == NULL) {
+		return;
+	}
+	if (pthread_create(&thread, NULL, appprof_thread, NULL) == 0) {
+		pthread_detach(thread);
+		say("hakios: app prof: the main thread sampled 50 times a second (appprof=1)\n",
+		    sizeof("hakios: app prof: the main thread sampled 50 times a second (appprof=1)\n") - 1);
+	}
+}
+
 __attribute__((constructor))
 static void
 hakios_app_init(void)
@@ -466,6 +574,7 @@ hakios_app_init(void)
 		return;
 	}
 	who = name;
+	appprof_start();
 	slide = (uintptr_t)_dyld_get_shared_cache_range(&length) - CACHE_BASE;
 	/*
 	 * An application's standard error goes nowhere here, and that is where the Swift runtime says

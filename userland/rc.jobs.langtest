@@ -5,8 +5,10 @@
 # window and exits; the URL opens it again. The runner takes a screenshot every two seconds and
 # the window server's audit says in the log whether the display was opaque black.
 /redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 6
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.32 0.601 wait 4
+/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 6 tap 0.32 0.601 wait 2
 /redwood/bin/rwtouch tap 0.9 0.14 wait 12 swipe 0.5 0.8 0.5 0.3 300 wait 2 swipe 0.5 0.8 0.5 0.3 300 wait 2
 /redwood/bin/rwtouch tap 0.30 0.841 wait 12
 /redwood/bin/rwtouch tap 0.77 0.10 wait 6 tap 0.677 0.565 wait 10
