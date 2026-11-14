@@ -407,6 +407,14 @@ wide around 2437 MHz**, and both joins were accepted (`logs/135413-run.log`).
 The option now does what it says; an ordinary run, which names none of these,
 keeps the board's defaults exactly as before.
 
+A refusal is now asked again rather than returned at once: `station_join()`'s
+authentication and association loops run up to three times whether the answer
+was silence or a refusal, 200 ms apart (`wifi/lx/src/lx_80211.c`, kernel
+`48755a68`). Built, not yet seen on the phone: the 14:11 run's scene did not
+reach a join (its log has the driver set up and the station ready, but no
+`lx: iOS join reached`), and the run before this change joined on its first
+answer at 20 MHz (`logs/135413-run.log`).
+
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel

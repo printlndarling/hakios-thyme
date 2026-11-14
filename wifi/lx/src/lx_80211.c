@@ -1768,7 +1768,15 @@ station_join(struct lx_radio *radio, const struct hakios_sta_join *what)
 	radio->reached = IEEE80211_STA_NONE;
 
 	/* authentication, of the kind that asks nothing ("open system": the passphrase is proved in the handshake) */
-	for (unsigned attempt = 0; attempt < 3 && answer == ANSWER_NONE; attempt++) {
+	for (unsigned attempt = 0; attempt < 3 && answer != ANSWER_AUTHENTICATED; attempt++) {
+		if (attempt != 0) {
+			/*
+			 * A refusal can be the access point's band steering
+			 * catching its breath (the 12:35 refusals were answered
+			 * status 1 at once): ask again a moment later.
+			 */
+			lx_os_sleep(&radio->answer, 200 * 1000000ull);
+		}
 		radio->answer = ANSWER_NONE;
 		if ((skb = frame_new(radio, 30, &frame)) == NULL) {
 			break;
@@ -1788,7 +1796,10 @@ station_join(struct lx_radio *radio, const struct hakios_sta_join *what)
 
 	/* association: what we can do, and that we want its protection */
 	answer = ANSWER_NONE;
-	for (unsigned attempt = 0; attempt < 3 && answer == ANSWER_NONE; attempt++) {
+	for (unsigned attempt = 0; attempt < 3 && answer != ANSWER_ASSOCIATED; attempt++) {
+		if (attempt != 0) {
+			lx_os_sleep(&radio->answer, 200 * 1000000ull);
+		}
 		radio->answer = ANSWER_NONE;
 		if ((skb = frame_new(radio, 28 + 300, &frame)) == NULL) {
 			break;
