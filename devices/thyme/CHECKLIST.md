@@ -3261,3 +3261,27 @@ has already been matched.  The next control is a cold power-on *into the bootloa
 load also succeeds, the boot-chain state after ABL's normal boot is what the PBL is
 reacting to; if it fails like every other HakiOS probe, the remaining difference is inside
 the port's own host setup despite the register-level matches.
+
+Two controls closed the last device-side hypotheses.  The cold-boot control: after a full
+power-off and power-on (`ro.boot.bootreason` `shutdown,userrequested`; uptime 85 s when
+captured) the stock kernel still loads `sdx55m/sbl1.mbn` over BHI at 13.244 s and MHI is up
+at 15.4 s (`coldboot-dmesg.txt`) -- a cold modem's PBL places the stock SBL, so the
+cold-DDR/protection-state hypothesis is closed.  The RC-config control: the stock
+`pci-msm` pieces the port never wrote -- DBI 0xb40 = 0x14 for the 19.2 MHz aux clock
+(`qcom,use-19p2mhz-aux-clk`), ACK_F_ASPM_CTRL 0x70c bit 15 for the absent `qcom,n-fts`,
+BRIDGE_CTRL 0x3c bits 16/17 and the device control's four reporting enables for AER -- are
+now in `hakios.thyme_pcie2.c`; the phone reads them back (`aux 0x14, ack_f 0x1b909000,
+bridge 0x300ff, devctl 0x10581f`) and the doorbell still answers `0xef0e0003` in 30 ms
+with the same AER view (`logs/004339-run.log`).  A cold-fastboot control -- power off,
+volume-down + power into the bootloader, then the same probe with Android never running --
+also answers `0xef0e0003` (`logs/003452-run.log`).  So neither the modem's cold state nor
+the last stock RC-configuration item is the wall.
+
+The one stock step still not reproduced is the MHI context and interrupt setup that
+`mhi_async_power_up` performs before the BHI load: channel/event/command context bases at
+0x20002000/0x20004000/0x20048000, MHICFG 0xa110b80, and MSI enable.  The PBL transfer is not
+known to read those host-side structures, and reproducing them means allocating and mapping
+the whole ring area in the port (the earlier 8 MB mapping attempt hung the kernel).  The
+boot-chain isolation that would test "ABL normal boot vs fastboot + Silicium" cannot be done
+without flashing a modified boot image, which needs explicit authorization.  The Wi-Fi
+location provider remains the working location, as recorded earlier.

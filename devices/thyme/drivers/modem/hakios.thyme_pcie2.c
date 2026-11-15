@@ -521,6 +521,19 @@ link_train(void)
 	}
 	hakios_tl("pcie2: the link is up; RC id %#x, link status %#x, ELBI %#x\n", value, rd(DBI + 0x80), rd(DBI + 0xf28));
 
+	/* The vendor's msm_pcie_config_controller, which runs after the link:
+	 * the 19.2 MHz aux clock the phone's DT names
+	 * (qcom,use-19p2mhz-aux-clk), the N-FTS default (no qcom,n-fts in the
+	 * DT, so ACK_F_ASPM_CTRL bit 15 is set), and AER reporting on the RC
+	 * (BRIDGE_CTRL bits 16/17 and the device control's four reporting
+	 * enables).  None of these was in the port's link bring-up. */
+	wr(DBI + 0xb40, 0x14);                    /* AUX_CLK_FREQ_REG, 19.2 MHz */
+	update(DBI + 0x70c, 0, BIT(15));          /* ACK_F_ASPM_CTRL, n_fts = 0 */
+	update(DBI + 0x3c, 0, BIT(16) | BIT(17)); /* BRIDGE_CTRL: AER */
+	update(DBI + 0x78, 0, 0xf);               /* DEVCTRLSTATUS: error reports */
+	hakios_tl("pcie2: RC config: aux %#x, ack_f %#x, bridge %#x, devctl %#x\n", rd(DBI + 0xb40),
+	    rd(DBI + 0x70c), rd(DBI + 0x3c), rd(DBI + 0x78));
+
 	/* The RC's type-1 header needs its secondary bus number set before
 	 * any config request to the endpoint can be forwarded; Linux's
 	 * pci_scan_bridge does this, and without it the CONF window answers
