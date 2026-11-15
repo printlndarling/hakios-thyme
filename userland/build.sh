@@ -135,6 +135,10 @@ DARWIN_JOBS=${JOBS-"
 # through the modem or the SSC, and network positioning goes through Apple's service), so this
 # brings the entry and the API, not a fix. LOCATIOND=0 leaves it out.
 [ "${LOCATIOND-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.locationd"
+# ... and routined, which locationd looks up while it initializes (com.apple.routined.registration);
+# its program is in the image (usr/libexec/routined). fairplayd and searchpartyd are not in the
+# rootfs extraction at all, so they stay out. ROUTINED=0 leaves it out.
+[ "${ROUTINED-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.routined"
 # The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
 # device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
 # in mkjobs.py when that program was put in this build's root: the kernel has already booted

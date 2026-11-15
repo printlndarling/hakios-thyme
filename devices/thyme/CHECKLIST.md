@@ -2585,3 +2585,11 @@ this image does not carry (`com.apple.fairplayd`, `com.apple.commcenter.xpc`,
 `com.apple.routined.registration`, `com.apple.icloud.searchpartyd.*`), and the private XPC
 by which it publishes the switch. A real fix needs that path and, for positions, the GPS
 providers (modem QMI LOC or SSC GNSS), neither of which is up.
+
+Adding routined -- the one daemon of those lookups whose program is in the image -- to the
+job list starts it (`com.apple.routined [11]`, `logs/145410-run.log`) and changes nothing:
+`locationServicesEnabled = 0` still. What locationd also asks for, `com.apple.fairplayd` and
+`com.apple.icloud.searchpartyd`, has no program in the rootfs extraction at all. The switch
+therefore stays with locationd's private path (its XPC, or a platform service this image does
+not carry), and the thread is parked there: what is proven is the daemon and its registration,
+not a working switch and not a position.
