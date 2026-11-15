@@ -1,0 +1,10 @@
+# Whether locationd delivers a fix at all, and whether Weather's blank page is
+# the location side or the data side (RC_JOBS=rc.jobs.weatherdiag).
+# loc_test prints to the console, so its lines land in the run's kernel log.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 10
+/redwood/bin/loc_test watch 25
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 90
+/redwood/bin/loc_test watch 25
+/redwood/bin/rwtouch wait 40

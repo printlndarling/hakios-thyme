@@ -251,6 +251,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
 		# what CoreLocation says about location services (src/loc_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreLocation -framework CoreFoundation -o obj/loc_test src/loc_test.m
+		# a plist as XML on the console, for the binary stores a run must report (src/plistcat.m)
+		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/plistcat src/plistcat.m
 		# whether the privacy settings classes Settings names resolve here (src/clcheck.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/clcheck src/clcheck.m
 		# SystemConfiguration's view of the network next to the sockets' (src/reach_test.m)
@@ -413,6 +415,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
+	[ -f obj/plistcat ] && cp obj/plistcat root/bin/
 	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
 	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/

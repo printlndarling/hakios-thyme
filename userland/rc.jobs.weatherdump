@@ -1,0 +1,19 @@
+# Answer Weather's consent and find locationd's client store
+# (RC_JOBS=rc.jobs.weatherdump): list both cache directories, then print the
+# files a client authorization would be in.
+/redwood/bin/sleep_hold 320 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 60
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/plistcat /private/var/db/locationd
+/redwood/bin/plistcat /var/mobile/Library/Caches/locationd
+/redwood/bin/plistcat /private/var/db/locationd/clients.plist
+/redwood/bin/rwtouch wait 60
+/redwood/bin/plistcat /private/var/db/locationd
+/redwood/bin/plistcat /var/mobile/Library/Caches/locationd
+/redwood/bin/plistcat /var/mobile/Library/Caches/locationd/clients.plist
+/redwood/bin/rwtouch wait 30

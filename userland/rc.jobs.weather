@@ -1,0 +1,10 @@
+# Weather on its own (RC_JOBS=rc.jobs.weather): open the stock Weather app by
+# bundle id, let it ask for location if it does, and hold it for the
+# screenshots.  The consent alert, if it appears, is tapped by the next version
+# of this scene once a screenshot has shown where its buttons are.
+/redwood/bin/sleep_hold 240 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 80
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 60

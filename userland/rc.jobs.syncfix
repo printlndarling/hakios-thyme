@@ -1,0 +1,17 @@
+# Weather with syncdefaultsd let through (RC_JOBS=rc.jobs.syncfix): answer the
+# consent, then leave Weather in front so its kvsd lookups reach the job that
+# mkjobs.py's DENY used to keep out (com.apple.kvsd is syncdefaultsd's).
+/redwood/bin/sleep_hold 320 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 50
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 60

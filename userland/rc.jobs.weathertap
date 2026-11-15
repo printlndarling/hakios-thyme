@@ -1,0 +1,12 @@
+# Weather with the location consent answered for it (RC_JOBS=rc.jobs.weathertap):
+# the alert's three buttons sit at 0.50/0.64 (Allow Once), 0.50/0.69 (Allow
+# While Using App) and 0.50/0.75 (Don't Allow) of the screen (weather-60.png);
+# tap the middle one, then give location + WeatherKit time and hold the page.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 40
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 70
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 40
