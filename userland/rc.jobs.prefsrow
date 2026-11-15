@@ -1,0 +1,11 @@
+# The Privacy & Security page with the injected row, held for a screenshot
+# (RC_JOBS=rc.jobs.prefsrow): the URL is quoted, and only the page itself is
+# asked for -- the path=LOCATION form pushes straight on into the row's page.
+/redwood/bin/sleep_hold 220 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy'
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy'
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy'
+/redwood/bin/rwtouch wait 90

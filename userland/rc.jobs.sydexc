@@ -1,0 +1,8 @@
+# The uncaught-exception stack of syncdefaultsd (RC_JOBS=rc.jobs.sydexc):
+# Weather's launch asks for com.apple.kvsd, which spawns the daemon with
+# libhakios.sydexc.dylib in it; the dylib prints the exception and its stack on
+# the console before the process aborts.
+/redwood/bin/sleep_hold 180 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 90
