@@ -2624,6 +2624,11 @@ Git-ignored, it is the vendor's). With `sbl1.mbn` staged and the scene
 0xef120700, dbg 0xc0000000 0 0x85cd8, MHISTATUS 0` after 80 ms, AER stayed clean
 (uncorrectable 0, correctable 0, root 0), PARF reported int status 0x2000 / status 0x4c60,
 and the SMMU recorded `CB0 FSR 0x400 FAR 0xd55bef8e`. The probe PASSes as evidence, not as
-a boot: the PBL rejects this image with the same `0xef120700` as before. What that code is
-(it looks like the authentication/segment check in the PBL, not the PCIe link) is the next
-question; the firmware set now in the tree is what any further probe needs.
+a boot -- and the first run, without the BDF-to-SID table programmed, is the `0xef120700`
+case the cellular document calls "no transfer at all". With `pcie2_sid=5` the doorbell
+answers the documented best state instead (`logs/154028-run.log`, SHA-256
+`d589b169...cc9738`): `0xef0e0003` in 30 ms, dbg `0x20000000 0 0x85cd8`, AER clean. So the
+transfer, the size and the signature pass and the refusal is after them -- exactly where
+`docs/cellular.md` left it: the secure side of the modem's boot or inside the SBL's start,
+which this kernel cannot observe. The firmware set now in the tree is what any further probe
+needs.
