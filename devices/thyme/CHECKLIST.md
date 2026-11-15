@@ -3003,3 +3003,22 @@ change remains to try: with the image read and authenticated and the ELF load re
 on the modem's side of the PCIe link, where this host has no interface.  Satellite positioning
 stays unavailable; Wi-Fi positioning is the working provider and the Settings row stays the
 separate open item.
+
+The modem PMIC is reachable after all, and the reset now goes where stock's does.  The live phone's
+own device tree (`/sys/firmware/fdt`, pulled with `adb`, decompiled) has `qcom,pmxprairie@8` on the
+apps SPMI bus with a single child -- `qcom,power-on@800` marked `qcom,modem-reset` -- and no
+regulators and no supplies on `qcom,mdm0`; Android enumerates `spmi0-08` and its MHI channels
+(`0306_02.01.00_*`, SAHARA among them) are online, so under stock the modem is fully booted.  The
+port's earlier inventory line that made slave 8 look dead did not apply to this block: with
+`pmic_modem_pon_sid=8` the reset finds and writes it (`pmic: the modem's PON: slave 8 0x0800
+(channel 9), reset type 1`, `logs/205703-run.log`), and `pmic_modem_pon` selects the vendor's
+reset type (1 warm, 2 shutdown, 3 hard).  With the stock target for the reset now used, the BHI
+answer is unchanged (`0xef0e0003`, 30 ms) -- so the reset block was not the difference either.
+
+What the same DT rules out: no AP-side regulator property on the modem PMIC or the modem node, so
+there is no AP rail to add.  The remaining difference between this boot chain and stock is the
+boot chain itself: Silicium's UEFI (the umi package in `Mu-Silicium`, which this phone's loader
+build uses) contains no modem/PCIe-modem driver at all, while stock's XBL/ABL is what leaves the
+modem running with its MHI channels up before Linux.  The exact 4.19 driver's BHI path is the next
+thing to read against the probe, to learn whether the stock kernel's load differs in a detail
+(MHICFG/INTVEC/EE handling) or whether only the bootloader can do it here.

@@ -312,6 +312,8 @@ pmic	k
 pmic_charge	k
 pmic_charger	k
 pmic_list	k
+pmic_modem_pon	k
+pmic_modem_pon_sid	k
 press_power	k
 press_power_ms	k
 privs	k

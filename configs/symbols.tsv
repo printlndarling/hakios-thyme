@@ -291,6 +291,8 @@ PCIE2_TXDB	arg	pcie2_txdb	User space	k	hakios.thyme_pcie2.c	the value written to
 PMIC_CHARGE	arg	pmic_charge	Chip, thermal and PMIC	k	hakios.pmic.c	
 PMIC_CHARGER	arg	pmic_charger	Chip, thermal and PMIC	k	hakios.pmic.c	also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only; works without pmic=1
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block
+PMIC_MODEM_PON	arg	pmic_modem_pon	Chip, thermal and PMIC	k	hakios.pmic.c	
+PMIC_MODEM_PON_SID	arg	pmic_modem_pon_sid	Chip, thermal and PMIC	k	hakios.pmic.c	
 PRESS_POWER	arg	press_power	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the key's own are (hakios_touch_post):
 PRESS_POWER_MS	arg	press_power_ms	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
 PRIVS	arg	privs	Security stand-ins	k	kern_minimac.c	

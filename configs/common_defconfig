@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 522 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 524 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -1106,7 +1106,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UMI_HAPTIC is not set
 
 #
-# Chip, thermal and PMIC (17)
+# Chip, thermal and PMIC (19)
 #
 
 # read the chip's identity from the firmware's shared memory: kern.hakios.soc_* (SoC number, revision, board)
@@ -1147,6 +1147,12 @@ CONFIG_MODEM_AGAIN=y
 
 # only the clock, not the inventory of every block
 # CONFIG_PMIC_LIST is not set
+
+# read by hakios.pmic.c (kernel)
+# CONFIG_PMIC_MODEM_PON is not set
+
+# read by hakios.pmic.c (kernel)
+# CONFIG_PMIC_MODEM_PON_SID is not set
 
 # read by hakios.socinfo.c (kernel)
 # CONFIG_SOC_SMEM_SIZE is not set

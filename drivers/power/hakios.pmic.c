@@ -302,10 +302,19 @@ pon_report(uint32_t channel)
 int
 hakios_pmic_pon_modem_reset(void)
 {
-	uint32_t channels;
+	uint32_t channels, type = 1, want_sid = 0xffffffff;
 	uint8_t value;
 	const char *problem;
 
+	/*
+	 * pmic_modem_pon=N picks the reset type the vendor's enum names: 1 warm
+	 * reset, 2 shutdown, 3 hard reset.  pmic_modem_pon_sid=S picks the SPMI
+	 * slave whose PON block is written: the mainline thyme DTS puts the
+	 * modem's PON at slave 8 (pmxprairie), while this function otherwise
+	 * takes the first PON block it meets -- the AP's PM8150 at slave 0.
+	 */
+	(void)PE_parse_boot_argn("pmic_modem_pon", &type, sizeof(type));
+	(void)PE_parse_boot_argn("pmic_modem_pon_sid", &want_sid, sizeof(want_sid));
 	if (!pmic_mapped()) {
 		return -ENODEV;
 	}
@@ -314,14 +323,21 @@ hakios_pmic_pon_modem_reset(void)
 		channels = ARB_MAX_CHANNELS;
 	}
 	for (uint32_t n = 0; n < channels; n++) {
+		uint32_t map = rd(arb_core + ARB_CHANNEL(n));
+		uint16_t ppid = (uint16_t)((map >> 8) & 0xfff);
 		uint8_t is[2];
 
-		if (rd(arb_core + ARB_CHANNEL(n)) == 0) {
+		if (map == 0) {
+			continue;
+		}
+		if (want_sid != 0xffffffff && (ppid >> 8) != want_sid) {
 			continue;
 		}
 		if (spmi_read(n, REG_TYPE, is, 2) != NULL || is[0] != PON_TYPE || is[1] != PON_SUBTYPE) {
 			continue;
 		}
+		say("pmic: the modem's PON: slave %u 0x%02x00 (channel %u), reset type %u\n", ppid >> 8,
+		    ppid & 0xff, n, type);
 		value = 0;
 		problem = spmi_write(n, PON_MODEM_PWR_OFF_CTL, &value, 1);
 		if (problem != NULL) {
@@ -329,7 +345,7 @@ hakios_pmic_pon_modem_reset(void)
 			return -EIO;
 		}
 		delay(50000);
-		value = 1;
+		value = (uint8_t)type;
 		problem = spmi_write(n, PON_MODEM_PWR_OFF, &value, 1);
 		if (problem != NULL) {
 			say("pmic: the modem's power-off bit: %s\n", problem);
