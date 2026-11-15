@@ -1,0 +1,11 @@
+# What SystemConfiguration says next to the sockets (RC_JOBS=rc.jobs.locnet): after the Wi-Fi
+# link has had time to come up, ask reachability for gs-loc.apple.com and for the default route,
+# connect to the same hosts by hand, and list the processes so whether configd runs at all is in
+# the same log.  Twice, half a minute apart: a first call can be what starts configd.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 30
+/redwood/bin/reach_test
+/bin/ps -A
+/redwood/bin/rwtouch wait 30
+/redwood/bin/reach_test
+/bin/ps -A

@@ -250,6 +250,17 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
 		# what CoreLocation says about location services (src/loc_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreLocation -framework CoreFoundation -o obj/loc_test src/loc_test.m
+		# whether the privacy settings classes Settings names resolve here (src/clcheck.m)
+		$DYN -fobjc-arc -framework Foundation -o obj/clcheck src/clcheck.m
+		# SystemConfiguration's view of the network next to the sockets' (src/reach_test.m)
+		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/reach_test src/reach_test.m
+		# the smallest application that can ask for a position: a bundle identifier and a
+		# usage description, which a command line program has not (src/LocProbe.m)
+		mkdir -p obj/LocProbe.app &&
+			$DYN -fobjc-arc -framework Foundation -framework UIKit -framework CoreLocation \
+				-o obj/LocProbe.app/LocProbe src/LocProbe.m &&
+			cp LocProbe-Info.plist obj/LocProbe.app/Info.plist &&
+			{ ${LDID:-ldid} -S obj/LocProbe.app/LocProbe 2>/dev/null || true; }
 		# a scene that must not be suspended by the system idle sleep (src/sleep_hold.c)
 		$DYN -framework IOKit -o obj/sleep_hold src/sleep_hold.c
 		# (with an entitlement for "battery_test open URL", if ldid is there: src/battery_test.c)
@@ -395,6 +406,14 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
+	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
+	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
+	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
+	# runs uicache, and opens it (the system volume itself is read only)
+	if [ -d obj/LocProbe.app ]; then
+		mkdir -p root/fw/locprobe
+		cp -R obj/LocProbe.app root/fw/locprobe/
+	fi
 	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
 	[ -f obj/keychain_test ] && cp obj/keychain_test root/bin/
@@ -793,6 +812,13 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	fi
 	rm -rf sysroot
 	linkcopy $DARWIN/rootfs sysroot                   # hard links or clones: no copies of the 0.5 GB
+	# The Location Services row is the one row of PrivacySettingsUI's Privacy.plist with a "get"
+	# and the one row the Privacy & Security page leaves out on this port (CHECKLIST, 2026-11-15
+	# late night: all its classes resolve, the switch is on).  The experiment takes the getter
+	# out; patch-privacy.py writes a new file rather than the shared link.
+	if [ -f sysroot/System/Library/PrivateFrameworks/Settings/PrivacySettingsUI.framework/Privacy.plist ]; then
+		python3 patch-privacy.py sysroot/System/Library/PrivateFrameworks/Settings/PrivacySettingsUI.framework/Privacy.plist
+	fi
 	# launchd must load our choice of jobs, not all 500 that Darwin has
 	rm -rf sysroot/System/Library/LaunchDaemons sysroot/System/Library/NanoLaunchDaemons \
 		sysroot/System/Library/LaunchAngels sysroot/System/Library/xpc/launchd.plist

@@ -1,0 +1,12 @@
+# The private switch (RC_JOBS=rc.jobs.locspi): Sileo keeps the job running; ask CoreLocation,
+# call CLInternalSetLocationServicesEnabled(YES) -- the SPI the Settings privacy pane uses --
+# ask again, and open the Privacy page by URL for the runner shots. No taps.
+/redwood/bin/sleep_hold 250 &
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 20
+/redwood/bin/loc_test
+/redwood/bin/loc_test spi
+/redwood/bin/rwtouch wait 5
+/redwood/bin/loc_test
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 120

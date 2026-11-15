@@ -1,0 +1,18 @@
+# The smallest application that can ask for a position (RC_JOBS=rc.jobs.locapp): the master
+# switch on, the probe application registered from the package manager's prefix and opened,
+# 90 s for TCC and for locationd to answer, then the application's own log to the console.
+# No taps: if a consent alert appears it is left in place for the shots.
+/redwood/bin/sleep_hold 300 &
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 15
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 3
+/redwood/bin/killby locationd 15
+/redwood/bin/rwtouch wait 4
+/redwood/bin/loc_test
+/var/jb/usr/bin/mkdir -p /var/jb/Applications
+/var/jb/usr/bin/cp -R /redwood/fw/locprobe/LocProbe.app /var/jb/Applications/
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen hakiosloc://
+/redwood/bin/rwtouch wait 90
+/var/jb/usr/bin/cat /var/jb/locprobe.log

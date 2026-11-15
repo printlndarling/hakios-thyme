@@ -1875,7 +1875,7 @@ No item moves to `PASS` from source inspection alone.
 | Rootless package manager (Sileo) | PARTIAL; offline and online repository installs PASS | The Procursus prefix grafted, dpkg installed/queried/removed tree 2.0.1 offline, and Sileo rendered. On 2026-11-08 apt fetched the Procursus index (`InRelease` 8,310 B, `Packages` 334 kB) and installed tree 2.0.1 from https://apt.procurs.us over the phone's own Wi-Fi, queried, listed and removed it, with Sileo launching (`logs/012326-run.log`). A longer interactive Sileo session and dependency repair remain | A re-run on 2026-11-11 (kernel `35d4e53f`, scene `root-sileo` `44281532`) stopped after the scene's first command, `sound_test springboard`: no `prep.sh`, `apt-get`, Sileo or `dpkg-query` line followed (`logs/111316-run.log`, SHA-256 `9fb720bf6d4e41dbd71e0ac5f28a595c39fcc13069453a7ee079689b9092d040`), so the scene image/script needs its first step fixed before the online path can be re-verified on the current kernel; the 2026-11-08 apt evidence above is unchanged. On 2026-11-11 the scene was re-run correctly on kernel `35d4e53f` with the JB system image `b7e22d95` (`system-jb-meta.apfs`) and the rebuilt scene `3d3b5b11` (`logs/115231-run.log`, SHA-256 `43f9bd40c2270a0b217ae98bff829213babac83d0b7149a7f40d9c29b7fff00b`): init grafted `/var/jb from /jb` (439 directories, 6432 files and links), `apt-get update` fetched `InRelease [8,310 B]` and `Packages [334 kB]` from https://apt.procurs.us, and Sileo launched (`org.coolstar.SileoStore`); the UI taps still installed nothing (`dpkg-query: no packages found matching tree`), the known queue-sheet problem. The scene needs the JB system image: with the daily `system.apfs` (`4f0f3f8b`) `/var/jb` is absent and `prep.sh` exits 127 (`logs/113529-run.log`). On 2026-11-12 Sileo's own source (github.com/Sileo/Sileo) explained the queue: the QUEUE button only adds the package to DownloadManager; the queue is the LNPopupController popup bar the TabBarController shows when `operationCount() > 0`, and `presentPopupController()` does nothing unless the popup is already presented; the popup bar sits above the tab bar, behind the package page's modal page sheet, so the sheet must be dismissed first. A drag must start on the sheet's grabber row (measured at y 0.060 of the screen in the timeline shots; earlier drags at 0.033 began above the card and did nothing). The scene now dismisses the notification alert from two background tap lines across the whole page-load window (its appearance tracks the page load, up to ~30 s after it and minutes after boot, which defeated every fixed tap), then queues, closes the sheet and taps the popup bar. The install from the UI is still unproven as of `logs/220916-run.log`, where the alert was still up at the GET moment. The 2026-11-13 00:25 and 00:38 runs (600 s, the guard lowered to 10 % for the run) show the alert dismissed by the background taps (`logs/sileoJ-43.png`), the GET tap repeated six times (an already-queued button only presents the popup and reloads, it does not unqueue), and the page still reading GET with its Repository row **"Untitled Repo"** afterwards (the 20:41 run that had the page show `Procursus` queued fine) -- Sileo's repository object loses its name in these boots, the same state the earlier sessions blamed for the queue path; the grabber drags still do not close the sheet either (`logs/sileoK-44.png`..`-48.png`). The repository name itself is now fixed and verified: apt writes `<repo>_InRelease` while Sileo reads `<repo>_Release`, so the scene seeds the second from the first (`userland/sileo-seed.sh`, run after `apt-get update`); the page's Repository row then reads **Procursus** in the 01:02 run (`logs/sileoL-36.png`). The queue still does not take: the same run's six GET taps (`logs/sileoK`/`sileoL` frames) leave the button at GET -- Sileo's `reloadData(recheckPackages: true)` runs `recheckTotalOps()` and, on any apt error, calls `removeAllItems()` and shows the error, so the queue is emptied the moment it is filled. The root helper's own log in the 01:19 run shows the taps reaching that path: Sileo starts its session tasks (including `https://apt.procurs.us/dists/iphoneos-arm64-rootless/1800/Release`, havoc.app and repo.chariz.com from its own source list) and then spawns `/bin/rm -rf /var/jb/var/lib/apt/sileolists`, `mkdir`, `chown` and `chmod` -- the DependencyResolver rebuilds its index, and the queue clear follows it (`logs/012034-run.log`); the scene's own apt simulation needs a 600 s run to land in the kept log. What apt inside Sileo objects to is the next thing to read.
 | Notifications, audio routing and background apps | PARTIAL | Safari reaches and renders HTTPS content, Weather/Calendar widgets render, Apple services resolve and establish TLS. Notification delivery and sustained background behavior still need an interactive soak |
 | Lock/unlock and passcode | PARTIAL | display sleep/wake through the lock button is verified; the sleep also takes the Wi-Fi link down (see the Wi-Fi row), and passcode entry, secure storage and reboot persistence are not validated |
-| Location Services | IMPLEMENTED, NOT WORKING | locationd now loads and runs from the rebuilt system image (the rootfs keeps it and the launchd job is named); CoreLocation still answers locationServicesEnabled=0, the master-switch preference written in all four domains does not change it, and Settings has no Location Services row. No GPS source (modem QMI LOC or SSC GNSS) is up |
+| Location Services | PARTIAL: master switch on, no position yet | locationd loads and runs from the rebuilt system image and now reads its switch as the mobile user: with `LocationServicesEnabledIn8.0` = true written as uid 501, CoreLocation answers locationServicesEnabled=1 (authorization 2 -> 0) after the daemon restarts (`logs/163514-run.log`, 2026-11-15 late night), and the daily rc.jobs writes it at every boot. Still open: Settings' Privacy page leaves the Location Services row out even with the switch on and every privacy class resolving (`logs/164626-run.log`); a command line client is refused for a missing usage description (kCLErrorDomain 1); and no position source (modem QMI LOC or SSC GNSS; Wi-Fi positioning untested) is delivering a fix |
 | User data persistence | IMPLEMENTED, NOT EXERCISED | The tree carries the machinery (var_store's two-slot archive of /private/var through /dev/rufs_darwin, a writable HFS+ data volume from darwin block 2042368, and tools/darwin-write.py as the only writer, with GPT, by-name and read-back checks); the daily arguments enable none of it, on thyme `by-name/darwin` is the 128 MiB `rescue` partition, not a darwin partition, so no round trip is possible yet, and any write to darwin needs the owner's explicit authorization |
 
 ### Rootless package manager (2026-11-04)
@@ -2632,3 +2632,128 @@ transfer, the size and the signature pass and the refusal is after them -- exact
 `docs/cellular.md` left it: the secure side of the modem's boot or inside the SBL's start,
 which this kernel cannot observe. The firmware set now in the tree is what any further probe
 needs.
+
+
+### Location Services: the switch is locationd's own preference of the mobile user (2026-11-15, late night)
+
+The daemon was never the reason the switch stayed off: the writes went to the wrong home. `loc_test
+enable` ran from the rc job as root, and CFPreferences' "current user" for root is /var/root; locationd
+starts as mobile (user/501 in every run, `Successfully spawned locationd[19]`) and reads the switch from
+/var/mobile/Library/Preferences/com.apple.locationd.plist. The tool now calls setgid/setuid(501) before
+writing, writes the key the dyld cache names -- "LocationServicesEnabledIn8.0" (earlier probes wrote the
+legacy "LocationServicesEnabled" only) -- as a CFBoolean in current-user/any-host, and prints the type it
+reads back. With root image `2220401a...` on kernel `dd3f6368` and `userland/system.apfs`
+(`logs/163514-run.log`):
+
+    loc_test: writing as uid 501 gid 501 (boolean)
+    loc_test: current user, any host: write ok, read back boolean true
+    loc_test: any user, any host: write FAILED, read back boolean true
+
+(the any-user write needs root and is refused after the drop to 501; it is not the domain locationd
+reads). `killby locationd 15` restarts the daemon and the next question answers
+`locationServicesEnabled = 1`, `authorizationStatus = 0` -- 2, denied, in every earlier boot. The second
+pass with the number 1 (`enablenum`) reads back as a number and answers 1 as well, so the boolean form is
+the one to keep. What changed is CoreLocation's answer, the privilege the framework reports for the
+caller, and not yet the user-visible pane: the Settings Privacy page still leaves Location Services out
+even when it is opened after the switch reads 1 (`logs/sileo-220.png` of the 16:46 run), and
+`prefs:root=Privacy&path=LOCATION` still lands on the page without the row. The privacy plist names the
+row (`PrivacySettingsUI.framework/Privacy.plist`: PSLinkListCell, detail PUILocationServicesListController,
+get locationServicesEnabled:, label LOCATION), and a `clcheck` probe (`logs/164626-run.log`) shows the
+framework dlopens and PUILocationServicesListController, PUILocationServicesCell,
+PUILocationServicesAuthLevelCell, PUITCCAccessController and PUITrackersController all resolve -- so the
+row is dropped above class resolution; the code path that names it (`locationServicesSpecifier` is a
+selector in the cache of Preferences.framework) is the next thing to read.  `userland/patch-privacy.py`
+(143 bytes of experiment: it takes the row's only `get` out as the system image is built) is the test
+of whether the getter is what drops it; the rebuilt image carries it (`17:29`, 626511 blocks).
+
+For positions the command line is the wrong kind of client: `loc_test watch 45` (`logs/164626-run.log`)
+answers `services 1, authorization 0`, then CoreLocation itself says "This app has attempted to access
+privacy-sensitive data without a usage description. The app's Info.plist must contain an
+NSLocationWhenInUseUsageDescription key", the authorization change comes back 0 and the request fails
+with `kCLErrorDomain 1` -- denied before TCC or locationd is asked. The smallest real client is now
+`LocProbe.app` (`userland/src/LocProbe.m`: bundle id com.hakios.locprobe, usage description, URL scheme
+hakiosloc), built into the root image and registered by a scene from /var/jb/Applications; whether it
+gets a fix, and whether a consent alert appears at all (tccd is not in the spawned list of the run), is
+what `rc.jobs.locapp` asks.
+
+Until /private/var is persistent the switch has to be written at every boot; the daily `userland/rc.jobs`
+now does what Setup Assistant does on a stock phone, with `loc_test enable` as its first line.
+
+### Location Services: the consent prompt renders, and locationd scans Wi-Fi (2026-11-15, late night)
+
+`LocProbe.app` answered the question the command line could not. Built into the root image
+(`5ca0a253...`, kernel `dd3f6368`, system image `userland/system.apfs`), registered from
+/var/jb/Applications by `uicache -a`, SpringBoard launches it (`Successfully spawned LocProbe[224]`,
+bundle path `/private/var/jb/Applications/LocProbe.app`, a data container made for it), and the
+CoreLocation consent alert renders exactly as it does on a stock phone --
+`CoreLocationVanillaWhenInUseAuthPromptPlugin[226]` is spawned and `logs/sileo-160.png` of the 17:04
+run shows "Allow "LocProbe" to use your location?", the usage description, "Precise: On", and Allow
+Once / Allow While Using App / Don't Allow (`logs/170645-run.log`). The alert was left unanswered in
+that run, so the application stayed in notDetermined; `rc.jobs.locapp2` taps "Allow While Using App"
+at (0.5, 0.694) of the screen, the place that screenshot puts the middle button.
+
+The run also showed that the provider below the switch is alive. With the application in front,
+locationd asks wifid for scans (`scanType=2 client='locationd'`) every few seconds and gets real access
+points back -- the driver logs the scan it is asked for and what it heard ("THE SCAN HEARD 3 NETWORKS
+(access points): 0 at 2.4 GHz, 3 at 5 GHz ... the strongest at -43 dBm", `lx:` lines beside the wifid
+`WiFiSettlementObserver` results). What locationd's own Wi-Fi database makes of them is nothing yet:
+`TBCoreDataSource _executeFetchRequest: fetched 0 results` for each scan, and wifid's own
+`WiFiLocationManager locationManager:didFailWithError:` reports `kCLErrorDomain Code=0`
+(kCLErrorLocationUnknown, not denied) -- scans without a position. Whether the network path to Apple's
+location service then supplies one is what the answered run will show.
+
+The application cannot write /var/jb as a sandboxed bundle (its first attempt left no
+/var/jb/locprobe.log, and `cat` said so); the scene now makes /var/jb/locprobe world-writable before
+the launch and the application falls back to its container's Caches directory, printing both.
+
+### Location Services: consent answered, no position yet (2026-11-15, late night)
+
+The one scripted tap works.  `rc.jobs.locapp2` (root image `657ebe15...`) opens LocProbe first and
+taps (0.5, 0.694) twelve seconds later; the application's log, written to the world-writable
+/var/jb/locprobe the scene makes before the launch, says what happened (`logs/171653-run.log`):
+
+    17:17:54 launched: services 1, authorization 0, home /var/mobile/Containers/Data/Application/6A39739E-...
+    17:17:54 authorization 0
+    17:17:56 failed: kCLErrorDomain 1
+    17:18:06 authorization 4
+    17:18:09 waiting: authorization 4
+    ...
+
+Authorization 4 is kCLAuthorizationStatusAuthorizedWhenInUse: the alert was the one the 17:04 run
+photographed, and the tap landed on Allow While Using App.  The kCLErrorDomain 1 two seconds before
+that is the request made while the alert was still up.  From 17:18:06 the application is authorized
+and asks for updates, and for the rest of the run (two minutes) it gets none -- no location lines and
+no errors after the consent.
+
+Below it, locationd kept asking wifid for scans (62 `client='locationd'` results in the run) and wifid
+kept scanning through the driver; every scan's `TBCoreDataSource _executeFetchRequest:` still
+`fetched 0 results`, and wifid's own `requestLowAccuracyLocationUpdate` (its locale path) repeatedly
+reports "location is nil".  So the input to Wi-Fi positioning exists and the client is authorized, but
+nothing resolves the access points to a position -- locationd's own os_log is what the next scene
+puts on the console (`OSLOG=com.apple.locationd`, rc.jobs.locapp3).
+
+### Location Services: locationd skips the ALS query for "connectivity" (2026-11-15, late night)
+
+With locationd's own os_log on the console (`OSLOG=com.apple.locationd` in the root image,
+`9933462c...`, `logs/172613-run.log`), the Wi-Fi positioning flow says where it stops.  The scans
+reach it -- each ALS request carries twelve access points -- and locationd builds the query:
+
+    [WifiPosition] @WifiFlow, sufficiency, 0, nofix
+    [WifiPosition] #alsquery, do_query, 1, reason, unknownratio
+    [WifiPosition] @WifiFlow, alsrequest, 1, unknownratio, aps, 12, type, 0, vni, 0, 12, 0
+    [GeneralCLX] @AlsFlow, query, in, cells, 0, 0, 0, 0, 0, wifi, 12, cache, 1, piggyback, 1
+    [GeneralCLX] @AlsFlow, query, skip, connectivity
+
+and then answers itself `alsreply, aps, 0, tag, -1` and `outcome, nofix`.  Every one of the run's
+51 ALS queries is skipped the same way (`skip, connectivity`), so no request ever leaves for
+Apple's location service although the phone's Wi-Fi carries HTTPS.  The connectivity gate is
+SystemConfiguration's, and whether configd -- which answers it, and whose program and launchd job
+are both in the image (~/usr/libexec/configd, in system.manifest) -- ever runs is what
+`reach_test` (src/reach_test.m: SCNetworkReachability for gs-loc.apple.com and for the default
+route, then the same connections by getaddrinfo/connect) and a `ps -A` beside it in
+`rc.jobs.locnet` ask.
+
+That run's scene also showed an application-launch ordering that matters: LocProbe opened three
+seconds after `uicache -a` did not come to the front (the screenshots are of the home screen and
+/var/jb/locprobe stays empty), while the same lines with Sileo opened first (rc.jobs.locapp2) work.
+Give LaunchServices the time, or open Sileo first.

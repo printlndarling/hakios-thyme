@@ -1,4 +1,8 @@
 # Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# Location Services is off in a fresh /var/mobile -- on a stock phone Setup Assistant turns it
+# on.  The switch is locationd's own preference, read from the mobile user's home, so it is set
+# here on every boot until /var/mobile is persistent; loc_test drops to uid 501 to write it.
+/redwood/bin/loc_test enable
 /redwood/bin/hello_dyn started by launchd
 /redwood/bin/svc_test
 /redwood/bin/surf_test

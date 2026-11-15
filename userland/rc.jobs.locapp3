@@ -1,0 +1,20 @@
+# LocProbe with locationd's own log on the console (RC_JOBS=rc.jobs.locapp3, built with
+# OSLOG=com.apple.locationd): the switch on, the probe opened first (so its consent alert has
+# the screen), one tap on "Allow While Using App", two minutes for locationd to scan, resolve
+# and answer, then the application's log. No Sileo in front: sleep_hold keeps the display up.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 10
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 3
+/redwood/bin/killby locationd 15
+/redwood/bin/rwtouch wait 4
+/var/jb/usr/bin/mkdir -p /var/jb/locprobe
+/var/jb/usr/bin/chmod 777 /var/jb/locprobe
+/var/jb/usr/bin/mkdir -p /var/jb/Applications
+/var/jb/usr/bin/cp -R /redwood/fw/locprobe/LocProbe.app /var/jb/Applications/
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen hakiosloc://
+/redwood/bin/rwtouch wait 12
+/redwood/bin/rwtouch tap 0.5 0.694
+/redwood/bin/rwtouch wait 120
+/var/jb/usr/bin/cat /var/jb/locprobe/locprobe.log
