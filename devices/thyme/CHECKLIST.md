@@ -2922,3 +2922,27 @@ programmed; `docs/cellular.md`) is the gate for GNSS and for cellular data alike
 on that wall: the BHI doorbell's image type, the image the PBL expects, and what the bootloader does
 after the SBL that a bare host must replicate -- researched against mainline's `mhi_pci_generic` and
 the SDX55 firmware packaging before the probe is changed again.
+
+### The modem wall is past authentication: the BL rejects the ELF load (2026-11-15, night)
+
+The probe's own control experiments, read against the register evidence, put the wall one stage
+further than "the image is refused".  With the untouched vendor `sbl1.mbn` (sha256
+`c9027c9b...`, the same file Linux's `mhi_pci_generic` requests for SDX55) the doorbell answers
+`0xef0e0003`; zeroing the 548,056-byte image in place (same address and size) answers
+`0xef120700`; changing one body byte at file offset 0x8000 answers `0xef0a0105` -- the
+authentication group, the same family a QCA6490 PBL uses for a body-hash mismatch.  So the PBL
+does read the buffer, authenticate the image, and refuse a modified one: the untouched image
+fails after authentication, in the ELF program-header/load group (0x0e), not for its signature.
+The BHI identity registers agree with a genuine part (`serial 0x9721197d`, antirollback 0,
+numseg 3, OEM PK hash fused), and the BHI doorbell is only a nonzero sequence token -- there is
+no image ID in it and mainline writes a random one.
+
+The SMMU side is verified in the same run (`logs/195239-run.log`, kernel `a83a8a0f`): the
+BDF-to-SID table reads back `0x1000100` in all 256 entries (BDF 1:0.0 -> SID 0x1d01), SMR 6
+carries stream `0x1d01` into context 5, and a walk of context 5's tables for 0x20000000 prints
+`page 0xc0000e43 -> physical 0xc0000000`, the image buffer.  The stale context FARs (the SMMU is
+not reset between boots) do not belong to this transfer.  What is left is the SBL's ELF load:
+its segments' p_paddrs are 0x14682000..0x148e7000 and 0x8fd00000/0x8fd3c000, and the phone also
+ships `mdmddr.mbn` (40 bytes) beside the firmware -- whether the PBL needs the modem's DDR
+configured or those destination ranges mapped before it can place the segments is the question
+the next research pass answers.
