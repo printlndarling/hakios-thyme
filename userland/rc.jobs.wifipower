@@ -1,10 +1,12 @@
-# The Wi-Fi power-cycle test (RC_JOBS=rc.jobs.wifipower): join, then put the radio's power off
-# and on, as the system's sleep does. The station layer keeps the last join as its "standing"
-# network and joins it again when the radio comes back on (hakios.thyme_sta.c, the power-on
-# branch); nothing in userland asks for a join after the power comes back. sleep_hold keeps the
-# system from suspending the job (a sleeping system runs no scene), and the last lines are the
-# proof: the address and a name, with no joinfile between them.
+# The Wi-Fi power-cycle test (RC_JOBS=rc.jobs.wifipower), on the jb system image so that Sileo
+# can be opened first: an application in front that sets idleTimerDisabled is the one thing that
+# reliably keeps SpringBoard from locking the display -- PM timers held and injected touches did
+# not (logs/095245-run.log, logs/100719-run.log), and a locked display suspends the job with it.
+# Then: join, the radio's power off and on, and an address and a name again with no joinfile
+# between them -- the station layer's own re-join of the standing network.
 /redwood/bin/sleep_hold 300 &
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 25
 /redwood/bin/net_test wait 30 joinfile /redwood/fw/network
 /redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
 /redwood/bin/net_test power 0
