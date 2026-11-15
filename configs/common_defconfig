@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 519 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 520 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -1106,7 +1106,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UMI_HAPTIC is not set
 
 #
-# Chip, thermal and PMIC (15)
+# Chip, thermal and PMIC (16)
 #
 
 # read the chip's identity from the firmware's shared memory: kern.hakios.soc_* (SoC number, revision, board)
@@ -1138,6 +1138,9 @@ CONFIG_MODEM_AGAIN=y
 
 # run the memory benchmark after CPU probing (2 runs it on a background thread)
 # CONFIG_MEMBENCH is not set
+
+# also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only; works without pmic=1
+# CONFIG_PMIC_CHARGER is not set
 
 # only the clock, not the inventory of every block
 # CONFIG_PMIC_LIST is not set

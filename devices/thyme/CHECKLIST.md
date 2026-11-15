@@ -2835,3 +2835,33 @@ the PM8150B charger, and every charge so far has been whatever the bootloader le
 next step is a read-only one: a kernel probe of the charger peripheral's registers (the SPMI
 arbiter and its read/write path are already in `bsd/dev/hakios.pmic.c`) to see the state the
 firmware leaves and what the local input current limit is, before anything is written.
+
+### Charging: the charger is enabled and "fullon", so the input side is next (2026-11-15, night)
+
+A read-only dump of the PM8150B's charger block (boot-arg `pmic_charger=1`, kernel `f28f6f98`,
+`logs/184201-run.log`) shows what the firmware left behind, and it is not "charging switched off":
+the block answers at slave 2 0x1000 (type 0x02 subtype 0x80, channel 30), and
+
+- `0x1042 = 0x01` -- the charging enable bit is set;
+- `0x1006 = 0x03` -- battery charger status 1 says FULLON (fast charge), not inhibit or disable;
+- `0x1061 = 0x1e` -- fast-charge current 30 x 50 mA = 1.5 A;
+- `0x1070 = 0x50` -- float voltage 3.6 V + 80 x 10 mV = 4.40 V;
+- `0x1051 = 0x38` -- the analog charge inhibit bit (BIT(0)) is clear;
+- `0x1090 = 0x1b` -- hardware JEITA is enabled with several of its limit bits.
+
+So the charger believes it is charging, while the loader reads `I = -208 mA` and the guard says
+"charger attached, charging no".  What the dump did not cover is the input side -- the USBIN block
+(0x1300, where the input current limit lives at 0x1370), the Type-C block (0x1500) and the MISC
+block (0x1600, the watchdog) -- and that is where the rest of the state is; the next run reads all
+four (the address is the full 16-bit register, read through the charger peripheral's channel).
+
+The register facts are now sourced rather than remembered.  Xiaomi publishes no thyme branch
+(`MiCode/Xiaomi_Kernel_OpenSource` has none; the closest is `cmi-r-oss`, Mi 10 Pro, same SM8250 +
+PM8150B) and the DTS facts come from the third-party thyme tree, whose `smb5-reg.h` is byte-identical
+to Xiaomi's.  From `smb5-reg.h`, `smb5-lib.c` and `qpnp-smb5.c`: ICL is 0x1370 with code = uA / 50 mA
+(500 mA = 0x0a), FCC is 0x1061 with the same 50 mA step, FV is 0x1070 with (uV - 3.6 V) / 10 mV,
+charging enable is 0x1042 BIT(0), and the vendor driver enables the charging path at init, disables
+hardware JEITA, and lets APSD/cable events program ICL -- thyme's DT asks for 3 A USB ICL, 6 A FCC
+and 4.45 V, none of which a first bring-up should copy.  The MISC watchdog matters too: the vendor
+pets 0x1643 on the bark interrupt and configures a bite to disable charging (0x1653 BIT(7)), so a
+path of ours with no interrupt must either pet it or turn the timer off (0x1651 BIT(1)/BIT(6)).

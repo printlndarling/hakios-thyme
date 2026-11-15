@@ -39,6 +39,8 @@
  * Boot-args:
  *   pmic=1            do it (once, from a thread of its own)
  *   pmic_list=0       only the clock, not the inventory of every block
+ *   pmic_charger=1    also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only;
+ *                     works without pmic=1
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
@@ -364,13 +366,58 @@ hakios_pmic_pon_report(void)
 }
 
 static bool list_all = true;
+static bool charger_dump_enabled;
+
+/*
+ * The charger block, read only.  Slave 2 of the arbiter is the PM8150B (the charger, the fuel
+ * gauge and the USB port controller); its charger peripheral answers type 0x02 subtype 0x80 at
+ * base 0x1000, the block Qualcomm's SMB5 driver drives.  Nothing is written: the dump says what
+ * the firmware left behind (input current limit, charging enable, status) before any driver of
+ * ours touches it.  Boot-arg pmic_charger=1.
+ */
+#define CHARGER_TYPE            0x02
+#define CHARGER_SUBTYPE         0x80
+#define CHARGER_BASE            0x1000
+#define CHARGER_SPAN            0x100
+
+static void
+block_report(const char *what, uint32_t channel, uint16_t base)
+{
+	uint8_t bytes[8];
+
+	say("pmic: %s block, channel %u, registers %#x..%#x (read only)\n", what, channel, base, base + 0xFF);
+	for (uint16_t reg = base; reg < base + CHARGER_SPAN; reg += 8) {
+		const char *problem = spmi_read(channel, reg, bytes, 8);
+
+		if (problem != NULL) {
+			say("pmic:   %#06x: %s\n", reg, problem);
+			continue;
+		}
+		say("pmic:   %#06x: %02x %02x %02x %02x %02x %02x %02x %02x\n", reg, bytes[0], bytes[1],
+		    bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]);
+	}
+}
+
+/* The four blocks the charger's state lives in (smb5-reg.h): the charger itself, the USB input,
+ * the Type-C port controller and the MISC block with the watchdog.  The register address is the
+ * full 16-bit one (0x1370 for the input current limit), read through the channel of the charger's
+ * own peripheral; if the PMIC routes by the address's peripheral field, the other blocks answer,
+ * and a block that does not will say failed.  Still read only. */
+static void
+charger_report(uint32_t channel)
+{
+	block_report("charger", channel, 0x1000);
+	block_report("USBIN", channel, 0x1300);
+	block_report("Type-C", channel, 0x1500);
+	block_report("MISC", channel, 0x1600);
+}
 
 static void
 pmic_run(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 {
 	bool list = list_all;
-	uint32_t version, channels, found = 0, rtc_channel = 0, pon_channel = 0;
-	bool rtc_found = false, pon_found = false;
+	uint32_t version, channels, found = 0, rtc_channel = 0, pon_channel = 0, charger_channel = 0;
+	bool rtc_found = false, pon_found = false, charger_found = false;
 	uint16_t ppids[ARB_MAX_CHANNELS];
 	uint16_t channel_of[ARB_MAX_CHANNELS];
 
@@ -437,6 +484,12 @@ pmic_run(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 			say("pmic: the power-on block is slave %u 0x%02x00 (type %#x, subtype %#x)\n", ppids[i] >> 8, ppids[i] & 0xff,
 			    is[0], is[1]);
 		}
+		if (problem == NULL && is[0] == CHARGER_TYPE && is[1] == CHARGER_SUBTYPE && !charger_found) {
+			charger_found = true;
+			charger_channel = channel_of[i];
+			say("pmic: the charger block is slave %u 0x%02x00 (type %#x, subtype %#x)\n", ppids[i] >> 8,
+			    ppids[i] & 0xff, is[0], is[1]);
+		}
 	}
 	if (rtc_found) {
 		clock_report(rtc_channel);
@@ -450,6 +503,13 @@ pmic_run(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 		say("pmic: none of the %u blocks says it is a power-on block (type %#x, subtype %#x): none read\n", found, PON_TYPE,
 		    PON_SUBTYPE);
 	}
+	if (charger_dump_enabled) {
+		if (charger_found) {
+			charger_report(charger_channel);
+		} else {
+			say("pmic: no charger block (type %#x, subtype %#x) to read\n", CHARGER_TYPE, CHARGER_SUBTYPE);
+		}
+	}
 out:
 	return;
 }
@@ -458,13 +518,19 @@ __startup_func
 static void
 pmic_init(void)
 {
-	uint32_t enabled = 0, list = 1;
+	uint32_t enabled = 0, list = 1, charger = 0;
 
-	if (!PE_parse_boot_argn("pmic", &enabled, sizeof(enabled)) || !enabled) {
-		return;
+	if (!PE_parse_boot_argn("pmic", &enabled, sizeof(enabled))) {
+		enabled = 0;
 	}
 	(void)PE_parse_boot_argn("pmic_list", &list, sizeof(list));
-	list_all = list != 0;
+	(void)PE_parse_boot_argn("pmic_charger", &charger, sizeof(charger));
+	charger_dump_enabled = charger != 0;
+	if (!enabled && !charger_dump_enabled) {
+		return;
+	}
+	/* the dump alone does not list every block; pmic=1 still does */
+	list_all = enabled && list != 0;
 	/* once, from a thread call: the reads wait on the bus, and that is no place for the startup thread */
 	thread_call_enter(thread_call_allocate(pmic_run, NULL));
 }
