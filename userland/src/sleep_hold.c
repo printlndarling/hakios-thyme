@@ -71,10 +71,11 @@ main(int argc, char **argv)
 		printf("sleep_hold: the root domain will not open a user client: 0x%x\n", result);
 		return 1;
 	}
-	if (IOConnectCallScalarMethod(connection, PM_GET_AGGRESSIVENESS, input, 1, &previous, &previous_count) != KERN_SUCCESS ||
-	    previous_count == 0) {
+	result = IOConnectCallScalarMethod(connection, PM_GET_AGGRESSIVENESS, input, 1, &previous, &previous_count);
+	if (result != KERN_SUCCESS || previous_count == 0) {
 		/* without the old value there is nothing to put back: the hold would outlive the test */
-		printf("sleep_hold: the root domain will not say what kPMMinutesToSleep was; not holding\n");
+		printf("sleep_hold: the root domain will not say what kPMMinutesToSleep was (get 0x%x, %u value(s)); not holding\n",
+		    result, previous_count);
 		IOServiceClose(connection);
 		return 1;
 	}
