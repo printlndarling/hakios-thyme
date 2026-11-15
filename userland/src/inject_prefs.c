@@ -76,7 +76,10 @@ class_name_of(id object)
 static BOOL
 name_has_privacy(const char *name)
 {
-	return name != NULL && strstr(name, "Privacy") != NULL;
+	/* The page, not every page with the word in it: PUILocationServices-
+	 * PrivacyAlertsLevelController is a subpage of Location Services, and a
+	 * Location row in it is not ours to add. */
+	return name != NULL && strstr(name, "PrivacyController") != NULL;
 }
 
 static BOOL
@@ -155,7 +158,8 @@ ensure_location_row(id self)
 			id specifier = ((id (*)(id, SEL, id, id, SEL, SEL, id, long, id))objc_msgSend)(
 			    specifier_class,
 			    sel_registerName("preferenceSpecifierNamed:target:set:get:detail:cell:edit:"),
-			    (id)CFSTR("Location"), self, (SEL)0, (SEL)0, detail_class, 2, (id)0);
+			    (id)CFSTR("Location Services"), self, (SEL)0, (SEL)0, detail_class,
+			    2, (id)0);
 
 			if (specifier == NULL) {
 				say("hakios-prefs: %s: could not make the specifier\n",
