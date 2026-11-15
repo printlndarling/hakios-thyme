@@ -2513,5 +2513,6 @@ shows the first ten seconds of Sileo after the fix: the first five-second window
 main thread in `mach_msg2_trap` for 93 of 250 samples and `__connect` for 83 -- the launch's
 blocking connects, now bounded by the two-second keepinit -- and the second window is
 `mach_msg2_trap` for 199 of 250 and a semaphore for 23, the run loop waiting; the sampler
-then stopped printing (the window's remaining rounds are not in the log), so this is a
-sketch of the launch, not a profile of the whole scene.
+then stopped printing because the run ended there: the demo job'''s commands ran only at
+about 400 s of the run (the job had been suspended before, as in the power-cycle attempts),
+so the profile covers the launch at the run'''s end -- a sketch, not the whole scene.
