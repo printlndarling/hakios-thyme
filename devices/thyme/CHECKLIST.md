@@ -3235,3 +3235,29 @@ behind the image hung the kernel before the image line: `logs/234912-run.log.liv
 at `pcie2: BHI: the SMMU maps 0x800000 bytes from the image on` and the loader's watchdog
 returned the phone to Android.  The experiment and its boot argument were reverted; the
 image-only mapping stands as the last tested state.
+
+### The cold-boot control: stock loads the SBL from a cold modem (2026-11-16, after midnight)
+
+The decisive control the device-side research asked for was run: the phone was powered off
+completely (long power press, a user-requested shutdown -- `ro.boot.bootreason` reads
+`shutdown,userrequested`) and powered on into Android after a pause.  On that cold boot the
+stock kernel did exactly what it does on a warm one:
+
+    13.025674 subsys-restart: Changing subsys fw_name to esoc0
+    13.242583 mhi 0002:01:00.0: enabling device (0000 -> 0002)
+    13.244076 mhi 0002:01:00.0: Falling back to syfs fallback for: sdx55m/sbl1.mbn
+    15.400365 mhi 0002:01:00.0: enabling device (0000 -> 0002)
+    15.516130 sysmon-qmi: ssctl_new_server: Connection established ... esoc0's SSCTL service
+
+(`coldboot-dmesg.txt`, 478.8 KB; uptime 85 s when captured, so this is the cold boot
+itself).  A cold modem's PBL places the stock SBL over BHI just as well as a warm one, and
+the MHI channels come up.  So the cold-DDR state hypothesis is closed: the wall is not
+"the PBL needs pre-trained DDR that only a previous SBL run provides".  What is left is the
+difference between the stock boot path and the port's: the stock path is
+XBL -> ABL normal boot -> kernel, while HakiOS is XBL -> ABL fastboot -> Silicium UEFI
+(from RAM) -> xnuloader -> kernel, and every AP-visible register/file input in the transfer
+has already been matched.  The next control is a cold power-on *into the bootloader*
+(volume-down + power), then the same BHI probe without letting Android run first: if that
+load also succeeds, the boot-chain state after ABL's normal boot is what the PBL is
+reacting to; if it fails like every other HakiOS probe, the remaining difference is inside
+the port's own host setup despite the register-level matches.
