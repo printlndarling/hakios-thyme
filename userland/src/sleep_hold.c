@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #define PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP 3      /* kPMMinutesToSleep */
+#define PM_AGGRESSIVENESS_TYPE_MINUTES_TO_DIM   1      /* kPMMinutesToDim */
 #define PM_SET_AGGRESSIVENESS                   0      /* kPMSetAggressiveness */
 #define PM_GET_AGGRESSIVENESS                   1      /* kPMGetAggressiveness */
 
@@ -33,30 +34,15 @@ stop(int signal_number)
 	stopped = 1;
 }
 
-static int
-set_minutes_to_sleep(io_connect_t connection, uint64_t minutes)
-{
-	uint64_t input[2] = { PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP, minutes };
-	uint64_t output[1] = { 0 };
-	uint32_t output_count = 1;
-	kern_return_t result = IOConnectCallScalarMethod(connection, PM_SET_AGGRESSIVENESS, input, 2, output, &output_count);
-
-	if (result != KERN_SUCCESS) {
-		printf("sleep_hold: kPMMinutesToSleep=%llu refused: 0x%x%s\n", minutes, result,
-		    result == kIOReturnNotPrivileged ? " (not an administrator)" : "");
-		return -1;
-	}
-	return 0;
-}
 
 int
 main(int argc, char **argv)
 {
 	io_service_t service;
 	io_connect_t connection = 0;
-	uint64_t input[1] = { PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP };
-	uint64_t previous = 0;
-	int previous_absent = 0;
+	uint64_t input[2] = { PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP, 0 };
+	uint64_t previous[2] = { 0, 0 };
+	int absent[2] = { 0, 0 };
 	uint32_t previous_count = 1;
 	unsigned seconds = argc > 1 ? (unsigned)atoi(argv[1]) : 0;
 	kern_return_t result;
@@ -72,28 +58,52 @@ main(int argc, char **argv)
 		printf("sleep_hold: the root domain will not open a user client: 0x%x\n", result);
 		return 1;
 	}
-	result = IOConnectCallScalarMethod(connection, PM_GET_AGGRESSIVENESS, input, 1, &previous, &previous_count);
-	if (result == kIOReturnInvalid && previous_count == 1) {
-		/*
-		 * No record for kPMMinutesToSleep yet: the root domain says so with kIOReturnInvalid and
-		 * answers 0 (IOPMrootDomain::getAggressiveness). powerd sets the record later in a run;
-		 * until then the system's idle sleep is its own timer, about a minute. Hold anyway, and
-		 * put a minute back on exit rather than the absent 0.
-		 */
-		previous_absent = 1;
-		previous = 0;
-	} else if (result != KERN_SUCCESS || previous_count == 0) {
-		printf("sleep_hold: the root domain will not say what kPMMinutesToSleep was (get 0x%x, %u value(s)); not holding\n",
-		    result, previous_count);
-		IOServiceClose(connection);
-		return 1;
+	/* Both timers are held: the system's sleep (kPMMinutesToSleep) and the display's dimming and
+	 * sleep (kPMMinutesToDim). With only the first held the display still went away, and the
+	 * demo job was suspended with it (logs/095245-run.log). */
+	for (unsigned i = 0; i < 2; i++) {
+		uint64_t type = i == 0 ? PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP : PM_AGGRESSIVENESS_TYPE_MINUTES_TO_DIM;
+		uint64_t was = 0;
+		uint32_t was_count = 1;
+
+		input[0] = type;
+		result = IOConnectCallScalarMethod(connection, PM_GET_AGGRESSIVENESS, input, 1, &was, &was_count);
+		if (result == kIOReturnInvalid && was_count == 1) {
+			/*
+			 * No record for this type yet: the root domain says so with kIOReturnInvalid and
+			 * answers 0 (IOPMrootDomain::getAggressiveness). powerd sets the records later in a
+			 * run; until then the timers are the system's own. Hold anyway, and put a minute
+			 * back on exit rather than the absent 0.
+			 */
+			absent[i] = 1;
+			was = 0;
+		} else if (result != KERN_SUCCESS || was_count == 0) {
+			printf("sleep_hold: the root domain will not say what timer %llu was (get 0x%x, %u value(s)); not holding\n",
+			    type, result, was_count);
+			IOServiceClose(connection);
+			return 1;
+		}
+		previous[i] = was;
 	}
-	if (set_minutes_to_sleep(connection, 0) != 0) {
-		IOServiceClose(connection);
-		return 1;
+	for (unsigned i = 0; i < 2; i++) {
+		uint64_t type = i == 0 ? PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP : PM_AGGRESSIVENESS_TYPE_MINUTES_TO_DIM;
+
+		input[0] = type;
+		input[1] = 0;
+		{
+			uint64_t output[1] = { 0 };
+			uint32_t output_count = 1;
+
+			result = IOConnectCallScalarMethod(connection, PM_SET_AGGRESSIVENESS, input, 2, output, &output_count);
+		}
+		if (result != KERN_SUCCESS) {
+			printf("sleep_hold: timer %llu = 0 refused: 0x%x%s\n", type, result,
+			    result == kIOReturnNotPrivileged ? " (not an administrator)" : "");
+			IOServiceClose(connection);
+			return 1;
+		}
 	}
-	printf("sleep_hold: idle sleep held off (kPMMinutesToSleep was %llu%s)\n", previous,
-	    previous_count == 0 ? ", unread" : "");
+	printf("sleep_hold: idle sleep and display dim held off (sleep was %llu, dim was %llu)\n", previous[0], previous[1]);
 
 	if (argc > 1) {
 		for (unsigned elapsed = 0; elapsed < seconds && !stopped; elapsed++) {
@@ -104,12 +114,19 @@ main(int argc, char **argv)
 			sleep(1);
 		}
 	}
-	if (previous_absent) {
-		(void)set_minutes_to_sleep(connection, 1);
-		printf("sleep_hold: kPMMinutesToSleep was absent; set to a minute\n");
-	} else {
-		(void)set_minutes_to_sleep(connection, previous);
-		printf("sleep_hold: kPMMinutesToSleep put back to %llu\n", previous);
+	for (unsigned i = 0; i < 2; i++) {
+		uint64_t type = i == 0 ? PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP : PM_AGGRESSIVENESS_TYPE_MINUTES_TO_DIM;
+		uint64_t value = absent[i] ? 1 : previous[i];
+
+		input[0] = type;
+		input[1] = value;
+		{
+			uint64_t output[1] = { 0 };
+			uint32_t output_count = 1;
+
+			(void)IOConnectCallScalarMethod(connection, PM_SET_AGGRESSIVENESS, input, 2, output, &output_count);
+		}
+		printf("sleep_hold: timer %llu %s %llu\n", type, absent[i] ? "was absent; set to" : "put back to", value);
 	}
 	IOServiceClose(connection);
 	return 0;
