@@ -2946,3 +2946,13 @@ its segments' p_paddrs are 0x14682000..0x148e7000 and 0x8fd00000/0x8fd3c000, and
 ships `mdmddr.mbn` (40 bytes) beside the firmware -- whether the PBL needs the modem's DDR
 configured or those destination ranges mapped before it can place the segments is the question
 the next research pass answers.
+
+One more state is ruled out: the row does not appear when the location subsystem is live either.
+`rc.jobs.locrow5` opens LocProbe first, answers its alert, and only then opens Privacy & Security;
+the status bar shows Settings was opened from LocProbe, and the page -- scrolled to the top on
+purpose -- still begins with Tracking and Contacts (`logs/sileo-160.png` of the 20:09 run).  The
+deep link's scroll landing at Local Network in that run is a scroll position, not a row: a swipe
+back to the top shows the same page as always.  So the filter is inside Preferences' own specifier
+handling (the `locationServicesSpecifier` path) and does not depend on the switch, an authorized
+client, the framework's classes or the subsystem's state.  Location itself does not need the row:
+the switch is on at boot and applications get their Wi-Fi fixes.
