@@ -50,3 +50,13 @@ Possible future designs, in order of risk:
 
 None of these writes is enabled by the current port. The Android partitions and
 all existing data remain untouched.
+
+## Since this description (2026-11-15)
+
+The port now carries the store this layout was written for: `userland/src/var_store.c` packs
+`/private/var` into a two-slot archive written through `/dev/rufs_darwin` at block 2097152,
+and `drivers/storage/hakios.ufs.c` opens, with `ufs_write=1` only, darwin from block 2042368
+on -- a packed store and a writable HFS+ data volume. `tools/darwin-write.py` is the only
+writer of darwin from Android, with the GPT, by-name, bounds and read-back checks in its
+header. None of it has been exercised on thyme, and nothing here is a write plan: a write
+that changes darwin's contents needs the owner's explicit authorization.
