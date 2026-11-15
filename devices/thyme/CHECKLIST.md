@@ -2593,3 +2593,9 @@ job list starts it (`com.apple.routined [11]`, `logs/145410-run.log`) and change
 therefore stays with locationd's private path (its XPC, or a platform service this image does
 not carry), and the thread is parked there: what is proven is the daemon and its registration,
 not a working switch and not a position.
+
+The daily artifacts carry all of it as of tonight: `out/thyme-boot/root-wirelessfull.apfs`
+`421c8205` (the var skeleton with locationd's directories and the job list with the daemon)
+and, as the runners' default system image, the rebuilt `userland/system.apfs` -- the same
+file as `devices/thyme/prebuilt/system.apfs` (one inode) -- with locationd in it and the
+kernel `dd3f6368` with the standing-network re-join.
