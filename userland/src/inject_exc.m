@@ -126,6 +126,34 @@ init_file_url_hook(id self, SEL _cmd, NSString *path, BOOL is_directory)
 	return self;
 }
 
+/* The URL hook shows the string is nil, not what the string was made from.
+ * The container path comes through +[NSString stringWithUTF8String:]; when
+ * that returns nil, print the bytes it was given. */
+static IMP original_string_utf8;
+static int nil_strings_logged;
+
+static id
+string_utf8_hook(id self, SEL _cmd, const char *cstring)
+{
+	id result = ((id (*)(id, SEL, const char *))original_string_utf8)(self, _cmd, cstring);
+
+	if (result == nil && cstring != NULL && nil_strings_logged < 4) {
+		char line[1200];
+		int used = snprintf(line, sizeof(line),
+		    "hakios-exc: stringWithUTF8String: nil for bytes:");
+		int i;
+
+		nil_strings_logged++;
+		for (i = 0; i < 256 && used + 4 < (int)sizeof(line); i++) {
+			used += snprintf(line + used, sizeof(line) - used, " %02x",
+			    (unsigned char)cstring[i]);
+		}
+		snprintf(line + used, sizeof(line) - used, "\n");
+		say(line);
+	}
+	return result;
+}
+
 __attribute__((constructor)) static void
 hakios_exc_init(void)
 {
@@ -157,5 +185,15 @@ hakios_exc_init(void)
 		}
 		say(original_init_file_url != NULL ? "hakios-exc: hooked -[NSURL initFileURLWithPath:isDirectory:]\n"
 		    : "hakios-exc: no NSURL initializer to hook\n");
+		cls = objc_getClass("NSString");
+		if (cls != NULL) {
+			method = class_getClassMethod(cls, sel_registerName("stringWithUTF8String:"));
+			if (method != NULL) {
+				original_string_utf8 = method_setImplementation(method,
+				    (IMP)string_utf8_hook);
+			}
+		}
+		say(original_string_utf8 != NULL ? "hakios-exc: hooked +[NSString stringWithUTF8String:]\n"
+		    : "hakios-exc: no stringWithUTF8String to hook\n");
 	}
 }

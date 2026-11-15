@@ -1,2 +1,8 @@
+# The personas launchd looks for before it starts a daemon (PERSONA_SYSTEM_PROXY:
+# "Unable to find persona with type 6" in its log).  persona_test carries the
+# com.apple.private.persona-mgmt entitlement, which the kernel's stand-in AMFI
+# reads from the signature (src/persona_test.c).
+/redwood/bin/persona_test alloc
+
 # Experiment: hand process 1 over to the real Darwin launchd.
 exec /sbin/launchd.darwin

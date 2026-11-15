@@ -258,6 +258,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -o obj/clcheck src/clcheck.m
 		# SystemConfiguration's view of the network next to the sockets' (src/reach_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/reach_test src/reach_test.m
+		# the personas launchd keeps looking for, if the kernel lets an entitled program make them (src/persona_test.c)
+		$DYN -o obj/persona_test src/persona_test.c &&
+			{ ${LDID:-ldid} -Ssrc/persona_test.entitlements obj/persona_test 2>/dev/null ||
+			  echo "build.sh: no ldid: persona_test is unsigned, and the persona syscalls will be refused"; }
 		# the setup-completion preferences a new phone has and this port never wrote (src/setup_seed.c)
 		$DYN -framework CoreFoundation -o obj/setup_seed src/setup_seed.c
 		# the smallest application that can ask for a position: a bundle identifier and a
@@ -422,6 +426,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/plistcat ] && cp obj/plistcat root/bin/
 	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
 	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
+	[ -f obj/persona_test ] && cp obj/persona_test root/bin/
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)

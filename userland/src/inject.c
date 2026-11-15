@@ -1338,7 +1338,16 @@ container_manager_fixes(void)
 	Class cls = objc_getClass("MCMUserIdentityCache");
 	Method method = cls ? class_getClassMethod(cls, sel_registerName("personasAreSupported")) : NULL;
 	IMP original = method ? method_getImplementation(method) : NULL;
+	char bootargs[1024];
+	size_t bootargs_size = sizeof(bootargs);
 
+	/* personas=1: rc.launchd has made the personas, so let the container
+	 * manager use them instead of answering "not supported". */
+	if (sysctlbyname("kern.bootargs", bootargs, &bootargs_size, NULL, 0) == 0 &&
+	    strstr(bootargs, "personas=1") != NULL) {
+		say("hakios: container manager: personas left on (personas=1)\n");
+		return;
+	}
 	if (original == NULL || (uintptr_t)original != 0x1c3ea6298UL + slide) {
 		say("hakios: +[MCMUserIdentityCache personasAreSupported]: found %#lx, not what was expected; left alone\n",
 		    original ? (uintptr_t)original - slide : 0);

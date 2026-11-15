@@ -21,6 +21,11 @@ SCENE=${SCENE:-out/thyme-boot/root-weather.apfs}
 SECS=${SECS:-200}
 STEP=${STEP:-20}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
+# one word more for the kernel, e.g. personas=1 (the container manager's switch)
+EXTRA_ARGS=${EXTRA_ARGS-}
+if [ -n "$EXTRA_ARGS" ]; then
+	ARGS="$ARGS $EXTRA_ARGS"
+fi
 PHONE=${XDG_RUNTIME_DIR:-/tmp}/darwin-hakios-phone
 
 [ -f "$SYSTEM_IMAGE" ] || { echo "weather: no system image: $SYSTEM_IMAGE" >&2; exit 1; }

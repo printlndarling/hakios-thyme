@@ -1,0 +1,8 @@
+# The persona syscalls and the entitlement (RC_JOBS=rc.jobs.persona):
+# persona_test allocates the system-proxy, system and default personas and then
+# asks whether they are there; what it prints goes to the console and so to the
+# run's kernel log.
+/redwood/bin/sleep_hold 120 &
+/redwood/bin/rwtouch wait 10
+/redwood/bin/persona_test
+/redwood/bin/rwtouch wait 20
