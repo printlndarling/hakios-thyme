@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 516 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 519 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -365,7 +365,7 @@ CONFIG_TOUCHSCREEN=y
 # CONFIG_VIRTIO_INPUT is not set
 
 #
-# GPU and display (83)
+# GPU and display (84)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -457,6 +457,9 @@ CONFIG_GPU=y
 
 # read by MiniIOMobileFramebuffer.cpp, inject_sb.c (kernel and user space)
 # CONFIG_FBWIDTH is not set
+
+# read by eagl.c (user space)
+# CONFIG_GLAUDIT is not set
 
 # the surface's memory, as before
 # CONFIG_GLBLIT is not set
@@ -1213,8 +1216,14 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (130)
+# User space (132)
 #
+
+# read by inject_app.c (user space)
+# CONFIG_APPPROF is not set
+
+# read by inject_app.c (user space)
+# CONFIG_APPPROF_SECS is not set
 
 # read by inject_sb.c (user space)
 # CONFIG_AUTOUNLOCK is not set
