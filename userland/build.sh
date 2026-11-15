@@ -815,13 +815,6 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	fi
 	rm -rf sysroot
 	linkcopy $DARWIN/rootfs sysroot                   # hard links or clones: no copies of the 0.5 GB
-	# The Location Services row is the one row of PrivacySettingsUI's Privacy.plist with a "get"
-	# and the one row the Privacy & Security page leaves out on this port (CHECKLIST, 2026-11-15
-	# late night: all its classes resolve, the switch is on).  The experiment takes the getter
-	# out; patch-privacy.py writes a new file rather than the shared link.
-	if [ -f sysroot/System/Library/PrivateFrameworks/Settings/PrivacySettingsUI.framework/Privacy.plist ]; then
-		python3 patch-privacy.py sysroot/System/Library/PrivateFrameworks/Settings/PrivacySettingsUI.framework/Privacy.plist
-	fi
 	# launchd must load our choice of jobs, not all 500 that Darwin has
 	rm -rf sysroot/System/Library/LaunchDaemons sysroot/System/Library/NanoLaunchDaemons \
 		sysroot/System/Library/LaunchAngels sysroot/System/Library/xpc/launchd.plist

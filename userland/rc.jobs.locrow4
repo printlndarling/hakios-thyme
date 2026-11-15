@@ -1,0 +1,9 @@
+# Whether opening PrivacySettingsUI in Settings' own process brings the Location row back
+# (RC_JOBS=rc.jobs.locrow4): libhakios.prefs.dylib is injected into Preferences and opens the
+# framework at launch; this only turns the switch on and opens the page. No taps.
+/redwood/bin/sleep_hold 200 &
+/redwood/bin/rwtouch wait 15
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 2
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 90

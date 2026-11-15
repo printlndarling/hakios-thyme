@@ -1,5 +1,9 @@
 # Complete wireless gate: Wi-Fi join/DHCP, Safari, power cycle, rejoin and DHCP,
 # Safari again, then Bluetooth discovery. All in one cold RAM boot.
+# Location Services on, as Setup Assistant turns it on for a new phone: /var/mobile starts fresh
+# every boot, and locationd reads the switch from the mobile user's own preferences (loc_test
+# drops to uid 501 to write it). Safe before the network is up.
+/redwood/bin/loc_test enable
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network
 /redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
 /redwood/bin/battery_test open https://www.apple.com/library/test/success.html

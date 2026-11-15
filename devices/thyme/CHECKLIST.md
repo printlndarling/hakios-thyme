@@ -2598,10 +2598,12 @@ not carry), and the thread is parked there: what is proven is the daemon and its
 not a working switch and not a position.
 
 The daily artifacts carry all of it as of tonight: `out/thyme-boot/root-wirelessfull.apfs`
-`421c8205` (the var skeleton with locationd's directories and the job list with the daemon)
-and, as the runners' default system image, the rebuilt `userland/system.apfs` -- the same
-file as `devices/thyme/prebuilt/system.apfs` (one inode) -- with locationd in it and the
-kernel `dd3f6368` with the standing-network re-join.
+`f98c088d` (the var skeleton with locationd's directories, the job list with the daemon, and
+`loc_test enable` as the scene's first line so Location Services is on at every boot) and, as
+the runners' default system image, the rebuilt `userland/system.apfs` -- the same file as
+`devices/thyme/prebuilt/system.apfs` (one inode), rebuilt clean at 18:18 after the plist
+experiment was reverted, with locationd in it -- and the kernel `dd3f6368` with the
+standing-network re-join.
 
 A no-tap cold boot of the default artifacts (`rc.jobs.dailycheck`, image `03f6377d`, the
 runners default system image; `logs/151118-run.log`) starts what tonight put there:
@@ -2667,7 +2669,20 @@ selector in the cache of Preferences.framework) is the next thing to read.  `use
 test of whether the getter is what drops it -- it is not: the rebuilt image carries the row without
 the getter (checked in the image with `tools/apfs/apfs.py cat`), and the page is unchanged
 (`logs/sileo-120.png` of the 17:54 boot, rc.jobs.locrow).  The setup-completion preferences a new
-phone has (purplebuddy) are what rc.jobs.locrow3 then tries.
+phone has (purplebuddy: SetupDone, SetupFinishedAllSteps, SetupLastExit, UserHasFinishedSetup, and
+Preferences' first-time location-consent marker) are what rc.jobs.locrow3 then wrote as the mobile
+user before opening the page -- and the row is still out, on a clean page with no alert over it
+(`logs/sileo-120.png` of the 18:00 run).  So the getter, the classes, the switch value and the
+setup state are all ruled out.  The framework-load question is answered too: a few lines injected
+into Preferences (`libhakios.prefs.dylib`, then named for Preferences in INJECT) opened
+PrivacySettingsUI in the app's own constructor -- init's `library insertion:` line carries it in
+`logs/181029-run.log` and Settings started normally with it -- and the row is still out
+(`logs/sileo-120.png` of the 18:10 run).  So the getter, the classes, the framework load, the
+switch value and the setup state are all ruled out; what is left is Preferences' own specifier
+code (the `locationServicesSpecifier` method the cache names) and whatever it asks CoreLocation
+about the hardware.  The plist patch and the injection were experiments and are reverted; the
+system image is rebuilt without them.  The row stays an open item, and location itself does not
+depend on it: the switch is on at every boot and applications get Wi-Fi positions.
 
 For positions the command line is the wrong kind of client: `loc_test watch 45` (`logs/164626-run.log`)
 answers `services 1, authorization 0`, then CoreLocation itself says "This app has attempted to access
@@ -2679,8 +2694,9 @@ hakiosloc), built into the root image and registered by a scene from /var/jb/App
 gets a fix, and whether a consent alert appears at all (tccd is not in the spawned list of the run), is
 what `rc.jobs.locapp` asks.
 
-Until /private/var is persistent the switch has to be written at every boot; the daily `userland/rc.jobs`
-now does what Setup Assistant does on a stock phone, with `loc_test enable` as its first line.
+Until /private/var is persistent the switch has to be written at every boot; the daily scene
+`userland/rc.jobs.wirelessfull` (and the base `userland/rc.jobs`) now does what Setup Assistant
+does on a stock phone, with `loc_test enable` as its first line.
 
 ### Location Services: the consent prompt renders, and locationd scans Wi-Fi (2026-11-15, late night)
 
