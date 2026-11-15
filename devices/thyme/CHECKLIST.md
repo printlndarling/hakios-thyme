@@ -2609,3 +2609,21 @@ runners default system image; `logs/151118-run.log`) starts what tonight put the
 join returning 1 after 0.9 s. The scenes later steps (address, name, CoreLocation) were
 suspended when the display locked, as in every scene without an application in front -- no
 new fault, and the short check was not meant to hold the screen.
+
+### Cellular: the SDX55M's PBL answers on the current kernel (2026-11-15, night)
+
+The modem firmware was pulled from the phone itself into `fw-modem-sdx55m/` (18 files,
+85 MB, from `/vendor/firmware_mnt/image/sdx55m` through a root copy in
+`/data/local/tmp`: `sbl1.mbn` 548,056 bytes, `qdsp6sw.mbn` 84,004,996, plus
+`multi_image.mbn`, `tz.mbn`, `xbl_cfg.elf`, the EFS images and the rest; the directory is
+Git-ignored, it is the vendor's). With `sbl1.mbn` staged and the scene
+`root-modemprobe.apfs` `7dcd63b6`, `devices/thyme/modem-probe.sh` ran on kernel
+`dd3f6368` and produced its whole evidence trail (`logs/153232-run.log`, SHA-256
+`3be7c2e6...c38053`): the loader handed the image at `0xc8b68000` (first words
+`0x464c457f` -- an ELF), the doorbell answered `status 0xffffffff (result 3), errcode
+0xef120700, dbg 0xc0000000 0 0x85cd8, MHISTATUS 0` after 80 ms, AER stayed clean
+(uncorrectable 0, correctable 0, root 0), PARF reported int status 0x2000 / status 0x4c60,
+and the SMMU recorded `CB0 FSR 0x400 FAR 0xd55bef8e`. The probe PASSes as evidence, not as
+a boot: the PBL rejects this image with the same `0xef120700` as before. What that code is
+(it looks like the authentication/segment check in the PBL, not the PCIe link) is the next
+question; the firmware set now in the tree is what any further probe needs.
