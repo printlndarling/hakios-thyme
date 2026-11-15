@@ -2852,8 +2852,13 @@ the block answers at slave 2 0x1000 (type 0x02 subtype 0x80, channel 30), and
 So the charger believes it is charging, while the loader reads `I = -208 mA` and the guard says
 "charger attached, charging no".  What the dump did not cover is the input side -- the USBIN block
 (0x1300, where the input current limit lives at 0x1370), the Type-C block (0x1500) and the MISC
-block (0x1600, the watchdog) -- and that is where the rest of the state is; the next run reads all
-four (the address is the full 16-bit register, read through the charger peripheral's channel).
+block (0x1600, the watchdog) -- and that is where the rest of the state is.  Reading those through
+the charger's channel was the first try and it is wrong: the arbiter selects the peripheral by the
+channel and takes only the low address byte, so 0x1370 answered exactly what 0x1070 had
+(`logs/184759-run.log`: the "USBIN" 0x1370 line is byte-identical to the charger's 0x1070 line).
+Each block is its own peripheral with its own channel on the same slave -- from the inventory,
+slave 2 has 0x1000 on channel 30, 0x1100 on 31, 0x1200 on 32, 0x1300 on 33, 0x1400 on 34, 0x1500 on
+35 and 0x1600 on 36 -- and the probe now finds each by its ppid and reads it there.
 
 The register facts are now sourced rather than remembered.  Xiaomi publishes no thyme branch
 (`MiCode/Xiaomi_Kernel_OpenSource` has none; the closest is `cmi-r-oss`, Mi 10 Pro, same SM8250 +

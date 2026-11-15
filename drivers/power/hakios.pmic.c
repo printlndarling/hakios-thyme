@@ -398,18 +398,56 @@ block_report(const char *what, uint32_t channel, uint16_t base)
 	}
 }
 
-/* The four blocks the charger's state lives in (smb5-reg.h): the charger itself, the USB input,
- * the Type-C port controller and the MISC block with the watchdog.  The register address is the
- * full 16-bit one (0x1370 for the input current limit), read through the channel of the charger's
- * own peripheral; if the PMIC routes by the address's peripheral field, the other blocks answer,
- * and a block that does not will say failed.  Still read only. */
-static void
-charger_report(uint32_t channel)
+/* The arbiter's channel for slave 2's peripheral at `base` (ppid = slave << 8 | base >> 8);
+ * ARB_MAX_CHANNELS when the table has none. */
+static uint32_t
+peripheral_channel(uint16_t ppid)
 {
-	block_report("charger", channel, 0x1000);
-	block_report("USBIN", channel, 0x1300);
-	block_report("Type-C", channel, 0x1500);
-	block_report("MISC", channel, 0x1600);
+	uint32_t channels = rd(arb_core + ARB_FEATURES) & 0x7ff;
+
+	if (channels == 0 || channels > ARB_MAX_CHANNELS) {
+		channels = ARB_MAX_CHANNELS;
+	}
+	for (uint32_t n = 0; n < channels; n++) {
+		uint32_t map = rd(arb_core + ARB_CHANNEL(n));
+
+		if (map != 0 && (uint16_t)((map >> 8) & 0xfff) == ppid) {
+			return n;
+		}
+	}
+	return ARB_MAX_CHANNELS;
+}
+
+/* The blocks the charger's state lives in (smb5-reg.h): the charger itself, the DCDC block with
+ * the ICL status, the USB input where the input current limit is, the Type-C port controller and
+ * the MISC block with the watchdog.  Each is its own SPMI peripheral and must be read through its
+ * own channel -- reading 0x1370 through the charger's channel answers 0x1070 again, the arbiter
+ * taking only the low address byte.  Still read only. */
+static void
+charger_report(uint32_t charger_channel)
+{
+	static const struct {
+		const char *what;
+		uint16_t base;
+	} blocks[] = {
+		{ "charger", 0x1000 },
+		{ "DCDC", 0x1100 },
+		{ "USBIN", 0x1300 },
+		{ "Type-C", 0x1500 },
+		{ "MISC", 0x1600 },
+	};
+
+	for (unsigned i = 0; i < sizeof(blocks) / sizeof(blocks[0]); i++) {
+		uint16_t ppid = (uint16_t)((2 << 8) | (blocks[i].base >> 8));
+		uint32_t channel = i == 0 ? charger_channel : peripheral_channel(ppid);
+
+		if (channel == ARB_MAX_CHANNELS) {
+			say("pmic: no %s peripheral (slave 2 0x%02x00) to read\n", blocks[i].what,
+			    blocks[i].base >> 8);
+			continue;
+		}
+		block_report(blocks[i].what, channel, blocks[i].base);
+	}
 }
 
 static void
