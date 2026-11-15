@@ -1,0 +1,11 @@
+# Privacy & Security by hand, for a screenshot of the injected row
+# (RC_JOBS=rc.jobs.prefstap): Settings is launched by bundle id (the prefs: URL
+# does not start it in this userland), then the row that says Privacy &
+# Security is pressed at 0.54/0.29 of the screen, where the root page's fourth
+# row sits (rowcheck-85.png).
+/redwood/bin/sleep_hold 240 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
+/redwood/bin/rwtouch wait 50
+/redwood/bin/rwtouch tap 0.54 0.29
+/redwood/bin/rwtouch wait 100

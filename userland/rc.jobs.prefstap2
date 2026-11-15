@@ -1,0 +1,12 @@
+# Privacy & Security with Settings already running (RC_JOBS=rc.jobs.prefstap2):
+# the prefs: URL does not start Settings by itself in this userland, but the
+# running app handles it as its own deep link; the root page the earlier scene
+# tapped was unscrolled, so the row was not under 0.54/0.29.
+/redwood/bin/sleep_hold 240 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
+/redwood/bin/rwtouch wait 40
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy'
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy'
+/redwood/bin/rwtouch wait 90

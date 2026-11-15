@@ -50,6 +50,18 @@ re-checks in `viewDidAppear:` and after `reloadSpecifiers`, and does not insert
 into an empty specifier list, so a page that builds or reloads its list after
 the first appearance cannot silently lose the row.
 
+The row's title and page match were narrowed afterwards (commit `5ebc320c`):
+the specifier is named `Location Services`, and only a class whose name
+carries `PrivacyController` is treated as the page -- the alerts subpage,
+`PUILocationServicesPrivacyAlertsLevelController`, had been getting a row too
+and its title showed as "Location" with a "Location Alerts" back button.  A
+fresh screenshot of the corrected title was not obtained: a `prefs:` URL
+neither starts Settings nor navigates a running one in this userland
+(`logs/032631-run.log`, `logs/035357-run.log`: only `PSUIPrefsListController`
+loads), and the root page is unscrolled, so the scripted tap at 0.54/0.29
+landed on Wi-Fi.  The label and the narrower match are code and build; the
+row, its page and its master switch are the device-verified part above.
+
 ## Weather's data, kvsd, and what the app waits for (2026-11-16)
 
 The stock Weather app is where the last user-visible question sits: the place
