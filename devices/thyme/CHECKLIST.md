@@ -120,6 +120,33 @@ draws through Metal, and this port's Metal render path does not run yet (the
 Air/Metal probe and the TURNIP/M2V path are the open work, `docs/air.md`,
 `docs/official-metal-probe.md`).
 
+## Personas, and the container path kvsd cannot get (2026-11-16)
+
+launchd's log carried "Unable to find persona with type 6" on every job spawn
+(207 in one run).  The kernel is built with `CONFIG_PERSONAS` and the syscalls
+exist (`bsd/kern/sys_persona.c`), but allocation and lookup are gated by
+`com.apple.private.persona-mgmt`.  The port's stand-in AMFI
+(`libkern/amfi/miniamfi_entitlements.cpp`) reads the entitlements property
+list from the program's own signature without validating it, so a program
+signed with ldid (the Theos toolchain has one) carries the entitlement.
+`persona_test` (`src/persona_test.c` and `.entitlements`) allocates
+`PERSONA_SYSTEM_PROXY` (6), `PERSONA_SYSTEM` (4) and `PERSONA_DEFAULT` (5): on
+the phone all three succeeded (ids 501, 511 and 521) and `kpersona_find_by_type`
+answered 1 found for each; the same calls fail unsigned.  `rc.launchd` now runs
+`persona_test alloc` before handing process 1 to launchd, and the type-6 lines
+went from 207 to **0** in the run that did it (`logs/044045-run.log`).
+
+`personas=1` among the kernel arguments leaves the container manager's
+`+[MCMUserIdentityCache personasAreSupported]` alone (`src/inject.c`), so MCM
+may use the personas; without it the port keeps answering "not supported", as
+before.  The switch was taken and logged in that run.
+
+The kvsd crash is not the persona API.  `syncdefaultsd`'s nil URL comes from
+`sandbox_container_path_for_audit_token` -- the sandbox container, not the
+persona's path -- and it still dies the same way with the personas present and
+MCM unhooked.  What bytes that path holds is what the exception logger's
+`stringWithUTF8String:` hook now asks (`src/inject_exc.m`).
+
 ## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
 
 The sensor DIAG probe never reached its measurement because its scene -- the
