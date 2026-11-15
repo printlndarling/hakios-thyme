@@ -3070,3 +3070,21 @@ after its warm reset.  `pcie2_keep=1` skips the PERST but also, by its condition
 two: the PMIC reset still runs, PERST does not, and the doorbell follows the reset directly --
 the stock order.  The next run is `pcie2_bhi=2 pcie2_perst=0 pcie2_sid=5
 pmic_modem_pon_sid=8`.
+
+The stock order itself is now tested and it is not the difference.  `pcie2_pon_late=1` with
+`pcie2_bhi=2 pcie2_sid=5 pmic_modem_pon_sid=8` brings the link up first (PERST included, as the
+controller driver does), then resets the modem through pmxprairie's PON, raises AP2MDM_STATUS and
+rings the doorbell ten milliseconds later -- the 4.19/ESOC order -- and the answer is the same
+`0xef0e0003` in 30 ms (`logs/215121-run.log`, kernel `a8474aa8`).  The link parameters match the
+stock ones too: Android reports 2.5 GT/s x2, 64-bit DMA and an IOMMU DMA group on 0002:01:00.0,
+and the probe's link status is the same width/speed class.
+
+So every AP-visible input of the SBL transfer is now identical to the kernel that succeeds on this
+phone: image and size, IOVA 0x20000000 in a verified stage-1 context with SID 0x1d01, the BHI
+register sequence and zero boot vector, the random-nonzero doorbell, the PMIC PON reset at the
+modem's own block, the AP2MDM_STATUS handshake, the link, and the order of all of them.  The PBL
+still reads and authenticates the image and then fails to place its ELF segments.  What is left is
+not visible from the apps processor -- the modem-side secure state the PBL checks at that stage --
+and closing it needs either the stock bootloader's modem bring-up (whose code is not public) or
+device-side reverse engineering of the PBL.  The Wi-Fi provider remains the working location, and
+this is the boundary this checklist records for GPS.
