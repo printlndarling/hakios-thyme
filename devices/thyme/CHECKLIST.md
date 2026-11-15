@@ -2430,3 +2430,22 @@ resolves to a partition named `rescue`, start block 22020096, 262144 blocks (128
 where the tool expects sda34, block 202997760, 41943000 blocks; the guarded writer refused,
 which is its gate working. There is no darwin partition on thyme yet, and creating one is a
 repartitioning operation that needs the owner's explicit authorization.
+
+### The power-cycle run and what actually happened (2026-11-15, later)
+
+The scene `rc.jobs.wifipower` ran (`logs/090945-run.log`, kernel `dd3f6368`, image
+`cf9f1e3d`) but its own steps never got a chance: `sleep_hold` declined to hold (the root
+domain answered the read of `kPMMinutesToSleep` with a failure, and the tool refuses rather
+than leave the system never sleeping afterwards), and the system's idle sleep then suspended
+the demo job before its `wait 30` was over -- its `power 0`/`power 1` and the address/resolve
+lines are not in the log. What the log does show is a real loss and a recovery: at 242.65 s
+the access point deauthenticated us (reason 3), and at 247.67 s an ASSOCIATE -- five seconds
+later -- went through to association accepted at 248.20 and the link up at 248.35, with
+traffic after it (a TCP connection at 264 s). The per-request log line naming the caller was
+beyond the driver's 200-line budget, so which process asked is not in the log; the
+keepalive's own only join is at 419.4 s, at the teardown, where it got `Device not
+configured` -- the daemon had been suspended with the rest of userland and processed the
+queued link events when it resumed. So this run shows wifid can recover a deauthenticated
+link by itself, does not exercise the kernel's standing re-join, and shows that the
+keepalive cannot act while the system is suspended (it acts on the queued events after a
+resume, which is what the teardown join was).
