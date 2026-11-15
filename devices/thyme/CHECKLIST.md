@@ -3158,3 +3158,12 @@ step is knowingly not reproduced: `mhi_async_power_up` initializes the MHI conte
 and MSI before the BHI load (`mhi_init_dev_ctxt`, `mhi_init_irq_setup`); those structures
 are host-side rings the PBL transfer does not read, and the probe's BHI writes match the
 capture without them.
+
+The stock-window run landed and repeats the same answer.  `pcie2_win_base=0
+pcie2_win_stop=0x3fffffff` with `pcie2_iova=0x20100000` gives
+`logs/232541-run.log` (SHA-256 `d83adecd...8af79`): the probe prints `MHI: windows
+base 0 stop 0x3fffff00` (the boot line carried the value with its low byte zeroed, a
+command-line parsing artifact; the image at 0x20100000 is below either limit) and
+`BHI: status 0xffffffff (result 3), errcode 0xef0e0003, dbg 0x20100000 0 0x85cd8,
+execenv 0, MHISTATUS 0 after 30 ms`.  So neither the image's place in the pool nor the
+MHI window pair is the difference.
