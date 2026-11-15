@@ -2455,3 +2455,9 @@ The read the tool declined on is now explained: the root domain answers
 () -- powerd sets the record later in a run. 
 now treats that answer as "absent": it holds, and on exit sets a minute back rather than the
 absent 0. Whether the set itself is permitted from the user session is the next run answer.
+
+One more run with the hold working (, ) still did not run the scene: only the first background touch
+fired and the join never happened -- the display had gone away and the demo job with it. So
+the display timer is held too now (, same absent-record handling,
+); the next run answers whether both timers held keep the job running and let
+the power cycle and its address/name checks happen.
