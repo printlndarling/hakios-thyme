@@ -3285,3 +3285,29 @@ the whole ring area in the port (the earlier 8 MB mapping attempt hung the kerne
 boot-chain isolation that would test "ABL normal boot vs fastboot + Silicium" cannot be done
 without flashing a modified boot image, which needs explicit authorization.  The Wi-Fi
 location provider remains the working location, as recorded earlier.
+
+### Weather gets a location (2026-11-16, user-observed)
+
+The locationd preference is now seeded into every image instead of written by a boot
+job: `userland/var/mobile/Library/Preferences/com.apple.locationd.plist`
+(`LocationServicesEnabledIn8.0` = true, mode 644, owner 501) is copied into
+`/private/var` by init from `etc/var.skel` before launchd starts, so locationd and the
+first application both see the switch on.  On a RAM boot with Wi-Fi up the user opened
+Weather, answered CoreLocation's consent alert, and Weather showed the current place --
+Xi'an, Chang'an District.  That is the Wi-Fi positioning path end to end in a stock
+application, not only in LocProbe: the same locationd, the same ALS provider, and the
+consent prompt.  The satellite path remains unavailable (the modem wall above).
+
+The Settings row work continues separately.  The plist's LOCATION specifier is filtered
+by Preferences whatever its detail class, getter, label or icon says, so the fix is a
+dylib injected into Preferences (`userland/src/inject_prefs.c`,
+`libhakios.prefs.dylib`): it hooks PSListController's own `viewDidLoad` and
+`viewWillAppear:` (PSListController is always present; the privacy framework is dlopened
+later) and, when the instance is `PUIPrivacyController`, inserts a PSLinkListCell for
+`PUILocationServicesListController` at the top of the page with the identifier
+`LOCATION`.  The library and its INJECT line are in the image; the automated scenes that
+tried to open Settings with it did not come up (the prefs: URL as a first launch is
+dropped here and the screenshots/logs of those runs were lost to the screenshot/log
+staging collision), so its state is "code in the image, real-device verification still
+open".  The probe rows added to Privacy.plist for the earlier filter experiments are
+removed from the sysimage source again.

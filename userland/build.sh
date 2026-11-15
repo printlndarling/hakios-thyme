@@ -158,6 +158,7 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 /redwood/lib/libhakios.media.dylib mediaserverd
 /redwood/lib/libhakios.app.dylib Sileo
 /redwood/lib/libhakios.tweaks.dylib Preferences
+/redwood/lib/libhakios.prefs.dylib Preferences
 /redwood/lib/libhakios.bluetooth.dylib bluetoothd"}
 mkdir -p obj
 
@@ -286,6 +287,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# program either as the one library the kernel inserts or opened by a library of ours
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.tweaks.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.tweaks.dylib src/inject_tweaks.c
+		# ... and the Location Services row in Settings (src/inject_prefs.c): the row this
+		# port's Preferences filters out of Privacy.plist, inserted at page load
+		$DYN -dynamiclib -install_name /redwood/lib/libhakios.prefs.dylib -framework CoreFoundation -lobjc \
+			-o obj/libhakios.prefs.dylib src/inject_prefs.c
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.app.dylib src/inject_app.c
@@ -442,6 +447,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/libhakios.app.dylib ] && cp obj/libhakios.app.dylib root/lib/
 	[ -f obj/libhakios.bluetooth.dylib ] && cp obj/libhakios.bluetooth.dylib root/lib/
 	[ -f obj/libhakios.tweaks.dylib ] && cp obj/libhakios.tweaks.dylib root/lib/
+	[ -f obj/libhakios.prefs.dylib ] && cp obj/libhakios.prefs.dylib root/lib/
 	if [ -f obj/HakiosAudio ]; then
 		mkdir -p root/lib/HakiosAudio.driver
 		cp obj/HakiosAudio root/lib/HakiosAudio.driver/

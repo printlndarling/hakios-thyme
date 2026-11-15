@@ -1,0 +1,14 @@
+# The injected Location row (RC_JOBS=rc.jobs.locrow8): launch Sileo first, as the
+# one run that opened Settings did (a prefs: URL as the first application launch
+# is dropped here), dismiss Sileo's notification alert with a scripted tap on
+# "Don't Allow", then open Privacy & Security and hold it for the screenshots.
+/redwood/bin/sleep_hold 200 &
+/redwood/bin/rwtouch wait 10
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 2
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 25
+/redwood/bin/rwtouch tap 0.29 0.52
+/redwood/bin/rwtouch wait 6
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 90
