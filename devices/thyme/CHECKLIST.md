@@ -3182,3 +3182,56 @@ ordinary contiguous kernel memory (physical 0x1970d8000, above 4 GB) instead of 
 SLPI heap at 0xc0000000; with the full pulse, the stock-short timing and
 `pcie2_iova=0x20100000` the answer is unchanged (`logs/234027-run.log`, SHA-256
 `73b3fd73...97add`).  So the carveout is not the difference either.
+
+### Device-side reverse engineering of the modem wall (2026-11-15, night)
+
+With every AP-visible input matched, the work moved to the device side.  The phone's own
+boot chain was pulled read-only (it has root): `xbl_a` (`/dev/block/sdb1`, 8 MB, ELF64
+aarch64, SHA-256 `b04fc2ca...`), `abl_a` (`/dev/block/sde9`, 2 MB, ELF32 ARM wrapping a
+UEFI FV at offset 0x3028, SHA-256 `3752087d...`).  XBL contains the AP's DDR training
+(`CD_BTDDR.BIN`, "DDR Training Init/Restore") and the SPMI/PCIe2 drivers (including the
+`PCIE_MODEM_*` register blocks); ABL's UEFI volume carries no readable strings.  XBL runs
+in both the Android boot and a `fastboot boot` of the Silicium loader, so the boot chain
+is common up to ABL's boot-mode branch; neither image contains a modem firmware loader
+(only `has-slot:modem` strings).  The modem PMIC's regulators are not in the live DT (its
+PON is the only pmxprairie child), so the AP has no visible modem rail to cut.
+
+Public device-side research found no SDX55 PBL source, error table or decode, but two
+independent Qualcomm PBL analyses establish the error word: `0xEF | group | status |
+detail`, with the group masked at bits 23:16 and status at 15:8 (the QCA6490/WCN6855
+work in `derekross/omarchy-mobile` `device/lynx/WIFI-PLAN.md`, and the Nokia 6 PBL
+disassembly in `alephsecurity/firehorse` `host/target/nokia6/pbl-nokia6-bbdb.txt`).  In
+that format `0xef0e0003` is group 0x0e -- the post-authentication ELF-loader group --
+with status 0x00/detail 0x03; `0xef0a0105` is the authentication/hash group (0x0a) and
+`0xef120700` the ELF/hash-read group (0x12).  The SBL's ELF flag high bits decode with
+Qualcomm's `MI_PBT` definitions (`coreboot util/qualcomm/mbn_tools.py`) as AMSS
+(`0x01000007`) and SWAPPED/XBL_SEC (`0x05000005`) segments, and the hash segment matches
+U-Boot `tools/qcom/mkmbn/hashseg.py` exactly: 48-byte header, 120-byte metadata, 17
+SHA-384 hashes, 256-byte signature, 6,144-byte certificate chain -- 7,384 bytes ending
+exactly at the file's 0x85cd8.  The only DDR-resident PT_LOAD is the BSS at 0x8fd00000
+(filesz 0, memsz 0x3b1ec); the hash segment's `p_paddr` is 0x8fd3c000.
+
+No public source shows `mdmddr` or any DDR training being provided over BHI before SBL:
+the documented order is userspace Sahara image 34 *after* the SBL runs (the MHI UCI
+SAHARA channel exists only in SBL EE), and `mdmddr.mbn` is a 40-byte unsigned header, not
+an ELF hash-segment image.  No public report of `0xef0e0003`, nor of a host-only BHI load
+failing at the ELF stage for DDR/PMIC/secure-boot reasons, was found; the closest is the
+QCA6490 PBL parking after authentication for chip-side boot/security state, without a
+fix.  The phone's installed `sbl1.mbn` is the same `c9027c9b...` file, so a
+firmware-variant difference is ruled out.  The leading device-side hypothesis is the
+modem's DDR/protection state at a cold host-only BHI load: the stock kernel's successful
+load may happen with the modem's DDR already up, and the decisive test -- making the
+stock kernel load from a genuinely cold modem -- needs a modem power cut the AP cannot
+perform (no AP-visible regulators; a physical power cycle would do it).  An EDL trigger
+exists in mainline MHI (`MHI_EDL_DB 91`, cookie `0xEDEDEDED`), but there is no public
+host tool for Sahara over the MHI UCI pipe to use it.
+
+The last AP-side interface hypothesis was stock's whole-pool IOMMU mapping: if the PBL's
+ELF stage prefetches or rounds past the 548,056-byte image, the probe's image-only
+mapping would fault.  The SMMU's own fault registers argue against it -- after each
+doorbell the global FSR is 0 and the context FSR is the stale 0x400/FAR pair, not a new
+translation fault for the image window -- and an attempt to map 8 MB of the SLPI heap
+behind the image hung the kernel before the image line: `logs/234912-run.log.live` ends
+at `pcie2: BHI: the SMMU maps 0x800000 bytes from the image on` and the loader's watchdog
+returned the phone to Android.  The experiment and its boot argument were reverted; the
+image-only mapping stands as the last tested state.
