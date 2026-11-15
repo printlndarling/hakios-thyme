@@ -307,6 +307,7 @@ pcie2_reset	k
 pcie2_sid	k
 pcie2_survey	k
 pcie2_test	k
+pcie2_txdb	k
 pmic	k
 pmic_charge	k
 pmic_charger	k

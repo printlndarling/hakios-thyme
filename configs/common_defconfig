@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 521 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 522 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -1222,7 +1222,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (132)
+# User space (133)
 #
 
 # read by inject_app.c (user space)
@@ -1491,6 +1491,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_TEST is not set
+
+# the value written to BHI_IMGTXDB. The sentinel 0x1234567 was only ever a way to see the doorbell answer; the PBL ...
+# CONFIG_PCIE2_TXDB is not set
 
 # the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
 # CONFIG_ROOT_APFS is not set

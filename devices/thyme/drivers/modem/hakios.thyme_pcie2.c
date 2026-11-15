@@ -1690,14 +1690,28 @@ image_ready:
 			size = imgsz;
 		}
 	}
-	wr(bhi + 0x2c, 0);                  /* BHI_STATUS */
-	wr(bhi + 0x0c, (uint32_t)(phys >> 32));
-	wr(bhi + 0x08, (uint32_t)phys);
-	wr(bhi + 0x10, (uint32_t)size);     /* BHI_IMGSIZE */
-	wr(bhi + 0x18, 0x1234567);          /* BHI_IMGTXDB */
-	hakios_tl("pcie2: BHI: wrote imgaddr %#x/%#x size %#x; read back %#x/%#x size %#x, txdb %#x, status %#x\n",
-	    (uint32_t)(phys >> 32), (uint32_t)phys, (uint32_t)size, rd(bhi + 0x0c), rd(bhi + 0x08), rd(bhi + 0x10),
-	    rd(bhi + 0x18), rd(bhi + 0x2c));
+	/*
+	 * pcie2_txdb=N: the value written to BHI_IMGTXDB. The sentinel 0x1234567
+	 * was only ever a way to see the doorbell answer; the PBL reads that word
+	 * as a request, and its fields (the image type among them) are what the
+	 * next experiments vary: mainline's mhi writes its own image request
+	 * there, and a wrong type could be what is refused after the transfer.
+	 */
+	{
+		uint32_t txdb = 0x1234567;
+
+		if (PE_parse_boot_argn("pcie2_txdb", &txdb, sizeof(txdb))) {
+			hakios_tl("pcie2: BHI: the probe's doorbell %#x, not the sentinel\n", txdb);
+		}
+		wr(bhi + 0x2c, 0);              /* BHI_STATUS */
+		wr(bhi + 0x0c, (uint32_t)(phys >> 32));
+		wr(bhi + 0x08, (uint32_t)phys);
+		wr(bhi + 0x10, (uint32_t)size); /* BHI_IMGSIZE */
+		wr(bhi + 0x18, txdb);           /* BHI_IMGTXDB */
+		hakios_tl("pcie2: BHI: wrote imgaddr %#x/%#x size %#x doorbell %#x; read back %#x/%#x size %#x, txdb %#x, status %#x\n",
+		    (uint32_t)(phys >> 32), (uint32_t)phys, (uint32_t)size, txdb, rd(bhi + 0x0c), rd(bhi + 0x08),
+		    rd(bhi + 0x10), rd(bhi + 0x18), rd(bhi + 0x2c));
+	}
 	delay(10000);
 	modem_context_fsr(false);
 	for (i = 0; i < 1000; i++) {

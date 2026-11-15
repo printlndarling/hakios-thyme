@@ -287,6 +287,7 @@ PCIE2_RESET	arg	pcie2_reset	User space	k	hakios.thyme_pcie2.c
 PCIE2_SID	arg	pcie2_sid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_SURVEY	arg	pcie2_survey	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TEST	arg	pcie2_test	User space	k	hakios.thyme_pcie2.c	
+PCIE2_TXDB	arg	pcie2_txdb	User space	k	hakios.thyme_pcie2.c	the value written to BHI_IMGTXDB. The sentinel 0x1234567 was only ever a way to see the doorbell answer; the PBL reads that word
 PMIC_CHARGE	arg	pmic_charge	Chip, thermal and PMIC	k	hakios.pmic.c	
 PMIC_CHARGER	arg	pmic_charger	Chip, thermal and PMIC	k	hakios.pmic.c	also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only; works without pmic=1
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block
