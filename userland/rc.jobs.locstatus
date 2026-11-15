@@ -1,0 +1,8 @@
+# The CoreLocation status check (RC_JOBS=rc.jobs.locstatus): locationd runs (launchd spawns it),
+# but Settings leaves Location Services out of Privacy, so ask CoreLocation itself -- twice, with
+# twenty seconds between, in case the answer settles. No taps.
+/redwood/bin/sleep_hold 120 &
+/redwood/bin/loc_test
+/redwood/bin/rwtouch wait 20
+/redwood/bin/loc_test
+/redwood/bin/rwtouch wait 40

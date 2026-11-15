@@ -1,0 +1,16 @@
+# Location Services, second attempt (RC_JOBS=rc.jobs.locenable2): Sileo in front first (the only
+# thing that keeps this job running once the display would lock), then the master switch written,
+# locationd restarted so a fresh instance reads it, CoreLocation asked again, and the Privacy page
+# opened by URL for the runner shots. No taps.
+/redwood/bin/sleep_hold 200 &
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 20
+/redwood/bin/loc_test
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 3
+/redwood/bin/killby locationd 15
+/redwood/bin/rwtouch wait 5
+/redwood/bin/loc_test
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 70

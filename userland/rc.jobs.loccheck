@@ -1,0 +1,10 @@
+# The Location Services check (RC_JOBS=rc.jobs.loccheck): open the Privacy page by URL -- no taps --
+# and leave the screen to the runner shots. The URL is one word (no spaces): the job parser splits
+# words, and quotes around it are passed through, which is why the first attempt did nothing.
+# With the system image that carries locationd (userland/system.apfs after the
+# sysimage/select-system.py change), the page should offer Location Services.
+/redwood/bin/sleep_hold 150 &
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/uiopen prefs:
+/redwood/bin/rwtouch wait 60

@@ -1,0 +1,13 @@
+# The Location Services switch (RC_JOBS=rc.jobs.locenable): ask CoreLocation, write the master
+# switch it reads (com.apple.locationd's LocationServicesEnabled -- on a stock phone Setup
+# Assistant sets it; this port's /var/mobile starts empty), ask again, then open the Privacy
+# page by URL so the runner shots can show whether Location Services is listed. No taps.
+/redwood/bin/sleep_hold 150 &
+/redwood/bin/rwtouch wait 15
+/redwood/bin/loc_test
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 5
+/redwood/bin/loc_test
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 90
