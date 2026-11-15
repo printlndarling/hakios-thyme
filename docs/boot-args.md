@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **486 arguments**: 412 read by the kernel, 14 by the loader, 71 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **487 arguments**: 413 read by the kernel, 14 by the loader, 71 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -369,7 +369,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `torch_secs` | K | `hakios.thyme_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
 | `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 
-## Chip, thermal and PMIC (17)
+## Chip, thermal and PMIC (18)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -380,6 +380,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ddr_vote` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_VOTE` |  |
 | `membench` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_MEMBENCH` |  |
 | `pmic` | K | `hakios.pmic.c` | `CONFIG_PMIC` |  |
+| `pmic_charge` | K | `hakios.pmic.c` | `CONFIG_PMIC_CHARGE` |  |
 | `pmic_charger` | K | `hakios.pmic.c` | `CONFIG_PMIC_CHARGER` |  |
 | `pmic_list` | K | `hakios.pmic.c` | `CONFIG_PMIC_LIST` |  |
 | `soc_smem_size` | K | `hakios.socinfo.c` | `CONFIG_SOC_SMEM_SIZE` |  |

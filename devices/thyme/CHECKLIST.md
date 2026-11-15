@@ -2902,3 +2902,13 @@ For live battery numbers, the gauge is not where it was assumed: PM8150B's fuel 
 peripherals 0x4000 (SOC), 0x4100 (battery info), 0x4200 (RRADC) and 0x4300 (memif) -- the type 0x0d
 blocks the inventory lists -- while 0x7200 (type 0x16 subtype 0x0a) is the PBS, not a QBG. The next
 reading of current and voltage would use FG_GEN4's registers (`qpnp-fg-gen4.c`, `fg-reg.h`).
+
+The software step is now in the driver too.  Boot-arg `pmic_charge=1` dumps the same blocks and then
+does what the vendor's driver does with the cable's APSD result (0x1308): SDP 500 mA, CDP 1.5 A,
+DCP 1.6 A, written to 0x1370 as the vendor's 50 mA-per-step code, with the high-current sources
+also given the vendor's override (0x1366 BIT(0), 0x1365 BIT(4), software ICL override clear); the
+watchdog is petted once when a write happens.  Nothing else is touched -- no float voltage, no
+fast-charge current.  On this desk's PC port the run logs `pmic: charge: SDP, input current limit
+already 500 mA` (`logs/190559-run.log`, kernel `dba84133`): the classification is right and the code
+left the port's own limit alone.  The DCP and CDP branches are the vendor's values and wait for a
+wall charger to be verified; they cannot be exercised on the port the loader needs.

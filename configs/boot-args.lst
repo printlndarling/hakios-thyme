@@ -308,6 +308,7 @@ pcie2_sid	k
 pcie2_survey	k
 pcie2_test	k
 pmic	k
+pmic_charge	k
 pmic_charger	k
 pmic_list	k
 press_power	k

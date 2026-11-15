@@ -41,6 +41,9 @@
  *   pmic_list=0       only the clock, not the inventory of every block
  *   pmic_charger=1    also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only;
  *                     works without pmic=1
+ *   pmic_charge=1     the same dump, and then set the USB input current limit from the APSD result
+ *                     as the vendor driver does (SDP 500 mA, CDP 1.5 A, DCP 1.6 A), and when it
+ *                     writes, pet the watchdog once; no float voltage, no fast-charge current
  */
 #include <kern/clock.h>
 #include <kern/locks.h>
@@ -367,6 +370,7 @@ hakios_pmic_pon_report(void)
 
 static bool list_all = true;
 static bool charger_dump_enabled;
+static bool charge_apply_enabled;
 
 /*
  * The charger block, read only.  Slave 2 of the arbiter is the PM8150B (the charger, the fuel
@@ -418,6 +422,109 @@ peripheral_channel(uint16_t ppid)
 	return ARB_MAX_CHANNELS;
 }
 
+static const char *
+spmi_update_bits(uint32_t channel, uint16_t reg, uint8_t mask, uint8_t value)
+{
+	uint8_t byte;
+	const char *problem = spmi_read(channel, reg, &byte, 1);
+
+	if (problem != NULL) {
+		return problem;
+	}
+	byte = (uint8_t)((byte & ~mask) | (value & mask));
+	return spmi_write(channel, reg, &byte, 1);
+}
+
+/*
+ * The input current limit follows the port, as the vendor's driver does (qpnp-smb5.c and
+ * smb5-lib.c: SDP 500 mA, CDP 1.5 A, DCP 1.6 A; APSD result in 0x1308), and nothing else is
+ * written: no float voltage, no fast-charge current.  On a high-current source the vendor's
+ * override is USBIN_MODE_CHG plus "override after APSD" (0x1366 BIT(0), 0x1365 BIT(4)) with the
+ * software ICL override clear (0x1342 BIT(0)); SDP keeps the hardware's own mode.  A port that
+ * advertises standard current is left exactly at the 500 mA it already has -- the limit is the
+ * port's, not the charger's.  On the write path the watchdog is petted once (0x1643 BIT(0)); the
+ * firmware's 0x1653 has its bite wired not to disable charging, so this is courtesy, not a gate.
+ */
+#define USBIN_ICL_REG           0x1370
+#define USBIN_ICL_OPTIONS_REG   0x1366
+#define USBIN_LOAD_CFG_REG      0x1365
+#define USBIN_CMD_IL_REG        0x1340
+#define CMD_ICL_OVERRIDE_REG    0x1342
+#define APSD_RESULT_STATUS_REG  0x1308
+#define BARK_BITE_WDOG_PET_REG  0x1643
+
+static void
+charger_set_icl(uint32_t usbin)
+{
+	uint8_t apsd = 0, icl = 0;
+	uint8_t target;
+	const char *what;
+	const char *problem = spmi_read(usbin, APSD_RESULT_STATUS_REG, &apsd, 1);
+
+	if (problem != NULL) {
+		say("pmic: charge: APSD result unreadable: %s\n", problem);
+		return;
+	}
+	apsd &= 0x7f;
+	switch (apsd) {
+	case 0x01:
+		what = "SDP";
+		target = 0x0a;          /* 500 mA */
+		break;
+	case 0x04:
+		what = "CDP";
+		target = 0x1e;          /* 1.5 A */
+		break;
+	case 0x08:
+		what = "DCP";
+		target = 0x20;          /* 1.6 A */
+		break;
+	default:
+		say("pmic: charge: APSD result %#x (%s); input current limit left alone\n", apsd,
+		    apsd == 0x10 ? "floating" : apsd == 0x20 ? "QC2" : apsd == 0x40 ? "QC3" : "unknown");
+		return;
+	}
+	if (spmi_read(usbin, USBIN_ICL_REG, &icl, 1) == NULL && icl == target) {
+		say("pmic: charge: %s, input current limit already %u mA\n", what, (unsigned)target * 50);
+		return;
+	}
+	if (apsd != 0x01) {
+		problem = spmi_update_bits(usbin, USBIN_ICL_OPTIONS_REG, 1u << 0, 1u << 0);
+		if (problem == NULL) {
+			problem = spmi_update_bits(usbin, USBIN_LOAD_CFG_REG, 1u << 4, 1u << 4);
+		}
+		if (problem == NULL) {
+			problem = spmi_update_bits(usbin, CMD_ICL_OVERRIDE_REG, 1u << 0, 0);
+		}
+		if (problem != NULL) {
+			say("pmic: charge: %s: the override: %s\n", what, problem);
+			return;
+		}
+	}
+	problem = spmi_write(usbin, USBIN_ICL_REG, &target, 1);
+	if (problem == NULL) {
+		problem = spmi_update_bits(usbin, USBIN_CMD_IL_REG, 1u << 0, 0);    /* not suspended */
+	}
+	if (problem != NULL) {
+		say("pmic: charge: %s: %s\n", what, problem);
+		return;
+	}
+	if (spmi_read(usbin, USBIN_ICL_REG, &icl, 1) == NULL) {
+		say("pmic: charge: %s, input current limit set to %u mA (reads back %u mA)\n", what,
+		    (unsigned)target * 50, (unsigned)icl * 50);
+	} else {
+		say("pmic: charge: %s, input current limit written, read-back failed\n", what);
+	}
+	{
+		uint32_t misc = peripheral_channel((uint16_t)((2 << 8) | 0x16));
+		uint8_t pet = 1;
+
+		if (misc != ARB_MAX_CHANNELS) {
+			(void)spmi_write(misc, BARK_BITE_WDOG_PET_REG, &pet, 1);
+		}
+	}
+}
+
 /* The blocks the charger's state lives in (smb5-reg.h): the charger itself, the DCDC block with
  * the ICL status, the USB input where the input current limit is, the Type-C port controller and
  * the MISC block with the watchdog.  Each is its own SPMI peripheral and must be read through its
@@ -447,6 +554,15 @@ charger_report(uint32_t charger_channel)
 			continue;
 		}
 		block_report(blocks[i].what, channel, blocks[i].base);
+	}
+	if (charge_apply_enabled) {
+		uint32_t usbin = peripheral_channel((uint16_t)((2 << 8) | 0x13));
+
+		if (usbin != ARB_MAX_CHANNELS) {
+			charger_set_icl(usbin);
+		} else {
+			say("pmic: charge: no USBIN peripheral, nothing set\n");
+		}
 	}
 }
 
@@ -556,14 +672,16 @@ __startup_func
 static void
 pmic_init(void)
 {
-	uint32_t enabled = 0, list = 1, charger = 0;
+	uint32_t enabled = 0, list = 1, charger = 0, charge = 0;
 
 	if (!PE_parse_boot_argn("pmic", &enabled, sizeof(enabled))) {
 		enabled = 0;
 	}
 	(void)PE_parse_boot_argn("pmic_list", &list, sizeof(list));
 	(void)PE_parse_boot_argn("pmic_charger", &charger, sizeof(charger));
-	charger_dump_enabled = charger != 0;
+	(void)PE_parse_boot_argn("pmic_charge", &charge, sizeof(charge));
+	charge_apply_enabled = charge != 0;
+	charger_dump_enabled = charger != 0 || charge_apply_enabled;
 	if (!enabled && !charger_dump_enabled) {
 		return;
 	}
