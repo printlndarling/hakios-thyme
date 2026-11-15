@@ -2258,6 +2258,8 @@ group — is the next piece.
 - [ ] Cellular modem, SIM, and network registration.
 - [ ] NFC and fingerprint policy.
 - [ ] Repeatable installer and recovery workflow for this third-party ROM.
+- [ ] Refresh prebuilt/ from the verified tree: the tracked prebuilt/hakios-kernel is from 25-27 October, while the kernel verified on the phone today (dd3f6368: boot, Wi-Fi standing re-join, keepalive) and the userland that installed wget and its six dependencies are not in it. tools/update-prebuilt.sh regenerates the set; it is a large binary change, so it wants a deliberate pass rather than a loop turn.
+
 - [x] Rootless Procursus prefix, dpkg metadata and offline install/remove verification.
 - [x] Online repository installation through Sileo, from the page to the
   installed binary: PASS on 2026-11-13 (`logs/094507-run.log`; the page
