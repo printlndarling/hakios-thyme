@@ -2498,3 +2498,12 @@ returned 1 after 0.3 s, and the kernel logged the link up at 307.75 s; the scene
 address and name came back (resolve in 0.02 s). The daemon had read the kernel's data-link
 event and acted on it by itself: the path the sleep case needs, now shown on the phone for a
 link that goes away while the system runs.
+
+### The owner test: no black on a language change or a restart (2026-11-15, night)
+
+The owner reported on the current daily build, in their own use, that switching Sileo's
+language and quitting and restarting it no longer shows the black screen ("不管切换语言还是
+退出重启都没有出现黑屏问题"). That is the user-facing confirmation of the work recorded
+above: the image table's exhaustion (IMAGES 1024), the /var/jb container link that stopped
+the dead10cc kills, and the two-second cap on the launch's blocking connects
+(`net.inet.tcp.keepinit = 2000`, `logs/040630-run.log`: one dark frame, about two seconds).
