@@ -2988,3 +2988,18 @@ load of the same SBL on the same phone; the public sources do not settle them.  
 path after the SBL (MHI UCI + Sahara + mdmddr) is a larger bring-up of its own.  Until that door
 opens, satellite positioning stays unavailable and the working provider is Wi-Fi, as verified
 above; the Settings row stays the separate open item recorded earlier.
+
+The last host-side lever was checked and is not there.  The thyme/LineageOS stock `esoc-mdm-pon`
+driver has **no regulator handling at all**: its modem node in the public thyme DTS carries only
+the AP2MDM/MDM2AP GPIOs (`ap2mdm-status` 56, `mdm2ap-status` 3, errfatal 57/1), no `reg-names`, no
+supplies; the regulator loop that appears in some trees is a different SoC's driver.  The modem's
+own power (its DDR/SRAM) comes from a separate modem PMIC (`pmxprairie`) on the modem's SPMI at
+SID 8, which the apps arbiter cannot reach -- the port's own inventory already lists slave 8 as
+"failed" (no chip on this bus).  The stock PON sequence is exactly what the probe's `pcie2_bhi=2`
+does -- SPMI warm reset, 150 ms, AP2MDM_STATUS high, then PBLRDY or an image request -- and the
+stock apps-SMMU mapping is the one the probe programs (`iommu-map` BDF 0x100 -> SID 0x1d01;
+`pcie2_sid=5` is the probe's *mode*, not a SID value).  So no AP-side regulator, reset or SID
+change remains to try: with the image read and authenticated and the ELF load refused, the door is
+on the modem's side of the PCIe link, where this host has no interface.  Satellite positioning
+stays unavailable; Wi-Fi positioning is the working provider and the Settings row stays the
+separate open item.
