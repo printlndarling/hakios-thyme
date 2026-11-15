@@ -2870,3 +2870,35 @@ hardware JEITA, and lets APSD/cable events program ICL -- thyme's DT asks for 3 
 and 4.45 V, none of which a first bring-up should copy.  The MISC watchdog matters too: the vendor
 pets 0x1643 on the bark interrupt and configures a bite to disable charging (0x1653 BIT(7)), so a
 path of ours with no interrupt must either pet it or turn the timer off (0x1651 BIT(1)/BIT(6)).
+
+### Charging: the charger works; the port's 500 mA is the limit (2026-11-15, late night)
+
+The per-channel dump completes the picture (`logs/185404-run.log`, kernel `3cf83ada`), and nothing
+on the phone's side is broken:
+
+- Type-C (channel 35): `0x150B = 0x2b` (attached, sink), `0x1544 = 0x02` (sink only, not disabled,
+  not source-only), `0x1506 = 0x08` (the port advertises standard current);
+- USBIN (channel 33): `0x1308 = 0x01` (APSD classified the port SDP), `0x1340 = 0x00` (input not
+  suspended), `0x1370 = 0x0a` (input current limit 500 mA);
+- DCDC (channel 31): `0x1106`, `0x1107` and `0x1108` are all `0x0a` -- the maximum, the status and
+  the AICL result agree on 500 mA;
+- charger (channel 30): enable `0x1042 = 1`, status `0x1006 = 3` (fullon), FCC `0x1061 = 0x1e`
+  (1.5 A), float `0x1070 = 0x50` (4.40 V), inhibit `0x1051` BIT(0) clear;
+- MISC (channel 36): `0x1651 = 0x62` (timer enabled on plugin, bark interrupt on),
+  `0x1653 = 0x0c` (bark 128 s, and BIT(7) clear: a bite does not disable charging), so the
+  unserviced watchdog does not cut charging.
+
+The phone is charging at up to 500 mA into a PC USB port that advertises standard current (SDP),
+and the load exceeds it, so the cell falls: the port is the limit, not the charger. On a DCP or a
+Type-C port advertising 1.5/3 A the charger would still be capped at 500 mA, because the ICL
+register stays 0x0a until software raises it -- the vendor's driver raises ICL on the APSD result
+(DCP 1.6 A, CDP 1.5 A) and thyme's DT asks for 3 A. That software step is the next piece of the
+port, and verifying it needs a wall charger; on the PC port the right answer is the 500 mA it
+already has. So "the kernel's charging path is not written" (docs/install-safe.md) stands for
+software control, not for charging itself: the firmware path charges within the port's advertised
+limit, which is why a 30-minute soak held 91-92 % on its charger.
+
+For live battery numbers, the gauge is not where it was assumed: PM8150B's fuel gauge is FG_GEN4 at
+peripherals 0x4000 (SOC), 0x4100 (battery info), 0x4200 (RRADC) and 0x4300 (memif) -- the type 0x0d
+blocks the inventory lists -- while 0x7200 (type 0x16 subtype 0x0a) is the PBS, not a QBG. The next
+reading of current and voltage would use FG_GEN4's registers (`qpnp-fg-gen4.c`, `fg-reg.h`).
