@@ -1,0 +1,18 @@
+# Weather for a long session (RC_JOBS=rc.jobs.weatherlong): answer the consent
+# with the tap train, then stay in the app for five minutes -- the user's own
+# session did show the place name, but only after a wait, and this asks whether
+# the city (location) or the numbers (WeatherKit) are what this build lacks.
+/redwood/bin/sleep_hold 520 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 50
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.50 0.69
+/redwood/bin/rwtouch wait 300

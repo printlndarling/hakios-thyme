@@ -50,6 +50,56 @@ re-checks in `viewDidAppear:` and after `reloadSpecifiers`, and does not insert
 into an empty specifier list, so a page that builds or reloads its list after
 the first appearance cannot silently lose the row.
 
+## Weather's data, kvsd, and what the app waits for (2026-11-16)
+
+The stock Weather app is where the last user-visible question sits: the place
+name appeared once for the user (Xi'an, Chang'an) but never the forecast
+values, and Maps' canvas stays empty.  This is what the device said about both.
+
+**The location consent is real, and can be answered without a person.**  An app
+launched by bundle id (`uiopen --bundleid com.apple.weather`) asks for location
+about a minute later; the alert's buttons sit at 0.50/0.64 (Allow Once),
+0.50/0.69 (Allow While Using App) and 0.50/0.75 (Don't Allow) of the screen
+(`logs/weather-60.png`).  A tap at the middle one, after the alert is up,
+answers it: the alert goes and `weatherd` is spawned the same second
+(02:42:03, `logs/024022-run.log`; 02:50:59, `logs/024929-run.log`).  A tap
+before the alert leaves it on screen.  This is the automation the Weather
+scenes use; no person touches the phone.
+
+**`com.apple.kvsd` is `syncdefaultsd`, and mkjobs' DENY kept it out.**  Weather
+and its widget look up `com.apple.kvsd`; the service is one of
+`syncdefaultsd`'s MachServices (`System/Library/LaunchDaemons/com.apple.syncdefaultsd.plist`),
+and `userland/mkjobs.py`'s DENY names `syncdefaultsd` as one of the jobs that
+"start, crash and are asked for again, over and over".  Let through
+(`ALLOW=syncdefaultsd`), launchd registers `com.apple.kvsd` and the app's failed
+kvsd lookups stop -- but `syncdefaultsd` itself dies at once every time:
+
+    NSInvalidArgumentException -[NSURL initFileURLWithPath:isDirectory:]: nil string parameter
+
+(four threads raise it, then SIGABRT and a 10 s respawn throttle,
+`logs/024929-run.log`; the backtrace the kernel prints is the libc++abi abort
+path, so the thrower is not in it).  A nil path at startup is consistent with
+the container manager's "no personas" (`src/inject.c` answers
+`personasAreSupported` NO), but the throwing frame is not named yet.  Weather
+carries the ubiquity-kvstore entitlement, so the store is part of its startup.
+
+**`weatherd` starts, and the numbers still do not come.**  With the consent
+answered and the kvsd service registered, WeatherKit's daemon starts and stays
+up (`weatherd[217]`, `logs/024929-run.log`), and Weather stops reporting kvsd;
+it reports `fairplayd` 24 times in that run (189 in the run where only the
+consent had been answered, `logs/022549-run.log`).  `weatherd`'s own strings
+name a `fairplay-client` and `com.apple.fairplayd.versioned`, and WeatherKit
+carries a fairplay feature flag; `fairplayd.H2` launches and exits with 0
+because the port has no `com_apple_driver_FairPlayIOKitUserClient`
+(`docs/ru/notes.md`, the App Store account).  The forecast values are behind
+FairPlay/SEP, not behind location: the consent is answerable and the place name
+is a geocode, which works.
+
+**Maps.**  The empty canvas is the Metal wall already recorded: Maps' VectorKit
+draws through Metal, and this port's Metal render path does not run yet (the
+Air/Metal probe and the TURNIP/M2V path are the open work, `docs/air.md`,
+`docs/official-metal-probe.md`).
+
 ## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
 
 The sensor DIAG probe never reached its measurement because its scene -- the
