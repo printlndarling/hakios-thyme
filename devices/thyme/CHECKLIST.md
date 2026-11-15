@@ -2912,3 +2912,13 @@ fast-charge current.  On this desk's PC port the run logs `pmic: charge: SDP, in
 already 500 mA` (`logs/190559-run.log`, kernel `dba84133`): the classification is right and the code
 left the port's own limit alone.  The DCP and CDP branches are the vendor's values and wait for a
 wall charger to be verified; they cannot be exercised on the port the loader needs.
+
+The thorough part of location is the modem, and the firmware says so itself: the module's
+`modemr.jsn` (`fw-modem-sdx55m/`, the phone's own `/vendor/firmware_mnt/image/sdx55m`) declares the
+services the modem registers when it boots -- `servreg`, `pdr_enabled` and **`gps_service`**.  The
+Wi-Fi fix works without it, but satellite positioning is inside the SDX55M, so the PCIe2/MHI boot
+wall (the PBL refusing the SBL after the signature checks, `0xef0e0003` with the BID-to-SID table
+programmed; `docs/cellular.md`) is the gate for GNSS and for cellular data alike.  The next work is
+on that wall: the BHI doorbell's image type, the image the PBL expects, and what the bootloader does
+after the SBL that a bare host must replicate -- researched against mainline's `mhi_pci_generic` and
+the SDX55 firmware packaging before the probe is changed again.
