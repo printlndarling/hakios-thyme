@@ -254,6 +254,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -o obj/clcheck src/clcheck.m
 		# SystemConfiguration's view of the network next to the sockets' (src/reach_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/reach_test src/reach_test.m
+		# the setup-completion preferences a new phone has and this port never wrote (src/setup_seed.c)
+		$DYN -framework CoreFoundation -o obj/setup_seed src/setup_seed.c
 		# the smallest application that can ask for a position: a bundle identifier and a
 		# usage description, which a command line program has not (src/LocProbe.m)
 		mkdir -p obj/LocProbe.app &&
@@ -408,6 +410,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
 	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
 	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
+	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
 	if [ -d obj/LocProbe.app ]; then

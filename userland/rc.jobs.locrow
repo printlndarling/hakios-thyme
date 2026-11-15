@@ -1,0 +1,11 @@
+# Whether the Location Services row appears once its getter is gone (RC_JOBS=rc.jobs.locrow):
+# the system image was built by build.sh with patch-privacy.py, which takes the only "get" out
+# of the row's specifier; open the Privacy & Security page and hold it for the shots. No taps.
+/redwood/bin/sleep_hold 200 &
+/redwood/bin/rwtouch wait 20
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 2
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 90

@@ -1,0 +1,11 @@
+# Whether "the device is set up" is what the missing Location Services row waits for
+# (RC_JOBS=rc.jobs.locrow3): write the purplebuddy completion state and the first-time
+# location-consent marker as the mobile user, turn the switch on, and open the privacy page
+# directly (no Sileo, so no notification alert over it) for the shots. No taps.
+/redwood/bin/sleep_hold 200 &
+/redwood/bin/rwtouch wait 15
+/redwood/bin/setup_seed
+/redwood/bin/loc_test enable
+/redwood/bin/rwtouch wait 2
+/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
+/redwood/bin/rwtouch wait 90
