@@ -15,17 +15,11 @@
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#include <dlfcn.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-
-/* The Foundation path does not always call -[NSException raise]: the compiler
- * and CoreFoundation throw through the runtime function, so that is the one to
- * interpose.  dyld's __interpose section replaces the call sites at load. */
-extern void objc_exception_throw(id exception) __attribute__((noreturn));
 
 static int console_fd = -1;
 
@@ -100,53 +94,37 @@ raise_hook(id self, SEL _cmd)
 	}
 }
 
-static void (*original_exception_throw)(id);
-static int inside_throw;
+/* The exception itself is thrown from inside the shared cache, but the method
+ * it is thrown out of is an Objective-C method like any other: swizzle NSURL's
+ * initializer, and when the path is nil the stack is the caller's. */
+static IMP original_init_file_url;
+static int nil_urls_logged;
 
-static void
-hakios_exception_throw(id exception)
+static id
+init_file_url_hook(id self, SEL _cmd, NSString *path, BOOL is_directory)
 {
-	@autoreleasepool {
-		if (!inside_throw && exception != nil) {
-			inside_throw = 1;
-			{
-				NSMutableString *text = [NSMutableString string];
-				const char *name = [exception isKindOfClass:[NSException class]] &&
-				    ((NSException *)exception).name != nil ?
-				    ((NSException *)exception).name.UTF8String : "?";
-				const char *reason = [exception isKindOfClass:[NSException class]] &&
-				    ((NSException *)exception).reason != nil ?
-				    ((NSException *)exception).reason.UTF8String : "?";
-				int frames = 0;
+	if (path == nil && nil_urls_logged < 8) {
+		@autoreleasepool {
+			NSMutableString *text = [NSMutableString string];
+			int frames = 0;
 
-				[text appendFormat:@"hakios-exc: throw %s: %s\n", name, reason];
-				for (NSString *line in [NSThread callStackSymbols]) {
-					[text appendFormat:@"hakios-exc: %s\n", line.UTF8String];
-					if (++frames >= 22) {
-						break;
-					}
+			nil_urls_logged++;
+			[text appendString:@"hakios-exc: NSURL initFileURLWithPath: nil\n"];
+			for (NSString *line in [NSThread callStackSymbols]) {
+				[text appendFormat:@"hakios-exc: %s\n", line.UTF8String];
+				if (++frames >= 26) {
+					break;
 				}
-				say(text.UTF8String);
 			}
-			inside_throw = 0;
+			say(text.UTF8String);
 		}
 	}
-	if (original_exception_throw == NULL) {
-		original_exception_throw = (void (*)(id))dlsym(RTLD_NEXT, "objc_exception_throw");
+	if (original_init_file_url != NULL) {
+		return ((id (*)(id, SEL, NSString *, BOOL))original_init_file_url)(self, _cmd,
+		    path, is_directory);
 	}
-	if (original_exception_throw != NULL) {
-		original_exception_throw(exception);
-	}
-	abort();
+	return self;
 }
-
-__attribute__((used, section("__DATA,__interpose")))
-static const struct {
-	const void *replacement;
-	const void *original;
-} hakios_interposes[] = {
-	{ (const void *)hakios_exception_throw, (const void *)objc_exception_throw },
-};
 
 __attribute__((constructor)) static void
 hakios_exc_init(void)
@@ -168,5 +146,16 @@ hakios_exc_init(void)
 		}
 		say(original_raise != NULL ? "hakios-exc: hooked -[NSException raise]\n"
 		    : "hakios-exc: no -[NSException raise] to hook\n");
+		cls = objc_getClass("NSURL");
+		if (cls != NULL) {
+			method = class_getInstanceMethod(cls,
+			    sel_registerName("initFileURLWithPath:isDirectory:"));
+			if (method != NULL) {
+				original_init_file_url = method_setImplementation(method,
+				    (IMP)init_file_url_hook);
+			}
+		}
+		say(original_init_file_url != NULL ? "hakios-exc: hooked -[NSURL initFileURLWithPath:isDirectory:]\n"
+		    : "hakios-exc: no NSURL initializer to hook\n");
 	}
 }

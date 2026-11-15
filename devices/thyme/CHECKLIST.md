@@ -78,9 +78,17 @@ kvsd lookups stop -- but `syncdefaultsd` itself dies at once every time:
 
 (four threads raise it, then SIGABRT and a 10 s respawn throttle,
 `logs/024929-run.log`; the backtrace the kernel prints is the libc++abi abort
-path, so the thrower is not in it).  A nil path at startup is consistent with
-the container manager's "no personas" (`src/inject.c` answers
-`personasAreSupported` NO), but the throwing frame is not named yet.  Weather
+path, so the thrower is not in it).  Swizzling `-[NSURL
+initFileURLWithPath:isDirectory:]` themselves and printing the stack when the
+path is nil named the caller (`logs/033241-run.log`): the daemon calls
+`sandbox_container_path_for_audit_token` into a 1024-byte buffer, converts the
+path to a string and builds the URL from it; with this userland's container
+manager (personas answered "not supported", `src/inject.c`) the string comes
+out nil and the initializer throws.  An interpose of that C function -- print
+the real path, then answer "no container" so the daemon takes its fallback --
+is not usable: the call sites are inside the shared cache, and dyld dies with
+SIGBUS patching them (`logs/034142-run.log`).  The fix, if the store matters
+later, is a container manager that hands out a path, not a hook.  Weather
 carries the ubiquity-kvstore entitlement, so the store is part of its startup.
 
 **`weatherd` starts, and the numbers still do not come.**  With the consent
