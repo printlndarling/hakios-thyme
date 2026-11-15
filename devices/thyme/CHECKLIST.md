@@ -3088,3 +3088,73 @@ not visible from the apps processor -- the modem-side secure state the PBL check
 and closing it needs either the stock bootloader's modem bring-up (whose code is not public) or
 device-side reverse engineering of the PBL.  The Wi-Fi provider remains the working location, and
 this is the boundary this checklist records for GPS.
+### The stock kernel's own modem boot, read and captured (2026-11-15, late night)
+
+The phone's Android is HyperOS 3 (`OS3.0.10.0.WPACNXM`, Android 16, kernel
+`4.19.157-HyperOS3-A16-OurSky-Developers+`), not the OS1.0.4.0 package the earlier
+research had used.  Its `boot_a` (`/dev/block/sde12`) kernel Image was pulled (48,781,336
+bytes) and `vmlinux-to-elf` rebuilt a symbolized ELF from the in-kernel kallsyms, so the
+stock ESOC/PON/MHI code could be read as code rather than inferred:
+
+- the ops tables name the path: `mdm4x_do_first_power_on` -> `sdx55m_toggle_soft_reset`
+  -> `qpnp_pon_modem_pwr_off(1)`;
+- `qpnp_pon_modem_pwr_off` writes `(base + 0x63) = 0`, `udelay(500)`,
+  `(base + 0x62) = type`, `(base + 0x63) = 0x80`, `udelay(500)`, `(base + 0x64) = 0xA5`;
+  `base` is the first u32 of the power-on node's `reg` (0x800);
+- the PON it uses is `modem_reset_dev`, assigned to the node with **`qcom,modem-reset`**
+  (pmxprairie@8); `qcom,system-reset` belongs to a different PON (pm8150@0) and is not
+  this path;
+- `mdm4x_do_first_power_on`: the reset above, `msleep(150)`, AP2MDM_STATUS high, poll the
+  optional pblrdy GPIO (the live DT has none), `msleep(200)` or queue `ESOC_REQ_IMG`.
+
+The port had written only the first two values, so its pulse was loaded but never fired.
+`hakios_pmic_pon_modem_reset` now writes all five and reads 0x862/0x863 back before the
+trigger -- the phone answers `0x863 = 0x80`, so the writes land; `hakios.thyme_pcie2.c`
+drives AP2MDM_STATUS low before the pulse, raises it after the vendor's 150 ms, watches
+MDM2AP_STATUS for up to 100 ms and waits another 200 ms before touching the link.  The
+doorbell's answer did not change (`0xef0e0003` in 30 ms, `logs/225051-run.log`).
+
+The stock reset path itself is real, and was watched live.  A small static tool (raw
+syscalls, no libc) drove `/dev/esoc-0`: `ESOC_NOTIFY` with `ESOC_PRIMARY_REBOOT` made the
+driver call `qpnp_pon_modem_pwr_off(type=1)` (kprobe `p:pon
+qpnp_pon_modem_pwr_off type=%x0`, event at 1112.361 s) and the ESOC status fell from
+0x1 to 0x0 -- the modem was actually powered down by the same sequence.  The modem does
+not come back from that notification alone; the next Android boot restores it.
+
+A kprobe capture of a stock Android boot (`mhi_write_reg` offset/value pairs and
+`mhi_fw_load_handler`) then gave the successful SBL load exactly, at 13.2548 s of that
+boot:
+
+    mwr off=0x2c val=0x0          BHI_STATUS
+    mwr off=0xc  val=0x0          BHI_IMGADDR_HIGH
+    mwr off=0x8  val=0x20100000   BHI_IMGADDR_LOW
+    mwr off=0x10 val=0x85cd8      BHI_IMGSIZE
+    mwr off=0x18 val=0x3dbe2bc7   BHI_IMGTXDB (the session id)
+    flh: mhi_fw_load_handler +0x0  (the entry, at the same instant)
+
+and at 13.5266 s the MHI context and window writes: CCABAP 0x20002000, ECABAP
+0x20004000, CRCBAP 0x20048000, MHICTRLBASE/LIMIT 0x0/0x3fffffff, MHIDATABASE/LIMIT
+0x0/0x3fffffff.  The image is the DMA pool's base + 1 MB, above the ring area, while
+every probe so far had put it at the pool base.  `pcie2_iova` now moves the probe's image
+(0x20100000 tried), and `pcie2_win_base`/`pcie2_win_stop` reproduce the stock windows.
+With the image at 0x20100000 the answer is unchanged (`logs/231953-run.log`, `dbg
+0x20100000 0 0x85cd8`); the stock-window run is recorded below when it lands.
+
+The file-variant hypothesis is closed as well: the phone's installed
+`/vendor/firmware_mnt/image/sdx55m/sbl1.mbn` hashes `c9027c9b...e1de5f` (548,056 bytes),
+exactly the file the probe hands the PBL.  The stock kernel requests that same file into a
+coherent buffer and writes the same five BHI registers the probe does, with the same size.
+
+One correction: `0xb0230008`'s bits 23:16 are 0x23 -- speed 3 and width 2 -- so the port's
+link is Gen3 x2, the same class as Android's "8 GT/s x2"; the earlier note's "2.5 GT/s x2"
+read an intermediate training value.
+
+So every AP-visible input now matches the stock success path: the image and its size, the
+BHI register sequence and the image's IOVA, the SMMU context and stream, the PMIC pulse
+and its readback, the AP2MDM/MDM2AP handshake and pauses, the PHY sequence (identical to
+the live DT's `qcom,phy-sequence`), and the link.  What remains is the modem's internal
+state at the moment the PBL loads the ELF, which the AP cannot see or write.  One stock
+step is knowingly not reproduced: `mhi_async_power_up` initializes the MHI context rings
+and MSI before the BHI load (`mhi_init_dev_ctxt`, `mhi_init_irq_setup`); those structures
+are host-side rings the PBL transfer does not read, and the probe's BHI writes match the
+capture without them.

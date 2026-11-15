@@ -672,6 +672,7 @@ extern uint64_t umi_camera_iomap_free(void);
 #define SMMU_MAIR0_VAL   0xf404ff44
 
 #define SMMU_IOVA        0x20000000ull   /* the DT's iommu-dma-addr-pool */
+static uint64_t smmu_iova = SMMU_IOVA;   /* pcie2_iova=N moves the image inside the pool */
 
 static struct {
 	vm_offset_t tables;              /* the root, then the levels it needs */
@@ -735,7 +736,7 @@ smmu_enter(vm_offset_t buffer, size_t size)
 		modem_space.count = 1;
 	}
 	for (uint64_t offset = 0; offset < size; offset += 0x1000) {
-		uint64_t at = SMMU_IOVA + offset;
+		uint64_t at = smmu_iova + offset;
 		uint64_t *level2 = smmu_next(&smmu_table(0)[at >> 30 & 0x1ff]);
 		uint64_t *level3 = level2 == NULL ? NULL : smmu_next(&level2[at >> 21 & 0x1ff]);
 
@@ -900,7 +901,7 @@ modem_smmu_map(vm_offset_t buffer, size_t size)
 	}
 	modem_space.context = c;
 	modem_space.on = true;
-	return SMMU_IOVA;
+	return smmu_iova;
 }
 
 /*
@@ -1326,6 +1327,19 @@ pcie2_bhi_try(void)
 	 * fault, so the PBL's error is something between the SMMU and memory.
 	 */
 	{
+		uint32_t iova = 0;
+
+		/* pcie2_iova=N: where in the DT's pool the modem finds the image.
+		 * The stock kernel's first 1 MB holds the MHI context rings and its
+		 * dma_alloc_coherent buffer lands at 0x20100000; every probe so far
+		 * put the image at the pool's base instead. */
+		if (PE_parse_boot_argn("pcie2_iova", &iova, sizeof(iova)) && iova != 0) {
+			smmu_iova = iova;
+			hakios_tl("pcie2: BHI: the probe's image IOVA %#x, not %#llx\n", iova,
+			    (unsigned long long)SMMU_IOVA);
+		}
+	}
+	{
 		uint32_t img = 1;
 
 		PE_parse_boot_argn("pcie2_img", &img, sizeof(img));
@@ -1572,24 +1586,28 @@ image_ready:
 	 * windows the DT's DMA pool (the mhi_0_iommu_group's
 	 * qcom,iommu-dma-addr-pool = <0x20000000 0x1fffffff>), not the image:
 	 * MHICTRLBASE/LIMIT and MHIDATABASE/LIMIT are the IOVA range MHI may
-	 * use, and the image is placed inside it. */
+	 * use, and the image is placed inside it.  The live stock kernel's
+	 * success trace wrote base 0x0 / limit 0x3fffffff; the defaults here
+	 * keep the pool, and pcie2_win_base/stop reproduce the stock pair. */
 #define MODEM_IOVA_BASE 0x20000000u
 #define MODEM_IOVA_STOP 0x3ffffffeu
 	{
-		uint32_t mhiraw = 0;
+		uint32_t mhiraw = 0, win_base = MODEM_IOVA_BASE, win_stop = MODEM_IOVA_STOP;
 
 		PE_parse_boot_argn("pcie2_mhiraw", &mhiraw, sizeof(mhiraw));
+		PE_parse_boot_argn("pcie2_win_base", &win_base, sizeof(win_base));
+		PE_parse_boot_argn("pcie2_win_stop", &win_stop, sizeof(win_stop));
 		if (mhiraw == 0) {
-			wr(MHI_BAR + 0x80, MODEM_IOVA_BASE);
+			wr(MHI_BAR + 0x80, win_base);
 			wr(MHI_BAR + 0x84, 0);
-			wr(MHI_BAR + 0x88, MODEM_IOVA_STOP);
+			wr(MHI_BAR + 0x88, win_stop);
 			wr(MHI_BAR + 0x8c, 0);
-			wr(MHI_BAR + 0x98, MODEM_IOVA_BASE);
+			wr(MHI_BAR + 0x98, win_base);
 			wr(MHI_BAR + 0x9c, 0);
-			wr(MHI_BAR + 0xa0, MODEM_IOVA_STOP);
+			wr(MHI_BAR + 0xa0, win_stop);
 			wr(MHI_BAR + 0xa4, 0);
-			hakios_tl("pcie2: MHI: windows base %#x stop %#x, image at %#llx size %zu\n", MODEM_IOVA_BASE,
-			    MODEM_IOVA_STOP, (unsigned long long)phys, size);
+			hakios_tl("pcie2: MHI: windows base %#x stop %#x, image at %#llx size %zu\n", win_base,
+			    win_stop, (unsigned long long)phys, size);
 		} else {
 			hakios_tl("pcie2: MHI: the windows are left as they were (pcie2_mhiraw=1), image at %#llx\n",
 			    (unsigned long long)phys);
@@ -2118,6 +2136,10 @@ pcie2_run(void)
 	 * warm reset (qpnp_pon_modem_pwr_off(1), now that the PMIC bus has a
 	 * write path), a pause, and then the AP2MDM_STATUS handshake below. */
 	if (bhi >= 2 && !pcie2_keep && !pcie2_pon_late) {
+		/* the vendor's ESOC probe leaves AP2MDM_STATUS low until its
+		 * power-on; drive it low here so the PON pulse meets the same
+		 * level the stock reset does. */
+		pcie2_pin_output(56, 0);
 		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
 		hakios_tl("pcie2: PON right after the pulse:\n");
 		hakios_pmic_pon_report();
@@ -2135,8 +2157,18 @@ pcie2_run(void)
 	pcie2_pin_output(56, pcie2_pon_late ? 0 : 1);
 	/* after a PMIC reset the PBL's boot window is short: the vendor goes
 	 * from the reset's 150 ms straight to AP2MDM_STATUS and the MHI load,
-	 * so the pauses here are milliseconds, not seconds, when bhi >= 2 */
-	delay(bhi >= 2 ? 10000 : 1000000);
+	 * so the pauses here are milliseconds, not seconds, when bhi >= 2.
+	 * The vendor's mdm4x_do_first_power_on then watches MDM2AP_STATUS for
+	 * up to 100 ms and gives the modem another 200 ms before the MHI/PCIe
+	 * probe touches the link; mirror that tail when the reset ran. */
+	if (bhi >= 2 && !pcie2_pon_late) {
+		for (unsigned i = 0; i < 20 && pcie2_pin_in(3) == 0; i++) {
+			delay(5000);
+		}
+		delay(200000);
+	} else {
+		delay(bhi >= 2 ? 10000 : 1000000);
+	}
 	hakios_tl("pcie2: modem lines: mdm2ap status %u, errfatal %u\n", pcie2_pin_in(3), pcie2_pin_in(1));
 	if (umi_rpmh_wifi_power() != 0) {
 		hakios_tl("pcie2: the PCIe rails did not come up\n");

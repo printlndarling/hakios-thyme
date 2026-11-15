@@ -300,6 +300,7 @@ pcie2_exid	k
 pcie2_img	k
 pcie2_imgsz	k
 pcie2_inb	k
+pcie2_iova	k
 pcie2_keep	k
 pcie2_mhiraw	k
 pcie2_perst	k
@@ -310,6 +311,8 @@ pcie2_sid	k
 pcie2_survey	k
 pcie2_test	k
 pcie2_txdb	k
+pcie2_win_base	k
+pcie2_win_stop	k
 pmic	k
 pmic_charge	k
 pmic_charger	k

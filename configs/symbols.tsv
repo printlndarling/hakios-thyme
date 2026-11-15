@@ -280,6 +280,7 @@ PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMGSZ	arg	pcie2_imgsz	User space	k	hakios.thyme_pcie2.c	hand the PBL a size other than the file's
 PCIE2_INB	arg	pcie2_inb	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IOVA	arg	pcie2_iova	User space	k	hakios.thyme_pcie2.c	where in the DT's pool the modem finds the image
 PCIE2_KEEP	arg	pcie2_keep	User space	k	hakios.thyme_pcie2.c	leave the endpoint's PERST alone
 PCIE2_MHIRAW	arg	pcie2_mhiraw	User space	k	hakios.thyme_pcie2.c	leave the MHI registers exactly as Android does before the load
 PCIE2_PERST	arg	pcie2_perst	User space	k	hakios.thyme_pcie2.c	
@@ -290,6 +291,8 @@ PCIE2_SID	arg	pcie2_sid	User space	k	hakios.thyme_pcie2.c
 PCIE2_SURVEY	arg	pcie2_survey	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TEST	arg	pcie2_test	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TXDB	arg	pcie2_txdb	User space	k	hakios.thyme_pcie2.c	the value written to BHI_IMGTXDB. The sentinel 0x1234567 was only ever a way to see the doorbell answer; the PBL reads that word
+PCIE2_WIN_BASE	hex	pcie2_win_base	User space	k	hakios.thyme_pcie2.c	
+PCIE2_WIN_STOP	arg	pcie2_win_stop	User space	k	hakios.thyme_pcie2.c	
 PMIC_CHARGE	arg	pmic_charge	Chip, thermal and PMIC	k	hakios.pmic.c	
 PMIC_CHARGER	arg	pmic_charger	Chip, thermal and PMIC	k	hakios.pmic.c	also dump the charger block's registers (slave 2, 0x1000..0x10ff), read only; works without pmic=1
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block

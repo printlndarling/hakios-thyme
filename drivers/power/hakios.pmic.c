@@ -213,8 +213,9 @@ spmi_write(uint32_t channel, uint16_t reg, const uint8_t *bytes, uint32_t count)
 #define PON_SUBTYPE             0x04  /* the phone DT: qcom,power-on@800 under the PM8150 */
 #define PON_REG_FIRST           0x860 /* the block sits at 0x800 in the PMIC; its state registers are 0x860..0x86f */
 #define PON_REG_COUNT           0x10
-#define PON_MODEM_PWR_OFF       0x862
-#define PON_MODEM_PWR_OFF_CTL   0x863
+#define PON_MODEM_PWR_OFF       0x862 /* the reset type, as qpnp_pon_modem_pwr_off's w2 */
+#define PON_MODEM_PWR_OFF_CTL   0x863 /* cleared first, then armed with 0x80 */
+#define PON_MODEM_PWR_OFF_KEY   0x864 /* 0xA5 fires the block */
 #define RTC_REG_READ            0x48
 
 static int64_t rtc_seconds_value = -1;
@@ -292,11 +293,13 @@ pon_report(uint32_t channel)
 }
 
 /*
- * The vendor's qpnp_pon_modem_pwr_off(1): clear the PON block's modem power-off
- * control (0x63), a short pause, then set the modem power-off bit (0x62). Its
- * ext-sdx55m first-power-on and power-down both call it with the same value --
- * it is the modem's power cycle, after which the AP raises AP2MDM_STATUS. Only
- * those two registers are written.
+ * The vendor's qpnp_pon_modem_pwr_off(1), as its disassembly has it: clear the
+ * PON block's modem control (0x63), wait 500 us, write the reset type (0x62),
+ * arm with 0x80 in 0x63, wait 500 us, and key 0xA5 into the trigger (0x64).
+ * Its ext-sdx55m first-power-on and power-down both call it with type 1 -- the
+ * modem's power cycle, after which the AP raises AP2MDM_STATUS.  The earlier
+ * version of this function wrote only the first two values, so the pulse was
+ * loaded but never fired.
  * Returns 0, or a negative errno.
  */
 int
@@ -338,17 +341,50 @@ hakios_pmic_pon_modem_reset(void)
 		}
 		say("pmic: the modem's PON: slave %u 0x%02x00 (channel %u), reset type %u\n", ppid >> 8,
 		    ppid & 0xff, n, type);
+		/*
+		 * The vendor's qpnp_pon_modem_pwr_off(1), instruction for
+		 * instruction: clear the control, wait 500 us, write the reset
+		 * type, arm with 0x80, wait 500 us, and key 0xA5 into the
+		 * trigger register.  The earlier probe wrote only the first two
+		 * values, so the block was loaded but never fired.
+		 */
 		value = 0;
 		problem = spmi_write(n, PON_MODEM_PWR_OFF_CTL, &value, 1);
 		if (problem != NULL) {
 			say("pmic: the modem's power-off control: %s\n", problem);
 			return -EIO;
 		}
-		delay(50000);
+		delay(500);
 		value = (uint8_t)type;
 		problem = spmi_write(n, PON_MODEM_PWR_OFF, &value, 1);
 		if (problem != NULL) {
 			say("pmic: the modem's power-off bit: %s\n", problem);
+			return -EIO;
+		}
+		value = 0x80;
+		problem = spmi_write(n, PON_MODEM_PWR_OFF_CTL, &value, 1);
+		if (problem != NULL) {
+			say("pmic: the modem's power-off arm: %s\n", problem);
+			return -EIO;
+		}
+		/*
+		 * Before the 0xA5 trigger: did the writes land?  The vendor's
+		 * block keeps its type and arm values in 0x862/0x863 until the
+		 * trigger, so a readback of 0x80 in 0x863 says the sequence
+		 * reached the PON and a zero says the access target is wrong.
+		 */
+		{
+			uint8_t rb[2] = { 0, 0 };
+
+			(void)spmi_read(n, PON_MODEM_PWR_OFF, rb, 2);
+			say("pmic: the modem's power-off armed: 0x%03x %02x, 0x%03x %02x\n", PON_MODEM_PWR_OFF,
+			    rb[0], PON_MODEM_PWR_OFF_CTL, rb[1]);
+		}
+		delay(500);
+		value = 0xa5;
+		problem = spmi_write(n, PON_MODEM_PWR_OFF_KEY, &value, 1);
+		if (problem != NULL) {
+			say("pmic: the modem's power-off key: %s\n", problem);
 			return -EIO;
 		}
 		return 0;
