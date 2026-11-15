@@ -2530,3 +2530,13 @@ built, not yet run. Naming it brings the daemon, its Mach services and the API, 
 of positions -- the GPS paths (the modem's QMI LOC service and the SSC's GNSS sensor) are
 not brought up (cellular is TODO; the sensor framework's client manager still stalls), and
 network positioning asks Apple's service.
+
+The first boot with the job named (`logs/115319-run.log`, image `34243eb0`) shows the next
+step of the same story: launchd queues the job, spawns it, and fails with
+`Could not find and/or execute program specified by service: 2: No such file or directory:
+/usr/libexec/locationd` -- the plist was in the image but the program is not. The OS cryptex
+is where Darwin 16.5 keeps locationd, and this tree's cryptex extraction (`sysimage/cryptex`,
+7z over `cryptex-os.dmg`) reported 979 "Unsupported Method" sub-item errors and kept only a
+fraction of it; its `usr/` holds `lib` and no `libexec`. The IPSW those materials came from
+(6.17 GB, iPhone10,3/10,6 16.5 20F66) is not on this machine now, so the binary cannot be
+re-extracted until it is found again.
