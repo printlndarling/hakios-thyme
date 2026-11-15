@@ -2507,3 +2507,11 @@ language and quitting and restarting it no longer shows the black screen ("‰∏çÁÆ
 above: the image table's exhaustion (IMAGES 1024), the /var/jb container link that stopped
 the dead10cc kills, and the two-second cap on the launch's blocking connects
 (`net.inet.tcp.keepinit = 2000`, `logs/040630-run.log`: one dark frame, about two seconds).
+
+The same day's short launch profile (`logs/104511-run.log`, `appprof=1 appprof_secs=180`)
+shows the first ten seconds of Sileo after the fix: the first five-second window has the
+main thread in `mach_msg2_trap` for 93 of 250 samples and `__connect` for 83 -- the launch's
+blocking connects, now bounded by the two-second keepinit -- and the second window is
+`mach_msg2_trap` for 199 of 250 and a semaphore for 23, the run loop waiting; the sampler
+then stopped printing (the window's remaining rounds are not in the log), so this is a
+sketch of the launch, not a profile of the whole scene.
