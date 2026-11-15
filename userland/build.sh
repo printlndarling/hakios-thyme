@@ -127,6 +127,14 @@ DARWIN_JOBS=${JOBS-"
 # (Count a QEMU run log with its duplicate lines removed: run-darwin.sh prints launchd's log twice.)
 # WIFID=0 leaves it out.
 [ "${WIFID-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.wifid"
+
+# Location Services: the system's locationd was never in the job list, so its XPC registration
+# was absent ("failed lookup: com.apple.locationd.registration" from wifid, SpringBoard and
+# chronod) and Settings has no Location Services row at all. Naming it loads the daemon, its
+# Mach services and the CoreLocation API; a source of positions is still missing (no GPS
+# through the modem or the SSC, and network positioning goes through Apple's service), so this
+# brings the entry and the API, not a fix. LOCATIOND=0 leaves it out.
+[ "${LOCATIOND-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.locationd"
 # The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
 # device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
 # in mkjobs.py when that program was put in this build's root: the kernel has already booted

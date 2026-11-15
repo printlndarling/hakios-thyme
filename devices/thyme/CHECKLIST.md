@@ -2516,3 +2516,17 @@ blocking connects, now bounded by the two-second keepinit -- and the second wind
 then stopped printing because the run ended there: the demo job'''s commands ran only at
 about 400 s of the run (the job had been suspended before, as in the power-cycle attempts),
 so the profile covers the launch at the run'''s end -- a sketch, not the whole scene.
+
+### Location Services: locationd was never loaded (2026-11-15, the owner's finding)
+
+The owner looked for where Location Services is turned on and found no entry. It is not a
+missing toggle: the system's locationd is in the system image, its plist has RunAtLoad, and
+launchd never loaded it because the build's job list (userland/build.sh, DARWIN_JOBS) never
+named it -- every client's lookup fails (`failed lookup: name =
+com.apple.locationd.registration`, from wifid, SpringBoard, chronod and parsecd in
+logs/101852-run.log and the Sileo runs), so CoreLocation has no daemon and Settings shows no
+Location Services row. `com.apple.locationd` is now named (LOCATIOND=0 leaves it out):
+built, not yet run. Naming it brings the daemon, its Mach services and the API, not a source
+of positions -- the GPS paths (the modem's QMI LOC service and the SSC's GNSS sensor) are
+not brought up (cellular is TODO; the sensor framework's client manager still stalls), and
+network positioning asks Apple's service.
