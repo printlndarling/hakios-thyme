@@ -56,6 +56,7 @@ main(int argc, char **argv)
 	io_connect_t connection = 0;
 	uint64_t input[1] = { PM_AGGRESSIVENESS_TYPE_MINUTES_TO_SLEEP };
 	uint64_t previous = 0;
+	int previous_absent = 0;
 	uint32_t previous_count = 1;
 	unsigned seconds = argc > 1 ? (unsigned)atoi(argv[1]) : 0;
 	kern_return_t result;
@@ -72,8 +73,16 @@ main(int argc, char **argv)
 		return 1;
 	}
 	result = IOConnectCallScalarMethod(connection, PM_GET_AGGRESSIVENESS, input, 1, &previous, &previous_count);
-	if (result != KERN_SUCCESS || previous_count == 0) {
-		/* without the old value there is nothing to put back: the hold would outlive the test */
+	if (result == kIOReturnInvalid && previous_count == 1) {
+		/*
+		 * No record for kPMMinutesToSleep yet: the root domain says so with kIOReturnInvalid and
+		 * answers 0 (IOPMrootDomain::getAggressiveness). powerd sets the record later in a run;
+		 * until then the system's idle sleep is its own timer, about a minute. Hold anyway, and
+		 * put a minute back on exit rather than the absent 0.
+		 */
+		previous_absent = 1;
+		previous = 0;
+	} else if (result != KERN_SUCCESS || previous_count == 0) {
 		printf("sleep_hold: the root domain will not say what kPMMinutesToSleep was (get 0x%x, %u value(s)); not holding\n",
 		    result, previous_count);
 		IOServiceClose(connection);
@@ -95,7 +104,10 @@ main(int argc, char **argv)
 			sleep(1);
 		}
 	}
-	if (previous_count != 0) {
+	if (previous_absent) {
+		(void)set_minutes_to_sleep(connection, 1);
+		printf("sleep_hold: kPMMinutesToSleep was absent; set to a minute\n");
+	} else {
 		(void)set_minutes_to_sleep(connection, previous);
 		printf("sleep_hold: kPMMinutesToSleep put back to %llu\n", previous);
 	}

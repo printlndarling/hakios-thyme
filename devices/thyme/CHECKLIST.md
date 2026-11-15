@@ -2449,3 +2449,9 @@ queued link events when it resumed. So this run shows wifid can recover a deauth
 link by itself, does not exercise the kernel's standing re-join, and shows that the
 keepalive cannot act while the system is suspended (it acts on the queued events after a
 resume, which is what the teardown join was).
+
+The read the tool declined on is now explained: the root domain answers 
+(0xe0000001) when no record for  exists yet, with the value 0
+() -- powerd sets the record later in a run. 
+now treats that answer as "absent": it holds, and on exit sets a minute back rather than the
+absent 0. Whether the set itself is permitted from the user session is the next run answer.
