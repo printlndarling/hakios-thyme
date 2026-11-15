@@ -2540,3 +2540,12 @@ is where Darwin 16.5 keeps locationd, and this tree's cryptex extraction (`sysim
 fraction of it; its `usr/` holds `lib` and no `libexec`. The IPSW those materials came from
 (6.17 GB, iPhone10,3/10,6 16.5 20F66) is not on this machine now, so the binary cannot be
 re-extracted until it is found again.
+
+The extraction path for that is now proven on the one cryptex we still have: the python
+reader (`tools/apfs/apfs.py`) fails on a sealed volume (the root inode object at block 21
+has a zeroed header), but the kernel's own APFS code built as a host program
+(`tools/apfs/build-tool.sh` -> `apfs-work/apfs-tool`) reads the same image: `ls` lists
+`/usr/libexec`, and `cat /usr/libexec/webinspectord` returns a Mach-O (decmpfs type 14, the
+bytes in the resource fork, 168,416 bytes uncompressed). So when the IPSW returns,
+`cryptex-os.dmg` -> `apfs-tool ls/cat` gives locationd and whatever else the OS cryptex
+holds, without 7z's unsupported-item holes.
