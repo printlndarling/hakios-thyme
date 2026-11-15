@@ -1,0 +1,10 @@
+# The no-tap daily check (RC_JOBS=rc.jobs.dailycheck): the cold boot of the current artifacts --
+# Wi-Fi joined and answering, the keepalive daemon up, locationd up and what CoreLocation says --
+# with no touch of the screen. sleep_hold keeps the idle timers; the scene is short before the
+# display would lock anyway.
+/redwood/bin/sleep_hold 150 &
+/redwood/bin/rwtouch wait 10
+/redwood/bin/net_test joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/redwood/bin/loc_test
+/redwood/bin/rwtouch wait 40

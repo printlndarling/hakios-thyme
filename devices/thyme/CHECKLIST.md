@@ -2599,3 +2599,10 @@ The daily artifacts carry all of it as of tonight: `out/thyme-boot/root-wireless
 and, as the runners' default system image, the rebuilt `userland/system.apfs` -- the same
 file as `devices/thyme/prebuilt/system.apfs` (one inode) -- with locationd in it and the
 kernel `dd3f6368` with the standing-network re-join.
+
+A no-tap cold boot of the default artifacts (`rc.jobs.dailycheck`, image `03f6377d`, the
+runners default system image; `logs/151118-run.log`) starts what tonight put there:
+`Successfully spawned locationd[19]`, the keepalive reading its link events, and the Wi-Fi
+join returning 1 after 0.9 s. The scenes later steps (address, name, CoreLocation) were
+suspended when the display locked, as in every scene without an application in front -- no
+new fault, and the short check was not meant to hold the screen.
