@@ -62,6 +62,7 @@ extern uint64_t kvtophys(vm_offset_t va);
  * execution environment the endpoint really is in when this kernel starts.
  */
 static uint32_t pcie2_keep;
+static uint32_t pcie2_perst_on = 1;
 
 static const struct { uint32_t offset, value, delay_us; } pcie2_phy[] = {
 	{ 0xa40, 0x03, 0 },
@@ -404,8 +405,9 @@ link_train(void)
 	 * msm_pcie_enable asserts it before touching any PCIe register).
 	 * pcie2_keep skips it, so an endpoint the bootloader already booted
 	 * keeps its execution environment. */
-	if (pcie2_keep) {
-		hakios_tl("pcie2: PERST left alone (pcie2_keep=1)\n");
+	if (pcie2_keep || !pcie2_perst_on) {
+		hakios_tl("pcie2: PERST left alone (%s)\n",
+		    pcie2_keep ? "pcie2_keep=1" : "pcie2_perst=0");
 	} else {
 		pcie2_perst(0);
 	}
@@ -2074,6 +2076,10 @@ pcie2_run(void)
 	}
 	pcie2_lines();
 	PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey));
+	(void)PE_parse_boot_argn("pcie2_perst", &pcie2_perst_on, sizeof(pcie2_perst_on));
+	if (!pcie2_perst_on) {
+		hakios_tl("pcie2: pcie2_perst=0: PERST is not asserted before the link\n");
+	}
 	PE_parse_boot_argn("pcie2_power", &power, sizeof(power));
 	PE_parse_boot_argn("pcie2_bhi", &bhi, sizeof(bhi));
 	PE_parse_boot_argn("pcie2_keep", &pcie2_keep, sizeof(pcie2_keep));

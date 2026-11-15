@@ -2,7 +2,7 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **490 arguments**: 416 read by the kernel, 14 by the loader, 71 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **491 arguments**: 417 read by the kernel, 14 by the loader, 71 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
@@ -438,7 +438,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (135)
+## User space (136)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -526,6 +526,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `pcie2_inb` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_INB` |  |
 | `pcie2_keep` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_KEEP` |  |
 | `pcie2_mhiraw` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MHIRAW` |  |
+| `pcie2_perst` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PERST` |  |
 | `pcie2_power` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_POWER` |  |
 | `pcie2_reset` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_RESET` |  |
 | `pcie2_sid` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_SID` |  |

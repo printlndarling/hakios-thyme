@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 524 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 525 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -1228,7 +1228,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (133)
+# User space (134)
 #
 
 # read by inject_app.c (user space)
@@ -1482,6 +1482,9 @@ CONFIG_MODEM_AGAIN=y
 
 # leave the MHI registers exactly as Android does before the load
 # CONFIG_PCIE2_MHIRAW is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_PERST is not set
 
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_POWER is not set

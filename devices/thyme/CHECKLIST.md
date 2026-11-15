@@ -3047,3 +3047,26 @@ need the modem to be started by the path that can (the stock boot chain, as it d
 the PBL's post-authentication ELF load to be solved from the device side.  Neither is reachable from
 the present sources.  Wi-Fi positioning stays the working provider, and this is the boundary the
 checklist records.
+
+The previous section's reading of Android is corrected by its own kernel log.  Android's dmesg
+carries, at 13.26 s of its boot:
+
+    mhi 0002:01:00.0: Falling back to syfs fallback for: sdx55m/sbl1.mbn
+
+-- the firmware loader's message when the MHI driver's `request_firmware("sdx55m/sbl1.mbn")`
+went to the sysfs fallback (which is why no ueventd line appeared).  The 4.19 driver only asks
+for that file when `BHI_EXECENV` is PBL, so **on this phone the Android kernel does load the
+SBL over BHI** and it succeeds; the modem is in AMSS a second later and the MHI channels come
+up.  A working kernel-side reference exists on exactly this hardware, and the difference between
+it and the probe is findable.
+
+The first difference found is an ordering one.  In the stock flow the PCIe link is initialized
+first (the controller driver asserts PERST as part of its enable), the ESOC power-on then does
+the PMIC warm reset through the modem's PON (pmxprairie, slave 8), and the MHI driver loads the
+SBL right after -- no PERST between the reset and the doorbell.  The probe's `pcie2_bhi=2` did
+the PMIC reset and then asserted PERST inside its own link training, i.e. reset the modem again
+after its warm reset.  `pcie2_keep=1` skips the PERST but also, by its condition, the PMIC reset
+(one run showed the PON line missing: `logs/212852-run.log`).  `pcie2_perst=0` now separates the
+two: the PMIC reset still runs, PERST does not, and the doorbell follows the reset directly --
+the stock order.  The next run is `pcie2_bhi=2 pcie2_perst=0 pcie2_sid=5
+pmic_modem_pon_sid=8`.
