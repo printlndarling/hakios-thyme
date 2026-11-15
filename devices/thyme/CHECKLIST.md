@@ -3022,3 +3022,28 @@ build uses) contains no modem/PCIe-modem driver at all, while stock's XBL/ABL is
 modem running with its MHI channels up before Linux.  The exact 4.19 driver's BHI path is the next
 thing to read against the probe, to learn whether the stock kernel's load differs in a detail
 (MHICFG/INTVEC/EE handling) or whether only the bootloader can do it here.
+
+The decisive comparison is in, and it moves the wall from the driver to the boot path.  The
+LineageOS 4.19 driver that runs on this phone (commit `6b34d247`, `drivers/bus/mhi/core/
+mhi_boot.c`, `mhi_pm.c`, `mhi_qcom.c`) does exactly what the probe does before the SBL transfer:
+`BHI_STATUS = 0`, image address high/low, size, a random nonzero 30-bit doorbell -- no MHICFG, no
+event-ring counts, no M0 (those come after READY) -- and `BHI_INTVEC = 0` exactly as the probe
+writes it.  Its `mhi_async_power_up()` reads `BHI_EXECENV` and, when the EE is AMSS, deliberately
+skips the firmware request and goes straight to READY.  Android's own boot has no `sbl1.mbn`
+firmware request (ueventd logs every request, and the ipa images appear there), so under stock the
+modem is already in AMSS when Linux starts: the boot chain booted it, not the kernel.
+
+And in our path the endpoint is in the PBL before any reset of ours.  With `pcie2_keep=1` the probe
+leaves PERST alone (`logs/211817-run.log`: `pcie2: PERST left alone (pcie2_keep=1)`, link up at
+`0xb0230008`), and the BHI still answers `execenv 0` before and after the link comes up.  So the
+Silicium/xnuloader path (its `umi` UEFI package in `Mu-Silicium` has no modem or PCIe-modem driver)
+never starts the modem, while the path that boots Android does -- that is the structural difference,
+not a register the probe is missing.  Every host-visible input has now been matched to stock: the
+PON at pmxprairie slave 8, warm/hard reset types, AP2MDM_STATUS and the 150 ms pauses, the
+BHI sequence, the doorbell, the 32-bit/IOVA source, the SMMU mapping, and the image itself.
+
+What remains for satellite positioning is therefore not a kernel fix under this boot chain: it would
+need the modem to be started by the path that can (the stock boot chain, as it does for Android), or
+the PBL's post-authentication ELF load to be solved from the device side.  Neither is reachable from
+the present sources.  Wi-Fi positioning stays the working provider, and this is the boundary the
+checklist records.
