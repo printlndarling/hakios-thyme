@@ -2809,3 +2809,15 @@ not boot past the secure side; the sensor framework's client manager does not op
 tens to about 150 m, which is what Wi-Fi positioning gives; maps and apps that ask for a location
 work, a car-navigation-grade fix does not.  A scene that needs the network should retry `joinfile`
 once the radio is up (or wait for the link), not call it once at ten seconds.
+
+### The daily image turns Location Services on at boot (2026-11-15, night)
+
+The rebuilt daily artifact (`root-wirelessfull` `aafd733a...`, the clean system image of 18:18,
+kernel `dd3f6368`) runs its first line as the mobile user, and the scene's last question confirms
+it (`logs/182439-run.log`): `loc_test: current user, any host: write ok, read back boolean true`
+at 18:24:50, and at 18:28:19 -- after the whole wireless gate -- `locationServicesEnabled = 1`,
+`authorizationStatus = 0`.  The gate itself is as before: Safari's TCP session completes (5984
+bytes in, `FIN_WAIT_1`, 53.7 s), Bluetooth preferences open, and the link is joined late in the run
+-- the scene's first `net_test wait 20 joinfile` is still refused (`Device not configured`, the
+radio is not up at half a minute) and the standing/keepalive join brings it up at 165 s.  That
+early joinfile is the scene's known call; it is not a location regression.

@@ -20,3 +20,5 @@
 /redwood/bin/rwtouch wait 35
 /redwood/bin/battery_test open prefs:root=Bluetooth
 /redwood/bin/rwtouch wait 35
+# what CoreLocation answers with the switch the first line wrote
+/redwood/bin/loc_test
