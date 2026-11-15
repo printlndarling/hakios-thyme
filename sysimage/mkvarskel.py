@@ -33,6 +33,10 @@ EXTRA = [   # path, mode, uid, gid
     ('/private/var/mobile/Library/Caches', 0o755, 501, 501),
     ('/private/var/mobile/Library/Preferences', 0o755, 501, 501),
     ('/private/var/mobile/Library/Logs', 0o755, 501, 501),
+    # locationd's own state: on a stock phone the data partition comes with these; the daemon
+    # runs as mobile and /var/db is root's, so it cannot make them itself (2026-11-15).
+    ('/private/var/db/locationd', 0o755, 501, 501),
+    ('/private/var/mobile/Library/Caches/locationd', 0o755, 501, 501),
     ('/private/var/root/Library/Caches', 0o700, 0, 0),
     ('/private/var/root/Library/Preferences', 0o700, 0, 0),
     ('/private/var/root/Library/Logs', 0o700, 0, 0),

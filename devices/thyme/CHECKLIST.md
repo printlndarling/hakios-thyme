@@ -2570,3 +2570,18 @@ by iOS 16 locationd/framework -- the next probe is locationd state files
 and, beyond that, the daemon's private XPC. What exists now is the daemon and its Mach
 services; the Settings entry, a working switch and any real fix still need that switch path
 and the GPS providers (modem QMI LOC or SSC GNSS), neither of which is up.
+
+Two more probes closed the obvious candidates and left the daemon's own initialization as the
+remaining question. `rc.jobs.locfiles` (`logs/142915-run.log`) shows no `/var/db/locationd`,
+no `/var/mobile/Library/Caches/locationd` -- the state directories a stock data partition
+comes with, which the daemon cannot make itself (/var/db is root's and it runs as mobile) --
+while `com.apple.locationd.plist` (134 bytes) and
+`com.apple.locationd.StatusBarIconManager.plist` do exist under the mobile preferences. The
+var skeleton now creates both directories (`sysimage/mkvarskel.py`), the root image was
+rebuilt, and the switch written again: CoreLocation still answers
+`locationServicesEnabled = 0` (`logs/144102-run.log`). So it is not the preference and not
+those directories: what is left is locationd's own start, which keeps looking for daemons
+this image does not carry (`com.apple.fairplayd`, `com.apple.commcenter.xpc`,
+`com.apple.routined.registration`, `com.apple.icloud.searchpartyd.*`), and the private XPC
+by which it publishes the switch. A real fix needs that path and, for positions, the GPS
+providers (modem QMI LOC or SSC GNSS), neither of which is up.

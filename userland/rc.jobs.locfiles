@@ -1,0 +1,11 @@
+# Location state files (RC_JOBS=rc.jobs.locfiles): Sileo first keeps this job running; then list
+# where locationd keeps its state and whether the preference written for the switch is on disk.
+# No taps.
+/redwood/bin/sleep_hold 150 &
+/var/jb/usr/bin/uiopen sileo://package/wget
+/redwood/bin/rwtouch wait 25
+/var/jb/usr/bin/ls -la /var/mobile/Library/Preferences
+/var/jb/usr/bin/ls -la /var/db/locationd
+/var/jb/usr/bin/ls -la /var/db/locationd/Library/Preferences
+/var/jb/usr/bin/ls -la /var/mobile/Library/Caches/locationd
+/redwood/bin/rwtouch wait 60
