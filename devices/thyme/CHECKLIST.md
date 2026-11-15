@@ -2821,3 +2821,17 @@ bytes in, `FIN_WAIT_1`, 53.7 s), Bluetooth preferences open, and the link is joi
 -- the scene's first `net_test wait 20 joinfile` is still refused (`Device not configured`, the
 radio is not up at half a minute) and the standing/keepalive join brings it up at 165 s.  That
 early joinfile is the scene's known call; it is not a location regression.
+
+### Charging: the daily boot still discharges through the cable (2026-11-15, night)
+
+The bytes of the charging question are at the very top of the daily run's log (`logs/182439-run.log`):
+`battery: flags=1f SOC=59% V=3948 mV I=-208 mA T=32 C action=7` at boot, and the guard's own
+verdict later in the same run -- `battguard: charge 56% (battery present, charger attached,
+charging no); stop at or below 10%`.  The firmware charger path (QcomChargerDxeLA behind the
+loader) is attached but is not putting charge in under the kernel's load, which is the known
+"PC port does not keep up" limit and not a fault of any one run; what the port still lacks is the
+*system's own* charger control -- the kernel has never written an input current limit or enabled
+the PM8150B charger, and every charge so far has been whatever the bootloader left behind.  The
+next step is a read-only one: a kernel probe of the charger peripheral's registers (the SPMI
+arbiter and its read/write path are already in `bsd/dev/hakios.pmic.c`) to see the state the
+firmware leaves and what the local input current limit is, before anything is written.
