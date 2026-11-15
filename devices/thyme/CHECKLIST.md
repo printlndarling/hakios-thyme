@@ -2956,3 +2956,35 @@ back to the top shows the same page as always.  So the filter is inside Preferen
 handling (the `locationServicesSpecifier` path) and does not depend on the switch, an authorized
 client, the framework's classes or the subsystem's state.  Location itself does not need the row:
 the switch is on at boot and applications get their Wi-Fi fixes.
+
+### The modem's BHI door is authenticated and then refused at the ELF load (2026-11-15, late night)
+
+The stock flow, established from a public Sony Xperia SDX55M crash/reload log, is hybrid: the
+kernel's MHI/BHI loads **only `sbl1.mbn`**; the SBL then exposes MHI UCI pipes, and userspace
+(`mdm_helper`/kickstart) serves Sahara images over them -- **mdmddr (Sahara ID 34) first**, then
+apdp, devcfg, tz, hyp, sec, aop, the EFS images, acdb, qdsp6sw and apps.  The `mdmddr.mbn` in
+`/vendor/firmware_mnt/image/sdx55m` is a 40-byte header-only stub (image ID 0x22, no payload); the
+real training/configuration data is the `mdmddr` partition (1 MB; stock transfers 1,636 bytes of
+it).  The stock SDX55M power-on is regulators, an SPMI warm reset, 150 ms, AP2MDM_STATUS high and
+the PBLRDY poll -- the probe's default path skips the warm reset, and `pcie2_bhi=2` performs it.
+
+Against that, the experiments on this phone now read as one line: the host side is fine and the
+PBL refuses the ELF load.  The source mapping is proven (context 5 maps IOVA 0x20000000 to the
+image's physical 0xc0000000, stream 0x1d01 through SMR 6), the untouched vendor image
+authenticates (a one-byte body change turns the answer into the authentication group's
+`0xef0a0105`, a zeroed image into `0xef120700`), and with the PMIC warm reset performed
+(`pcie2_bhi=2` with `pcie2_sid=5`, `logs/202334-run.log`) the answer is the same `0xef0e0003` in
+30 ms.  By the public QCA6490 PBL's grouping, group 0x0e is the ELF program-header/loader class:
+the PBL reads and authenticates the image, then fails to place its segments.  Those destinations
+are modem-internal -- SRAM at 0x14682000..0x148e7000 and the SBL's DDR (`sbl_mem`,
+0x8fd00000, the one PT_LOAD segment whose `p_memsz > p_filesz`) -- not host addresses, so they
+cannot be fixed from the host SMMU; the only DDR load segment is that BSS.
+
+So the wall for GNSS is exactly where `docs/cellular.md` left the cellular wall: before any
+MHI/Sahara step the stock flow has, the PBL will not complete the SBL placement on this host.
+The remaining hypotheses are device-state ones (the regulators/PON sequence the stock ESOC driver
+performs, the DDR state the PBL expects, an image variant/platform check) and a known-good BHI
+load of the same SBL on the same phone; the public sources do not settle them.  The full stock
+path after the SBL (MHI UCI + Sahara + mdmddr) is a larger bring-up of its own.  Until that door
+opens, satellite positioning stays unavailable and the working provider is Wi-Fi, as verified
+above; the Settings row stays the separate open item recorded earlier.
