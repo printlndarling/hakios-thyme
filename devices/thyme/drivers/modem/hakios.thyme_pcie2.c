@@ -2140,6 +2140,7 @@ pcie2_run(void)
 		 * power-on; drive it low here so the PON pulse meets the same
 		 * level the stock reset does. */
 		pcie2_pin_output(56, 0);
+		pcie2_pin_output(57, 0); /* the vendor's AP2MDM_ERRFATAL low, before the pulse */
 		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
 		hakios_tl("pcie2: PON right after the pulse:\n");
 		hakios_pmic_pon_report();
@@ -2161,14 +2162,12 @@ pcie2_run(void)
 	 * The vendor's mdm4x_do_first_power_on then watches MDM2AP_STATUS for
 	 * up to 100 ms and gives the modem another 200 ms before the MHI/PCIe
 	 * probe touches the link; mirror that tail when the reset ran. */
-	if (bhi >= 2 && !pcie2_pon_late) {
-		for (unsigned i = 0; i < 20 && pcie2_pin_in(3) == 0; i++) {
-			delay(5000);
-		}
-		delay(200000);
-	} else {
-		delay(bhi >= 2 ? 10000 : 1000000);
-	}
+	/* The vendor's mdm4x_do_first_power_on does its 200 ms wait only on the
+	 * pblrdy branch; this phone's DT has no pblrdy line, so stock queues the
+	 * image request right after AP2MDM_STATUS and the MHI load follows.  The
+	 * reset-to-doorbell gap stays short, as stock's is (~250 ms), not the
+	 * 200 ms status wait that branch adds. */
+	delay(bhi >= 2 ? 10000 : 1000000);
 	hakios_tl("pcie2: modem lines: mdm2ap status %u, errfatal %u\n", pcie2_pin_in(3), pcie2_pin_in(1));
 	if (umi_rpmh_wifi_power() != 0) {
 		hakios_tl("pcie2: the PCIe rails did not come up\n");

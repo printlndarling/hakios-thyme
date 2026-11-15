@@ -3167,3 +3167,18 @@ command-line parsing artifact; the image at 0x20100000 is below either limit) an
 `BHI: status 0xffffffff (result 3), errcode 0xef0e0003, dbg 0x20100000 0 0x85cd8,
 execenv 0, MHISTATUS 0 after 30 ms`.  So neither the image's place in the pool nor the
 MHI window pair is the difference.
+
+Two corrections and the last AP-side variable complete this pass.  The 200 ms tail in
+`mdm4x_do_first_power_on` belongs to the pblrdy branch; this phone's DT has no pblrdy
+line, so stock queues the image request right after AP2MDM_STATUS and the
+reset-to-doorbell gap is about 250 ms.  The port had added the status poll and the
+200 ms unconditionally; both are removed (a 10 ms settle only), and AP2MDM_ERRFATAL is
+now driven low before the pulse as the vendor's cmd-exe does.  With the full pulse, the
+stock image IOVA and this stock-short timing the answer is still `0xef0e0003`
+(`logs/233453-run.log`, SHA-256 `f7117a58...45024b`).
+
+The image's physical placement is closed too.  With `pcie2_img=2` the file sits in
+ordinary contiguous kernel memory (physical 0x1970d8000, above 4 GB) instead of the
+SLPI heap at 0xc0000000; with the full pulse, the stock-short timing and
+`pcie2_iova=0x20100000` the answer is unchanged (`logs/234027-run.log`, SHA-256
+`73b3fd73...97add`).  So the carveout is not the difference either.
