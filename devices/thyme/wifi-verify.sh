@@ -22,6 +22,9 @@ export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
 export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
 export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
+# both scenes open Sileo first (the jb system image), the one thing that keeps the display awake
+SYSTEM_IMAGE=${SYSTEM_IMAGE:-out/thyme-boot/system-jb.apfs}
+export SYSTEM_IMAGE
 POWER_SCENE=${POWER_SCENE:-out/thyme-boot/root-wifipower.apfs}
 DROP_SCENE=${DROP_SCENE:-out/thyme-boot/root-wifidrop.apfs}
 for scene in "$POWER_SCENE" "$DROP_SCENE"; do

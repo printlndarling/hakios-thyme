@@ -2480,3 +2480,7 @@ userland join is the standing network; `hakios.thyme_apple80211.c`) does what it
 do: a Wi-Fi power cycle brings the network back without userland asking. What is not yet
 shown is that the system's own sleep takes the radio through this same power transition;
 that is the owner's hand-on-screen test.
+
+`rc.jobs.wifidrop` now opens Sileo first for the same reason (an application in front keeps
+the display from locking; `devices/thyme/wifi-verify.sh` points both scenes at the jb system
+image), so the keepalive\x27s event path can be tested with the job actually running.
