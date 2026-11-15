@@ -303,6 +303,7 @@ pcie2_inb	k
 pcie2_keep	k
 pcie2_mhiraw	k
 pcie2_perst	k
+pcie2_pon_late	k
 pcie2_power	k
 pcie2_reset	k
 pcie2_sid	k

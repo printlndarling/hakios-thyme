@@ -63,6 +63,7 @@ extern uint64_t kvtophys(vm_offset_t va);
  */
 static uint32_t pcie2_keep;
 static uint32_t pcie2_perst_on = 1;
+static uint32_t pcie2_pon_late;
 
 static const struct { uint32_t offset, value, delay_us; } pcie2_phy[] = {
 	{ 0xa40, 0x03, 0 },
@@ -1875,6 +1876,8 @@ image_ready:
 	}
 }
 
+static void pcie2_pin_output(unsigned pin, unsigned high);
+
 static void
 endpoint(void)
 {
@@ -1894,6 +1897,17 @@ endpoint(void)
 	    id >> 16, classreg, bar0);
 	if (id != 0xffffffffu && id != UINT32_MAX) {
 		mhi_peek();
+		/* pcie2_pon_late: the vendor's order -- the link is up first (the
+		 * controller driver proves the endpoint), then the ESOC power-on
+		 * resets the modem through its own PON and raises AP2MDM_STATUS,
+		 * and the MHI driver loads the SBL immediately after. */
+		if (pcie2_pon_late) {
+			hakios_tl("pcie2: the PMIC's modem reset after the link: %d\n", hakios_pmic_pon_modem_reset());
+			delay(150000);
+			pcie2_pin_output(56, 1);
+			hakios_tl("pcie2: AP2MDM_STATUS high after the late reset; the doorbell follows\n");
+			delay(10000);
+		}
 		pcie2_bhi_try();
 	}
 }
@@ -2077,8 +2091,12 @@ pcie2_run(void)
 	pcie2_lines();
 	PE_parse_boot_argn("pcie2_survey", &survey, sizeof(survey));
 	(void)PE_parse_boot_argn("pcie2_perst", &pcie2_perst_on, sizeof(pcie2_perst_on));
+	(void)PE_parse_boot_argn("pcie2_pon_late", &pcie2_pon_late, sizeof(pcie2_pon_late));
 	if (!pcie2_perst_on) {
 		hakios_tl("pcie2: pcie2_perst=0: PERST is not asserted before the link\n");
+	}
+	if (pcie2_pon_late) {
+		hakios_tl("pcie2: pcie2_pon_late=1: link first, then the PMIC reset\n");
 	}
 	PE_parse_boot_argn("pcie2_power", &power, sizeof(power));
 	PE_parse_boot_argn("pcie2_bhi", &bhi, sizeof(bhi));
@@ -2099,7 +2117,7 @@ pcie2_run(void)
 	/* pcie2_bhi=2 is the vendor's first power-on before the link: the PMIC
 	 * warm reset (qpnp_pon_modem_pwr_off(1), now that the PMIC bus has a
 	 * write path), a pause, and then the AP2MDM_STATUS handshake below. */
-	if (bhi >= 2 && !pcie2_keep) {
+	if (bhi >= 2 && !pcie2_keep && !pcie2_pon_late) {
 		hakios_tl("pcie2: the PMIC's modem warm reset: %d\n", hakios_pmic_pon_modem_reset());
 		hakios_tl("pcie2: PON right after the pulse:\n");
 		hakios_pmic_pon_report();
@@ -2114,7 +2132,7 @@ pcie2_run(void)
 	pcie2_pin_input(1);
 	pcie2_pin_input(3);
 	pcie2_pin_output(57, 0);
-	pcie2_pin_output(56, 1);
+	pcie2_pin_output(56, pcie2_pon_late ? 0 : 1);
 	/* after a PMIC reset the PBL's boot window is short: the vendor goes
 	 * from the reset's 150 ms straight to AP2MDM_STATUS and the MHI load,
 	 * so the pauses here are milliseconds, not seconds, when bhi >= 2 */
