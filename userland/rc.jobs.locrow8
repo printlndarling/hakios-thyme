@@ -1,14 +1,14 @@
-# The injected Location row (RC_JOBS=rc.jobs.locrow8): launch Sileo first, as the
-# one run that opened Settings did (a prefs: URL as the first application launch
-# is dropped here), dismiss Sileo's notification alert with a scripted tap on
-# "Don't Allow", then open Privacy & Security and hold it for the screenshots.
+# The injected Location row (RC_JOBS=rc.jobs.locrow8): open Settings at the
+# Privacy page with the system's own URL, three times a dozen seconds apart --
+# a prefs: URL that launches Settings from cold lands on its root page, the
+# next one navigates -- and hold the page for the screenshots.  The URL is
+# quoted: unquoted, the shell's '&' split it and only "prefs:root=Privacy"
+# was ever opened.  No Sileo, no taps: nothing here is blind.
 /redwood/bin/sleep_hold 200 &
 /redwood/bin/rwtouch wait 10
-/redwood/bin/loc_test enable
-/redwood/bin/rwtouch wait 2
-/var/jb/usr/bin/uiopen sileo://package/wget
-/redwood/bin/rwtouch wait 25
-/redwood/bin/rwtouch tap 0.29 0.52
-/redwood/bin/rwtouch wait 6
-/var/jb/usr/bin/uiopen prefs:root=Privacy&path=LOCATION
-/redwood/bin/rwtouch wait 90
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy&path=LOCATION'
+/redwood/bin/rwtouch wait 12
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy&path=LOCATION'
+/redwood/bin/rwtouch wait 12
+/var/jb/usr/bin/uiopen 'prefs:root=Privacy&path=LOCATION'
+/redwood/bin/rwtouch wait 100

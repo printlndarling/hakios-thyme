@@ -4,6 +4,52 @@ Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
 `PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
 `TODO` has not been tested.
 
+## The Settings Location row, and Wi-Fi location in Maps (2026-11-16)
+
+Location itself is usable: in the 01:37 RAM session Maps resolved **Chang'an,
+Xi'an** with the Wi-Fi positioning provider (`logs/locrow-100.png`, 100 s into
+the run, Wi-Fi connected), the same place Weather showed the user earlier.  The
+Settings switch UI is now real too.
+
+The kernel's inject parser (`bsd/kern/kern_exec.c`, `exec_inject_env`) takes
+`LIBRARY NAME...` groups separated by `;`, and a program named in more than one
+group gets every library, joined with `:` in the one `DYLD_INSERT_LIBRARIES`.
+Preferences therefore carries both `libhakios.tweaks.dylib` and
+`libhakios.prefs.dylib`; the run's log shows the tweak loader running inside
+Preferences (`hakios: tweaks: Preferences (com.apple.Preferences): 1 of 1
+opened`).  The first prefs dylib wrote only to stderr, which Settings does not
+put in the kernel log; it now writes `/dev/console` and names every list
+controller that loads or appears.
+
+The 01:37 run (`logs/013721-run.log`, kernel `ee62d18cb881`, scenario image
+`dc704c9b5021`) then shows the whole chain:
+
+- `hakios-prefs: load PUIPrivacyController`
+- `hakios-prefs: PUIPrivacyController: Location row added at 1 of 26`
+- `hakios-prefs: appear PUIPrivacyController`
+- `PUILocationServicesListController` loaded and appeared, then
+  `PUILocationSystemServicesListController` and
+  `PUILocationServicesAuthorizationLevelController` as the page was entered --
+  the stock Location Services page, master switch and per-app list, not a
+  stand-in.
+
+The user saw the row appear in the same seconds and tapped into the page.
+Two scene bugs had kept every automated attempt away from it: the deep link
+`prefs:root=Privacy&path=LOCATION` was unquoted, so the rc shell split it at
+`&` and only `prefs:root=Privacy` was ever opened; and a `prefs:` URL that
+starts Settings from cold lands on the Settings root page rather than the
+named page.  `rc.jobs.locrow8` now quotes the URL and opens it three times,
+twelve seconds apart, with no taps (`devices/thyme/locrow.sh` runs it and
+prints the dylib's lines from the run log).
+
+One open point: an earlier appearance of the Privacy page in the same session
+(the one the 80 s screenshot caught) still showed the empty group where the
+row belongs; that process's console lines fall inside the part of the kernel
+log the loader drops, so whether it inserted is unknown.  The dylib now also
+re-checks in `viewDidAppear:` and after `reloadSpecifiers`, and does not insert
+into an empty specifier list, so a page that builds or reloads its list after
+the first appearance cannot silently lose the row.
+
 ## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
 
 The sensor DIAG probe never reached its measurement because its scene -- the
