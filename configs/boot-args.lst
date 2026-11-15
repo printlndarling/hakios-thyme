@@ -52,6 +52,8 @@ apfs_write_len	k
 apfs_write_path	k
 applog	k
 applog_name	k
+appprof	u
+appprof_secs	u
 autounlock	u
 battery	kl
 battery_shared_pa	k
@@ -157,6 +159,7 @@ fbtrace	k
 fbwidth	ku
 gamut	l
 gl	u
+glaudit	u
 glblit	u
 glcensus	u
 glcompile	u

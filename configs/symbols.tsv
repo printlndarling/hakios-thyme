@@ -51,6 +51,8 @@ APFS_WRITE_LEN	arg	apfs_write_len	Storage and APFS	k	hakios.apfs_check.c	how man
 APFS_WRITE_PATH	arg	apfs_write_path	Storage and APFS	k	hakios.apfs_check.c	the file in it, by path from the volume's root
 APPLOG	arg	applog	CPU, memory and boot	k	(patch)	
 APPLOG_NAME	arg	applog_name	CPU, memory and boot	k	(patch)	
+APPPROF	arg	appprof	User space	u	inject_app.c	
+APPPROF_SECS	arg	appprof_secs	User space	u	inject_app.c	
 AUTOUNLOCK	arg	autounlock	User space	u	inject_sb.c	
 BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,hakios.thyme_adsp.c,hakios.thyme_slpi.c,loader.c	
 BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c,hakios.thyme_slpi.c	every property once, for the log (which number is which on this phone's firmware)
@@ -148,6 +150,7 @@ FBTRACE	arg	fbtrace	GPU and display	k	MiniIOMobileFramebuffer.cpp	log the first 
 FBWIDTH	arg	fbwidth	GPU and display	ku	MiniIOMobileFramebuffer.cpp,inject_sb.c	
 GAMUT	arg	gamut	Loader	l	loader.c	
 GL	arg	gl	User space	u	inject.c,inject_sb.c	not even with a GPU; gl=1: also without one, by Mesa's software driver (slow; for working on eagl.c in QEMU)
+GLAUDIT	arg	glaudit	GPU and display	u	eagl.c	
 GLBLIT	arg	glblit	GPU and display	u	eagl.c	the surface's memory, as before
 GLCENSUS	arg	glcensus	GPU and display	u	eagl.c	
 GLCOMPILE	arg	glcompile	User space	u	inject.c	
