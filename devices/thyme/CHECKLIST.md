@@ -199,6 +199,17 @@ step, not a daemon switch.  The pieces and their order --
 `WeatherKit.Weather` is public and Codable, Open-Meteo needs no identity, the
 injection mechanism is the kernel's -- are in `docs/weather-data-shim.md`.
 
+An injected `libhakios.weatherlog.dylib` (`WEATHERLOG=1`, the kernel's
+insertion list) was meant to say which URLSession requests Weather makes.  It
+has produced no line of its own in three runs, a WeatherWidget canary
+included, while the same image's other insertions work at boot (the tweaks
+library says "opened").  The library is in the image and the init line names
+Weather and WeatherWidget (`logs/143727-run.log`); whether the UIKit app's
+exec is outside the kernel's insertion or dyld leaves DYLD_INSERT_LIBRARIES
+alone for that binary is the open question, and the next test is that dylib
+under a name already known to take the insertion, with the app in the same
+line.
+
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
 launchd's log carried "Unable to find persona with type 6" on every job spawn

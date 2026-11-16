@@ -1,6 +1,6 @@
 /*
  * weatherlog: say every URL request the Weather app makes and every answer it
- * gets, on the console.
+ * gets.
  *
  * The app's forecast path needs a FairPlay device identity this port has none
  * of (CHECKLIST, "Weather: the app's own fairplayd gate"), and a stand-in for
@@ -11,32 +11,18 @@
  * dataTask entry points the Swift URLSession API funnels through, and the
  * answers when they come.  It is injected into Weather alone (WEATHERLOG=1 in
  * userland/build.sh's INJECT).
+ *
+ * NSLog, not /dev/console: the Weather app is sandboxed and may not open the
+ * console, while its unified-log lines reach the same log the rest of the run
+ * is read from.
  */
 #import <Foundation/Foundation.h>
-#include <fcntl.h>
 #include <objc/runtime.h>
-#include <stdio.h>
-#include <unistd.h>
 
 static void
-weather_say(NSString *format, ...)
+weather_say(NSString *message)
 {
-	va_list ap;
-	char line[900];
-	int n = snprintf(line, sizeof(line), "hakios: weatherlog: ");
-
-	va_start(ap, format);
-	n += vsnprintf(line + n, sizeof(line) - (size_t)n, [format UTF8String], ap);
-	va_end(ap);
-	if (n < (int)sizeof(line) - 1) {
-		line[n++] = '\n';
-	}
-	line[n] = 0;
-	int fd = open("/dev/console", O_WRONLY);
-	if (fd >= 0) {
-		write(fd, line, (size_t)n);
-		close(fd);
-	}
+	NSLog(@"hakios: weatherlog: %@", message);
 }
 
 typedef void (^weather_completion)(NSData *, NSURLResponse *, NSError *);
@@ -45,16 +31,16 @@ typedef void (^weather_completion)(NSData *, NSURLResponse *, NSError *);
 - (NSURLSessionDataTask *)wl_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(weather_completion)completion
 {
 	NSString *auth = [request valueForHTTPHeaderField:@"Authorization"];
-	weather_say(@"request %@ %@ (Authorization: %@)", request.HTTPMethod, request.URL.absoluteString,
-	    auth != nil ? @"yes" : @"no");
+	weather_say([NSString stringWithFormat:@"request %@ %@ (Authorization: %@)", request.HTTPMethod,
+	    request.URL.absoluteString, auth != nil ? @"yes" : @"no"]);
 	weather_completion wrapped = nil;
 	if (completion != nil) {
 		wrapped = ^(NSData *data, NSURLResponse *response, NSError *error) {
 			NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ?
 			    (NSInteger)[(NSHTTPURLResponse *)response statusCode] : -1;
-			weather_say(@"answer %ld from %@, %lu bytes, %@", (long)status,
+			weather_say([NSString stringWithFormat:@"answer %ld from %@, %lu bytes, %@", (long)status,
 			    request.URL.absoluteString.lastPathComponent, (unsigned long)data.length,
-			    error != nil ? error.localizedDescription : @"no error");
+			    error != nil ? error.localizedDescription : @"no error"]);
 			completion(data, response, error);
 		};
 	}
@@ -63,7 +49,7 @@ typedef void (^weather_completion)(NSData *, NSURLResponse *, NSError *);
 
 - (NSURLSessionDataTask *)wl_dataTaskWithURL:(NSURL *)url completionHandler:(weather_completion)completion
 {
-	weather_say(@"request (URL only) %@", url.absoluteString);
+	weather_say([NSString stringWithFormat:@"request (URL only) %@", url.absoluteString]);
 	return [self wl_dataTaskWithURL:url completionHandler:completion];
 }
 @end
@@ -76,15 +62,16 @@ exchange(const char *from, const char *to)
 
 	if (a != NULL && b != NULL) {
 		method_exchangeImplementations(a, b);
-		weather_say(@"interposed %s", from);
+		weather_say([NSString stringWithFormat:@"interposed %s", from]);
 	} else {
-		weather_say(@"could not interpose %s", from);
+		weather_say([NSString stringWithFormat:@"could not interpose %s", from]);
 	}
 }
 
 __attribute__((constructor)) static void
 weatherlog_init(void)
 {
+	NSLog(@"hakios: weatherlog: loaded into %@", [[NSProcessInfo processInfo] processName]);
 	exchange("dataTaskWithRequest:completionHandler:", "wl_dataTaskWithRequest:completionHandler:");
 	exchange("dataTaskWithURL:completionHandler:", "wl_dataTaskWithURL:completionHandler:");
 }

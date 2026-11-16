@@ -165,7 +165,7 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 # (src/inject_weatherlog.m; docs/weather-data-shim.md)
 if [ -n "${WEATHERLOG:-}" ]; then
 	INJECT="$INJECT
-/redwood/lib/libhakios.weatherlog.dylib Weather"
+/redwood/lib/libhakios.weatherlog.dylib Weather WeatherWidget"
 fi
 mkdir -p obj
 
