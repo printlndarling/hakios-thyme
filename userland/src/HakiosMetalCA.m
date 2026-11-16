@@ -3181,9 +3181,13 @@ hm_describe_function(id f)
 		hakios_metal_constant vsConstants[64], fsConstants[64];
 		unsigned vsCount = hm_function_constants(vs, vsConstants, 64), fsCount = hm_function_constants(fs, fsConstants, 64);
 
-		program = hakios_metal_program_new_bitcode_constants([vsAir bytes], [vsAir length], vsConstants, vsCount, fsAir != nil ? [fsAir bytes] : NULL,
+		/* The modules are already specialised -- the pipeline library's variant for a fixed function, or the
+		 * module Metal hands over for the others -- and handing the script's values to the compiler again made
+		 * it fold a specialised uber shader into one the GPU stopped in (the command processor's IB position,
+		 * metal650g).  The values stay read for the log and for a refusal's sentence. */
+		program = hakios_metal_program_new_bitcode_constants([vsAir bytes], [vsAir length], NULL, 0, fsAir != nil ? [fsAir bytes] : NULL,
 								     fsAir != nil ? [fsAir length] : 0,
-								     fsConstants, fsCount, format);
+								     NULL, 0, format);
 		if (program != NULL) {
 			hm_dump_function("vs", vs, "metal_dump=fn", vsConstants, vsCount);
 			if (fs != nil) hm_dump_function("fs", fs, "metal_dump=fn", fsConstants, fsCount);
@@ -3278,6 +3282,29 @@ hm_describe_function(id f)
 		hm_print("linked %s (%p) for pixel format %u: the vertex stage binds %u resources, the fragment stage %u; fragment constants not 0:%s\n",
 			 hakios_metal_program_name(program), (void *)program, format, hakios_metal_program_resource_count(program, 0),
 			 hakios_metal_program_resource_count(program, 1), [set UTF8String]);
+	}
+	{
+		/* the first instruction words of each stage: the kernel's buffer dump of a submission that stops in the GPU
+		 * carries the same words at the program's address, so a pass's shader is known by its words */
+		static unsigned told;
+		uint32_t sw[8], fw[8];
+		unsigned sn = hakios_metal_program_stage_words_copy(program, 0, sw, 8);
+		unsigned fn2 = hakios_metal_program_stage_words_copy(program, 1, fw, 8);
+
+		if (told++ < 32) {
+			char line[256];
+			size_t at = 0;
+
+			at += (size_t) snprintf(line + at, sizeof(line) - at, "fbstage: %s+%s vs %u:", [vs name], [fs name], sn);
+			for (unsigned i = 0; i < sn && at + 10 < sizeof(line); i++) {
+				at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", sw[i]);
+			}
+			at += (size_t) snprintf(line + at, sizeof(line) - at, " fs %u:", fn2);
+			for (unsigned i = 0; i < fn2 && at + 10 < sizeof(line); i++) {
+				at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", fw[i]);
+			}
+			hm_print("%s\n", line);
+		}
 	}
 	{
 		HakiosMetalRenderPipelineState *state = [[HakiosMetalRenderPipelineState alloc] initWithHakiosDevice:self program:program descriptor:descriptor];

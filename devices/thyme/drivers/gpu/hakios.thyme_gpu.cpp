@@ -1110,6 +1110,30 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 				}
 				loader_log_line(line);
 			}
+			if (told <= 2) {
+				unsigned shown = 0;
+
+				/* the other buffers the failing submission names, by their first words: the window server's compiled
+				 * shader programs are among them, and the plug-in's fbstage lines carry the same words */
+				for (uint32_t i = 0; i < request->nr_bos && shown < 8; i++) {
+					struct gpu_buffer * b = buffer(bos[i].handle);
+					char bl[160];
+					size_t ba = 0;
+					const uint32_t * w;
+
+					if (b == NULL || b->kernel == NULL || b->size < 32 || b->address == addresses[0]) {
+						continue;
+					}
+					w = (const uint32_t *) b->kernel;
+					ba += (size_t) snprintf(bl + ba, sizeof(bl) - ba, "fbbuf: %#llx %u:",
+					    (unsigned long long) b->address, (unsigned) b->size);
+					for (unsigned k = 0; k < 8 && ba + 10 < sizeof(bl); k++) {
+						ba += (size_t) snprintf(bl + ba, sizeof(bl) - ba, " %08x", w[k]);
+					}
+					loader_log_line(bl);
+					shown++;
+				}
+			}
 		}
 		if (gGPUReports < 4) {
 			gGPUReports++;

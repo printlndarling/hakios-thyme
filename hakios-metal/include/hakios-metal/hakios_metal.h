@@ -288,6 +288,9 @@ hakios_metal_program *hakios_metal_program_specialize(hakios_metal_program *base
     const hakios_metal_constant *fs_constants, unsigned fs_count, unsigned binding, const void *bytes, size_t length);
 /* STAGE 0 = vertex, 1 = fragment: how many instruction words that stage compiled to */
 unsigned hakios_metal_program_stage_words(hakios_metal_program *program, unsigned stage);
+/* ... and the first MAX of them into OUT (the words the GPU is given at the program's address), for telling one
+ * program from another in a log: the count written */
+unsigned hakios_metal_program_stage_words_copy(hakios_metal_program *program, unsigned stage, uint32_t *out, unsigned max);
 void hakios_metal_program_free(hakios_metal_program *program);
 /* the buffers made from the kernel and those taken again from a queue's pool since the last call, and the bytes made */
 void hakios_metal_buffer_counts(unsigned *made, unsigned *reused, unsigned long long *bytes);
