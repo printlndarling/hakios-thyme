@@ -119,10 +119,10 @@ index 4b83160780c3..8997af1f0e1b 100644
  include $(MakeInc_rule)
  include $(MakeInc_dir)
 diff --git a/bsd/conf/files b/bsd/conf/files
-index 44274016a4cf..27cccab98c8e 100644
+index 44274016a4cf..406f822ddc50 100644
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -109,6 +109,51 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+@@ -109,6 +109,83 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
  bsd/dev/unix_startup.c			standard
  
  bsd/dev/monotonic.c optional monotonic
@@ -170,11 +170,43 @@ index 44274016a4cf..27cccab98c8e 100644
 +bsd/dev/hakios.lx.c                      optional hakios_wifi
 +bsd/dev/hakios.sta.c                     optional hakios_wifi
 +bsd/dev/hakios.apple80211.c              optional hakios_wifi
++bsd/dev/hakios.thyme_adsp.c              optional hakios_thyme_audio
++bsd/dev/hakios.thyme_speaker.c           optional hakios_thyme_audio
++bsd/dev/hakios.thyme_sound.c             optional hakios_thyme_audio
++bsd/dev/hakios.thyme_mic.c               optional hakios_thyme_audio
++bsd/dev/hakios.thyme_guard.c             optional hakios_thyme_audio
++bsd/dev/hakios.thyme_bluetooth.c         optional hakios_thyme_bt
++bsd/dev/hakios.thyme_camera.c            optional hakios_thyme_camera
++bsd/dev/hakios.thyme_umi_camera.c        optional hakios_thyme_camera
++bsd/dev/hakios.thyme_camera_dma.c        optional hakios_thyme_camera
++bsd/dev/hakios.thyme_torch.c             optional hakios_thyme_torch
++bsd/dev/hakios.thyme_display.c           optional hakios_thyme_display
++bsd/dev/hakios.thyme_adreno.c            optional hakios_thyme_adreno
++bsd/dev/hakios.thyme_haptic.c            optional hakios_thyme_haptic
++bsd/dev/hakios.thyme_touch.c             optional hakios_thyme_input
++bsd/dev/hakios.thyme_touch_boost.c       optional hakios_thyme_input
++bsd/dev/hakios.thyme_rpmh.c              optional hakios_thyme_input
++bsd/dev/hakios.thyme_keys.c              optional hakios_thyme_input
++bsd/dev/hakios.thyme_pcie2.c             optional hakios_thyme_modem_pcie
++bsd/dev/hakios.thyme_board.c             optional hakios_thyme_power
++bsd/dev/hakios.thyme_cpufreq.c           optional hakios_thyme_power
++bsd/dev/hakios.thyme_thermal.c           optional hakios_thyme_power
++bsd/dev/hakios.thyme_slpi.c              optional hakios_thyme_slpi
++bsd/dev/hakios.thyme_slpi_dma.cpp        optional hakios_thyme_slpi
++bsd/dev/hakios.thyme_wifi.c              optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_wlfw.c              optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_lx.c                optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_apple80211.c        optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_qmi.c               optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_qca6390.c           optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_mhi.c               optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_pcie.c              optional hakios_thyme_wifi
++bsd/dev/hakios.thyme_sta.c               optional hakios_thyme_wifi
 +# end of the HakiOS drivers
  bsd/dev/dev_perfmon.c optional config_perfmon
  
  bsd/libkern/crc32.c			standard
-@@ -155,6 +200,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
+@@ -155,6 +232,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
  bsd/miscfs/mockfs/mockfs_fsnode.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vfsops.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vnops.c	optional mockfs
@@ -227,7 +259,7 @@ index 44274016a4cf..27cccab98c8e 100644
  
  bsd/miscfs/routefs/routefs_ops.c	optional routefs
  
-@@ -361,6 +452,7 @@ bsd/security/audit/audit_syscalls.c		standard
+@@ -361,6 +484,7 @@ bsd/security/audit/audit_syscalls.c		standard
  bsd/security/audit/audit_worker.c		optional config_audit
  
  bsd/pthread/pthread_shims.c		standard
@@ -235,7 +267,7 @@ index 44274016a4cf..27cccab98c8e 100644
  bsd/pthread/pthread_priority.c		standard
  bsd/pthread/pthread_workqueue.c		standard
  
-@@ -383,6 +475,7 @@ bsd/kern/kern_debug.c			standard
+@@ -383,6 +507,7 @@ bsd/kern/kern_debug.c			standard
  bsd/kern/kern_symfile.c			standard
  bsd/kern/kern_descrip.c			standard
  bsd/kern/kern_guarded.c			standard
@@ -519,7 +551,7 @@ index 95192dd62449..b00da803b5b4 100644
  
  	/*
 diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
-index 1d71c66629fb..a22095ccf5f0 100644
+index 1d71c66629fb..ab6757b260e9 100644
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
 @@ -1157,6 +1157,9 @@ SYSCTL_PROC(_vm, OID_AUTO, shared_region_control,
@@ -1900,10 +1932,10 @@ index 83259ebf9835..8864e5c7cc41 100644
  DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
  endif
 diff --git a/iokit/conf/files b/iokit/conf/files
-index 5fb0a52062e0..7cfee3142b5b 100644
+index 5fb0a52062e0..922dfd474997 100644
 --- a/iokit/conf/files
 +++ b/iokit/conf/files
-@@ -79,6 +79,17 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -79,6 +79,20 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
@@ -1915,6 +1947,9 @@ index 5fb0a52062e0..7cfee3142b5b 100644
 +iokit/Kernel/hakios.gpu.cpp              optional hakios_adreno iokitcpp
 +iokit/Kernel/hakios.battery.cpp          optional hakios_battery iokitcpp
 +iokit/Kernel/hakios.wlan.cpp             optional hakios_wifi iokitcpp
++iokit/Kernel/hakios.thyme_bluetooth.cpp  optional hakios_thyme_bt iokitcpp
++iokit/Kernel/hakios.thyme_gpu.cpp        optional hakios_thyme_adreno iokitcpp
++iokit/Kernel/hakios.thyme_wlan.cpp       optional hakios_thyme_wifi iokitcpp
 +# end of the HakiOS drivers
 +iokit/Kernel/MiniAppleKeyStore.cpp			optional iokitcpp
 +iokit/Kernel/MiniIONetworkStack.cpp			optional iokitcpp
@@ -2250,6 +2285,34 @@ index e26a1d70f470..f91095c98d26 100644
  
  #if APPLE_ARM64_ARCH_FAMILY
  	configure_late_apple_regs();
+diff --git a/osfmk/arm/io_map.c b/osfmk/arm/io_map.c
+index 18ef2f02122f..aafd8e5c3ea3 100644
+--- a/osfmk/arm/io_map.c
++++ b/osfmk/arm/io_map.c
+@@ -62,7 +62,8 @@
+ 
+ extern vm_offset_t virtual_space_start;     /* Next available kernel VA */
+ 
+-#define IO_MAP_SIZE            (8ul << 20)
++/* THYME's permanent PCIe, GPU, audio and camera mappings share this window. */
++#define IO_MAP_SIZE            (32ul << 20)
+ 
+ __startup_data static struct mach_vm_range io_range;
+ static SECURITY_READ_ONLY_LATE(vm_map_t) io_submap;
+@@ -80,6 +81,13 @@ io_map_init(void)
+ }
+ STARTUP(KMEM, STARTUP_RANK_LAST, io_map_init);
+ 
++/* THYME camera diagnostics map CamCC, ISP, CCI and TLMM before the run. */
++uint64_t
++umi_camera_iomap_free(void)
++{
++	return io_submap && io_submap->size < IO_MAP_SIZE ? IO_MAP_SIZE - io_submap->size : 0;
++}
++
+ /*
+  * Allocate and map memory for devices that may need to be mapped before
+  * Mach VM is running. Allows caller to specify mapping protection
 diff --git a/osfmk/arm/model_dep.c b/osfmk/arm/model_dep.c
 index 39daaf8db949..64ceb1a5f201 100644
 --- a/osfmk/arm/model_dep.c
@@ -3256,6 +3319,34 @@ index bec97fbf7243..203e1f48783f 100644
  #endif
  
  #if CONFIG_DTRACE
+diff --git a/osfmk/kern/task_policy.c b/osfmk/kern/task_policy.c
+index 461c0d9560d4..b2588b1656b1 100644
+--- a/osfmk/kern/task_policy.c
++++ b/osfmk/kern/task_policy.c
+@@ -163,6 +163,7 @@ static int task_disable_cpumon(task_t task);
+ static int task_clear_cpuusage_locked(task_t task, int cpumon_entitled);
+ static int task_apply_resource_actions(task_t task, int type);
+ static void task_action_cpuusage(thread_call_param_t param0, thread_call_param_t param1);
++static _Atomic uint32_t cpumon_denied_warnings;
+ 
+ #ifdef MACH_BSD
+ typedef struct proc *   proc_t;
+@@ -2864,8 +2865,13 @@ task_set_cpuusage(task_t task, uint8_t percentage, uint64_t interval, uint64_t d
+ 				}
+ #endif
+ 
+-				printf("process %s[%d] denied attempt to escape CPU monitor"
+-				    " (missing required entitlement).\n", procname, pid);
++				uint32_t denied = os_atomic_inc_orig(&cpumon_denied_warnings, relaxed);
++				if (denied < 8) {
++					printf("process %s[%d] denied attempt to escape CPU monitor"
++					    " (missing required entitlement).\n", procname, pid);
++				} else if (denied == 8) {
++					printf("CPU-monitor denial warnings suppressed; further occurrences are not logged\n");
++				}
+ 			}
+ 
+ 			/* configure the limit values */
 diff --git a/osfmk/kern/thread.c b/osfmk/kern/thread.c
 index 384ef23fe0e1..d5ab6db0edbc 100644
 --- a/osfmk/kern/thread.c
@@ -3502,18 +3593,3 @@ index 3ebc295117a3..de101eafc83b 100755
  def find_non_ascii(s):
      for c in s:
          if ord(c) >= 0x80: return True
-diff --git a/osfmk/kern/task_policy.c b/osfmk/kern/task_policy.c
---- a/osfmk/kern/task_policy.c
-+++ b/osfmk/kern/task_policy.c
-@@ -165,0 +166 @@
-+static _Atomic uint32_t cpumon_denied_warnings;
-@@ -2867,2 +2868,7 @@
--				printf("process %s[%d] denied attempt to escape CPU monitor"
--				    " (missing required entitlement).\n", procname, pid);
-+				uint32_t denied = os_atomic_inc_orig(&cpumon_denied_warnings, relaxed);
-+				if (denied < 8) {
-+					printf("process %s[%d] denied attempt to escape CPU monitor"
-+					    " (missing required entitlement).\n", procname, pid);
-+				} else if (denied == 8) {
-+					printf("CPU-monitor denial warnings suppressed; further occurrences are not logged\n");
-+				}

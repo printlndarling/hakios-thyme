@@ -40,6 +40,20 @@ extern struct vc_info vinfo;            /* the boot framebuffer, as the text con
 #include "MiniIOSurface.h"
 
 extern "C" void hakios_tl(const char * format, ...) __printflike(1, 2);
+extern "C" void loader_log_line(const char *line);
+
+/* A line for the loader's log as well: its buffer keeps the whole run, the kernel's own log only the last of it. */
+static void
+fbLine(const char * format, ...)
+{
+	char line[192];
+	va_list list;
+
+	va_start(list, format);
+	vsnprintf(line, sizeof(line), format, list);
+	va_end(list);
+	loader_log_line(line);
+}
 
 /* IOConnectCallMethod selectors of the framebuffer user client (Darwin userland 16.5) */
 enum {
@@ -1576,6 +1590,11 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		if (sid == 0) {
 			/* the bottom layer taken away: nothing is shown, the screen is black */
 			if (layer == 0 && (set & 1) && fGraphics) {
+				static unsigned told;
+				if (told++ < 16) {
+					fbLine("fbshow: swap %u: the bottom layer is taken away with it set: the screen is made black\n",
+					    swapWord(swap, SWAP_ID));
+				}
 				for (uint32_t y = 0; y < fPanelHeight; y++) {
 					bzero(fBase + (size_t) y * fRowBytes, (size_t) fPanelWidth * 4);
 				}
@@ -1585,6 +1604,53 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		memcpy(src, swap + SWAP_SOURCE(layer), sizeof(src));
 		memcpy(dst, swap + SWAP_DEST(layer), sizeof(dst));
 		s = surfaces[layer];
+		if (layer == 0 && sid != 0) {
+			static unsigned told;
+			uint64_t total = 0, black = 0;
+			uint32_t be = 0, planes = 0, w = 0, h = 0, rowBytes = 0;
+
+			if (s != NULL) {
+				be = s->info.bytesPerElement;
+				planes = s->info.planeCount;
+				w = s->info.width;
+				h = s->info.height;
+				rowBytes = s->info.bytesPerRow;
+				if (be == 4 && planes == 0 && s->pixels() != NULL &&
+				    (uint64_t) rowBytes >= (uint64_t) w * 4 && h != 0 && w != 0) {
+					const uint8_t * base = (const uint8_t *) s->pixels();
+
+					/* how much of the whole-screen surface is black: a frame drawn as a damage rectangle into a
+					 * surface that did not keep the last one reads so */
+					for (uint32_t y = 1; y < h; y += 37) {
+						const uint32_t * row = (const uint32_t *) (base + (size_t) y * rowBytes);
+
+						for (uint32_t x = 1; x < w; x += 37) {
+							total++;
+							if ((row[x] & 0x00ffffff) == 0) {
+								black++;
+							}
+						}
+					}
+				}
+			}
+			if (told++ < 10 || (swapWord(swap, SWAP_ID) % 120) == 0) {
+				fbLine("fbshow: swap %u sid %u%s %ux%u be %u planes %u row %u black %llu/%llu\n",
+				    swapWord(swap, SWAP_ID), sid, s ? "" : " MISSING", w, h, be, planes, rowBytes, black, total);
+			}
+		}
+		if (layer == 0) {
+			int64_t area = (int64_t) dst[2] * dst[3], screen = (int64_t) fWidth * fHeight;
+			static unsigned told;
+
+			/* a part of the screen: whose rectangle, and on which surface (one tile at the top left is what a
+			 * frame drawn as a damage rectangle into a fresh surface, or the wrong destination, leaves) */
+			if (area > 0 && screen > 0 && area < screen - screen / 8 && told++ < 48) {
+				fbLine("fbshow: swap %u layer 0: surface %u %s %ux%u from %d,%d %dx%d to %d,%d %dx%d: "
+				    "a part of the screen only\n", swapWord(swap, SWAP_ID), sid, s ? "" : "MISSING",
+				    s ? s->info.width : 0, s ? s->info.height : 0, src[0], src[1], src[2], src[3],
+				    dst[0], dst[1], dst[2], dst[3]);
+			}
+		}
 		if (report) {
 			IOLog("MiniIOMobileFramebuffer: swap %u layer %u: surface %u%s (%ux%u '%c%c%c%c') "
 			    "from %d,%d %dx%d to %d,%d %dx%d, layers set 0x%x\n", swapWord(swap, SWAP_ID), layer, sid,
@@ -1594,6 +1660,11 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			    src[0], src[1], src[2], src[3], dst[0], dst[1], dst[2], dst[3], set);
 		}
 		if (s == NULL) {
+			static unsigned told;
+			if (told++ < 16) {
+				fbLine("fbshow: swap %u: layer %u names surface %u, which is not here\n",
+				    swapWord(swap, SWAP_ID), layer, sid);
+			}
 			continue;
 		}
 		if (s->info.bytesPerElement == 4 && s->info.planeCount == 0) {
