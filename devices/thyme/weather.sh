@@ -43,8 +43,14 @@ fi
 ./xl ramdisk "$SYSTEM_IMAGE"
 
 (
+	# Stop well before the kernel's return: the loader's clock starts at its
+	# own boot, about 117 s (the boot image upload) before the kernel does, so
+	# XL_SECS=380 runs the kernel about 260 s.  A screenshot in flight when
+	# the run's final log fetch stages its buffer makes that fetch download
+	# the framebuffer instead of the log (logs/145727-run.log,
+	# logs/152821-run.log: 9.8-10.1 MB of pixels, no text).
 	elapsed=0
-	while [ "$elapsed" -lt $((SECS - 20)) ]; do
+	while [ "$elapsed" -lt $((SECS - 150)) ]; do
 		sleep "$STEP"
 		elapsed=$((elapsed + STEP))
 		./xl screenshot "logs/weather-${elapsed}.png" || true

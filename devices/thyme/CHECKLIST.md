@@ -215,15 +215,45 @@ the requests (`logs/151121-run.log`):
 
 The seam is therefore reachable: Weather's own WeatherKit client fetches its
 edge configuration through URLSession in the app's process, and the injection
-puts code in that process.  Every request failed because that boot had no
-Wi-Fi (the Settings screen said "Not Connected"); the client stops at its
-config fetch and the forecast request -- the one a data shim has to answer --
-never came.  That run also spawned `weatherd` ("launching: ipc (mach)",
-15:13:06), so `rc.jobs.weatheronline` now joins the network written in
-`fw/network` first and then opens Weather, with the library also injected into
-weatherd, to see whether the forecast fetch is the app's or the daemon's and
-what URL and Authorization header it carries.  (The weatherlog dylib's NSLog
-comment in `src/inject_weatherlog.m` is the earlier, wrong channel.)
+puts code in that process.  Every request in that run failed because the boot
+had no Wi-Fi (the Settings screen said "Not Connected").
+
+With the link up the picture changed (`rc.jobs.weatheronline`: `net_test
+joinfile /redwood/fw/network`, then Weather; `logs/151953-run.log`):
+
+* Weather resolved the place and drew "Chang'an, Xi'an" (screenshot
+  `logs/weather-140.png`), but **the app process made no HTTP request at
+  all**.  The only weather request in the boot was WeatherWidget's
+  `PUT https://weather-edge.apple.com/v1/configs` -- 200, 7095 bytes; the
+  endpoint answers an empty JSON body with
+  `{"userInfo":{"treatmentIds":[],"segmentSetIds":[6767,8872]}}`, so it is an
+  experiment-assignment call and not where the data is.
+* `weatherd` was spawned on demand again (15:21:19) and stayed silent; it
+  made no network connection.
+* Weather kept looking `com.apple.fairplayd` up and failing, about every
+  15 s, through the whole run.
+
+The next run's logger (`WEATHERLOG=1`) interposes the delegate-based
+`dataTaskWithRequest:` as well, because WeatherDaemon's `WDSURLSession` uses
+it (only the completion-handler entry points were caught before), and
+`NSXPCConnection`, to see which service the app connects to and what error
+comes back.  Its live log (`logs/152821-run.log.live`) shows Weather's only
+request is the App Store bag (`bag.itunes.apple.com`, product
+`com.apple.weather`); weatherd loaded the library and made no request.  So the
+stock path is gated **before** any forecast fetch: the app sits on FairPlay,
+and the daemon is not asked for data.  The following run adds `fairplaystub`
+(so the lookups succeed and the stub answers) to see whether the app then
+reaches weatherkit.authservice and weatherd, and the XPC log says where it
+stops.
+
+Two run-mechanics notes.  The final log fetch races the scene's own
+screenshots: `logs/152821-run.log` is 10,108,800 bytes of raw framebuffer
+(1080x2340x4), not text, and `logs/145727-run.log` was 9.8 MB of the same.
+The 15 s `.live` copy is what saved the run's text (`weather.sh` now follows
+the log), and `weather.sh` stops screenshots at `SECS - 150`.  The loader's
+clock starts at its own boot, about 117 s (the boot image upload) before the
+kernel's, so `SECS=380` is about 260 s of kernel, and the earlier `SECS=260`
+runs returned at about 130 s.
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
