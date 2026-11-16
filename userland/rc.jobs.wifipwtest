@@ -1,0 +1,5 @@
+# Nothing but a boot held on the home screen (RC_JOBS=rc.jobs.wifipwtest): the
+# Wi-Fi password sheet appears about 100 s in when wifid cannot find the
+# network's password; wifipw_seed should have put it there.
+/redwood/bin/sleep_hold 240 &
+/redwood/bin/rwtouch wait 200

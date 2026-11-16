@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.hakios.wifipw</string>
+	<!-- Keep fw/network's passphrase in wifid's keychain item before Auto-Join
+	     asks for it; without it the system puts up "Enter the password for
+	     ..." about a hundred seconds into every boot.  src/wifipw_seed.c. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/redwood/bin/wifipw_seed</string>
+		<string>/redwood/fw/network</string>
+		<string>50</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/dev/console</string>
+	<key>StandardErrorPath</key>
+	<string>/dev/console</string>
+</dict>
+</plist>

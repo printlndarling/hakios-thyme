@@ -285,6 +285,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -framework CoreFoundation -framework Security -o obj/wifipw_test src/wifipw_test.c &&
 			{ ${LDID:-ldid} -Ssrc/wifipw_test.entitlements obj/wifipw_test 2>/dev/null ||
 			  echo "build.sh: no ldid: wifipw_test is unsigned, and the keychain will refuse it (-34018)"; }
+		# the network's password where Auto-Join looks, from fw/network at boot (src/wifipw_seed.c)
+		$DYN -framework CoreFoundation -framework Security -o obj/wifipw_seed src/wifipw_seed.c &&
+			{ ${LDID:-ldid} -Ssrc/wifipw_test.entitlements obj/wifipw_seed 2>/dev/null ||
+			  echo "build.sh: no ldid: wifipw_seed is unsigned, and the keychain will refuse it"; }
 		# our library for inside stock Darwin programs (the jobs in INJECT are started with it)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.dylib -framework CoreFoundation -framework IOKit -lobjc \
 			-o obj/libhakios.dylib src/inject.c
@@ -438,6 +442,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
 	[ -f obj/keychain_test ] && cp obj/keychain_test root/bin/
 	[ -f obj/wifipw_test ] && cp obj/wifipw_test root/bin/
+	[ -f obj/wifipw_seed ] && cp obj/wifipw_seed root/bin/
 	[ -f obj/sound_test ] && cp obj/sound_test root/bin/
 	[ -f obj/torch_test ] && cp obj/torch_test root/bin/
 	[ -f obj/camera_test ] && cp obj/camera_test root/bin/

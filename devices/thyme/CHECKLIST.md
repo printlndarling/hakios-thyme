@@ -167,6 +167,34 @@ the Theos SDK does not carry.  `syncdefaultsd` stays in mkjobs' DENY: without
 `ALLOW=syncdefaultsd` it never runs, and the substitution only matters in the
 scenes that allow it.
 
+## The Wi-Fi password sheet, and the keychain's slow start (2026-11-16)
+
+About a hundred seconds into some boots the system puts "Enter the password
+for ..." over the screen.  The kernel's Wi-Fi driver joins with the network's
+name and passphrase from `fw/network`, but iOS's own `wifid` does not see them:
+its keychain item (service `AirPort`, account = the network name) is missing.
+
+`wifipw_test` -- signed with wifid's name and the system-keychain entitlement
+(`src/wifipw_test.entitlements`) -- shows the keychain working from a program
+started later in the boot: at 60 s it sets a made-up network's password, reads
+it back ("THE SAME PASSWORD", service `AirPort`, access group
+`com.apple.wifid`, protection class `ck`), removes it and reads nothing
+(`logs/092647-run.log`).
+
+`wifipw_seed` (`src/wifipw_seed.c`) does the same with `fw/network`'s two
+lines, so the sheet would not need to ask.  As a launchd RunAtLoad job
+(`com.hakios.wifipw.plist`) it is too early: the process spawns at about 10 s
+and its first keychain call is still waiting when the run ends (no exit, no
+answer, `logs/091858-run.log`, `logs/093307-run.log`), while the same call from
+the scene-60 s program returns at once.  The keychain's daemon is not ready
+when the job starts, and the Security framework's call does not time out.  The
+job is therefore **not installed** by the build; the tool and the plist stay as
+the experiment, and the fix is a keychain call that can time out and retry.
+
+On the boots held on the home screen the sheet did not appear in the
+screenshots; it has been seen over Settings and Weather, so its appearance
+depends on when wifid asks.
+
 ## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
 
 The sensor DIAG probe never reached its measurement because its scene -- the

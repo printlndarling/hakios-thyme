@@ -1,0 +1,7 @@
+# Whether the keychain answers a signed program once the boot has settled
+# (RC_JOBS=rc.jobs.keychaintest): wifipw_test writes a made-up network's
+# password, reads it back and removes it, by wifid's entitlement.
+/redwood/bin/sleep_hold 200 &
+/redwood/bin/rwtouch wait 60
+/redwood/bin/wifipw_test
+/redwood/bin/rwtouch wait 60
