@@ -138,7 +138,11 @@ signed with ldid (the Theos toolchain has one) carries the entitlement.
 `persona_test` (`src/persona_test.c` and `.entitlements`) allocates
 `PERSONA_SYSTEM_PROXY` (6), `PERSONA_SYSTEM` (4) and `PERSONA_DEFAULT` (5): on
 the phone all three succeeded (ids 501, 511 and 521) and `kpersona_find_by_type`
-answered 1 found for each; the same calls fail unsigned.  `rc.launchd` now runs
+answered 1 found for each; the same calls fail unsigned.  A fourth was added:
+launchd asks for a **type-6 persona of uid 501** on application spawns ("No
+matching personas of type 6 uid 501, found 1"), so a `mobileproxy` (6, uid 501)
+is made beside the system's; with it, that line goes from 1 to **0** and the
+four allocations are ids 501, 511, 521 and 531 (`logs/095010-run.log`).  `rc.launchd` now runs
 `persona_test alloc` before handing process 1 to launchd, and the type-6 lines
 went from 207 to **0** in the run that did it (`logs/044045-run.log`).
 
