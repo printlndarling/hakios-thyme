@@ -4190,3 +4190,15 @@ library's GMEM-on defaults and never took the plug-in's choice, now get the same
 settings.  The GMEM path itself (a tile's store blit stalling the command
 processor after the IB2 is consumed) remains to be fixed for the performance it
 was meant to bring; it is not on the daily path any more.
+
+### The home screen through Metal, no wedge (2026-11-17, screenshot)
+
+The fix built into a scene and run with the default arguments (`metal650r`,
+kernel `82abf2539d68`, `logs/060526-run.log`): not one `no answer` line, the
+framebuffer's swaps reach 2400 with `black 3/2046` of the sampled pixels, and two
+screenshots taken during the run (`logs/metal650r-1.png`, `-2.png`) show the whole
+home screen -- the wallpaper, the status bar at 6:06 with 64% battery, the Weather
+(`No weather data`) and Calendar (`TUESDAY 17`) widgets, every icon and the dock.
+The plug-in's fps line still says 0 presented because it counts `presentDrawable`
+calls; the display's swap log and the screenshots are the evidence.  This is the
+first stable full UI with the Metal window server, and Maps takes the same path.
