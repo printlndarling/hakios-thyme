@@ -4093,3 +4093,39 @@ dropped here and the screenshots/logs of those runs were lost to the screenshot/
 staging collision), so its state is "code in the image, real-device verification still
 open".  The probe rows added to Privacy.plist for the earlier filter experiments are
 removed from the sysimage source again.
+
+### The wedged submission's own stream: a GMEM tile's store blit (2026-11-17)
+
+The command processor's report names the submission and the words it has left in
+the indirect buffer, but not the words themselves: by the time the next submission
+arrives, the window server has written its next frame into the same buffer
+(submission 41's 7964 words at 216a0000 over 40's).  The user client now copies the
+first command buffer (up to 128 KB) after a submission is accepted, and when a
+submission two seconds late is still the one the core is in, it prints the words
+around the core's position, the waits' words with their values, and the shader
+programs the stream last named (`fbib`, `fbstop`, `fbwait`, `fbvs`, `fbfs`; kernel
+`c910c2ccc939`, scene `a0a3c70130d1`, `logs/052522-run.log`).
+
+Submission 40: 11483 words at 216a0000, the core at word 4064 of them (7419 to
+go), the second indirect buffer at 23990000 with 0 to go.  Decoded, word 4064 is
+inside the GMEM tile loop of the window server's frame (tiled rendering is on by
+default, `gmem_ = true`): each tile emits a load blit (RB_BLIT_DST_INFO to the
+attachment at 200a0000, BLIT event 30), the tile's draws as an IB2 at 23990000
+(9248 words), RM6_BIN_END_OF_DRAWS, `CP_SKIP_IB2_ENABLE_GLOBAL(0)`, RM6_BIN_RESOLVE,
+and the store blits (BLIT event 30 to 200a0000, then to 22140000 with
+BASE_GMEM 0x74000), then a WFI.  The core stopped at the RB_BLIT_INFO register
+write of the tile's first store blit (word 4063), with the IB2 behind it fully
+consumed: the command processor had issued the tile's draws and stalled in the
+register writes that follow them, which is what a draw that does not drain looks
+like from the command processor's side rather than a wait packet.  No
+CP_WAIT_REG_MEM comes within 96 words of the stop, so the framebuffer-read flush
+of the earlier run was not the stop here.
+
+Two lessons for the next run: the fbstage file was probably written all along --
+the scene's rc.jobs invoked `/bin/cat`, which this root does not have (every cat
+exited 127, "No such file or directory"), and cat lives at /var/jb/usr/bin/cat
+(the Sileo bootstrap); and the hung draw's shader is not in the outer stream but
+in the tile's IB2, so the trap now reads SP_VS_OBJ_START and SP_FS_OBJ_START from
+the GPU's own registers and prints the first words at each (`fbprog`, `fbvs`,
+`fbfs`) -- to be matched against the fbstage lines once they are read with the
+right cat.

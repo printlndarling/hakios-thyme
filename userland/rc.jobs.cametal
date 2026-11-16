@@ -4,6 +4,6 @@
 # application's surface or happens on the home screen by itself.
 /redwood/bin/sleep_hold 300 &
 /redwood/bin/rwtouch wait 120
-/bin/cat /var/tmp/com.apple.backboardd/hakios-fbstage.log 2>/dev/null
-/bin/cat /var/tmp/hakios-fbstage.log 2>/dev/null
-/bin/cat /tmp/hakios-fbstage.log
+/var/jb/usr/bin/cat /var/tmp/com.apple.backboardd/hakios-fbstage.log
+/var/jb/usr/bin/cat /var/tmp/hakios-fbstage.log
+/var/jb/usr/bin/cat /tmp/hakios-fbstage.log

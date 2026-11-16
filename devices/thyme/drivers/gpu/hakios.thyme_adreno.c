@@ -3772,6 +3772,18 @@ hakios_gpu_ib1(uint64_t *base, uint32_t *remaining)
 	}
 }
 
+/* The programs the two 3D stages last named (SP_VS_OBJ_START, SP_FS_OBJ_START of a6xx): a hung GPU's. */
+void
+hakios_gpu_programs(uint32_t *vs, uint32_t *fs)
+{
+	if (vs != NULL) {
+		*vs = rd(gpu.base + 0xa81c);
+	}
+	if (fs != NULL) {
+		*fs = rd(gpu.base + 0xa983);
+	}
+}
+
 /* A submission does not come back: what the 3D core and its SMMU context say. */
 void
 hakios_gpu_report(const char *why)

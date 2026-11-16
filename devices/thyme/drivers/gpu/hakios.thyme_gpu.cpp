@@ -63,6 +63,7 @@ uint32_t hakios_gpu_last(void);
 void hakios_gpu_worked(uint64_t * microseconds, uint32_t * submissions, uint32_t by[7]);
 void hakios_gpu_report(const char * why);
 void hakios_gpu_ib1(uint64_t * base, uint32_t * remaining);
+void hakios_gpu_programs(uint32_t * vs, uint32_t * fs);
 void hakios_gpu_stop(void);
 
 void HakiosGPUStart(void);
@@ -775,6 +776,17 @@ HakiosGPUUserClient::dumpStuck(void)
 				line[at] = '\0';
 			}
 			loader_log_line(line);
+		}
+		{
+			/* the programs the two stages last named: the hung GPU's own registers, not the stream's plan */
+			uint32_t pvs = 0, pfs = 0;
+
+			hakios_gpu_programs(&pvs, &pfs);
+			snprintf(line, sizeof(line), "fbprog: SP_VS_OBJ_START %#x, SP_FS_OBJ_START %#x\n",
+			    pvs, pfs);
+			loader_log_line(line);
+			sayWords("fbvs", pvs, 8);
+			sayWords("fbfs", pfs, 8);
 		}
 		{
 			uint64_t waitAt = 0;
