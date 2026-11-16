@@ -3085,6 +3085,8 @@ static uint32_t sns_first_bad_msg;       /* the first QMI 0x20 answer with a non
 static uint32_t sns_first_bad_result;
 static uint8_t sns_first_bad_suid[16];
 static const char *sns_last_group;       /* the registry group file being written, if any */
+static uint32_t sns_cm_result_seen;      /* the client manager's group write was answered */
+static uint32_t sns_cm_result;           /* ... with this */
 static char sns_first_bad_group[40];
 struct sns_bad_record {
 	uint32_t msg;
@@ -3604,6 +3606,14 @@ sns_input(const uint8_t *data, uint32_t length)
 					if (resp_group != NULL) {
 						strlcpy(r->group, resp_group, sizeof(r->group));
 					}
+				}
+				/* the client manager's own group is the one the gate needs; the
+				 * refusal ring holds only the last eight answers, so take its
+				 * result here whatever it is */
+				if (resp_group != NULL && strcmp(resp_group, "sns_cm") == 0 &&
+				    !sns_cm_result_seen) {
+					sns_cm_result_seen = 1;
+					sns_cm_result = sns_last_result;
 				}
 			}
 			printf("slpi: sns: < QMI result %u, error %u\n", data[at] | data[at + 1] << 8,
@@ -8273,6 +8283,11 @@ link_stop(void)
 		printf("\n");
 		printf("slpi: sns: %u responses with result 0, %u with another (last %u); registry %u of %u written\n",
 		    sns_ok_count, sns_bad_count, sns_last_result, sns_registry_written, sns_registry_total);
+		if (sns_cm_result_seen) {
+			printf("slpi: sns: sns_cm write result %u\n", sns_cm_result);
+		} else {
+			printf("slpi: sns: sns_cm write was not answered\n");
+		}
 		if (sns_first_bad_result != 0) {
 			printf("slpi: sns: the first refusal: QMI %u answered %u for SUID "
 			    "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",

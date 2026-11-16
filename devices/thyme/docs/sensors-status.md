@@ -1504,6 +1504,14 @@ the next build must separate from message 1.
 The four EFAILED groups are the large ones (4005 bytes for `ccd_ttw`, 4534 for
 `sns_reg_config`, both JSON with many items); the other 185 answer 5.  So the
 write path reaches the service, and the payload size is not what separates the
-two answers -- the service's own state is.  Which answer `sns_cm` itself got is
-not in this log (the driver prints only the refusals and the first result-5
-line), and separating it is part of the next build's work.
+two answers -- the service's own state is.
+
+The driver now records the client manager's own group: at the QMI result TLV,
+`sns_cm`'s write has **no answer at all** (`sns_cm write was not answered`,
+`logs/110539-run.log`), while 24 of the 189 writes do get a QMI-layer reply (20
+result 0, the same four result 1).  Pacing the upload at 20 ms a group instead
+of 2 ms -- to keep the 32-slot transaction ring covering the round trip --
+changes nothing (`logs/111513-run.log`), so the burst is not what loses the
+answers: the service itself does not answer most of the writes, `sns_cm`'s
+among them.  The SNS layer's 185 result-5 replies are still not attributed per
+group; that attribution is the next build's work.
