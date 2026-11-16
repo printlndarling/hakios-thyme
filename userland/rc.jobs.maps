@@ -1,12 +1,15 @@
-# RC_JOBS=rc.jobs.maps: open Maps and leave it on screen.  The boot arguments put
-# metal_all=1 first (the command line is 607 characters; the last arguments are cut), so
-# SpringBoard, Maps and the window server all take the Metal device.  The jailbreak
-# prefix's uiopen asks LaunchServices for the bundle, as it does for HakiOS's weather app.
-# A first launch shows "What's New in Maps" (Continue) and then the notification screen
-# (Not Now); both buttons sit at about 0.92 of the screen's height in the 1080x2340
-# picture, so the same tap dismisses them in turn.  The location alert's "Allow While
-# Using App" is at 0.712 (the three rows are 0.655, 0.712 and 0.770).
+# RC_JOBS=rc.jobs.maps: join the Wi-Fi network, then open Maps and leave it on screen.
+# The boot arguments put metal_all=1 first (the command line is 607 characters; the last
+# arguments are cut), so SpringBoard, Maps and the window server all take the Metal device.
+# The jailbreak prefix's uiopen asks LaunchServices for the bundle, as it does for HakiOS's
+# weather app.  A first launch shows "What's New in Maps" (Continue) and the notification
+# screen (Not Now), both at about 0.92 of the screen's height; the location alert's
+# "Allow While Using App" is at 0.712 (its rows are 0.655, 0.712 and 0.770).  The join is
+# started in the background so the taps keep their times; the earlier scenes join this way
+# (rc.jobs.dailycheck, rc.jobs.hweather).
 /redwood/bin/sleep_hold 450 &
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
+/redwood/bin/net_test waitaddr en0 90 &
 /redwood/bin/rwtouch wait 90
 /var/jb/usr/bin/uiopen --bundleid com.apple.Maps
 /redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 60

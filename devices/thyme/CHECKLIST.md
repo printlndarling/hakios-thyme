@@ -4228,24 +4228,29 @@ What it asked the GPU for, and what it got:
 - 64 command buffers a queue, memoryless textures given memory, and command
   buffers run in commit order (each said once in the log).
 
-The map area is black in these runs.  Two causes are visible and both outside the
-window server: the Wi-Fi link was not joined in any run ("the network is NOT
-joined", no handshake, no map tiles), and in `maps6` the Wi-Fi service reset
-itself mid-run ("background MHI polling failed: 5", "endpoint reset", "service
-stopped"), the driver's MHI failure mode to chase separately.  The location
-alert's rows, measured off the 1080x2340 screenshots, are at 0.655 (Allow Once),
-0.712 (Allow While Using App) and 0.770 (Don't Allow); the scene's taps at 0.918
-serve both the What's New "Continue" and the notification screen's "Not Now",
-which sit at about 0.92 of the screen.  The first attempt at 0.609 was the
-display-scaled estimate, not the picture's, and only put the finger in the
-alert's text; the taps are corrected in the scene.
+The map area is black in these runs, and the cause is the scene, not the
+network stack: none of these scenes ever asked for a join.  The earlier scenes
+that had Wi-Fi run `net_test wait 20 joinfile /redwood/fw/network`
+(`rc.jobs.dailycheck`, `rc.jobs.hweather`); the Maps scenes only opened the app,
+so the link stayed down and there were no tiles.  The driver lines that looked
+like a mid-run Wi-Fi failure -- "background MHI polling failed: 5", "endpoint
+reset", "service stopped" -- come after `loader_return_after expired` in the
+log (`064413-run.log`: the return at line 10850, the polling failure at 10945):
+they are the run's teardown, not a fault of the boot.  The location alert's rows,
+measured off the 1080x2340 screenshots, are at 0.655 (Allow Once), 0.712 (Allow
+While Using App) and 0.770 (Don't Allow); the scene's taps at 0.918 serve both
+the What's New "Continue" and the notification screen's "Not Now", which sit at
+about 0.92 of the screen.  The first attempt at 0.609 was the display-scaled
+estimate, not the picture's, and only put the finger in the alert's text; the
+taps are corrected in the scene.
 
 With the corrected taps (scene `metal650maps8`, `logs/070220-run.log`) the alert
 is dismissed and Maps sits in its normal state: the search field, Favorites
 (Home/Work/Add), My Guides and New Guide drawn, the map's location button
 spinning while locationd positions by Wi-Fi (`logs/maps8-2.png`).  The map area
-is still black: the Wi-Fi link is not joined in this run either ("the network is
-NOT joined", the MHI endpoint reset again), so there are no tiles and VectorKit
-has nothing to draw them from.  The Metal side of Maps is now verified end to
-end -- launch, onboarding, permissions, idle UI -- with no wedge; the map
-content waits on the Wi-Fi join.
+is still black: the link was not joined (the scene never asked for a join; see
+above), so there are no tiles and VectorKit has nothing to draw them from.  The
+Metal side of Maps is now verified end to end -- launch, onboarding, permissions,
+idle UI -- with no wedge; the map content waits on the Wi-Fi join, which the next
+scene starts with `net_test joinfile` and `wifi_wide=0` (the 2.4 GHz BSS the
+earlier A/B joined).
