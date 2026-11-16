@@ -119,6 +119,14 @@ init_file_url_hook(id self, SEL _cmd, NSString *path, BOOL is_directory)
 			say(text.UTF8String);
 		}
 	}
+	if (path == nil) {
+		/* This port's sandbox has no container path to give: the call that
+		 * fills the buffer answers success and leaves stack garbage in it, so
+		 * the string is nil.  A writable directory the daemon can build its
+		 * store under is better than the exception that killed it. */
+		path = @"/private/var/mobile";
+		is_directory = YES;
+	}
 	if (original_init_file_url != NULL) {
 		return ((id (*)(id, SEL, NSString *, BOOL))original_init_file_url)(self, _cmd,
 		    path, is_directory);

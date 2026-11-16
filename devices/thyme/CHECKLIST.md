@@ -144,8 +144,16 @@ before.  The switch was taken and logged in that run.
 The kvsd crash is not the persona API.  `syncdefaultsd`'s nil URL comes from
 `sandbox_container_path_for_audit_token` -- the sandbox container, not the
 persona's path -- and it still dies the same way with the personas present and
-MCM unhooked.  What bytes that path holds is what the exception logger's
-`stringWithUTF8String:` hook now asks (`src/inject_exc.m`).
+MCM unhooked.  The bytes behind the nil string are stack garbage
+(`80 80 7f 00 01 00 ...`, `logs/044724-run.log`): the sandbox call answers
+success and writes no path.  The diagnostic library now substitutes
+`/private/var/mobile` for a nil URL path (`src/inject_exc.m`), so the daemon
+can build its store instead of dying; that is code and build, not verified on
+the phone yet -- the app's kvsd lookup is not deterministic (one run asks, the
+next does not), and a direct `com.apple.kvsd` ping wanted `xpc/xpc.h`, which
+the Theos SDK does not carry.  `syncdefaultsd` stays in mkjobs' DENY: without
+`ALLOW=syncdefaultsd` it never runs, and the substitution only matters in the
+scenes that allow it.
 
 ## The sensor probe, the DSP's DIAG channel, and 189 of 189 (2026-11-14)
 
