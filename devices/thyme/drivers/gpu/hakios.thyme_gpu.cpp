@@ -429,18 +429,12 @@ struct gpu_kept {
 static TUNABLE(uint32_t, gGPUKeep, "gpu_keep", 1);      /* boot-arg gpu_keep=0 (a test): none kept; gpu_keep=2: kept ones cleared when given again */
 
 /*
- * The last command buffers given to the core, by address and length: when one does not come back
- * the core is still in its indirect buffer, and that buffer's words -- what the command processor
- * was running when it stopped -- are read from its own memory before a later submission writes over
- * it (the window server reuses the same three buffers frame after frame).
+ * The last command buffer given to the core, kept as it was submitted: when a submission does not
+ * come back, the window server's next frame has already written over that buffer's memory (it
+ * reuses the same few buffers every frame), so the words the command processor stopped in are read
+ * from this copy instead. Taken after the submission is accepted, before the next one can be.
  */
-struct gpu_recent {
-	uint32_t                        fence;
-	uint32_t                        words;
-	uint64_t                        address;
-	uint64_t                        began;
-};
-#define GPU_RECENT              8
+#define GPU_SNAPSHOT_MAX        (128u << 10)    /* bytes: a command buffer bigger than this is not kept */
 
 class HakiosGPUUserClient : public IOUserClient
 {
@@ -458,12 +452,17 @@ class HakiosGPUUserClient : public IOUserClient
 	uint32_t                fLeftCount;
 	struct gpu_kept         fKept[GPU_KEPT];
 	uint64_t                fKeptBytes;
-	struct gpu_recent       fRecent[GPU_RECENT];
-	uint32_t                fRecentAt;
+	uint8_t *               fSnapshot;              /* the last submission's first command buffer as it was given */
+	uint32_t                fSnapshotWords;         /* ... in words, */
+	uint32_t                fSnapshotBytes;         /* ... and the room there is for one */
+	uint32_t                fSnapshotFence;         /* its fence (0: none kept) */
+	uint32_t                fSnapshotDumps;         /* how many late submissions were said (a few) */
+	uint64_t                fSnapshotAddress;       /* the GPU address its command buffer had */
+	uint64_t                fSnapshotBegan;
 
 	struct gpu_buffer * buffer(uint32_t handle);
 	struct gpu_buffer * bufferAt(uint64_t address);
-	void remember(uint32_t fence, uint64_t address, uint32_t words);
+	void keepSnapshot(uint32_t fence, uint64_t address, const uint32_t * words, uint32_t count);
 	void dumpStuck(void);
 	void sayWords(const char * what, uint64_t address, unsigned count);
 	struct gpu_buffer * newBuffer(IOMemoryDescriptor * memory, uint64_t from, uint64_t size, uint32_t flags, uint32_t * handle);
@@ -506,8 +505,9 @@ HakiosGPUUserClient::start(IOService * provider)
 		return false;
 	}
 	fBuffers = IONewZero(struct gpu_buffer, GPU_BUFFERS);
-	bzero(fRecent, sizeof(fRecent));
-	fRecentAt = 0;
+	fSnapshot = NULL;
+	fSnapshotWords = fSnapshotBytes = fSnapshotFence = fSnapshotDumps = 0;
+	fSnapshotAddress = fSnapshotBegan = 0;
 	return fBuffers != NULL;
 }
 
@@ -636,6 +636,10 @@ HakiosGPUUserClient::free(void)
 		IODelete(fBuffers, struct gpu_buffer, GPU_BUFFERS);
 		fBuffers = NULL;
 	}
+	if (fSnapshot != NULL) {
+		IODelete(fSnapshot, uint8_t, fSnapshotBytes);
+		fSnapshot = NULL;
+	}
 	IOUserClient::free();
 }
 
@@ -666,16 +670,33 @@ HakiosGPUUserClient::bufferAt(uint64_t address)
 	return NULL;
 }
 
-/* A submission that went to the core: kept, so that a stuck one's buffer can be read before it is written over. */
+/* A submission that went to the core: its first command buffer kept as it was given, for the dump below. */
 void
-HakiosGPUUserClient::remember(uint32_t fence, uint64_t address, uint32_t words)
+HakiosGPUUserClient::keepSnapshot(uint32_t fence, uint64_t address, const uint32_t * words, uint32_t count)
 {
-	struct gpu_recent * r = &fRecent[fRecentAt++ % GPU_RECENT];
+	uint32_t bytes = count * 4;
 
-	r->fence = fence;
-	r->address = address;
-	r->words = words;
-	r->began = mach_absolute_time();
+	fSnapshotFence = 0;
+	if (words == NULL || count == 0 || bytes > GPU_SNAPSHOT_MAX) {
+		return;
+	}
+	if (fSnapshotBytes < bytes) {
+		uint8_t * fresh = IONewZero(uint8_t, bytes);
+
+		if (fresh == NULL) {
+			return;
+		}
+		if (fSnapshot != NULL) {
+			IODelete(fSnapshot, uint8_t, fSnapshotBytes);
+		}
+		fSnapshot = fresh;
+		fSnapshotBytes = bytes;
+	}
+	memcpy(fSnapshot, words, bytes);
+	fSnapshotWords = count;
+	fSnapshotAddress = address;
+	fSnapshotFence = fence;
+	fSnapshotBegan = mach_absolute_time();
 }
 
 /* The first words at a GPU address one of the client's buffers holds: a shader program, when a draw named it. With the lock held. */
@@ -707,56 +728,45 @@ HakiosGPUUserClient::sayWords(const char * what, uint64_t address, unsigned coun
 }
 
 /*
- * A submission has been in the core for a second and has not come back, and the core is still in
- * its indirect buffer: say where in the buffer it is and what the words there are -- the word a
- * wait polls, and the shader programs the draws named -- read from the buffer's own memory before
- * the window server's next frame writes over it (it reuses the same few buffers every frame).
+ * A submission has been in the core for two seconds and has not come back, and the core is still in
+ * its indirect buffer: say where in the buffer it is and what the words there are -- the word a wait
+ * polls and its value now, and the shader programs the draws named -- from the copy taken when it
+ * was submitted, which the window server's next frame has written over since.
  */
 void
 HakiosGPUUserClient::dumpStuck(void)
 {
-	static bool dumped;
 	uint64_t ib = 0, patience;
 	uint32_t rem = 0;
 
-	if (dumped || fRecentAt == 0) {
+	if (fSnapshot == NULL || fSnapshotFence == 0 || fSnapshotDumps >= 4) {
 		return;
 	}
-	nanoseconds_to_absolutetime(1000 * NSEC_PER_MSEC, &patience);
+	nanoseconds_to_absolutetime(2000 * NSEC_PER_MSEC, &patience);
 	hakios_gpu_ib1(&ib, &rem);
-	if (ib == 0) {
+	if (ib == 0 || ib != fSnapshotAddress) {
+		return;
+	}
+	if (hakios_gpu_done(fSnapshotFence) || mach_absolute_time() - fSnapshotBegan < patience) {
 		return;
 	}
 	IOLockLock(gGPULock);
-	for (uint32_t n = 0; n < GPU_RECENT; n++) {
-		struct gpu_recent * r = &fRecent[(fRecentAt + GPU_RECENT - 1 - n) % GPU_RECENT];
-		struct gpu_buffer * b;
-		const uint32_t * w;
-		uint32_t stop, from, to;
+	{
+		const uint32_t * w = (const uint32_t *) fSnapshot;
+		uint32_t words = fSnapshotWords;
+		uint32_t stop = rem < words ? words - rem : 0;
+		uint32_t from = stop > 96 ? stop - 96 : 0;
+		uint32_t to = stop + 128 < words ? stop + 128 : words;
 		char line[256];
 
-		if (r->fence == 0 || r->words == 0 || r->address != ib) {
-			continue;
-		}
-		if (hakios_gpu_done(r->fence) || mach_absolute_time() - r->began < patience) {
-			break;
-		}
-		b = bufferAt(ib);
-		if (b == NULL || ib + (uint64_t)r->words * 4 > b->address + b->size) {
-			break;
-		}
-		dumped = true;
-		w = (const uint32_t *)(b->kernel + (ib - b->address));
-		stop = rem < r->words ? r->words - rem : 0;
-		from = stop > 96 ? stop - 96 : 0;
-		to = stop + 128 < r->words ? stop + 128 : r->words;
+		fSnapshotDumps++;
 		snprintf(line, sizeof(line), "fbib: submission %u, %u words at %#llx: the core is at %u (%u to go)\n",
-		    r->fence, r->words, (unsigned long long)ib, stop, rem);
+		    fSnapshotFence, words, (unsigned long long)ib, stop, rem);
 		loader_log_line(line);
 		for (uint32_t off = from; off < to; off += 16) {
 			size_t at = 0;
 
-			at += (size_t)snprintf(line + at, sizeof(line) - at, "fbstop: %u %u:", r->fence, off);
+			at += (size_t)snprintf(line + at, sizeof(line) - at, "fbstop: %u %u:", fSnapshotFence, off);
 			for (uint32_t i = 0; i < 16 && off + i < to && at + 10 < sizeof(line); i++) {
 				at += (size_t)snprintf(line + at, sizeof(line) - at, " %08x", w[off + i]);
 			}
@@ -796,7 +806,7 @@ HakiosGPUUserClient::dumpStuck(void)
 			uint32_t nvs = 0, nfs = 0;
 
 			/* the last four programs each stage is given by the stream (SP_VS_OBJ_START, SP_FS_OBJ_START of a6xx) */
-			for (uint32_t i = 0; i + 1 < r->words; i++) {
+			for (uint32_t i = 0; i + 1 < words; i++) {
 				uint32_t reg;
 
 				if ((w[i] >> 28) != 4 || (w[i] & 0x7f) != 1) {
@@ -827,7 +837,6 @@ HakiosGPUUserClient::dumpStuck(void)
 				sayWords("fbfs", fs[i], 8);
 			}
 		}
-		break;
 	}
 	IOLockUnlock(gGPULock);
 }
@@ -1189,9 +1198,15 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 		words[count++] = cmds[i].size / 4;
 	}
 	request->fence = hakios_gpu_submit(addresses, words, count);
-	if (request->fence != 0) {
-		for (uint32_t i = 0; i < count && i < GPU_RECENT; i++) {
-			remember(request->fence, addresses[i], words[i]);
+	if (request->fence != 0 && count != 0) {
+		/* (the first command buffer, kept as it is now: the next frame writes over its memory) */
+		struct gpu_buffer * cb = cmds[0].submit_idx < request->nr_bos ? buffer(bos[cmds[0].submit_idx].handle) : NULL;
+
+		if (cb != NULL && cb->kernel != NULL && cmds[0].size >= 4 &&
+		    cmds[0].submit_offset + cmds[0].size <= cb->size) {
+			keepSnapshot(request->fence, addresses[0], (const uint32_t *)(cb->kernel + cmds[0].submit_offset), words[0]);
+		} else {
+			keepSnapshot(request->fence, 0, NULL, 0);
 		}
 	}
 	if (request->fence != 0) {

@@ -3307,27 +3307,33 @@ hm_describe_function(id f)
 			if (told <= 4) hm_print("%s\n", line);   /* (a few to the console; the file below carries them all) */
 			{
 				/* the console log does not keep these (launchd and the tl: lines flood it): a file the
-				 * scene's rc.jobs cats at the end carries them to the loader's log. The window server's
-				 * NSTemporaryDirectory is a directory nobody made here, so it is made, and /var/tmp is
-				 * the fallback (the same file rc.jobs.cametal reads). */
+				 * scene's rc.jobs cats at the end carries them to the loader's log.  The window server's
+				 * NSTemporaryDirectory is a directory nobody made here, so it is made; /var/tmp and /tmp
+				 * are the fallbacks (rc.jobs.cametal cats all three), since which one is writable here is
+				 * not known until one is. */
 				NSString *dir = NSTemporaryDirectory();
-				NSString *stagePath = [dir stringByAppendingPathComponent:@"hakios-fbstage.log"];
-				FILE *f = NULL;
+				NSString *paths[3];
+				unsigned n = 0, wrote = 0;
 
 				if (dir != nil && [dir length] != 0) {
 					mkdir([dir fileSystemRepresentation], 0777);
-					f = fopen([stagePath fileSystemRepresentation], "a");
+					paths[n++] = [dir stringByAppendingPathComponent:@"hakios-fbstage.log"];
 				}
-				if (f == NULL) {
-					mkdir("/var/tmp", 0777);
-					f = fopen("/var/tmp/hakios-fbstage.log", "a");
+				mkdir("/var/tmp", 0777);
+				paths[n++] = @"/var/tmp/hakios-fbstage.log";
+				paths[n++] = @"/tmp/hakios-fbstage.log";
+				for (unsigned i = 0; i < n; i++) {
+					FILE *f = fopen([paths[i] fileSystemRepresentation], "a");
+
+					if (f != NULL) {
+						fputs(line, f);
+						fputc('\n', f);
+						fclose(f);
+						wrote++;
+					}
 				}
-				if (f != NULL) {
-					fputs(line, f);
-					fputc('\n', f);
-					fclose(f);
-				} else if (told <= 2) {
-					hm_print("fbstage: no file: %s (errno %d)\n", [stagePath UTF8String], errno);
+				if (wrote == 0 && told <= 2) {
+					hm_print("fbstage: no file at any of %u paths (errno %d)\n", n, errno);
 				}
 			}
 		}
