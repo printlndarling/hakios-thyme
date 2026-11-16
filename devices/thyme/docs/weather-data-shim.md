@@ -23,10 +23,12 @@ process.
    `Codable`.  A JSON in WeatherKit's own REST shape decodes into it with
    `JSONDecoder`.  The public REST API's response is documented by Apple
    (`/api/v1/weather/{language}/{latitude}/{longitude}`: `currentWeather`,
-   `forecastHourly`, `forecastDaily`, `weatherAlerts`, and the metadata).  A
-   small test tool should decode a hand-written response into `Weather` on the
-   phone first: that proves the shape and the framework's availability without
-   touching the app.
+   `forecastHourly`, `forecastDaily`, `weatherAlerts`, and the metadata).
+   There is no Swift compiler in this toolchain (`theos/toolchain/linux/
+   iphone` is clang 11 only), so the decode is not ours to test in isolation:
+   the app's own Swift code does it, and the shim only has to hand it the
+   JSON.  The first measurement is therefore the request the app makes and the
+   shape it parses, not a standalone decoder.
 2. **The source.**  A service that needs no device identity: Open-Meteo
    (`https://api.open-meteo.com/v1/forecast`) has current conditions, hourly
    and daily values and needs no key.  Its JSON maps to WeatherKit's fields
@@ -43,13 +45,16 @@ process.
 
 ## Order of work
 
-1. `weatherkit_test`: decode a sample WeatherKit-shaped JSON into `Weather` on
-   the phone and print its fields (a scene like the others).
-2. A host-side converter from an Open-Meteo response to that shape (Python,
+1. An injected dylib in the Weather app that logs every `NSURLSession`/
+   `NSURLConnection` request it makes: the host and path the weather client
+   uses, and what it sends (a JWT header or none).  That says whether the seam
+   is reachable and what the server side of the shim must look like.
+2. The shim's answer: a sample WeatherKit-shaped JSON for that request, built
+   by hand from the public schema, so the app either renders it or its parse
+   error names the field it wanted.  Iterate on the shape from the app's own
+   complaints -- no Swift compiler here, the app is the decoder.
+3. A host-side converter from an Open-Meteo response to that shape (Python,
    `tools/`), checked against the sample.
-3. The app-side shim: the smallest hook that makes Weather render a
-   constructed `Weather`; `NSURLSession` interception first, the
-   `WeatherDaemon` client second.
 4. The weather widget, if it uses the same client, comes with the app.
 
 ## What this is not

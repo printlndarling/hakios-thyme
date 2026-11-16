@@ -161,6 +161,12 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 /redwood/lib/libhakios.prefs.dylib Preferences
 /redwood/lib/libhakios.sydexc.dylib syncdefaultsd
 /redwood/lib/libhakios.bluetooth.dylib bluetoothd"}
+# WEATHERLOG=1: the Weather app started with a library that says every URL request it makes
+# (src/inject_weatherlog.m; docs/weather-data-shim.md)
+if [ -n "${WEATHERLOG:-}" ]; then
+	INJECT="$INJECT
+/redwood/lib/libhakios.weatherlog.dylib Weather"
+fi
 mkdir -p obj
 
 if [ -z "$PREBUILT" ] && ! command -v ld64 >/dev/null; then PREBUILT=1; fi
@@ -312,6 +318,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# an uncaught exception's stack on the console, for a daemon that dies before it logs (src/inject_exc.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.sydexc.dylib -framework Foundation -lobjc \
 			-o obj/libhakios.sydexc.dylib src/inject_exc.m
+		# the Weather app's URL requests, for the data-shim question (src/inject_weatherlog.m)
+		if [ -n "${WEATHERLOG:-}" ]; then
+			$DYN -fblocks -dynamiclib -install_name /redwood/lib/libhakios.weatherlog.dylib -framework Foundation -lobjc \
+				-o obj/libhakios.weatherlog.dylib src/inject_weatherlog.m
+		fi
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.app.dylib src/inject_app.c
@@ -476,6 +487,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/libhakios.tweaks.dylib ] && cp obj/libhakios.tweaks.dylib root/lib/
 	[ -f obj/libhakios.prefs.dylib ] && cp obj/libhakios.prefs.dylib root/lib/
 	[ -f obj/libhakios.sydexc.dylib ] && cp obj/libhakios.sydexc.dylib root/lib/
+	[ -f obj/libhakios.weatherlog.dylib ] && cp obj/libhakios.weatherlog.dylib root/lib/
 	if [ -f obj/HakiosAudio ]; then
 		mkdir -p root/lib/HakiosAudio.driver
 		cp obj/HakiosAudio root/lib/HakiosAudio.driver/
