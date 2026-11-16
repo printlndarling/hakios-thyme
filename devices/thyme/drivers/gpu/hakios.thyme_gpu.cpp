@@ -63,7 +63,6 @@ uint32_t hakios_gpu_last(void);
 void hakios_gpu_worked(uint64_t * microseconds, uint32_t * submissions, uint32_t by[7]);
 void hakios_gpu_report(const char * why);
 void hakios_gpu_ib1(uint64_t * base, uint32_t * remaining);
-void hakios_gpu_programs(uint32_t * vs, uint32_t * fs);
 void hakios_gpu_stop(void);
 
 void HakiosGPUStart(void);
@@ -460,6 +459,13 @@ class HakiosGPUUserClient : public IOUserClient
 	uint32_t                fSnapshotDumps;         /* how many late submissions were said (a few) */
 	uint64_t                fSnapshotAddress;       /* the GPU address its command buffer had */
 	uint64_t                fSnapshotBegan;
+	uint8_t *               fBodySnapshot;          /* the first indirect buffer the submission runs (a pass's draws) */
+	uint32_t                fBodyWords;
+	uint32_t                fBodyBytes;
+	uint64_t                fBodyAddress;
+	uint64_t                fProgAddress[8];        /* the stage programs that body names, */
+	uint32_t                fProgWords[8][8];       /* ... and their first eight words, as they were then */
+	uint32_t                fPrograms;
 
 	struct gpu_buffer * buffer(uint32_t handle);
 	struct gpu_buffer * bufferAt(uint64_t address);
@@ -509,6 +515,9 @@ HakiosGPUUserClient::start(IOService * provider)
 	fSnapshot = NULL;
 	fSnapshotWords = fSnapshotBytes = fSnapshotFence = fSnapshotDumps = 0;
 	fSnapshotAddress = fSnapshotBegan = 0;
+	fBodySnapshot = NULL;
+	fBodyWords = fBodyBytes = fPrograms = 0;
+	fBodyAddress = 0;
 	return fBuffers != NULL;
 }
 
@@ -641,6 +650,10 @@ HakiosGPUUserClient::free(void)
 		IODelete(fSnapshot, uint8_t, fSnapshotBytes);
 		fSnapshot = NULL;
 	}
+	if (fBodySnapshot != NULL) {
+		IODelete(fBodySnapshot, uint8_t, fBodyBytes);
+		fBodySnapshot = NULL;
+	}
 	IOUserClient::free();
 }
 
@@ -698,6 +711,73 @@ HakiosGPUUserClient::keepSnapshot(uint32_t fence, uint64_t address, const uint32
 	fSnapshotAddress = address;
 	fSnapshotFence = fence;
 	fSnapshotBegan = mach_absolute_time();
+	/*
+	 * The first indirect buffer the stream runs: a pass's draws, which is where SP_VS_OBJ_START and
+	 * SP_FS_OBJ_START are written (the outer stream of a GMEM pass only runs the tiles).  Kept with the
+	 * first words at each program it names, since both the body's buffer and the program buffers are
+	 * the next frame's by the time a stuck submission is read.
+	 */
+	for (uint32_t i = 0; i + 3 < count; i++) {
+		if ((words[i] >> 28) == 7 && ((words[i] >> 16) & 0x7f) == 0x3f && (words[i] & 0x3fff) == 3) {
+			uint64_t a = (uint64_t) words[i + 1] | (uint64_t) words[i + 2] << 32;
+			uint32_t n = words[i + 3];
+			struct gpu_buffer * bb = bufferAt(a);
+
+			if (bb == NULL || bb->kernel == NULL || n == 0 || n * 4u > GPU_SNAPSHOT_MAX ||
+			    a + (uint64_t) n * 4 > bb->address + bb->size) {
+				break;
+			}
+			if (fBodyBytes < n * 4u) {
+				uint8_t * fresh = IONewZero(uint8_t, n * 4u);
+
+				if (fresh != NULL) {
+					if (fBodySnapshot != NULL) {
+						IODelete(fBodySnapshot, uint8_t, fBodyBytes);
+					}
+					fBodySnapshot = fresh;
+					fBodyBytes = n * 4u;
+				}
+			}
+			if (fBodySnapshot != NULL && fBodyBytes >= n * 4u) {
+				const uint32_t * bw;
+
+				memcpy(fBodySnapshot, bb->kernel + (a - bb->address), (size_t) n * 4);
+				fBodyWords = n;
+				fBodyAddress = a;
+				bw = (const uint32_t *) fBodySnapshot;
+				for (uint32_t k = 0; k + 1 < n && fPrograms < 8; k++) {
+					struct gpu_buffer * pb;
+					uint64_t pa;
+					uint32_t reg, dup = 0;
+
+					if ((bw[k] >> 28) != 4 || (bw[k] & 0x7f) != 1) {
+						continue;
+					}
+					reg = (bw[k] >> 8) & 0x3ffff;
+					if (reg != 0xa81c && reg != 0xa983) {
+						continue;
+					}
+					pa = bw[k + 1];
+					pb = bufferAt(pa);
+					if (pb == NULL || pb->kernel == NULL || pa + 32 > pb->address + pb->size) {
+						continue;
+					}
+					for (uint32_t q = 0; q < fPrograms; q++) {
+						if (fProgAddress[q] == pa) {
+							dup = 1;
+						}
+					}
+					if (dup) {
+						continue;
+					}
+					fProgAddress[fPrograms] = pa;
+					memcpy(&fProgWords[fPrograms][0], pb->kernel + (pa - pb->address), 32);
+					fPrograms++;
+				}
+			}
+			break;
+		}
+	}
 }
 
 /* The first words at a GPU address one of the client's buffers holds: a shader program, when a draw named it. With the lock held. */
@@ -777,16 +857,32 @@ HakiosGPUUserClient::dumpStuck(void)
 			}
 			loader_log_line(line);
 		}
-		{
-			/* the programs the two stages last named: the hung GPU's own registers, not the stream's plan */
-			uint32_t pvs = 0, pfs = 0;
+		if (fBodyWords != 0 && fBodySnapshot != NULL) {
+			const uint32_t * bw = (const uint32_t *) fBodySnapshot;
+			size_t at = 0;
 
-			hakios_gpu_programs(&pvs, &pfs);
-			snprintf(line, sizeof(line), "fbprog: SP_VS_OBJ_START %#x, SP_FS_OBJ_START %#x\n",
-			    pvs, pfs);
+			at += (size_t)snprintf(line + at, sizeof(line) - at, "fbbody: %u words at %#llx:", fBodyWords, (unsigned long long)fBodyAddress);
+			for (uint32_t i = 0; i < 8 && at + 10 < sizeof(line); i++) {
+				at += (size_t)snprintf(line + at, sizeof(line) - at, " %08x", bw[i]);
+			}
+			if (at + 2 < sizeof(line)) {
+				line[at++] = '\n';
+				line[at] = '\0';
+			}
 			loader_log_line(line);
-			sayWords("fbvs", pvs, 8);
-			sayWords("fbfs", pfs, 8);
+		}
+		for (uint32_t p = 0; p < fPrograms; p++) {
+			size_t at = 0;
+
+			at += (size_t)snprintf(line + at, sizeof(line) - at, "fbprog: %#llx:", (unsigned long long)fProgAddress[p]);
+			for (uint32_t i = 0; i < 8 && at + 10 < sizeof(line); i++) {
+				at += (size_t)snprintf(line + at, sizeof(line) - at, " %08x", fProgWords[p][i]);
+			}
+			if (at + 2 < sizeof(line)) {
+				line[at++] = '\n';
+				line[at] = '\0';
+			}
+			loader_log_line(line);
 		}
 		{
 			uint64_t waitAt = 0;

@@ -4129,3 +4129,19 @@ in the tile's IB2, so the trap now reads SP_VS_OBJ_START and SP_FS_OBJ_START fro
 the GPU's own registers and prints the first words at each (`fbprog`, `fbvs`,
 `fbfs`) -- to be matched against the fbstage lines once they are read with the
 right cat.
+
+The next run (scene `metal650o`) proved the cat right and the register read
+wrong: the fbstage file was read and holds the stage words, but the live read of
+SP_VS_OBJ_START at the trap stopped the machine -- `xl run` ended with "the
+kernel hung", the trap's `fbib` and 14 `fbstop` lines in
+`logs/053718-run.log.live` and no `fbprog` after them.  A wedged 3D block does
+not answer its register bus, so an MMIO read of its registers stalls the CPU.
+The trap no longer reads any SP register: at submit time it copies the first
+CP_INDIRECT_BUFFER the submission runs (the pass's draws: `0x2393e000`, `0x1e6f`
+words in this run) and the first eight words at each `SP_VS_OBJ_START` /
+`SP_FS_OBJ_START` program that body names, and prints those copies
+(`fbbody`, `fbprog`).  The fbstage label was garbage there (`yAcr!!`): `[vs
+name]` no longer answers once the AIR has been taken, so the line now carries
+`hakios_metal_program_name(program)`, the same label as the `linked` line.  The
+stop itself is reproducible: submission 40, word 4064 of 11489, the GMEM store
+blit of a tile, the IB2 behind it consumed.

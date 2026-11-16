@@ -3296,7 +3296,7 @@ hm_describe_function(id f)
 			char line[256];
 			size_t at = 0;
 
-			at += (size_t) snprintf(line + at, sizeof(line) - at, "fbstage: %s+%s vs %u:", [vs name], [fs name], sn);
+			at += (size_t) snprintf(line + at, sizeof(line) - at, "fbstage: %s vs %u:", hakios_metal_program_name(program), sn);
 			for (unsigned i = 0; i < sn && at + 10 < sizeof(line); i++) {
 				at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", sw[i]);
 			}
