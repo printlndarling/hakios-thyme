@@ -4233,4 +4233,9 @@ window server: the Wi-Fi link was not joined in any run ("the network is NOT
 joined", no handshake, no map tiles), and in `maps6` the Wi-Fi service reset
 itself mid-run ("background MHI polling failed: 5", "endpoint reset", "service
 stopped"), the driver's MHI failure mode to chase separately.  The location
-alert is answered by the next scene's tap at (0.5, 0.609).
+alert's rows, measured off the 1080x2340 screenshots, are at 0.655 (Allow Once),
+0.712 (Allow While Using App) and 0.770 (Don't Allow); the scene's taps at 0.918
+serve both the What's New "Continue" and the notification screen's "Not Now",
+which sit at about 0.92 of the screen.  The first attempt at 0.609 was the
+display-scaled estimate, not the picture's, and only put the finger in the
+alert's text; the taps are corrected in the scene.
