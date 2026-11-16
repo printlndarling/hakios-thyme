@@ -1017,6 +1017,10 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 						for (uint32_t i = 0; i < 16 && off + i < words[0] && at + 10 < sizeof(line); i++) {
 							at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", w[off + i]);
 						}
+						if (at + 2 < sizeof(line)) {
+							line[at++] = '\n';
+							line[at] = '\0';
+						}
 						loader_log_line(line);
 					}
 				} else {
