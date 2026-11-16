@@ -163,6 +163,19 @@ the boot argument.  The A650's row as Mesa has it (the `__info13` entry the
 chip id resolves to) and the constant-by-constant delta are in
 `docs/metal-a650.md`.
 
+The port's side of that is now two steps in (`docs/metal-a650-plan.md`):
+`a6xx_chip` carries what differs, `hakios_metal_open()` selects the row from
+the GPU's own chip id and both ids are accepted (`b6b5f880`); the CCU helpers,
+the static state's three differing DBG_ECO entries and the compiler's chip id
+all follow the selected row (`77affe4d`), with the 642L's static_assert
+replaced by host tests over both rows (54 tests, 0 failed checks).  What is
+left before a device run is the register-level audit the plan lists (whether
+`kMaxSets`, `kRegSizeVec4`, `kHas8bppUbwc`, `kHasLpac` and
+`kHasEarlyPreamble` are consumed under other names; the preamble bit in
+`SP_FS_CTRL_REG0`; the 1 MiB GMEM), and then `METAL_PLUGIN=ca` with
+`metal=1 ca_metallib=... metal_all=1` on the phone.  No A650 Metal frame has
+been submitted yet.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
