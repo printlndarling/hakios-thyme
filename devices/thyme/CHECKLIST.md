@@ -402,7 +402,9 @@ coordinate lowered to the constant (0, 0) (`tools/mesa/air/air_to_nir.c`, `a478c
 module compiles with no error (68 951 lines of listing).  A sweep of the pipelinelib's variants
 (13 sampled across the four uber functions, each compiled for chip IDs 0x06030500 and 0x06050002)
 leaves no other refusal: 13 of 13 compile.  Scene `metal650j` (`cb144ed5`) carries the fix; the
-device run waits for the phone to be back on USB.
+device run waits for the phone to be back on USB.  Scene `metal650maps` (`9897e319`,
+`rc.jobs.maps`) is the next one after it: it opens com.apple.Maps with `metal_all=1` first in the
+boot arguments, so Maps, SpringBoard and the window server all take the device.
 
 To name that shader: `hakios_metal_program_stage_words_copy()` (`hakios_metal.h`, `c_api.cpp`)
 gives a stage's first instruction words, the plug-in logs them once per pipeline
