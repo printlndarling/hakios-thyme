@@ -143,11 +143,10 @@ main(int argc, char **argv)
 	find_type("find type 5 (default)", 5);
 
 	if (argc > 1 && strcmp(argv[1], "alloc") == 0) {
-		alloc_persona("systemproxy", 6, 0);
-		/* launchd asks for a type-6 persona of uid 501 on application spawns
-		 * ("No matching personas of type 6 uid 501, found 1"); the proxy for
-		 * the user is a second one, not the system's. */
-		alloc_persona("mobileproxy", 6, 501);
+		/* One type-6 persona, for the mobile user: launchd asks for it both by
+		 * type alone ("No matching personas of type 6 uid -1" when two exist)
+		 * and as uid 501 on application spawns. */
+		alloc_persona("systemproxy", 6, 501);
 		alloc_persona("system", 4, 0);
 		alloc_persona("mobile", 5, 501);
 		find_type("find type 6 after alloc", 6);

@@ -138,11 +138,15 @@ signed with ldid (the Theos toolchain has one) carries the entitlement.
 `persona_test` (`src/persona_test.c` and `.entitlements`) allocates
 `PERSONA_SYSTEM_PROXY` (6), `PERSONA_SYSTEM` (4) and `PERSONA_DEFAULT` (5): on
 the phone all three succeeded (ids 501, 511 and 521) and `kpersona_find_by_type`
-answered 1 found for each; the same calls fail unsigned.  A fourth was added:
-launchd asks for a **type-6 persona of uid 501** on application spawns ("No
-matching personas of type 6 uid 501, found 1"), so a `mobileproxy` (6, uid 501)
-is made beside the system's; with it, that line goes from 1 to **0** and the
-four allocations are ids 501, 511, 521 and 531 (`logs/095010-run.log`).  `rc.launchd` now runs
+answered 1 found for each; the same calls fail unsigned.  The type-6 persona
+is made **for the mobile user (uid 501)**, not uid 0: launchd asks for that
+uid on application spawns ("No matching personas of type 6 uid 501"), which
+the uid-0 proxy leaves at 1 a boot; with the uid-501 proxy it is **0**
+(`logs/095656-run.log`).  Two type-6 personas are worse, not better: launchd's
+own by-type lookup then says "No matching personas of type 6 uid -1, found 2".
+That `uid -1` line (7-8 a boot, during the system domain's setup) is there in
+every configuration, the uid-0 proxy included, so it is launchd's request
+shape, not the personas' number.  `rc.launchd` now runs
 `persona_test alloc` before handing process 1 to launchd, and the type-6 lines
 went from 207 to **0** in the run that did it (`logs/044045-run.log`).
 
