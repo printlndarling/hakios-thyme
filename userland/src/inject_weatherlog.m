@@ -28,6 +28,7 @@
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <mach/mach.h>
 #include <objc/runtime.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -124,6 +125,16 @@ typedef void (^wl_xpc_handler)(wl_xpc_object);
 
 extern wl_xpc_connection xpc_connection_create(const char *, dispatch_queue_t);
 extern wl_xpc_connection xpc_connection_create_mach_service(const char *, dispatch_queue_t, uint64_t);
+
+/* libFPSupport (the FairPlay client) asks launchd for its daemons with
+ * bootstrap_look_up*, not with the xpc_connection creators, so those lookups
+ * are invisible to the table above.  They are named and their results shown:
+ * that is where the app stops (it looks com.apple.fairplayd up and never
+ * connects, while fairplaystub logs its listener and no peer). */
+typedef int wl_kern_return;
+extern wl_kern_return bootstrap_look_up(mach_port_t bootstrap_port, const char *service_name, mach_port_t *service_port);
+extern wl_kern_return bootstrap_look_up3(mach_port_t bootstrap_port, const char *service_name,
+    mach_port_t *service_port, uint64_t flags, void *audit_token);
 extern void xpc_connection_send_message(wl_xpc_connection, wl_xpc_object);
 extern void xpc_connection_send_message_with_reply(wl_xpc_connection, wl_xpc_object, dispatch_queue_t, wl_xpc_handler);
 extern wl_xpc_object xpc_connection_send_message_with_reply_sync(wl_xpc_connection, wl_xpc_object);
@@ -217,6 +228,54 @@ wl_say_xpc(const char *what, wl_xpc_connection connection, wl_xpc_object object)
 	weather_say([NSString stringWithFormat:@"xpc %s %s: %.700s", what, name,
 	    description != NULL ? description : "(none)"]);
 	free(description);
+}
+
+static int
+wl_lookup_interesting(const char *name)
+{
+	static const char *const words[] = {
+		"fairplay", "weather", "auth", "mescal", "token", "jwt",
+	};
+
+	for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+		if (strcasestr(name, words[i]) != NULL) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static wl_kern_return
+wl_bootstrap_look_up(mach_port_t bootstrap_port, const char *service_name, mach_port_t *service_port)
+{
+	static wl_kern_return (*real)(mach_port_t, const char *, mach_port_t *);
+	wl_kern_return result;
+
+	if (real == NULL) {
+		real = (void *)dlsym(RTLD_NEXT, "bootstrap_look_up");
+	}
+	result = real != NULL ? real(bootstrap_port, service_name, service_port) : -1;
+	if (wl_lookup_interesting(service_name)) {
+		weather_say([NSString stringWithFormat:@"bootstrap lookup %s: %d", service_name, result]);
+	}
+	return result;
+}
+
+static wl_kern_return
+wl_bootstrap_look_up3(mach_port_t bootstrap_port, const char *service_name,
+    mach_port_t *service_port, uint64_t flags, void *audit_token)
+{
+	static wl_kern_return (*real)(mach_port_t, const char *, mach_port_t *, uint64_t, void *);
+	wl_kern_return result;
+
+	if (real == NULL) {
+		real = (void *)dlsym(RTLD_NEXT, "bootstrap_look_up3");
+	}
+	result = real != NULL ? real(bootstrap_port, service_name, service_port, flags, audit_token) : -1;
+	if (wl_lookup_interesting(service_name)) {
+		weather_say([NSString stringWithFormat:@"bootstrap lookup3 %s: %d", service_name, result]);
+	}
+	return result;
 }
 
 static wl_xpc_connection
@@ -313,6 +372,8 @@ static const struct {
 	{ (const void *)wl_xpc_connection_send_message, (const void *)xpc_connection_send_message },
 	{ (const void *)wl_xpc_connection_send_message_with_reply, (const void *)xpc_connection_send_message_with_reply },
 	{ (const void *)wl_xpc_connection_send_message_with_reply_sync, (const void *)xpc_connection_send_message_with_reply_sync },
+	{ (const void *)wl_bootstrap_look_up, (const void *)bootstrap_look_up },
+	{ (const void *)wl_bootstrap_look_up3, (const void *)bootstrap_look_up3 },
 };
 
 @implementation NSXPCConnection (WeatherLog)

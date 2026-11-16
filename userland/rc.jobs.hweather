@@ -1,0 +1,23 @@
+# HWEATHER (RC_JOBS=rc.jobs.hweather): the native weather screen, installed
+# and opened the way LocProbe is.  The stock Weather app stops at WeatherKit's
+# FairPlay token (CHECKLIST, "Weather: the app's own fairplayd gate"); this
+# application asks Open-Meteo instead.  The scene joins the network beside it
+# and waits 35 s before opening, so the first fetch has a link; the app tries
+# again every 15 s (up to 8) if it does not.  The low-battery alert (the phone
+# runs these sessions in the teens) is closed, the location consent tapped,
+# and the application's own log printed at the end.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
+/redwood/bin/sleep_hold 300 &
+/var/jb/usr/bin/mkdir -p /var/jb/hweather
+/var/jb/usr/bin/chmod 777 /var/jb/hweather
+/var/jb/usr/bin/mkdir -p /var/jb/Applications
+/var/jb/usr/bin/cp -R /redwood/fw/hweather/HakiosWeather.app /var/jb/Applications/
+/var/jb/usr/bin/uicache -a
+/redwood/bin/rwtouch wait 35
+/var/jb/usr/bin/uiopen hakiosweather://
+/redwood/bin/rwtouch wait 12
+/redwood/bin/rwtouch tap 0.5 0.60
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch tap 0.5 0.694
+/redwood/bin/rwtouch wait 130
+/var/jb/usr/bin/cat /var/jb/hweather/weather.log

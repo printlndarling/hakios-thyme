@@ -323,6 +323,47 @@ its full ~240 s -- `battery_stop=10` appended after `ram.args` did take
 effect -- but with the injection refused, it only showed the app's normal
 screen and then the panel's idle blank from about t=120.
 
+### HakiOS Weather: the native screen, and the battery the runs cost (2026-11-16)
+
+The stock app's wall was followed to its end and stands: with the logger in
+Weather, the application and widget load it; with `fairplaystub` in the
+image, launchd's lookups stop failing and the stub logs its listeners -- but
+**no peer ever connects** to either name, `weatherd` is never spawned, and
+the app makes no connection of its own; its WeatherKit client gives up
+inside itself, before any IPC that libxpc interposition or `bootstrap_look_up`
+interposition can see (the two probes in `inject_weatherlog.m`; the
+`Mescal*` symbols in the dyld cache belong to JetEngine's media path, not
+WeatherKit).  WeatherKit's token needs a Mescal/FairPlay signature that only
+the SEP can make, and no switch, stub or preference found so far moves that.
+So a weather screen that does not ask WeatherKit was built and is what the
+port ships:
+
+* `userland/src/HakiosWeather.m` + `HakiosWeather-Info.plist`: a UIKit
+  application (no Metal, no WeatherKit) that asks CoreLocation for the
+  position, reverse-geocodes it with the district first ("长安区, 西安市",
+  the precision the stock screen had), falls back to Xi'an after thirty
+  seconds, fetches Open-Meteo (no key) for current conditions, twelve hours
+  and seven days, and **retries the fetch every 15 s up to eight times** --
+  the link comes up beside it.  It logs to `/var/jb/hweather/weather.log`.
+* It is installed like LocProbe: the scene copies the bundle from
+  `/redwood/fw/hweather` into `/var/jb/Applications`, runs `uicache -a`, and
+  opens `hakiosweather://` (`userland/rc.jobs.hweather`).
+
+First hardware run (`logs/171...`): the application launched, drew its
+Chinese title, the fallback city (西安), the loading spinner and its own
+error line "获取失败：请求超时" -- the fetch timed out because the Wi-Fi join
+had not finished when it went out (~t=25 of the run).  The scene now waits
+35 s after the join before opening and closes the system low-battery alert
+first; the app retries by itself.  Data on the screen is not yet proven.
+
+The battery guard is real but the runs are expensive: a 4 GB boot image
+uploaded at 24 MB/s, four minutes of kernel and the display on took the
+phone from ~28% to 0 across five sessions, and at 0 the phone disappeared
+from adb and fastboot entirely (it charges only in Android, at the USB
+port's 500 mA, and the loader does not charge at all).  Henceforth: check
+`adb shell dumpsys battery` before every session and run only well above
+20%, prefer fewer, shorter runs, and let Android charge between them.
+
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
 launchd's log carried "Unable to find persona with type 6" on every job spawn
