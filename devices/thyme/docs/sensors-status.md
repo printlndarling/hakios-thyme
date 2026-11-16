@@ -1518,6 +1518,15 @@ The SNS layer (TLV 0x11) for that same group answers **result 5**
 (`logs/112821-run.log`: `sns_cm write was not answered`, `sns_cm SNS result
 5`).  So the service does process the write and refuses it as "no instance":
 the gate is the registry sensor's own start-up, not the write's framing, the
-payload or the pace.  The registry sensor's instance is what the next work has
-to create -- its start-up condition (the index file and what it reads before
-the first client exists) is the whole of the remaining question.
+payload or the pace.
+
+The firmware's own registry strings say what that start-up looks at:
+`Registry dir '%s' not available` and `registry config file '%s' is not
+present` (`slpi.b15`, 239 registry strings).  The AP-side file service already
+implements `opendir`/`readdir`/`closedir` (apps_std methods 26/28/27), yet the
+DSP never asks for the directory: the only file session in the log is
+`hw_platform`, and no `apps_std` open of a registry path appears.  So the
+registry sensor fails **before** it reads anything through the file service --
+the start-up condition is inside the DSP, ahead of the first file call, and
+the next work has to see that interval (DSP logs remain closed; the servreg
+failure reports and the result-5 answers are the visible ends).
