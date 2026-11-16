@@ -1,0 +1,20 @@
+# Commands run by the launchd job com.hakios.demo for the shutter check.
+# The scene opens Camera.app as rc.jobs.camera does -- SpringBoard's first frame
+# takes minutes, so the tap waits 300 s, then the Camera icon at 0.845 0.36 --
+# and waits 165 s for the app (its preview comes about 130 s after the tap;
+# logs/120653-run.log armed the session at kernel t 435 with the location
+# consent alert up at 440, camera108-440.png).  Camera.app now asks for the
+# location when it starts, because location services answer: the alert's
+# "Allow While Using App" is at 0.500 0.699, the same place Weather's had.  It
+# is tapped twice -- the first may come before the alert has animated in, and a
+# tap with no alert on screen only sets the preview's focus.  Then the shutter
+# is tapped three times: it is the white circle at the screen's centre-bottom,
+# 0.500 0.866 (camui2-600.png), and a photograph is the capture stack's
+# StillImageCaptureNow, which the media layer answers with eight whole-sensor
+# frames summed (camera_device.c, still_accumulate()).  Three, because the
+# capture graph restarts the stream for the first photograph and a request that
+# arrives with that restart is dropped: logs/121949-run.log's first request
+# came with "the frames for iOS stopped (closed)" and only the second was
+# given; the taps 50 s apart leave room for the eight frames and the encode.
+# No flip tap: every photograph is the wide S5KHMX's.
+/redwood/bin/rwtouch wait 300 swipe 0.5 0.99 0.5 0.4 250 wait 3 tap 0.845 0.36 wait 165 tap 0.5 0.699 wait 10 tap 0.5 0.699 wait 10 tap 0.5 0.866 wait 50 tap 0.5 0.866 wait 50 tap 0.5 0.866 wait 30
