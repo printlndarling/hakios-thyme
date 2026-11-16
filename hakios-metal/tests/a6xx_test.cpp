@@ -903,3 +903,44 @@ TEST(a6xx_first_draw_fs_input_output_and_raster_words) {
     CHECK_EQ(CP_DRAW_INDX_OFFSET_2_NUM_INDICES(3), 3u);
     CHECK_EQ(CP_DRAW_INDX_OFFSET_0_GS_ENABLE, 0x10000u);
 }
+
+TEST(the_a650_row_is_mesa_info13_and_selection_keeps_the_default) {
+    // Mesa 25.0.7: GPUId(650) -> 0x60500ff -> __info13 (a6xx_base + a6xx_gen3)
+    CHECK_EQ(kA650.chip_id, 0x06050002u);
+    CHECK_EQ(kA650.num_ccu, 3u);
+    CHECK_EQ(kA650.num_sp_cores, 3u);
+    CHECK_EQ(kA650.tile_align_w, 96u);
+    CHECK_EQ(kA650.tile_align_h, 16u);
+    CHECK_EQ(kA650.gmem_bytes, 1024u * 1024u);
+    CHECK_EQ(kA650.gmem_ccu_color_cache_fraction, 2u);
+    CHECK(!kA650.has_lpac);
+    CHECK(kA650.has_early_preamble);
+    CHECK_EQ(kA650.magic_pc_power_cntl, 2u);
+    CHECK_EQ(kA650.magic_tpl1_dbg_eco_cntl, 0x01008000u);
+    CHECK_EQ(kA650.magic_uche_client_pf, 4u);
+    CHECK_EQ(kA650.magic_sp_dbg_eco_cntl, 0x01000000u);
+
+    // the 642L row must agree with the constants until the rest of the port moves onto chip()
+    CHECK_EQ(kA642L.chip_id, kChipId);
+    CHECK_EQ(kA642L.num_ccu, kNumCcu);
+    CHECK_EQ(kA642L.num_sp_cores, kNumSpCores);
+    CHECK_EQ(kA642L.tile_align_w, kTileAlignW);
+    CHECK_EQ(kA642L.tile_align_h, kTileAlignH);
+    CHECK_EQ(kA642L.gmem_bytes, kGmemBytes);
+    CHECK_EQ(kA642L.gmem_ccu_color_cache_fraction, kGmemCcuColorCacheFraction);
+    CHECK_EQ(kA642L.has_lpac, kHasLpac);
+    CHECK_EQ(kA642L.has_early_preamble, kHasEarlyPreamble);
+    CHECK_EQ(kA642L.magic_pc_power_cntl, kMagicPcPowerCntl);
+    CHECK_EQ(kA642L.magic_tpl1_dbg_eco_cntl, kMagicTpl1DbgEcoCntl);
+    CHECK_EQ(kA642L.magic_uche_client_pf, kMagicUcheClientPf);
+    CHECK_EQ(kA642L.magic_sp_dbg_eco_cntl, kMagicSpDbgEcoCntl);
+
+    // 0 and the 642L's id keep the row the driver was written on; the A650's id takes its own; another id is refused
+    CHECK(chip_select(0));
+    CHECK(&chip() == &kA642L);
+    CHECK(chip_select(kA650.chip_id));
+    CHECK(&chip() == &kA650);
+    CHECK(!chip_select(0x06010000));
+    CHECK(&chip() == &kA650);
+    chip_select(0);
+}

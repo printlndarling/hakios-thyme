@@ -23,6 +23,60 @@
 
 namespace hakios::metal::a6xx {
 
+// --- the GPUs this driver has a row for -----------------------------------------------------------------------------
+// Everything below that differs between the Adreno 7c+ Gen 3 the driver was written on and thyme's Adreno 650 lives in
+// one row each; the constants further down are the 642L's until the rest of the port moves onto chip().  The A650's
+// values are Mesa 25.0.7's freedreno_devices.h __info13 row (GPUId(650) -> 0x60500ff) and freedreno_devices.py's
+// a6xx_base + a6xx_gen3; devices/thyme/docs/metal-a650.md has the constant-by-constant delta.
+struct a6xx_chip {
+    uint32_t chip_id;
+    uint32_t num_ccu;
+    uint32_t num_sp_cores;
+    uint32_t tile_align_w, tile_align_h;
+    uint32_t gmem_bytes;
+    uint32_t gmem_ccu_color_cache_fraction;
+    bool has_lpac;
+    bool has_early_preamble;
+    uint32_t magic_pc_power_cntl;
+    uint32_t magic_tpl1_dbg_eco_cntl;
+    uint32_t magic_uche_client_pf;
+    uint32_t magic_sp_dbg_eco_cntl;
+};
+
+inline constexpr a6xx_chip kA642L = {
+    /* chip_id */ 0x06030500u, /* num_ccu */ 2, /* num_sp_cores */ 2,
+    /* tile_align_w */ 32, /* tile_align_h */ 16,
+    /* gmem_bytes */ 512u * 1024u, /* gmem_ccu_color_cache_fraction */ 4,
+    /* has_lpac */ true, /* has_early_preamble */ false,
+    /* magic_pc_power_cntl */ 1, /* magic_tpl1_dbg_eco_cntl */ 0x05008000u,
+    /* magic_uche_client_pf */ 0x00000084u, /* magic_sp_dbg_eco_cntl */ 0x00000006u,
+};
+
+inline constexpr a6xx_chip kA650 = {
+    /* chip_id */ 0x06050002u, /* num_ccu */ 3, /* num_sp_cores */ 3,
+    /* tile_align_w */ 96, /* tile_align_h */ 16,
+    /* gmem_bytes */ 1024u * 1024u, /* gmem_ccu_color_cache_fraction */ 2,
+    /* has_lpac */ false, /* has_early_preamble */ true,
+    /* magic_pc_power_cntl */ 2, /* magic_tpl1_dbg_eco_cntl */ 0x01008000u,
+    /* magic_uche_client_pf */ 0x00000004u, /* magic_sp_dbg_eco_cntl */ 0x01000000u,
+};
+
+// The row the driver runs with.  hakios_metal_open() selects it from the GPU's own chip ID; 0 (a kernel that does not
+// say, and the fake GPU) keeps the row this driver was written on.
+inline const a6xx_chip* g_selected_chip = &kA642L;
+inline const a6xx_chip& chip() { return *g_selected_chip; }
+inline bool chip_select(uint32_t chip_id) {
+    if (chip_id == 0 || chip_id == kA642L.chip_id) {
+        g_selected_chip = &kA642L;
+        return true;
+    }
+    if (chip_id == kA650.chip_id) {
+        g_selected_chip = &kA650;
+        return true;
+    }
+    return false;
+}
+
 // --- this chip -----------------------------------------------------------------------------------------------------
 // From Mesa's src/freedreno/common/freedreno_devices.py: the entry for chip_id ...06030500 ("Adreno 7c+ Gen 3", every
 // speedbin of the A635) is a6xx_base + a6xx_gen4 with num_ccu = 2.
