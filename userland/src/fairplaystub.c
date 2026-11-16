@@ -90,8 +90,9 @@ main(void)
 		close(console);
 	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	/* (the SDK has no libxpc to link against: the four calls are resolved from the system's own library) */
-	if (dlopen("/usr/lib/libxpc.dylib", RTLD_LAZY) == NULL) {
+	/* (the SDK has no libxpc to link against: the four calls are resolved from the system's own library,
+	 * which this image's dyld cache carries as /usr/lib/system/libxpc.dylib) */
+	if (dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY) == NULL) {
 		printf("fairplaystub: no libxpc: %s\n", dlerror());
 		return 1;
 	}

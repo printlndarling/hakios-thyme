@@ -181,9 +181,13 @@ as a launchd job's MachServices and answers with empty XPC replies.  With it,
 the app's fairplayd lookups stop failing -- no "No such process" lines where the
 run before had 15-24 -- and launchd spawned the stub on demand (`user/501/
 com.hakios.fairplaystub`, "launching: ipc (mach)", `logs/133948-run.log`): the
-app did send it something.  The stub's own account of that was lost, its
-standard output being /dev/null; it now writes to /dev/console (its plist names
-the path too), and the next run's log carries the messages' descriptions.
+app did send it something.  The stub's own account was lost twice: a launchd
+job's standard output is /dev/null, and its `dlopen("/usr/lib/libxpc.dylib")`
+failed because this image's dyld cache carries the library as
+`/usr/lib/system/libxpc.dylib` (its program says so on the console,
+`logs/135006-run.log`).  It now writes to /dev/console (its plist names the
+path too) and opens the right path; the next run's log carries the messages'
+descriptions.
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
