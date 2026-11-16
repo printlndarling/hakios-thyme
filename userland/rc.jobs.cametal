@@ -3,3 +3,6 @@
 # the full-then-partial frame the weather scene showed comes with an
 # application's surface or happens on the home screen by itself.
 /redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 200
+/bin/cat /var/tmp/com.apple.backboardd/hakios-fbstage.log 2>/dev/null
+/bin/cat /var/tmp/hakios-fbstage.log

@@ -89,6 +89,7 @@
 #include <sys/sysctl.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 #import <Metal/Metal.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -3291,7 +3292,7 @@ hm_describe_function(id f)
 		unsigned sn = hakios_metal_program_stage_words_copy(program, 0, sw, 8);
 		unsigned fn2 = hakios_metal_program_stage_words_copy(program, 1, fw, 8);
 
-		if (told++ < 32) {
+		if (told++ < 400) {
 			char line[256];
 			size_t at = 0;
 
@@ -3303,7 +3304,32 @@ hm_describe_function(id f)
 			for (unsigned i = 0; i < fn2 && at + 10 < sizeof(line); i++) {
 				at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", fw[i]);
 			}
-			hm_print("%s\n", line);
+			if (told <= 4) hm_print("%s\n", line);   /* (a few to the console; the file below carries them all) */
+			{
+				/* the console log does not keep these (launchd and the tl: lines flood it): a file the
+				 * scene's rc.jobs cats at the end carries them to the loader's log. The window server's
+				 * NSTemporaryDirectory is a directory nobody made here, so it is made, and /var/tmp is
+				 * the fallback (the same file rc.jobs.cametal reads). */
+				NSString *dir = NSTemporaryDirectory();
+				NSString *stagePath = [dir stringByAppendingPathComponent:@"hakios-fbstage.log"];
+				FILE *f = NULL;
+
+				if (dir != nil && [dir length] != 0) {
+					mkdir([dir fileSystemRepresentation], 0777);
+					f = fopen([stagePath fileSystemRepresentation], "a");
+				}
+				if (f == NULL) {
+					mkdir("/var/tmp", 0777);
+					f = fopen("/var/tmp/hakios-fbstage.log", "a");
+				}
+				if (f != NULL) {
+					fputs(line, f);
+					fputc('\n', f);
+					fclose(f);
+				} else if (told <= 2) {
+					hm_print("fbstage: no file: %s (errno %d)\n", [stagePath UTF8String], errno);
+				}
+			}
 		}
 	}
 	{

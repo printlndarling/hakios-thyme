@@ -3505,6 +3505,18 @@ hakios_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t cou
 	return gpu_fence;
 }
 
+/* Where the 3D core is in the indirect buffer it runs: its address and the words left after it. */
+void
+hakios_gpu_ib1(uint64_t *base, uint32_t *remaining)
+{
+	if (base != NULL) {
+		*base = (uint64_t)rd(gpu.base + CP_IB1_BASE + 4) << 32 | rd(gpu.base + CP_IB1_BASE);
+	}
+	if (remaining != NULL) {
+		*remaining = rd(gpu.base + CP_IB1_REM_SIZE);
+	}
+}
+
 /* A submission does not come back: what the 3D core and its SMMU context say. */
 void
 hakios_gpu_report(const char *why)

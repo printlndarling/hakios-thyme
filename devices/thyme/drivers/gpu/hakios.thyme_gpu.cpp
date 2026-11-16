@@ -62,6 +62,7 @@ bool hakios_gpu_done(uint32_t fence);
 uint32_t hakios_gpu_last(void);
 void hakios_gpu_worked(uint64_t * microseconds, uint32_t * submissions, uint32_t by[7]);
 void hakios_gpu_report(const char * why);
+void hakios_gpu_ib1(uint64_t * base, uint32_t * remaining);
 void hakios_gpu_stop(void);
 
 void HakiosGPUStart(void);
@@ -427,6 +428,20 @@ struct gpu_kept {
 #define GPU_KEEP_FROM           (256u << 10)    /* bytes: smaller ones are not worth it */
 static TUNABLE(uint32_t, gGPUKeep, "gpu_keep", 1);      /* boot-arg gpu_keep=0 (a test): none kept; gpu_keep=2: kept ones cleared when given again */
 
+/*
+ * The last command buffers given to the core, by address and length: when one does not come back
+ * the core is still in its indirect buffer, and that buffer's words -- what the command processor
+ * was running when it stopped -- are read from its own memory before a later submission writes over
+ * it (the window server reuses the same three buffers frame after frame).
+ */
+struct gpu_recent {
+	uint32_t                        fence;
+	uint32_t                        words;
+	uint64_t                        address;
+	uint64_t                        began;
+};
+#define GPU_RECENT              8
+
 class HakiosGPUUserClient : public IOUserClient
 {
 	OSDeclareDefaultStructors(HakiosGPUUserClient);
@@ -443,8 +458,14 @@ class HakiosGPUUserClient : public IOUserClient
 	uint32_t                fLeftCount;
 	struct gpu_kept         fKept[GPU_KEPT];
 	uint64_t                fKeptBytes;
+	struct gpu_recent       fRecent[GPU_RECENT];
+	uint32_t                fRecentAt;
 
 	struct gpu_buffer * buffer(uint32_t handle);
+	struct gpu_buffer * bufferAt(uint64_t address);
+	void remember(uint32_t fence, uint64_t address, uint32_t words);
+	void dumpStuck(void);
+	void sayWords(const char * what, uint64_t address, unsigned count);
 	struct gpu_buffer * newBuffer(IOMemoryDescriptor * memory, uint64_t from, uint64_t size, uint32_t flags, uint32_t * handle);
 	void freeBuffer(struct gpu_buffer * b);
 	bool keep(IOMemoryDescriptor * memory, uint8_t * kernel, uint64_t address, uint64_t size, uint32_t flags);
@@ -485,6 +506,8 @@ HakiosGPUUserClient::start(IOService * provider)
 		return false;
 	}
 	fBuffers = IONewZero(struct gpu_buffer, GPU_BUFFERS);
+	bzero(fRecent, sizeof(fRecent));
+	fRecentAt = 0;
 	return fBuffers != NULL;
 }
 
@@ -627,6 +650,186 @@ HakiosGPUUserClient::buffer(uint32_t handle)
 		return NULL;
 	}
 	return &fBuffers[handle - 1];
+}
+
+/* The client's buffer that holds ADDRESS, if one does. With the lock held. */
+struct gpu_buffer *
+HakiosGPUUserClient::bufferAt(uint64_t address)
+{
+	for (uint32_t i = 0; i < GPU_BUFFERS; i++) {
+		struct gpu_buffer * b = &fBuffers[i];
+
+		if (b->memory != NULL && b->kernel != NULL && address >= b->address && address < b->address + b->size) {
+			return b;
+		}
+	}
+	return NULL;
+}
+
+/* A submission that went to the core: kept, so that a stuck one's buffer can be read before it is written over. */
+void
+HakiosGPUUserClient::remember(uint32_t fence, uint64_t address, uint32_t words)
+{
+	struct gpu_recent * r = &fRecent[fRecentAt++ % GPU_RECENT];
+
+	r->fence = fence;
+	r->address = address;
+	r->words = words;
+	r->began = mach_absolute_time();
+}
+
+/* The first words at a GPU address one of the client's buffers holds: a shader program, when a draw named it. With the lock held. */
+void
+HakiosGPUUserClient::sayWords(const char * what, uint64_t address, unsigned count)
+{
+	struct gpu_buffer * b = bufferAt(address);
+	char line[256];
+	size_t at = 0;
+
+	if (b == NULL || b->kernel == NULL) {
+		snprintf(line, sizeof(line), "%s: %#llx: no buffer of this program holds it\n", what, (unsigned long long)address);
+		loader_log_line(line);
+		return;
+	}
+	if (address + (uint64_t)count * 4 > b->address + b->size) {
+		count = (unsigned)((b->address + b->size - address) / 4);
+	}
+	const uint32_t * w = (const uint32_t *)(b->kernel + (address - b->address));
+	at += (size_t)snprintf(line + at, sizeof(line) - at, "%s: %#llx:", what, (unsigned long long)address);
+	for (unsigned i = 0; i < count && at + 10 < sizeof(line); i++) {
+		at += (size_t)snprintf(line + at, sizeof(line) - at, " %08x", w[i]);
+	}
+	if (at + 2 < sizeof(line)) {
+		line[at++] = '\n';
+		line[at] = '\0';
+	}
+	loader_log_line(line);
+}
+
+/*
+ * A submission has been in the core for a second and has not come back, and the core is still in
+ * its indirect buffer: say where in the buffer it is and what the words there are -- the word a
+ * wait polls, and the shader programs the draws named -- read from the buffer's own memory before
+ * the window server's next frame writes over it (it reuses the same few buffers every frame).
+ */
+void
+HakiosGPUUserClient::dumpStuck(void)
+{
+	static bool dumped;
+	uint64_t ib = 0, patience;
+	uint32_t rem = 0;
+
+	if (dumped || fRecentAt == 0) {
+		return;
+	}
+	nanoseconds_to_absolutetime(1000 * NSEC_PER_MSEC, &patience);
+	hakios_gpu_ib1(&ib, &rem);
+	if (ib == 0) {
+		return;
+	}
+	IOLockLock(gGPULock);
+	for (uint32_t n = 0; n < GPU_RECENT; n++) {
+		struct gpu_recent * r = &fRecent[(fRecentAt + GPU_RECENT - 1 - n) % GPU_RECENT];
+		struct gpu_buffer * b;
+		const uint32_t * w;
+		uint32_t stop, from, to;
+		char line[256];
+
+		if (r->fence == 0 || r->words == 0 || r->address != ib) {
+			continue;
+		}
+		if (hakios_gpu_done(r->fence) || mach_absolute_time() - r->began < patience) {
+			break;
+		}
+		b = bufferAt(ib);
+		if (b == NULL || ib + (uint64_t)r->words * 4 > b->address + b->size) {
+			break;
+		}
+		dumped = true;
+		w = (const uint32_t *)(b->kernel + (ib - b->address));
+		stop = rem < r->words ? r->words - rem : 0;
+		from = stop > 96 ? stop - 96 : 0;
+		to = stop + 128 < r->words ? stop + 128 : r->words;
+		snprintf(line, sizeof(line), "fbib: submission %u, %u words at %#llx: the core is at %u (%u to go)\n",
+		    r->fence, r->words, (unsigned long long)ib, stop, rem);
+		loader_log_line(line);
+		for (uint32_t off = from; off < to; off += 16) {
+			size_t at = 0;
+
+			at += (size_t)snprintf(line + at, sizeof(line) - at, "fbstop: %u %u:", r->fence, off);
+			for (uint32_t i = 0; i < 16 && off + i < to && at + 10 < sizeof(line); i++) {
+				at += (size_t)snprintf(line + at, sizeof(line) - at, " %08x", w[off + i]);
+			}
+			if (at + 2 < sizeof(line)) {
+				line[at++] = '\n';
+				line[at] = '\0';
+			}
+			loader_log_line(line);
+		}
+		{
+			uint64_t waitAt = 0;
+			uint32_t waitRef = 0;
+
+			for (uint32_t i = from; i + 6 < to; i++) {
+				if ((w[i] >> 28) == 7 && ((w[i] >> 16) & 0x7f) == 0x3c && (w[i] & 0x3fff) == 6) {
+					waitAt = (uint64_t)w[i + 1] | (uint64_t)w[i + 2] << 32;
+					waitRef = w[i + 3];
+				}
+			}
+			if (waitAt != 0) {
+				struct gpu_buffer * wb = bufferAt(waitAt);
+
+				if (wb != NULL && wb->kernel != NULL && waitAt + 4 <= wb->address + wb->size) {
+					uint32_t value = *(const uint32_t *)(wb->kernel + (waitAt - wb->address));
+
+					snprintf(line, sizeof(line), "fbwait: the core waits for %#x at %#llx; the word there is %#x\n",
+					    waitRef, (unsigned long long)waitAt, value);
+				} else {
+					snprintf(line, sizeof(line), "fbwait: the core waits for %#x at %#llx; no buffer of this program holds it\n",
+					    waitRef, (unsigned long long)waitAt);
+				}
+				loader_log_line(line);
+			}
+		}
+		{
+			uint64_t vs[4] = { 0, 0, 0, 0 }, fs[4] = { 0, 0, 0, 0 };
+			uint32_t nvs = 0, nfs = 0;
+
+			/* the last four programs each stage is given by the stream (SP_VS_OBJ_START, SP_FS_OBJ_START of a6xx) */
+			for (uint32_t i = 0; i + 1 < r->words; i++) {
+				uint32_t reg;
+
+				if ((w[i] >> 28) != 4 || (w[i] & 0x7f) != 1) {
+					continue;
+				}
+				reg = (w[i] >> 8) & 0x3ffff;
+				if (reg != 0xa81c && reg != 0xa983) {
+					continue;
+				}
+				if (reg == 0xa81c) {
+					if (nvs < 4) {
+						vs[nvs++] = w[i + 1];
+					} else {
+						vs[0] = vs[1]; vs[1] = vs[2]; vs[2] = vs[3]; vs[3] = w[i + 1];
+					}
+				} else {
+					if (nfs < 4) {
+						fs[nfs++] = w[i + 1];
+					} else {
+						fs[0] = fs[1]; fs[1] = fs[2]; fs[2] = fs[3]; fs[3] = w[i + 1];
+					}
+				}
+			}
+			for (uint32_t i = 0; i < nvs; i++) {
+				sayWords("fbvs", vs[i], 8);
+			}
+			for (uint32_t i = 0; i < nfs; i++) {
+				sayWords("fbfs", fs[i], 8);
+			}
+		}
+		break;
+	}
+	IOLockUnlock(gGPULock);
 }
 
 /*
@@ -919,6 +1122,7 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 		IOLog("HakiosGPU: a submission of %u command buffers in %u buffers: not taken\n", request->nr_cmds, request->nr_bos);
 		return kIOReturnBadArgument;
 	}
+	dumpStuck();
 	bos = IONew(struct msm_gem_submit_bo, request->nr_bos);
 	cmds = IONew(struct msm_gem_submit_cmd, request->nr_cmds);
 	if (bos == NULL || cmds == NULL) {
@@ -985,6 +1189,11 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 		words[count++] = cmds[i].size / 4;
 	}
 	request->fence = hakios_gpu_submit(addresses, words, count);
+	if (request->fence != 0) {
+		for (uint32_t i = 0; i < count && i < GPU_RECENT; i++) {
+			remember(request->fence, addresses[i], words[i]);
+		}
+	}
 	if (request->fence != 0) {
 		static unsigned logged;
 
@@ -1115,7 +1324,7 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 
 				/* the other buffers the failing submission names, by their first words: the window server's compiled
 				 * shader programs are among them, and the plug-in's fbstage lines carry the same words */
-				for (uint32_t i = 0; i < request->nr_bos && shown < 8; i++) {
+				for (uint32_t i = 0; i < request->nr_bos && shown < 24; i++) {
 					struct gpu_buffer * b = buffer(bos[i].handle);
 					char bl[160];
 					size_t ba = 0;
