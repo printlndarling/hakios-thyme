@@ -321,9 +321,12 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# an uncaught exception's stack on the console, for a daemon that dies before it logs (src/inject_exc.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.sydexc.dylib -framework Foundation -lobjc \
 			-o obj/libhakios.sydexc.dylib src/inject_exc.m
-		# the Weather app's URL requests, for the data-shim question (src/inject_weatherlog.m)
+		# the Weather app's URL requests and libxpc traffic, for the data-shim
+		# question (src/inject_weatherlog.m; the interpose table needs the xpc
+		# symbols looked up at load, hence dynamic_lookup)
 		if [ -n "${WEATHERLOG:-}" ]; then
 			$DYN -fblocks -dynamiclib -install_name /redwood/lib/libhakios.weatherlog.dylib -framework Foundation -lobjc \
+				-Wl,-undefined,dynamic_lookup \
 				-o obj/libhakios.weatherlog.dylib src/inject_weatherlog.m
 		fi
 		# ... and inside an application, to say what killed it (src/inject_app.c)

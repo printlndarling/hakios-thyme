@@ -255,6 +255,53 @@ clock starts at its own boot, about 117 s (the boot image upload) before the
 kernel's, so `SECS=380` is about 260 s of kernel, and the earlier `SECS=260`
 runs returned at about 130 s.
 
+With `fairplaystub` in the image (lookups succeed, replies empty) the app
+still does not fetch weather: the boot's only Weather connection is its App
+Store bag (`bag.itunes.apple.com`, 17471 bytes in / 1017 out,
+`logs/153505-run.log`), the fairplayd lookup failures are gone, and weatherd
+is spawned again (15:36:33) without a single request of its own.  Two things
+are now known about the gate's plumbing: this Foundation has **no
+NSXPCConnection** -- every `class_getInstanceMethod` for its selectors fails,
+and WeatherDaemon's Swift client goes through libswiftXPC on the libxpc C
+API -- and `com.apple.weatherkit.authservice`, the service that mints the
+JWT (`WDSJWTAuthenticatorService`, `generateTokenWithUrl:completion:`,
+`WDSJWTMescalSigner`), is declared by no launchd job in `/redwood/
+LaunchDaemons` or in the iOS rootfs's weatherd plist (checked:
+`sysimage/rootfs/System/Library/LaunchDaemons/com.apple.weatherd.plist` has
+five services, not this one).  A lookup of it gets launchd's "Service stub
+created" (NewsTag's at 15:35:43) with nothing behind it.  What the app sends
+over XPC and what comes back is now visible: the logger carries a
+`__DATA,__interpose` table for `xpc_connection_create`/`..._create_mach_service`
+and the send and reply calls, so the next run names the service the app
+connects to and prints the request and reply it exchanges -- the token, or
+the failure that stops it.
+
+The first run with that table (`logs/154426-run.log.live`) showed it works,
+and also that logging everything is wrong: WeatherWidget polls some service
+in a tight synchronous loop and 1058 of its messages filled the kernel's 1 MB
+log, rotating the Weather app's own lines out before the run ended.  The
+logger now flattens each description onto one line and skips preference
+traffic -- the app and the widget both poll cfprefsd in tight synchronous
+loops (898 and 1058 messages in two runs), which was the flood -- and says
+everything else.  The same run's final log was framebuffer again even though
+screenshots had been stopped: the loader does stage the combined log at the
+kernel's return (`write_logs` -> `compose_logs` in `xnuloader/loader.c`), but
+a screenshot in flight can stage the screen after that and before the host's
+`get_staged`, and the fetch then takes the screen.  The 15 s `.live` copy is
+the run's reliable text; the next runs set `XL_FOLLOW=5` for a finer last
+copy.
+
+The short runs were not the loader's clock at all: at 24-26% charge, with
+`ram.args`' `battery_stop=25` and its 30 s poll, the power guard ended the
+run about 100 s in -- "battguard: the charge is 24%, at or below
+battery_stop=25 three looks in a row: back to the loader"
+(`logs/155121-run.log.live`).  That is just before `weatherd` is normally
+spawned (it did not spawn at all in that run), so the probe never saw it.
+`PE_parse_boot_argn` takes the first occurrence of an argument
+(`pexpert/gen/bootargs.c`), so `weather.sh` now takes `BATTERY_STOP=<percent>`
+and puts it ahead of `ram.args`: a watched long run uses 10, while the
+default image keeps 25.
+
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
 launchd's log carried "Unable to find persona with type 6" on every job spawn
