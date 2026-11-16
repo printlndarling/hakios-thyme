@@ -399,8 +399,10 @@ is that stop.  It was found by building the host Mesa (`tools/air/mk-host.sh`; t
 `pkg-config` was missing, so meson never saw libdrm) and compiling `fixed_frag_lph_cpf` with
 `ir3_compiler`, which aborted there once `ir3_context_error` was made to say its reason.  With the
 coordinate lowered to the constant (0, 0) (`tools/mesa/air/air_to_nir.c`, `a478c5cd`) the same
-module compiles with no error (68 951 lines of listing).  Scene `metal650j` (`cb144ed5`) carries
-the fix; the device run waits for the phone to be back on USB.
+module compiles with no error (68 951 lines of listing).  A sweep of the pipelinelib's variants
+(13 sampled across the four uber functions, each compiled for chip IDs 0x06030500 and 0x06050002)
+leaves no other refusal: 13 of 13 compile.  Scene `metal650j` (`cb144ed5`) carries the fix; the
+device run waits for the phone to be back on USB.
 
 To name that shader: `hakios_metal_program_stage_words_copy()` (`hakios_metal.h`, `c_api.cpp`)
 gives a stage's first instruction words, the plug-in logs them once per pipeline
