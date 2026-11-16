@@ -1611,39 +1611,10 @@ hm_bitcode_for(id function, NSString *pipeline, BOOL vertex)
 	NSData *own = ((NSData *(*)(id, SEL))objc_msgSend)(function, sel_getUid("bitcodeData")), *variant = nil;
 
 	if (name != nil && [name hasPrefix:@"edr_scale_"]) {
-		/* the stand-in at compile time too: the window server gets edr_scale by a road the library hooks do not see,
-		 * and the later CoreAnimation's reads buffers iOS 16.5's never binds (see hm_stand_ins) */
-		static NSData *copies[2];
-		static dispatch_once_t once;
-		const int lpf = [name hasSuffix:@"_lpf"];
-
-		dispatch_once(&once, ^{
-			id<MTLDevice> device = [function respondsToSelector:@selector(device)] ? [function device] : nil;
-
-			if (device == nil) device = MTLCreateSystemDefaultDevice();   /* (the function's own answered nil) */
-			NSError *e = nil;
-			id lib = [device newLibraryWithURL:[NSURL fileURLWithPath:@"/redwood/share/ca-share/QuartzCore-default.metallib"]
-						     error:&e];
-			hm_print("inplace_copy for edr_scale: device %s, library %s%s\n", device ? "yes" : "nil", lib ? "opened" : "not opened: ",
-				 lib ? "" : [[e description] UTF8String]);
-			for (int i = 0; i < 2 && lib != nil; i++) {
-				id f = [lib newFunctionWithName:i ? @"inplace_copy_lpf" : @"inplace_copy_lph"];
-
-				if (f != nil && [f respondsToSelector:sel_getUid("bitcodeData")]) {
-					copies[i] = [((NSData *(*)(id, SEL))objc_msgSend)(f, sel_getUid("bitcodeData")) retain];
-				}
-				[f release];
-			}
-			[lib release];
-		});
-		static unsigned told;
-		if (told++ < 3 || (told & (told - 1)) == 0) {
-			hm_print("CoreAnimation's %s: %s (%u times)\n", [name UTF8String], copies[lpf] != nil ?
-				 "compiled as inplace_copy, the source as it is" : "no inplace_copy to stand in, its own module", told);
-		}
-		if (copies[lpf] != nil) {
-			return copies[lpf];
-		}
+		/* While the stand-in was a later CoreAnimation's library, its edr_scale was forced to inplace_copy's module:
+		 * the window server gets edr_scale by a road the library hooks do not see, and the later function reads
+		 * buffers iOS 16.5's never binds (see hm_stand_ins). The image's own default.metallib carries the edr_scale
+		 * this CoreAnimation binds for, so its own module is the one to compile now. (hakios) */
 		return own;
 	}
 	if (name == nil || ![name hasPrefix:@"fixed_"]) {
@@ -1876,21 +1847,20 @@ hm_functions_encode_from_metadata(void)
 }
 
 /*
- * Functions CoreAnimation of iOS 16.5 asks its library for that the library given it (QuartzCore-default.metallib:
- * this image's uber shaders and a later CoreAnimation's other functions) does not have under that name, each answered
- * with the nearest one it has: luma_boost (a picture's luminance raised) by inplace_copy, the picture as it is -- both
- * read only the source at texture 3 beside std_vert1 (Metal's reflection on a Mac); edr_scale, tried first, reads
- * buffers 5 and 7 that CoreAnimation binds for neither, and its draws were refused. A function asked for that the
- * library has is never touched. (hakios)
+ * Functions CoreAnimation of iOS 16.5 asks its library for that the library given it does not have under that name,
+ * each answered with the nearest one it has: luma_boost (a picture's luminance raised) by inplace_copy, the picture as
+ * it is -- both read only the source at texture 3 beside std_vert1 (Metal's reflection on a Mac). The library given it
+ * is now the image's own QuartzCore.framework/default.metallib (1 014 208 bytes: it was in rootfs.dmg, and
+ * sysimage/select-system.py had left it out of sysimage/rootfs; see CHECKLIST), so luma_boost and edr_scale are found
+ * there by name and none of this fires -- the table stays for a library that lacks them, as the first one did. A
+ * function asked for that the library has is never touched. (hakios)
  */
 static const char *const hm_stand_ins[][3] = {
 	/* asked for, given instead, "always" when the library's own is the wrong one (not just missing) */
 	{ "luma_boost_lph", "inplace_copy_lph", "" },
 	{ "luma_boost_lpf", "inplace_copy_lpf", "" },
-	/* the later CoreAnimation's edr_scale reads buffers 5 and 7 and texture 9; iOS 16.5's binds three fragment
-	 * buffers and its source at 3, and 3 259 of its draws were refused in one run (logs/163451-run.log) */
-	{ "edr_scale_lph", "inplace_copy_lph", "always" },
-	{ "edr_scale_lpf", "inplace_copy_lpf", "always" },
+	{ "edr_scale_lph", "inplace_copy_lph", "" },
+	{ "edr_scale_lpf", "inplace_copy_lpf", "" },
 };
 static id (*hm_orig_fn_name)(id, SEL, NSString *);
 static id (*hm_orig_fn_constants)(id, SEL, NSString *, MTLFunctionConstantValues *, NSError **);
@@ -2483,15 +2453,28 @@ hm_print_callers(const char *what)
 				 withDestinationPath:[parent stringByAppendingPathComponent:entry] error:NULL];
 		}
 	}
-	/* QuartzCore's of this image (the iPhone X's) has no default.metallib beside it; the one made of its own functions
-	 * file (hakios: merge_metallib.py, the four uber shaders, one variant each -- hm_bitcode_for() picks the variant a
-	 * pipeline needs) stands in for it, from where the image puts it */
+	/* QuartzCore's default.metallib is in the IPSW's root filesystem but not in this system image (select-system.py
+	 * leaves .metallib out of framework directories); the image carries it at /redwood/share/ca-share, and the mirror
+	 * takes it as the one beside the pipeline library. */
 	NSString *ours = @"/redwood/share/ca-share/QuartzCore-default.metallib";
 	NSString *beside = [frame stringByAppendingPathComponent:@"default.metallib"];
 	if ([path rangeOfString:@"QuartzCore.framework"].location != NSNotFound && ![fm fileExistsAtPath:beside] &&
 	    [fm fileExistsAtPath:ours]) {
 		[fm createSymbolicLinkAtPath:beside withDestinationPath:ours error:NULL];
 		hm_print("QuartzCore's pipeline library is given %s as its default.metallib\n", [ours fileSystemRepresentation]);
+	}
+	/* The other pipeline libraries (SiriUICore's for SpringBoard, VectorKit's for Maps, ...) have the same gap: the
+	 * .metallib beside them is left out of the system image by the same rule.  Those files are carried under
+	 * /redwood/share/ca-metallibs, at the same path below it; the mirror takes the one there. */
+	if (![fm fileExistsAtPath:beside] && parent != nil) {
+		NSString *rel = [parent hasPrefix:@"/"] ? [parent substringFromIndex:1] : parent;
+		NSString *carried = [[@"/redwood/share/ca-metallibs" stringByAppendingPathComponent:rel]
+				     stringByAppendingPathComponent:@"default.metallib"];
+		if ([fm fileExistsAtPath:carried]) {
+			[fm createSymbolicLinkAtPath:beside withDestinationPath:carried error:NULL];
+			hm_print("the pipeline library at %s is given %s as its default.metallib\n",
+				 [path fileSystemRepresentation], [carried fileSystemRepresentation]);
+		}
 	}
 	NSString *cachePath = [copy stringByAppendingPathComponent:missing];
 	if (![fm fileExistsAtPath:cachePath]) {
@@ -3422,6 +3405,37 @@ hm_describe_function(id f)
 	if (handler != NULL) {
 		handler(state, error);
 	}
+}
+
+/* A framework's default.metallib is left out of the system image by sysimage/select-system.py's rule; the same file is
+ * carried under /redwood/share/ca-metallibs, at the same path below it (the MPS frameworks', SiriUICore's, ...).  A URL
+ * to a path the framework asks for that the image has not got is answered with the carried copy.  A nil URL -- what a
+ * caller builds when its own bundle lookup found nothing -- is logged with its caller instead of left to Metal's
+ * assertion, and answered with an error. */
+- (id)newLibraryWithURL:(NSURL *)url error:(NSError **)error
+{
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSString *path = [url path];
+
+	if (url == nil) {
+		hm_print_callers("a library was asked for with no URL");
+		if (error != NULL) {
+			*error = [NSError errorWithDomain:@"HakiosMetal" code:2
+						 userInfo:[NSDictionary dictionaryWithObject:@"no URL given"
+										      forKey:NSLocalizedDescriptionKey]];
+		}
+		return nil;
+	}
+	if ([url isFileURL] && path != nil && ![fm fileExistsAtPath:path]) {
+		NSString *rel = [path hasPrefix:@"/"] ? [path substringFromIndex:1] : path;
+		NSString *carried = [@"/redwood/share/ca-metallibs" stringByAppendingPathComponent:rel];
+
+		if ([fm fileExistsAtPath:carried]) {
+			hm_print("the library at %s is given %s\n", [path UTF8String], [carried UTF8String]);
+			url = [NSURL fileURLWithPath:carried];
+		}
+	}
+	return [super newLibraryWithURL:url error:error];
 }
 
 /* Metal source needs Metal's own compiler service, which this device has not got; what it compiles is AIR out of a

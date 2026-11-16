@@ -211,6 +211,96 @@ gpu_recover=1 anim_max=1 metal_all=1`):
 This is the first time the accelerator has accepted thyme's GPU; it is not a
 working Metal path yet.
 
+### The stand-in lacked CoreAnimation's other shaders; the image's own library was in rootfs.dmg (2026-11-16)
+
+With the metallib path fixed (`EXTRA_SHARE` naming `ca-share`), the same A650
+boot (kernel `c98ee588`, scene `74d4bf8b`, log `logs/221405-run.log`) got
+further: CoreAnimation's pipeline library opened through the mirror and the
+plug-in linked its first pipeline ("linked
+fixed_vert_lph_gen+fixed_frag_lph_cpf ... for pixel format 81"), then
+backboardd aborted in a loop with
+
+    deserializeFunction, line 532: error 'Function downsample_blur_vert_lph
+    could not be found in library'
+
+The stand-in built earlier held only this image's four uber shaders (451
+variants): `default.pipelinelib/functions` has no other names, while
+`pipelines.desc` names 38 distinct functions (`downsample_blur_vert_lph`, the
+`narrow_blur_*`, `path_*`, `inplace_copy`, `std_vert*`, ...) -- 34 of them not
+in `functions`.  `tools/ca-metallib.py` had taken that to mean the rest must
+come from a later CoreAnimation library (a Mac's, or iOS 17's out of an IPSW).
+
+They did not: **the image's own
+`QuartzCore.framework/default.metallib` is in `sysimage/rootfs.dmg`** --
+1 014 208 bytes, 141 functions, `downsample_blur_vert_lph` and `edr_scale_lph`
+among them -- and `sysimage/select-system.py`'s rule that leaves `.metallib`
+out of framework directories (`SKIP_EXT`) is why `sysimage/rootfs` does not
+carry it.  Extract it with
+
+    7z e -so sysimage/rootfs.dmg "System/Library/Frameworks/QuartzCore.framework/default.metallib" > /tmp/QC-real.metallib
+
+(3.7 s), and carry that as `/redwood/share/ca-share/QuartzCore-default.metallib`:
+no download, and it is exactly what this CoreAnimation was built with.  The
+plug-in no longer forces `edr_scale` to `inplace_copy`'s module: that was for
+a later library whose edr_scale reads buffers iOS 16.5 never binds; the
+image's own function is the one its pipelines were made for
+(`userland/src/HakiosMetalCA.m`; the luma_boost/edr_scale rows in
+`hm_stand_ins` now only apply to a library that lacks them).  Scene
+`metal650c` carries that file; the device run is the next evidence.
+
+This leaves a wider gap to know about: every `.metallib` inside a framework
+directory is absent from the system image by that rule.  Any framework
+component that loads one (this QuartzCore; others may follow) needs its file
+carried the same way.
+
+### The first pipeline with the image's own library; MPS's; the 64 MiB a scene has (2026-11-16)
+
+With the real `default.metallib` (scene `metal650c`, kernel `c98ee588`, log
+`logs/223636-run.log`), backboardd opened CoreAnimation's pipeline library,
+chose its variants, and read the first function's specialisation script
+("fixed_vert_lph_gen was specialised by a script of 152 bytes giving 3
+values"); the earlier 4-function stand-in had no constants and linked
+("linked fixed_vert_lph_gen+fixed_frag_lph_cpf ..."), and no such "linked"
+line followed this time.  The log is the 1 MiB kernel ring with its middle
+dropped under launchd and Wi-Fi spam, so whether that compile hung or its
+line was dropped is not settled; the next boot runs the same image with
+`metal=1` alone (the window server on Metal, applications still on GL), which
+is quiet enough to say.  The IOSurface refusals at the end of every run
+("IOSurface 2: the driver gave no buffer for it: Input/output error", after a
+request 0x7e answered 0xe00002d8 = kIOReturnNotReady) are the run's own end:
+`hakios_gpu_stop()` gives the GPU back (`gpu_kept = false`), and the window
+server's unblank and framebuffer allocation come after it.
+
+The next gaps, run by run (scene `metal650d`, log `logs/224450-run.log`):
+SiriUICore's pipeline library no longer ends in `getLibraryByIndex ...
+library not found`, and SpringBoard's next abort is MetalPerformanceShaders'
+--
+
+    MPSDeviceComputePipelineState.mm:156: failed assertion `metallib not
+    found: default.metallib for identifier com.apple.MetalPerformanceShaders.
+    MPSImage, .../MPSImage.framework`
+
+-- another `.metallib` the system image leaves out.  The plug-in now answers a
+missing framework URL with the copy carried under `/redwood/share/ca-metallibs`
+(`newLibraryWithURL:error:` in `HakiosMetalCA.m`), and a nil URL (what
+mediaserverd hands it) is logged with its caller instead of Metal's
+assertion.  For MPS the files themselves are now added to the system image's
+sysroot and manifest (`MPSCore`, `MPSImage`, `MPSFunctions`: 46 040 512
+bytes), which the next system image build carries.
+
+**The scene image cannot grow past the payload area.**  The `metal650e` scene
+with those three MPS libraries in `/redwood/share` (84 287 488 bytes) failed
+to stage: `xl: upload failed` after the system image's 2447 MB, and the
+loader's `PAYLOAD_MAX_SIZE` is 0x04000000 (64 MiB, kernel and cmdline
+included; `xnuloader/loader.c`).  The scene root image must stay at about the
+49 MB the running scenes have; anything large (MPS's libraries, other
+framework resources) belongs in the system image, not `/redwood/share`.  The
+scene share keeps only the 3.6 MB of pipeline-library siblings.
+
+The boot line is cut again: the kernel reports 100 characters that did not fit
+the 607 (`logs/223636-run.log` line 13), so the last extra arguments
+(`gpu_recover=1`, `anim_max=1`, the run's `battery_stop=10`) are not in force.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
