@@ -406,6 +406,14 @@ device run waits for the phone to be back on USB.  Scene `metal650maps` (`9897e3
 `rc.jobs.maps`) is the next one after it: it opens com.apple.Maps with `metal_all=1` first in the
 boot arguments, so Maps, SpringBoard and the window server all take the device.
 
+The project's AIR CI was run for the front-end change (Python 3.13, which the system lacked: its
+3.12 has no `math.fma`).  `docs/air-report.md` is byte-for-byte the committed one -- reader
+456/456 identical to llvm-dis, translate and ir3 321/456 as before -- and, run phase by phase,
+the folded intrincheck and the executed one both exit 0 (their 30 and 57 differences are the known
+softpipe ones), as do every corpus cpuref (0 differ), the atomic and the texture checks.  The
+script's own exit is 1 in this environment while none of those phases accounts for it; what it
+printed is the report the tree already had.
+
 To name that shader: `hakios_metal_program_stage_words_copy()` (`hakios_metal.h`, `c_api.cpp`)
 gives a stage's first instruction words, the plug-in logs them once per pipeline
 ("fbstage: vs+fs ... vs N: ... fs N: ..."), and the driver's failure path logs the first words
