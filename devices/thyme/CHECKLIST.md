@@ -399,6 +399,16 @@ title at "当前位置" -- the app now asks Apple's geocoder once more, ten
 seconds later.  The plain-HTTP wttr.in fallback stays in the app for the
 boots where Open-Meteo's TLS times out, and names its source when it is used.
 
+The run after that retry closes the loop (kernel `c98ee588`, scene
+`6a0ba9a6`, `logs/weather-180.png`, 21:30): the title reads **"Chang'an,
+Xi'an"** -- the district the owner remembered -- above the same verified
+screen (7° 毛毛雨, 体感 6° · 湿度 90% · 风速 0 km/h, the twelve-hour strip,
+the seven days, 数据：Open-Meteo), with the battery steady at 42%.  The
+native weather screen is therefore done for daily use: location to the
+district, live Open-Meteo data over HTTPS, a plain-HTTP fallback, and an
+application icon; what it cannot do is the stock app's WeatherKit path,
+which stays behind the SEP (above).
+
 The battery guard is real but the runs are expensive: a 4 GB boot image
 uploaded at 24 MB/s, four minutes of kernel and the display on took the
 phone from ~28% to 0 across five sessions, and at 0 the phone disappeared
