@@ -80,6 +80,27 @@ hw_condition(NSInteger code)
 	}
 }
 
+/* The same code as an SF Symbol, the way the stock app draws the sky. */
+static NSString *
+hw_symbol(NSInteger code)
+{
+	switch (code) {
+	case 0: return @"sun.max.fill";
+	case 1: return @"sun.min.fill";
+	case 2: return @"cloud.sun.fill";
+	case 3: return @"cloud.fill";
+	case 45: case 48: return @"cloud.fog.fill";
+	case 51: case 53: case 55: case 56: case 57: return @"cloud.drizzle.fill";
+	case 61: case 63: case 80: case 81: return @"cloud.rain.fill";
+	case 65: case 82: return @"cloud.heavyrain.fill";
+	case 66: case 67: return @"cloud.sleet.fill";
+	case 71: case 73: case 75: case 77: case 85: case 86: return @"cloud.snow.fill";
+	case 95: return @"cloud.bolt.rain.fill";
+	case 96: case 99: return @"cloud.bolt.fill";
+	default: return @"cloud.fill";
+	}
+}
+
 /* JSON numbers are NSNumbers; a null in the array is NSNull and would throw
  * on doubleValue.  -999 means "no value" and the row is skipped. */
 static double
@@ -99,92 +120,275 @@ hw_hour(NSString *iso)
 	return @"--";
 }
 
-@interface HWAppDelegate : UIResponder <UIApplicationDelegate, CLLocationManagerDelegate>
-@property (nonatomic, strong) UIWindow *window;
-@property (nonatomic, strong) CLLocationManager *manager;
-@property (nonatomic, strong) UILabel *cityLabel;
-@property (nonatomic, strong) UILabel *temperatureLabel;
-@property (nonatomic, strong) UILabel *conditionLabel;
-@property (nonatomic, strong) UILabel *detailsLabel;
-@property (nonatomic, strong) UILabel *hoursLabel;
-@property (nonatomic, strong) UILabel *daysLabel;
-@property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, assign) BOOL fetched;
-@property (nonatomic, assign) BOOL located;
-@property (nonatomic, assign) BOOL fetching;
-@property (nonatomic, assign) double lastLatitude;
-@property (nonatomic, assign) double lastLongitude;
-@property (nonatomic, assign) NSUInteger attempts;
-@property (nonatomic, strong) NSTimer *fallback;
+static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alpha:alpha]; }
+
+/* The sky the screen stands on. */
+@interface HWBackgroundView : UIView
+@end
+@implementation HWBackgroundView
++ (Class)layerClass { return [CAGradientLayer class]; }
 @end
 
-@implementation HWAppDelegate
+@interface HWRootController : UIViewController
+@property (nonatomic, strong) UILabel *cityLabel;
+@property (nonatomic, strong) UILabel *temperatureLabel;
+@property (nonatomic, strong) UIImageView *conditionIcon;
+@property (nonatomic, strong) UILabel *conditionLabel;
+@property (nonatomic, strong) UILabel *detailsLabel;
+@property (nonatomic, strong) UIStackView *hourlyStack;
+@property (nonatomic, strong) UIStackView *dailyStack;
+@property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UIButton *refreshButton;
+@end
 
-- (UILabel *)labelWithFont:(UIFont *)font color:(UIColor *)color
+@implementation HWRootController
+
+- (UILabel *)label:(UIFont *)font color:(UIColor *)color
 {
 	UILabel *label = [[UILabel alloc] init];
 
 	label.font = font;
 	label.textColor = color;
 	label.numberOfLines = 0;
-	label.textAlignment = NSTextAlignmentCenter;
+	label.textAlignment = NSTextAlignmentLeft;
 	return label;
 }
 
+- (void)viewDidLoad
+{
+	[super viewDidLoad];
+	[self buildInterface];
+}
+
+- (void)buildInterface
+{
+	UIScrollView *scroll = [[UIScrollView alloc] init];
+	UIStackView *content;
+	UIStackView *header;
+	UIStackView *conditionRow;
+	UIScrollView *hourlyScroll;
+	UILabel *hoursTitle = [self label:[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold] color:hw_white(0.9)];
+	UILabel *daysTitle = [self label:[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold] color:hw_white(0.9)];
+
+	{
+		HWBackgroundView *background = [[HWBackgroundView alloc] initWithFrame:self.view.bounds];
+
+		background.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+		((CAGradientLayer *)background.layer).colors = @[
+			(id)[UIColor colorWithRed:0.20 green:0.47 blue:0.70 alpha:1.0].CGColor,
+			(id)[UIColor colorWithRed:0.10 green:0.29 blue:0.48 alpha:1.0].CGColor,
+		];
+		((CAGradientLayer *)background.layer).startPoint = CGPointMake(0.5, 0.0);
+		((CAGradientLayer *)background.layer).endPoint = CGPointMake(0.5, 1.0);
+		[self.view addSubview:background];
+	}
+
+	self.cityLabel = [self label:[UIFont systemFontOfSize:30 weight:UIFontWeightSemibold] color:UIColor.whiteColor];
+	self.cityLabel.text = @"正在定位…";
+	self.temperatureLabel = [self label:[UIFont systemFontOfSize:92 weight:UIFontWeightThin] color:UIColor.whiteColor];
+	self.temperatureLabel.text = @"--°";
+	self.conditionIcon = [[UIImageView alloc] init];
+	self.conditionIcon.contentMode = UIViewContentModeScaleAspectFit;
+	self.conditionIcon.tintColor = UIColor.whiteColor;
+	[self.conditionIcon setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+	[self.conditionIcon.widthAnchor constraintEqualToConstant:24].active = YES;
+	[self.conditionIcon.heightAnchor constraintEqualToConstant:24].active = YES;
+	self.conditionLabel = [self label:[UIFont systemFontOfSize:21 weight:UIFontWeightRegular] color:UIColor.whiteColor];
+	self.detailsLabel = [self label:[UIFont systemFontOfSize:14 weight:UIFontWeightRegular] color:hw_white(0.85)];
+
+	conditionRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.conditionIcon, self.conditionLabel]];
+	conditionRow.axis = UILayoutConstraintAxisHorizontal;
+	conditionRow.spacing = 8;
+	conditionRow.alignment = UIStackViewAlignmentCenter;
+
+	header = [[UIStackView alloc] initWithArrangedSubviews:@[
+		self.cityLabel, self.temperatureLabel, conditionRow, self.detailsLabel,
+	]];
+	header.axis = UILayoutConstraintAxisVertical;
+	header.alignment = UIStackViewAlignmentLeading;
+	header.spacing = 6;
+
+	hoursTitle.text = @"未来 12 小时";
+	self.hourlyStack = [[UIStackView alloc] init];
+	self.hourlyStack.axis = UILayoutConstraintAxisHorizontal;
+	self.hourlyStack.spacing = 14;
+	self.hourlyStack.alignment = UIStackViewAlignmentTop;
+
+	hourlyScroll = [[UIScrollView alloc] init];
+	hourlyScroll.showsHorizontalScrollIndicator = NO;
+	[self.hourlyStack.heightAnchor constraintEqualToConstant:84].active = YES;
+	[hourlyScroll addSubview:self.hourlyStack];
+	self.hourlyStack.translatesAutoresizingMaskIntoConstraints = NO;
+	[NSLayoutConstraint activateConstraints:@[
+		[self.hourlyStack.topAnchor constraintEqualToAnchor:hourlyScroll.contentLayoutGuide.topAnchor],
+		[self.hourlyStack.bottomAnchor constraintEqualToAnchor:hourlyScroll.contentLayoutGuide.bottomAnchor],
+		[self.hourlyStack.leadingAnchor constraintEqualToAnchor:hourlyScroll.contentLayoutGuide.leadingAnchor],
+		[self.hourlyStack.trailingAnchor constraintEqualToAnchor:hourlyScroll.contentLayoutGuide.trailingAnchor],
+		[self.hourlyStack.heightAnchor constraintEqualToAnchor:hourlyScroll.frameLayoutGuide.heightAnchor],
+	]];
+
+	daysTitle.text = @"未来 7 天";
+	self.dailyStack = [[UIStackView alloc] init];
+	self.dailyStack.axis = UILayoutConstraintAxisVertical;
+	self.dailyStack.spacing = 14;
+
+	self.statusLabel = [self label:[UIFont systemFontOfSize:12 weight:UIFontWeightRegular] color:hw_white(0.7)];
+	self.refreshButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	[self.refreshButton setTitle:@"刷新" forState:UIControlStateNormal];
+	[self.refreshButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+	self.refreshButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+	self.refreshButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+
+	content = [[UIStackView alloc] initWithArrangedSubviews:@[
+		header, hoursTitle, hourlyScroll, daysTitle, self.dailyStack, self.statusLabel, self.refreshButton,
+	]];
+	content.axis = UILayoutConstraintAxisVertical;
+	content.spacing = 20;
+	content.alignment = UIStackViewAlignmentFill;
+
+	scroll.alwaysBounceVertical = YES;
+	[scroll addSubview:content];
+	[self.view addSubview:scroll];
+	scroll.translatesAutoresizingMaskIntoConstraints = NO;
+	content.translatesAutoresizingMaskIntoConstraints = NO;
+	[NSLayoutConstraint activateConstraints:@[
+		[scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+		[scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+		[scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+		[scroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+		[content.topAnchor constraintEqualToAnchor:scroll.topAnchor constant:18],
+		[content.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor constant:-18],
+		[content.leadingAnchor constraintEqualToAnchor:scroll.leadingAnchor constant:22],
+		[content.trailingAnchor constraintEqualToAnchor:scroll.trailingAnchor constant:-22],
+		[content.widthAnchor constraintEqualToAnchor:scroll.widthAnchor constant:-44],
+	]];
+
+	self.view.backgroundColor = UIColor.clearColor;
+}
+
+- (UIView *)hourCellWithHour:(NSString *)hour symbol:(NSString *)symbol temperature:(double)temperature
+{
+	UILabel *hourLabel = [self label:[UIFont systemFontOfSize:12 weight:UIFontWeightMedium] color:hw_white(0.8)];
+	UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
+	UILabel *temperatureLabel = [self label:[UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightSemibold]
+	    color:UIColor.whiteColor];
+	UIStackView *cell = [[UIStackView alloc] initWithArrangedSubviews:@[hourLabel, icon, temperatureLabel]];
+
+	hourLabel.text = [hour stringByAppendingString:@"时"];
+	hourLabel.textAlignment = NSTextAlignmentCenter;
+	temperatureLabel.text = [NSString stringWithFormat:@"%.0f°", temperature];
+	temperatureLabel.textAlignment = NSTextAlignmentCenter;
+	icon.tintColor = UIColor.whiteColor;
+	icon.contentMode = UIViewContentModeScaleAspectFit;
+	[icon.widthAnchor constraintEqualToConstant:22].active = YES;
+	[icon.heightAnchor constraintEqualToConstant:22].active = YES;
+	cell.axis = UILayoutConstraintAxisVertical;
+	cell.alignment = UIStackViewAlignmentCenter;
+	cell.spacing = 6;
+	[cell.widthAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+	return cell;
+}
+
+- (UIView *)dayRowWithName:(NSString *)name symbol:(NSString *)symbol condition:(NSString *)condition
+    high:(double)high low:(double)low
+{
+	UILabel *dayLabel = [self label:[UIFont systemFontOfSize:16 weight:UIFontWeightSemibold] color:UIColor.whiteColor];
+	UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
+	UILabel *conditionLabel = [self label:[UIFont systemFontOfSize:15 weight:UIFontWeightRegular] color:hw_white(0.85)];
+	UILabel *temperatureLabel = [self label:[UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightMedium]
+	    color:UIColor.whiteColor];
+	UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[dayLabel, icon, conditionLabel, temperatureLabel]];
+
+	dayLabel.text = name;
+	[dayLabel.widthAnchor constraintEqualToConstant:52].active = YES;
+	conditionLabel.text = condition;
+	icon.tintColor = UIColor.whiteColor;
+	icon.contentMode = UIViewContentModeScaleAspectFit;
+	[icon.widthAnchor constraintEqualToConstant:22].active = YES;
+	[icon.heightAnchor constraintEqualToConstant:22].active = YES;
+	temperatureLabel.text = [NSString stringWithFormat:@"%.0f° / %.0f°", high, low];
+	temperatureLabel.textAlignment = NSTextAlignmentRight;
+	[row setCustomSpacing:10 afterView:dayLabel];
+	[row setCustomSpacing:8 afterView:icon];
+	row.axis = UILayoutConstraintAxisHorizontal;
+	row.alignment = UIStackViewAlignmentCenter;
+	return row;
+}
+
+- (void)showCity:(NSString *)city
+{
+	dispatch_async(dispatch_get_main_queue(), ^{ self.cityLabel.text = city; });
+}
+
+- (void)showCurrentTemperature:(double)temperature condition:(NSString *)condition symbol:(NSString *)symbol
+    details:(NSString *)details
+{
+	dispatch_async(dispatch_get_main_queue(), ^{
+		self.temperatureLabel.text = [NSString stringWithFormat:@"%.0f°", temperature];
+		self.conditionLabel.text = condition;
+		self.conditionIcon.image = [UIImage systemImageNamed:symbol];
+		self.detailsLabel.text = details;
+	});
+}
+
+- (void)showHours:(NSArray<NSDictionary *> *)hours
+{
+	dispatch_async(dispatch_get_main_queue(), ^{
+		for (UIView *view in self.hourlyStack.arrangedSubviews) {
+			[self.hourlyStack removeArrangedSubview:view];
+			[view removeFromSuperview];
+		}
+		for (NSDictionary *hour in hours) {
+			[self.hourlyStack addArrangedSubview:[self hourCellWithHour:hour[@"hour"] symbol:hour[@"symbol"]
+			    temperature:[hour[@"temperature"] doubleValue]]];
+		}
+	});
+}
+
+- (void)showDays:(NSArray<NSDictionary *> *)days
+{
+	dispatch_async(dispatch_get_main_queue(), ^{
+		for (UIView *view in self.dailyStack.arrangedSubviews) {
+			[self.dailyStack removeArrangedSubview:view];
+			[view removeFromSuperview];
+		}
+		for (NSDictionary *day in days) {
+			[self.dailyStack addArrangedSubview:[self dayRowWithName:day[@"name"] symbol:day[@"symbol"]
+			    condition:day[@"condition"] high:[day[@"high"] doubleValue] low:[day[@"low"] doubleValue]]];
+		}
+	});
+}
+
+- (void)showStatus:(NSString *)status
+{
+	dispatch_async(dispatch_get_main_queue(), ^{ self.statusLabel.text = status; });
+}
+
+@end
+
+@interface HWAppDelegate : UIResponder <UIApplicationDelegate, CLLocationManagerDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@property (nonatomic, strong) HWRootController *root;
+@property (nonatomic, strong) CLLocationManager *manager;
+@property (nonatomic, assign) BOOL fetched;
+@property (nonatomic, assign) BOOL located;
+@property (nonatomic, assign) BOOL fetching;
+@property (nonatomic, assign) double lastLatitude;
+@property (nonatomic, assign) double lastLongitude;
+@property (nonatomic, assign) NSUInteger attempts;
+@property (nonatomic, assign) BOOL fallbackPending;
+@property (nonatomic, strong) NSTimer *fallback;
+@end
+
+@implementation HWAppDelegate
+
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options
 {
-	UIViewController *controller = [[UIViewController alloc] init];
-	UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem];
-	UIColor *dim = [UIColor colorWithWhite:0.85 alpha:1.0];
-
-	controller.view.backgroundColor = [UIColor colorWithRed:0.16 green:0.42 blue:0.62 alpha:1.0];
-	self.cityLabel = [self labelWithFont:[UIFont systemFontOfSize:30 weight:UIFontWeightSemibold] color:UIColor.whiteColor];
-	self.temperatureLabel = [self labelWithFont:[UIFont systemFontOfSize:84 weight:UIFontWeightThin] color:UIColor.whiteColor];
-	self.conditionLabel = [self labelWithFont:[UIFont systemFontOfSize:22 weight:UIFontWeightRegular] color:UIColor.whiteColor];
-	self.detailsLabel = [self labelWithFont:[UIFont systemFontOfSize:15 weight:UIFontWeightRegular] color:dim];
-	self.hoursLabel = [self labelWithFont:[UIFont systemFontOfSize:15 weight:UIFontWeightRegular] color:UIColor.whiteColor];
-	self.daysLabel = [self labelWithFont:[UIFont systemFontOfSize:15 weight:UIFontWeightRegular] color:UIColor.whiteColor];
-	self.statusLabel = [self labelWithFont:[UIFont systemFontOfSize:13 weight:UIFontWeightRegular] color:dim];
-
-	self.cityLabel.text = @"正在定位…";
-	self.temperatureLabel.text = @"--°";
-	self.conditionLabel.text = @"";
-	self.detailsLabel.text = @"";
-	self.hoursLabel.text = @"";
-	self.daysLabel.text = @"";
-	self.statusLabel.text = @"";
-
-	[refresh setTitle:@"刷新" forState:UIControlStateNormal];
-	[refresh addTarget:self action:@selector(refreshTapped) forControlEvents:UIControlEventTouchUpInside];
-
-	UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
-		self.cityLabel, self.temperatureLabel, self.conditionLabel, self.detailsLabel,
-		self.hoursLabel, self.daysLabel, self.statusLabel, refresh,
-	]];
-	stack.axis = UILayoutConstraintAxisVertical;
-	stack.spacing = 10;
-	stack.alignment = UIStackViewAlignmentCenter;
-
-	UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:controller.view.bounds];
-	stack.translatesAutoresizingMaskIntoConstraints = NO;
-	[scroll addSubview:stack];
-	[controller.view addSubview:scroll];
-	scroll.translatesAutoresizingMaskIntoConstraints = NO;
-	[NSLayoutConstraint activateConstraints:@[
-		[scroll.topAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.topAnchor],
-		[scroll.leadingAnchor constraintEqualToAnchor:controller.view.leadingAnchor],
-		[scroll.trailingAnchor constraintEqualToAnchor:controller.view.trailingAnchor],
-		[scroll.bottomAnchor constraintEqualToAnchor:controller.view.bottomAnchor],
-		[stack.topAnchor constraintEqualToAnchor:scroll.topAnchor constant:24],
-		[stack.bottomAnchor constraintEqualToAnchor:scroll.bottomAnchor constant:-24],
-		[stack.leadingAnchor constraintEqualToAnchor:scroll.leadingAnchor constant:20],
-		[stack.trailingAnchor constraintEqualToAnchor:scroll.trailingAnchor constant:-20],
-		[stack.widthAnchor constraintEqualToAnchor:scroll.widthAnchor constant:-40],
-	]];
-
+	self.root = [[HWRootController alloc] init];
 	self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-	self.window.rootViewController = controller;
+	self.window.rootViewController = self.root;
 	[self.window makeKeyAndVisible];
+	[self.root.refreshButton addTarget:self action:@selector(refreshTapped) forControlEvents:UIControlEventTouchUpInside];
 
 	hw_note(@"launched: services %d, authorization %ld", (int)[CLLocationManager locationServicesEnabled],
 	    (long)[CLLocationManager authorizationStatus]);
@@ -195,7 +399,7 @@ hw_hour(NSString *iso)
 		[self.manager requestWhenInUseAuthorization];
 	}
 	[self.manager startUpdatingLocation];
-	/* A fix, or eight seconds: the screen must show weather either way. */
+	/* A fix, or thirty seconds: the screen must show weather either way. */
 	self.fallback = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self selector:@selector(fallbackFired)
 	    userInfo:nil repeats:NO];
 	return YES;
@@ -203,14 +407,13 @@ hw_hour(NSString *iso)
 
 - (void)refreshTapped
 {
+	[self.root showStatus:@"正在刷新…"];
 	self.attempts = 0;
 	self.manager.delegate = self;
 	[self.manager startUpdatingLocation];
 	[self.fallback invalidate];
 	self.fallback = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self selector:@selector(fallbackFired)
 	    userInfo:nil repeats:NO];
-	/* A manual refusal of the fallback fetch is not a reason to stop; the
-	 * fetch itself starts again when a fix or the fallback timer comes. */
 	if (self.located) {
 		[self fetchForLatitude:self.lastLatitude longitude:self.lastLongitude];
 	}
@@ -233,11 +436,9 @@ hw_hour(NSString *iso)
 	if (self.fetched || self.located) {
 		return;
 	}
-	/* Thirty seconds, not eight: a cold locationd on this port takes tens of
-	 * seconds (the stock app's own screen waited that long for "Chang'an,
-	 * Xi'an"), and a wrong-district fallback is worse than a short wait. */
 	hw_note(@"no fix in thirty seconds: fetching for Xi'an");
-	self.cityLabel.text = @"西安市";
+	self.fallbackPending = YES;
+	[self.root showCity:@"西安市"];
 	[self fetchForLatitude:34.34 longitude:108.94];
 }
 
@@ -253,7 +454,8 @@ hw_hour(NSString *iso)
 		/* a coarse update after a good fix is not worth a second answer */
 		return;
 	}
-	fromFallback = self.fetched && self.lastLatitude == 34.34 && self.lastLongitude == 108.94;
+	fromFallback = self.fallbackPending;
+	self.fallbackPending = NO;
 	self.located = YES;
 	[manager stopUpdatingLocation];
 	hw_note(@"fix: %.4f, %.4f (+/- %.0f m)%@", location.coordinate.latitude, location.coordinate.longitude,
@@ -262,23 +464,24 @@ hw_hour(NSString *iso)
 	    NSError *error) {
 		CLPlacemark *place = places.firstObject;
 
-		dispatch_async(dispatch_get_main_queue(), ^{
-			if (place != nil) {
-				/* the district first: "长安区, 西安市" is the
-				 * precision the stock app showed, not "西安" */
-				NSString *district = place.subLocality ?: place.subAdministrativeArea;
-				NSString *city = place.locality ?: place.administrativeArea ?: place.name;
+		if (place != nil) {
+			/* the district first: "长安区, 西安市" is the precision the
+			 * stock app showed, not "西安" */
+			NSString *district = place.subLocality ?: place.subAdministrativeArea;
+			NSString *city = place.locality ?: place.administrativeArea ?: place.name;
+			NSString *name;
 
-				if (district.length > 0 && city.length > 0 && ![district isEqualToString:city]) {
-					self.cityLabel.text = [NSString stringWithFormat:@"%@, %@", district, city];
-				} else {
-					self.cityLabel.text = city.length > 0 ? city : (district.length > 0 ? district : @"当前位置");
-				}
+			if (district.length > 0 && city.length > 0 && ![district isEqualToString:city]) {
+				name = [NSString stringWithFormat:@"%@, %@", district, city];
 			} else {
-				self.cityLabel.text = @"当前位置";
+				name = city.length > 0 ? city : (district.length > 0 ? district : @"当前位置");
 			}
-			hw_note(@"place: %@ (error %@)", self.cityLabel.text, error.localizedDescription);
-		});
+			hw_note(@"place: %@ (error %@)", name, error.localizedDescription);
+			[self.root showCity:name];
+		} else {
+			hw_note(@"place: no placemark (error %@)", error.localizedDescription);
+			[self.root showCity:@"当前位置"];
+		}
 	}];
 	if (fromFallback) {
 		/* the fallback's answer, if it landed, is for the wrong point: let
@@ -314,13 +517,13 @@ hw_hour(NSString *iso)
 	self.lastLatitude = latitude;
 	self.lastLongitude = longitude;
 	self.attempts += 1;
-	self.statusLabel.text = @"正在获取天气…";
+	[self.root showStatus:@"正在获取天气…"];
 	hw_note(@"fetch %lu: %.4f, %.4f", (unsigned long)self.attempts, latitude, longitude);
 	task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,
 	    NSURLResponse *response, NSError *error) {
 		NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ?
 		    (NSInteger)[(NSHTTPURLResponse *)response statusCode] : -1;
-		BOOL again = self.attempts < 8;
+		BOOL again = self.attempts < 20;
 		BOOL current;
 
 		/* A fallback answer that arrives after a real fix must not draw
@@ -333,15 +536,18 @@ hw_hour(NSString *iso)
 		}
 		self.fetching = NO;
 		if (data == nil || error != nil) {
-			hw_note(@"fetch %lu failed: status %ld, %@%@", (unsigned long)self.attempts, (long)status,
-			    error.localizedDescription, again ? @", will retry" : @"");
-			dispatch_async(dispatch_get_main_queue(), ^{
-				self.statusLabel.text = again ? @"正在重试（等待网络）…" :
-				    [NSString stringWithFormat:@"获取失败：%@", error.localizedDescription ?: @"无数据"];
-			});
+			hw_note(@"fetch %lu failed: status %ld, domain %@ code %ld%@", (unsigned long)self.attempts,
+			    (long)status, error.domain, (long)error.code, again ? @", will retry" : @"");
+			[self.root showStatus:again ? @"正在重试（等待网络）…" :
+			    [NSString stringWithFormat:@"获取失败：%@", error.localizedDescription ?: @"无数据"]];
 			if (again) {
-				[NSTimer scheduledTimerWithTimeInterval:15.0 target:self selector:@selector(retryFired)
-				    userInfo:nil repeats:NO];
+				/* the completion runs on a URLSession queue: a timer made
+				 * there is added to that thread's run loop, which never runs
+				 * (the screen sat at "正在重试" for a whole run, 19:52) */
+				dispatch_async(dispatch_get_main_queue(), ^{
+					[NSTimer scheduledTimerWithTimeInterval:15.0 target:self selector:@selector(retryFired)
+					    userInfo:nil repeats:NO];
+				});
 			}
 			return;
 		}
@@ -361,18 +567,18 @@ hw_hour(NSString *iso)
 	NSDictionary *daily;
 	NSArray *hours;
 	NSArray *days;
-	NSMutableArray<NSString *> *hourLines = [NSMutableArray array];
-	NSMutableArray<NSString *> *dayLines = [NSMutableArray array];
+	NSMutableArray<NSDictionary *> *hourCells = [NSMutableArray array];
+	NSMutableArray<NSDictionary *> *dayRows = [NSMutableArray array];
 
 	if (![root isKindOfClass:[NSDictionary class]]) {
-		dispatch_async(dispatch_get_main_queue(), ^{ self.statusLabel.text = @"数据无法解析"; });
+		[self.root showStatus:@"数据无法解析"];
 		return;
 	}
 	current = root[@"current"];
 	hourly = root[@"hourly"];
 	daily = root[@"daily"];
 	if (![current isKindOfClass:[NSDictionary class]]) {
-		dispatch_async(dispatch_get_main_queue(), ^{ self.statusLabel.text = @"数据缺少当前天气"; });
+		[self.root showStatus:@"数据缺少当前天气"];
 		return;
 	}
 	hours = [hourly[@"time"] isKindOfClass:[NSArray class]] ? hourly[@"time"] : @[];
@@ -396,30 +602,36 @@ hw_hour(NSString *iso)
 			break;
 		}
 	}
-	for (NSUInteger i = start; i < hours.count && hourLines.count < 12; i++) {
+	for (NSUInteger i = start; i < hours.count && hourCells.count < 12; i++) {
+		double temperature;
+		double code;
+
 		if (i >= hourTemps.count || i >= hourCodes.count) {
 			break;
 		}
-		{
-			double temperature = hw_value(hourTemps[i], -999);
-			double code = hw_value(hourCodes[i], -999);
-
-			if (temperature < -100 || code < 0) {
-				continue;
-			}
-			[hourLines addObject:[NSString stringWithFormat:@"%@时 %.0f° %@", hw_hour(hours[i]),
-			    temperature, hw_condition((NSInteger)code)]];
+		temperature = hw_value(hourTemps[i], -999);
+		code = hw_value(hourCodes[i], -999);
+		if (temperature < -100 || code < 0) {
+			continue;
 		}
+		[hourCells addObject:@{
+			@"hour": hw_hour(hours[i]),
+			@"temperature": @(temperature),
+			@"symbol": hw_symbol((NSInteger)code),
+		}];
 	}
 
 	NSArray *dayCodes = [daily[@"weather_code"] isKindOfClass:[NSArray class]] ? daily[@"weather_code"] : @[];
 	NSArray *dayMax = [daily[@"temperature_2m_max"] isKindOfClass:[NSArray class]] ? daily[@"temperature_2m_max"] : @[];
 	NSArray *dayMin = [daily[@"temperature_2m_min"] isKindOfClass:[NSArray class]] ? daily[@"temperature_2m_min"] : @[];
 	NSArray *dayNames = @[@"周日", @"周一", @"周二", @"周三", @"周四", @"周五", @"周六"];
-	for (NSUInteger i = 0; i < days.count && i < 7; i++) {
+	for (NSUInteger i = 0; i < days.count && dayRows.count < 7; i++) {
 		NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
 		NSDate *date;
 		NSString *name;
+		double code;
+		double high;
+		double low;
 
 		if (i >= dayCodes.count || i >= dayMax.count || i >= dayMin.count) {
 			break;
@@ -428,38 +640,37 @@ hw_hour(NSString *iso)
 		date = [formatter dateFromString:days[i]];
 		name = date != nil ? dayNames[MAX(0, [[NSCalendar currentCalendar] component:NSCalendarUnitWeekday
 		    fromDate:date] - 1)] : days[i];
-		{
-			double code = hw_value(dayCodes[i], -999);
-			double high = hw_value(dayMax[i], -999);
-			double low = hw_value(dayMin[i], -999);
-
-			if (code < 0 || high < -100 || low < -100) {
-				continue;
-			}
-			[dayLines addObject:[NSString stringWithFormat:@"%@ %@ %.0f° / %.0f°", name,
-			    hw_condition((NSInteger)code), high, low]];
+		code = hw_value(dayCodes[i], -999);
+		high = hw_value(dayMax[i], -999);
+		low = hw_value(dayMin[i], -999);
+		if (code < 0 || high < -100 || low < -100) {
+			continue;
 		}
+		[dayRows addObject:@{
+			@"name": name,
+			@"condition": hw_condition((NSInteger)code),
+			@"symbol": hw_symbol((NSInteger)code),
+			@"high": @(high),
+			@"low": @(low),
+		}];
 	}
 
-	dispatch_async(dispatch_get_main_queue(), ^{
+	{
 		NSNumber *temperature = current[@"temperature_2m"];
 		NSNumber *feels = current[@"apparent_temperature"];
 		NSNumber *humidity = current[@"relative_humidity_2m"];
 		NSNumber *wind = current[@"wind_speed_10m"];
 		NSNumber *code = current[@"weather_code"];
-
-		if ([temperature isKindOfClass:[NSNumber class]]) {
-			self.temperatureLabel.text = [NSString stringWithFormat:@"%.0f°", temperature.doubleValue];
-		}
-		if ([code isKindOfClass:[NSNumber class]]) {
-			self.conditionLabel.text = hw_condition(code.integerValue);
-		}
-		self.detailsLabel.text = [NSString stringWithFormat:@"体感 %.0f° · 湿度 %.0f%% · 风速 %.0f km/h",
+		NSString *condition = [code isKindOfClass:[NSNumber class]] ? hw_condition(code.integerValue) : @"—";
+		NSString *symbol = [code isKindOfClass:[NSNumber class]] ? hw_symbol(code.integerValue) : @"cloud.fill";
+		NSString *details = [NSString stringWithFormat:@"体感 %.0f° · 湿度 %.0f%% · 风速 %.0f km/h",
 		    hw_value(feels, 0), hw_value(humidity, 0), hw_value(wind, 0)];
-		self.hoursLabel.text = [@"未来 12 小时\n" stringByAppendingString:[hourLines componentsJoinedByString:@"\n"]];
-		self.daysLabel.text = [@"未来 7 天\n" stringByAppendingString:[dayLines componentsJoinedByString:@"\n"]];
-		self.statusLabel.text = @"数据：Open-Meteo";
-	});
+
+		[self.root showCurrentTemperature:hw_value(temperature, 0) condition:condition symbol:symbol details:details];
+	}
+	[self.root showHours:hourCells];
+	[self.root showDays:dayRows];
+	[self.root showStatus:@"数据：Open-Meteo"];
 }
 
 @end

@@ -354,7 +354,36 @@ Chinese title, the fallback city (西安), the loading spinner and its own
 error line "获取失败：请求超时" -- the fetch timed out because the Wi-Fi join
 had not finished when it went out (~t=25 of the run).  The scene now waits
 35 s after the join before opening and closes the system low-battery alert
-first; the app retries by itself.  Data on the screen is not yet proven.
+first; the app retries by itself.
+
+The next run (image `d56d774e`, `logs/weather-100.png`, 19:29) is the one
+that **works**: the screen reads **"Chang'an, Xi'an"** (the reverse geocoder's
+district, the precision the stock app had), **7° 毛毛雨**, 体感 6° · 湿度 95% ·
+风速 2 km/h, a twelve-hour strip (19时 7° 毛毛雨 … 06时 4° 晴), the seven-day
+list (周一 毛毛雨 9°/6° … 周日 阴 9°/-2°) and "数据：Open-Meteo".  So the
+native screen is verified end to end on the phone: CoreLocation fix,
+reverse geocode, Open-Meteo fetch over the phone's own Wi-Fi, and the
+render.  Its first UI was a centred text column; the redesign (header at
+the left, SF Symbol condition icons, a horizontally scrolling hourly strip,
+daily rows, a gradient sky and an app icon) renders too (19:53 screenshot),
+with two defects found and fixed on the way:
+
+* The link's first request can lose the race with the Wi-Fi association.
+  The retry timer that was meant to cover that was created inside the
+  URLSession completion -- a timer made on a URLSession queue belongs to
+  that thread's run loop, which never runs -- so the screen sat at
+  "正在重试（等待网络）…" for the rest of the run (`logs/195021-run.log`,
+  19:52).  It is scheduled on the main queue now, and the retry window is
+  twenty attempts.  The 20:01 run's log then shows real retries
+  (`logs/200034-run.log`).
+* Every request in that run failed `NSURLErrorDomain -1001` (timed out,
+  20 s) while the name resolved -- and because the fallback fetch had gone
+  out before the first real fix arrived, its retries kept using Xi'an's
+  point although the screen said Chang'an.  A `fallbackPending` flag now
+  drops the fallback request when a fix lands and fetches the fix's point.
+  The next scene also asks `net_test resolve` and an IPv4 `net_test tcp
+  api.open-meteo.com 443` at the same moment, to say whether the timeout is
+  below or above TCP.
 
 The battery guard is real but the runs are expensive: a 4 GB boot image
 uploaded at 24 MB/s, four minutes of kernel and the display on took the

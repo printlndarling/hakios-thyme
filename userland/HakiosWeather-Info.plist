@@ -8,6 +8,16 @@
 	<string>HakiOS 天气</string>
 	<key>CFBundleExecutable</key>
 	<string>HakiosWeather</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+		</dict>
+	</dict>
 	<key>CFBundleIdentifier</key>
 	<string>com.hakios.weather</string>
 	<key>CFBundleInfoDictionaryVersion</key>
