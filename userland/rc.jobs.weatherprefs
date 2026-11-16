@@ -1,0 +1,20 @@
+# Weather with WeatherDaemon's JWT switch off (RC_JOBS=rc.jobs.weatherprefs):
+# weatherprefs writes "weatherdaemon.enableJWTTokenAuth" = false into the mobile
+# user's preferences, weatherd is ended so launchd starts it with the switch
+# read, and the stock Weather app is opened.  The location alert (Weather asks
+# for it; location services answer) is tapped at 0.500 0.699 twice -- the
+# second tap only lands on the app if the first already dismissed it.  The
+# screenshots show whether forecasts come; the log carries weatherd's and
+# Weather's XPC, fairplayd lookups and TCP connections.
+/redwood/bin/weatherprefs
+/redwood/bin/killby weatherd 15
+/redwood/bin/sleep_hold 420 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 80
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 150

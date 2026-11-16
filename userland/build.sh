@@ -252,6 +252,13 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
 		# what CoreLocation says about location services (src/loc_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreLocation -framework CoreFoundation -o obj/loc_test src/loc_test.m
+		# WeatherDaemon's switches for the mobile user (src/weatherprefs.c)
+		$DYN -framework CoreFoundation -o obj/weatherprefs src/weatherprefs.c
+		# fairplayd's two Mach service names, answered by a logger (src/fairplaystub.c; FAIRPLAYSTUB=1 scene)
+		if [ -n "${FAIRPLAYSTUB:-}" ]; then
+			# (the SDK has no libxpc to link: the calls resolve from the system's own at run time)
+			$DYN -fblocks -framework Foundation -Wl,-undefined,dynamic_lookup -o obj/fairplaystub src/fairplaystub.c
+		fi
 		# a plist as XML on the console, for the binary stores a run must report (src/plistcat.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/plistcat src/plistcat.m
 		# whether the privacy settings classes Settings names resolve here (src/clcheck.m)
@@ -372,7 +379,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 				echo "build.sh: with UniXNU's Metal on Vulkan (metal_m2v=1)"
 			fi
 			$DYN -bundle -framework Foundation -framework IOKit -framework IOSurface -framework Metal -lobjc \
-				-I$HM/include -o obj/HakiosMetal src/HakiosMetalCA.m $METAL_GPU $M2V_OBJS
+				-I$HM/include -o obj/HakiosMetal src/HakiosMetalCA.m $METAL_GPU $M2V_OBJS \
+				-Wl,-U,_native_bridge_metal_variant_hook -Wl,-U,_native_bridge_metal_open \
+				-Wl,-U,_native_bridge_metal_first_problem -Wl,-U,_native_bridge_metal_status -Wl,-U,_native_bridge_metal_formats
 		else
 		$DYN -bundle -framework Foundation -framework Metal -lobjc -I$METAL_SRC -o obj/HakiosMetal $METAL_SRC/HakiosMetal.m \
 			$METAL_SRC/hakios_metallib.c $METAL_GPU
@@ -427,6 +436,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
+	[ -f obj/weatherprefs ] && cp obj/weatherprefs root/bin/
 	[ -f obj/plistcat ] && cp obj/plistcat root/bin/
 	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
 	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
@@ -556,6 +566,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# fairplayd among them).
 	cp com.hakios.demo.plist com.hakios.wifi.plist com.hakios.wifi-keepalive.plist root/LaunchDaemons/
 	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
+	if [ -n "${FAIRPLAYSTUB:-}" ] && [ -f obj/fairplaystub ]; then
+		cp obj/fairplaystub root/bin/
+		cp com.hakios.fairplaystub.plist root/LaunchDaemons/
+	fi
 	VOLUME=""
 	[ -n "$FLASHBOOT" ] && [ -f $DARWIN/rootfs.slt ] && VOLUME="--root-volume $DARWIN/rootfs.slt"
 	[ -n "$DARWIN_JOBS" ] && OSLOG=${OSLOG-com.apple.backboardd} ./mkjobs.py ${REST:+--rest} $VOLUME $DARWIN/rootfs root/LaunchDaemons $DARWIN_JOBS

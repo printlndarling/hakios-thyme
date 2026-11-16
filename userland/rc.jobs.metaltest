@@ -1,0 +1,20 @@
+# Maps on the Metal path (RC_JOBS=rc.jobs.metaltest, boot-arg metal=1): the
+# window server's accelerator names HakiosMetal as its Metal plug-in
+# (MiniIOMobileFramebuffer.cpp), and every process that asks Metal for a device
+# -- Maps' VectorKit included -- is given HakiosMetalDevice.  ca_metallib= is
+# the QuartzCore default.metallib the window server's CoreAnimation wants (the
+# image's QuartzCore carries only default.pipelinelib); here a minimal library
+# of the image's own four uber shaders (tools/merge_metallib.py).  The first
+# run showed Maps' "What's New in Maps" sheet over a correctly drawn window
+# (logs/weather-80.png): Continue is at 0.500 0.912.  After it, the location
+# alert (Weather's place, 0.500 0.699) if it comes, then the map canvas is the
+# question: VectorKit draws it with its own Metal device.  The screenshots show
+# it; the log what VectorKit asked the device and what the plug-in answered.
+/redwood/bin/sleep_hold 420 &
+/redwood/bin/rwtouch wait 60
+/var/jb/usr/bin/uiopen --bundleid com.apple.Maps
+/redwood/bin/rwtouch wait 80
+/redwood/bin/rwtouch tap 0.5 0.912
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 120

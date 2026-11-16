@@ -126,6 +126,63 @@ draws through Metal, and this port's Metal render path does not run yet (the
 Air/Metal probe and the TURNIP/M2V path are the open work, `docs/air.md`,
 `docs/official-metal-probe.md`).
 
+### Maps on the Metal path: the window server's device is refused, the A650 is not the driver's A642L (2026-11-16)
+
+`metal=1` makes the accelerator name HakiosMetal as its Metal plug-in (the
+kernel's MiniIOMobileFramebuffer; no thyme change was needed), and the
+CoreAnimation plug-in (`METAL_PLUGIN=ca`) is built from the tree's hakios-metal,
+rebuilt here with `make ios MESA=1` (fui()'s sign bit no longer uses
+`__builtin_signbit`, which this clang refuses in a constexpr function), and
+linked with UniXNU's metal2vulkan entry points allowed undefined (`-Wl,-U`),
+which the hakios-metal route does not call.  QuartzCore's `default.metallib`,
+which the iPhone X image lacks, is made from the image's own four uber shaders
+with `tools/merge_metallib.py` (104,784 bytes) and carried in the image as
+`/redwood/share/cameta/QuartzCore-default.metallib`; inject answers
+CoreAnimation's lookup with it (`hakios: metallib lookups in backboardd are
+said; default.metallib is ...`, `logs/132946-run.log`).
+
+The window server then asked for the device and was refused:
+
+    HakiosMetal[backboardd 18]: no device: the GPU's chip ID is 0x6050002: the
+    tables of this driver are the Adreno's of chip ID 0x6030500 (a6xx.hpp),
+    another's would hang it
+
+thyme's GPU is the Adreno 650 (0x06050002: a6xx gen3 in Mesa's
+freedreno_devices.py, num_ccu 3, tiles 96x16, fibers_per_sp 128*2*16), while
+hakios-metal's tables are the Adreno 7c+ Gen 3's (0x06030500, a6xx gen4).  The
+plug-in refuses any other chip on purpose ("another's would hang it"), so
+CoreAnimation fell back to OpenGL ES: the Maps screens of that run
+(`logs/weather-80.png`, its "What's New in Maps" sheet) are the GL path's, not
+Metal's.  The plug-in also shows its device to the window server alone unless
+`metal_all=1`, and Maps was told so (`HakiosMetal[Maps 202]: Maps is not shown
+the device ...`).  Enabling Metal on the phone therefore needs hakios-metal's
+A650 (gen3) chip tables -- the kChipId, kFibersPerSp/kNumSpCores and kMagic*
+constants in a6xx.hpp, the compiler's chip id in compiler.cpp/texture.cpp, and
+whatever the gen3 render sequence differs in -- and `metal_all=1`, not only
+the boot argument.
+
+### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
+
+`weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
+`weatherdaemon.enableJWTTokenAuth`, and `weatherprefs` now writes it false with
+`weatherdaemon.fetchesWeatherData` true into the mobile user's
+`com.apple.weatherd` and `com.apple.weather` preferences; the write and the
+read-back are in `logs/131642-run.log`.  It changed nothing the owner sees:
+weatherd never spawned, Weather made no TCP connection and never looked up
+`com.apple.weatherd.weatherkit`; the app itself looked up `com.apple.fairplayd`
+and `.versioned` once a minute and retried.  The app carries the
+`fairplay-client` entitlement, and its own WeatherKit client is the gate --
+the daemon's switch is not on the app's path.
+
+`fairplaystub` (`src/fairplaystub.c`, `FAIRPLAYSTUB=1`) registers the two names
+as a launchd job's MachServices and answers with empty XPC replies.  With it,
+the app's fairplayd lookups stop failing -- no "No such process" lines where the
+run before had 15-24 -- and launchd spawned the stub on demand (`user/501/
+com.hakios.fairplaystub`, "launching: ipc (mach)", `logs/133948-run.log`): the
+app did send it something.  The stub's own account of that was lost, its
+standard output being /dev/null; it now writes to /dev/console (its plist names
+the path too), and the next run's log carries the messages' descriptions.
+
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
 launchd's log carried "Unable to find persona with type 6" on every job spawn
