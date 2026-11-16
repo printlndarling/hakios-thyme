@@ -164,8 +164,11 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 # WEATHERLOG=1: the Weather app started with a library that says every URL request it makes
 # (src/inject_weatherlog.m; docs/weather-data-shim.md)
 if [ -n "${WEATHERLOG:-}" ]; then
+	# weatherd too: whether the forecast fetch happens in the app or in the
+	# on-demand daemon (logs/151121-run.log: the app's own URLSession client
+	# asks weather-edge for its config; the daemon was spawned later).
 	INJECT="$INJECT
-/redwood/lib/libhakios.weatherlog.dylib Weather WeatherWidget"
+/redwood/lib/libhakios.weatherlog.dylib Weather WeatherWidget Preferences weatherd"
 fi
 mkdir -p obj
 

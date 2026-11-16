@@ -17,12 +17,25 @@
  * is read from.
  */
 #import <Foundation/Foundation.h>
+#include <fcntl.h>
 #include <objc/runtime.h>
+#include <stdio.h>
+#include <unistd.h>
 
+/* The console, as the prefs and tweaks libraries do it: their lines from
+ * Preferences are in the run's log, so the app may open it and NSLog's output
+ * is what did not arrive. */
 static void
 weather_say(NSString *message)
 {
-	NSLog(@"hakios: weatherlog: %@", message);
+	char line[900];
+	int n = snprintf(line, sizeof(line), "hakios: weatherlog: %s\n", [message UTF8String]);
+	int fd = open("/dev/console", O_WRONLY);
+
+	if (fd >= 0) {
+		write(fd, line, (size_t)n);
+		close(fd);
+	}
 }
 
 typedef void (^weather_completion)(NSData *, NSURLResponse *, NSError *);
@@ -71,7 +84,7 @@ exchange(const char *from, const char *to)
 __attribute__((constructor)) static void
 weatherlog_init(void)
 {
-	NSLog(@"hakios: weatherlog: loaded into %@", [[NSProcessInfo processInfo] processName]);
+	weather_say([NSString stringWithFormat:@"loaded into %@", [[NSProcessInfo processInfo] processName]]);
 	exchange("dataTaskWithRequest:completionHandler:", "wl_dataTaskWithRequest:completionHandler:");
 	exchange("dataTaskWithURL:completionHandler:", "wl_dataTaskWithURL:completionHandler:");
 }

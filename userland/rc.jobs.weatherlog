@@ -1,0 +1,19 @@
+# WEATHERLOG canary (RC_JOBS=rc.jobs.weatherlog): the weatherlog library is
+# in the insertion list for Weather, WeatherWidget and Preferences.  The
+# prefs/tweaks libraries are known to run inside Preferences, so it is opened
+# first: if weatherlog's constructor says "loaded into Preferences" the
+# library and its logging work, and Weather's silence is about that process's
+# launch; if Preferences is silent too, the library or the channel is the
+# question.  Weather then follows the usual way, with its location alert.
+/redwood/bin/weatherprefs
+/redwood/bin/killby weatherd 15
+/redwood/bin/sleep_hold 340 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 20
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 90

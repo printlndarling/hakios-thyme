@@ -1,0 +1,20 @@
+# WEATHERONLINE (RC_JOBS=rc.jobs.weatheronline): give Weather a link, then
+# let it ask.  The weatherlog canary (logs/151121-run.log) finally put the
+# library inside Weather itself and showed what its WeatherKit client does:
+# a PUT to weather-edge.apple.com/v1/configs and a GET to c.apple.news, both
+# through URLSession and both answered "The Internet connection appears to be
+# offline" -- the boot had no Wi-Fi.  The forecast request (the one a data
+# shim has to answer) never came because the client stopped at its config
+# fetch.  This run joins the network written in fw/network first, so those
+# requests can succeed and the next one can be seen: its host, its path and
+# whether it carries an Authorization header.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/weatherprefs
+/redwood/bin/sleep_hold 420 &
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/uiopen --bundleid com.apple.weather
+/redwood/bin/rwtouch wait 20
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.699
+/redwood/bin/rwtouch wait 120

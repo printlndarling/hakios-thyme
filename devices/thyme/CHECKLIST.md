@@ -200,15 +200,30 @@ step, not a daemon switch.  The pieces and their order --
 injection mechanism is the kernel's -- are in `docs/weather-data-shim.md`.
 
 An injected `libhakios.weatherlog.dylib` (`WEATHERLOG=1`, the kernel's
-insertion list) was meant to say which URLSession requests Weather makes.  It
-has produced no line of its own in three runs, a WeatherWidget canary
-included, while the same image's other insertions work at boot (the tweaks
-library says "opened").  The library is in the image and the init line names
-Weather and WeatherWidget (`logs/143727-run.log`); whether the UIKit app's
-exec is outside the kernel's insertion or dyld leaves DYLD_INSERT_LIBRARIES
-alone for that binary is the open question, and the next test is that dylib
-under a name already known to take the insertion, with the app in the same
-line.
+insertion list) was meant to say which URLSession requests Weather makes.  Its
+first three runs produced no line while the same image's other insertions work
+at boot; the answer was the channel, not the insertion: NSLog from these apps
+does not reach the run's log, and the library now writes to /dev/console as
+the prefs and tweaks libraries do.  With that, one run has both canaries and
+the requests (`logs/151121-run.log`):
+
+    hakios: weatherlog: loaded into Preferences
+    hakios: weatherlog: loaded into Weather
+    request PUT https://weather-edge.apple.com/v1/configs (Authorization: no)
+    answer -1 from configs, 0 bytes, The Internet connection appears to be offline.
+    request GET https://c.apple.news/AgEd... (Authorization: no)
+
+The seam is therefore reachable: Weather's own WeatherKit client fetches its
+edge configuration through URLSession in the app's process, and the injection
+puts code in that process.  Every request failed because that boot had no
+Wi-Fi (the Settings screen said "Not Connected"); the client stops at its
+config fetch and the forecast request -- the one a data shim has to answer --
+never came.  That run also spawned `weatherd` ("launching: ipc (mach)",
+15:13:06), so `rc.jobs.weatheronline` now joins the network written in
+`fw/network` first and then opens Weather, with the library also injected into
+weatherd, to see whether the forecast fetch is the app's or the daemon's and
+what URL and Authorization header it carries.  (The weatherlog dylib's NSLog
+comment in `src/inject_weatherlog.m` is the earlier, wrong channel.)
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 

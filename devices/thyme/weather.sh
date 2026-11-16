@@ -54,7 +54,13 @@ CAPTURE_PID=$!
 trap 'kill "$CAPTURE_PID" 2>/dev/null || true' EXIT HUP INT TERM
 
 LOG="logs/weather-$(date +%H%M%S).log"
-XL_FOLLOW= \
+# Follow the log every 15 s: the loader keeps one staging pointer, and this
+# script's own screenshots (xl screenshot stages the framebuffer) can be what
+# a get_staged sends when the run's final log fetch races them
+# (logs/145727-run.log: 9.8 MB of pixels, not one byte of text). The periodic
+# .live copies keep what the kernel said; XL_FOLLOW=5 changes the period,
+# XL_FOLLOW= (empty) turns them off.
+XL_FOLLOW=${XL_FOLLOW-15} \
 XL_SECS="$SECS" \
 XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} \
 XL_RAMDISK="$SCENE" \
