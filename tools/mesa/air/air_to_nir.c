@@ -1339,7 +1339,11 @@ load_sysval(struct air_ctx *c, enum air_sysval sv)
    case AIR_SV_FRONT_FACING: return nir_load_front_face(&c->b, 1);
    case AIR_SV_SAMPLE_ID: return nir_load_sample_id(&c->b);
    case AIR_SV_SAMPLE_MASK_IN: return nir_load_sample_mask_in(&c->b);
-   case AIR_SV_POINT_COORD: return nir_load_point_coord(&c->b);
+   case AIR_SV_POINT_COORD:
+      /* (hakios) freedreno has no point sprites and ir3 refuses load_point_coord: with NDEBUG that refusal
+       * was not one, and a shader the window server draws with stopped the GPU (ir3_context_error, "Unhandled
+       * intrinsic type: load_point_coord").  A point primitive reads (0, 0); triangle draws are unaffected. */
+      return nir_imm_vec2(&c->b, 0.0f, 0.0f);
    case AIR_SV_THREAD_POS_GRID: return nir_load_global_invocation_id(&c->b, 32);
    case AIR_SV_THREAD_POS_TG: return nir_load_local_invocation_id(&c->b);
    case AIR_SV_TG_POS_GRID: return nir_load_workgroup_id(&c->b);
