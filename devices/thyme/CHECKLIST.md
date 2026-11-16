@@ -4276,3 +4276,33 @@ behind.  The 44 MB texture allocations that fail with "the driver gave no buffer
 attachment" refusals, and Maps' SIGABRT "VectorKit received null buffer from
 Metal" at 07:20:55, all come after `loader_return_after expired` (line 10155
 against 10244+): the run's teardown, not the run.
+
+### Why the map view draws nothing: VectorKit's pipeline library has no functions (2026-11-17)
+
+VectorKit's `iphoneos.pipelinelib` is not like CoreAnimation's.  Its `functions`
+file is **0 bytes**; the pipeline descriptions are in `pipelines.desc` (502,020
+bytes) and the compiled pipelines are per Apple GPU (`pipelines.g10p` ...
+`pipelines.g15p`, ~1.6 MB each, none for Adreno).  CoreAnimation's
+`default.pipelinelib/functions` is 3,584,636 bytes beginning `LPPM`: a table of
+451 entries, each a 16-byte hash, an offset and a size into an embedded `MTLB`
+blob (`tools/ca-metallib.py` already scans for those `MTLB`s).  So CA's library
+carries the AIR of its uber shaders and this runtime compiles them; VectorKit's
+carries nothing this GPU can build, and Metal's builder returns nil for every
+pipeline by name -- which is why Maps encodes only "copy 1125x2436" passes and
+the plug-in never sees a `newRenderPipelineStateWithDescriptor:` from it.
+
+VectorKit's `default.metallib` (2,466,580 bytes, carried under
+`/redwood/share/ca-metallibs`) does contain the base functions the descriptions
+name (`DaVinci::ground_base_vertex`, ...), and `pipelines.desc`'s names are the
+library's `default_` prefix plus the function name plus a 64-hex-digit
+specialisation hash, so the pieces to build them are on the device.
+
+The M2V tree's iOS 16.5 patch names the path Apple's own pipeline-library
+builder takes: `-newFunctionWithName:constantValues:functionCache:error:` on the
+library ("with Metal's function cache, which holds nothing of this device's").
+The next piece of work is to answer that call when the library cannot: look the
+base function up in the carried `default.metallib` with the same constants, so
+the builder's descriptor reaches this runtime's compiler exactly as
+CoreAnimation's does.  That is a pipeline-library feature, not a GPU one; the
+mountains (`pipelines.desc` parsing) are Apple's own code, which is why the
+function fallback is the smaller door.
