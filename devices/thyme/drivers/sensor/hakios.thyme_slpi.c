@@ -3087,6 +3087,8 @@ static uint8_t sns_first_bad_suid[16];
 static const char *sns_last_group;       /* the registry group file being written, if any */
 static uint32_t sns_cm_result_seen;      /* the client manager's group write was answered */
 static uint32_t sns_cm_result;           /* ... with this */
+static uint32_t sns_cm_sns_seen;         /* ... and at the SNS layer, with this */
+static uint32_t sns_cm_sns_result;
 static char sns_first_bad_group[40];
 struct sns_bad_record {
 	uint32_t msg;
@@ -3634,6 +3636,10 @@ sns_input(const uint8_t *data, uint32_t length)
 			} else if (resp_msg == 513) {
 				sns_conf_result = result;
 				sns_conf_seen = 1;
+			} else if (resp_msg == 0x202 && resp_group != NULL &&
+			    strcmp(resp_group, "sns_cm") == 0 && !sns_cm_sns_seen) {
+				sns_cm_sns_seen = 1;
+				sns_cm_sns_result = result;
 			}
 			if (result == 0) {
 				sns_ok_count++;
@@ -8287,6 +8293,11 @@ link_stop(void)
 			printf("slpi: sns: sns_cm write result %u\n", sns_cm_result);
 		} else {
 			printf("slpi: sns: sns_cm write was not answered\n");
+		}
+		if (sns_cm_sns_seen) {
+			printf("slpi: sns: sns_cm SNS result %u\n", sns_cm_sns_result);
+		} else {
+			printf("slpi: sns: sns_cm SNS layer: no answer\n");
 		}
 		if (sns_first_bad_result != 0) {
 			printf("slpi: sns: the first refusal: QMI %u answered %u for SUID "

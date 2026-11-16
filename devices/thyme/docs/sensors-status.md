@@ -1512,6 +1512,12 @@ The driver now records the client manager's own group: at the QMI result TLV,
 result 0, the same four result 1).  Pacing the upload at 20 ms a group instead
 of 2 ms -- to keep the 32-slot transaction ring covering the round trip --
 changes nothing (`logs/111513-run.log`), so the burst is not what loses the
-answers: the service itself does not answer most of the writes, `sns_cm`'s
-among them.  The SNS layer's 185 result-5 replies are still not attributed per
-group; that attribution is the next build's work.
+answers.
+
+The SNS layer (TLV 0x11) for that same group answers **result 5**
+(`logs/112821-run.log`: `sns_cm write was not answered`, `sns_cm SNS result
+5`).  So the service does process the write and refuses it as "no instance":
+the gate is the registry sensor's own start-up, not the write's framing, the
+payload or the pace.  The registry sensor's instance is what the next work has
+to create -- its start-up condition (the index file and what it reads before
+the first client exists) is the whole of the remaining question.
