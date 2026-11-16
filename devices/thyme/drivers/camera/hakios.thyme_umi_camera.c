@@ -38,6 +38,7 @@ extern int umi_camera_stream_grab(void *, unsigned, unsigned);
 extern int umi_camera_dma_reserve(unsigned, unsigned);
 extern void umi_camera_dma_quiesce(bool);
 extern const uint8_t *hakios_wifi_file(const char *, uint64_t *);
+static uint32_t utab_u32(const uint8_t *);
 void umi_camera_probe_quiesce(void);
 
 static struct {
@@ -129,6 +130,42 @@ umap(vm_offset_t physical, vm_size_t size)
 	return mapped;
 }
 
+/*
+ * The boot's session mode, from the module file's own table: the session runs
+ * resN (cam_mode, default 3), and the two-bank DMA buffer must be reserved for
+ * that mode's frame while the system's memory is still in large pieces -- res0
+ * (12032x9024, 129.4 MiB a frame) asks for 271 MB.  A table that does not
+ * answer leaves the mode 3 size.
+ */
+static void
+ureserve_for_boot_mode(unsigned *width, unsigned *height)
+{
+	static const char *const names[2] = { "camera-s5khmx-v3.tab", "camera-s5khmx-v19.tab" };
+	uint32_t mode_n = 3;
+
+	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6) {
+		mode_n = 3;
+	}
+	for (int i = 0; i < 2; ++i) {
+		uint64_t size = 0;
+		const uint8_t *file = hakios_wifi_file(names[i], &size);
+
+		if (file == NULL || size < 40 || memcmp(file, "RWCTAB02", 8) != 0 ||
+		    utab_u32(file + 36) <= mode_n || size < 40 + ((uint64_t)mode_n + 1) * 48) {
+			continue;
+		}
+		const uint8_t *mode = file + 40 + (uint64_t)mode_n * 48;
+		unsigned w = utab_u32(mode), h = utab_u32(mode + 4);
+		uint64_t bytes = (uint64_t)((w * 10 / 8 + 15) & ~15u) * h;
+
+		if (w >= 64 && h >= 64 && w <= 16384 && h <= 16384 && bytes != 0 && bytes <= (192ull << 20)) {
+			*width = w;
+			*height = h;
+			return;
+		}
+	}
+}
+
 /* Reserve the session's mappings while the loader's IO window still has room. */
 void
 umi_camera_ios_prepare(void)
@@ -144,9 +181,13 @@ umi_camera_ios_prepare(void)
 	(void)umap(0x0acdb200, 0x2200);  /* IFE-lite 1, the front's lite block */
 	(void)umap(0x0ac70000, 0x2000);  /* CSIPHY 3 */
 	(void)umap(0x0ac72000, 0x2000);  /* CSIPHY 4 */
-	/* The front's 2592x1940 mode is the largest frame a session runs. */
-	if (umi_camera_dma_reserve(3008, 2256) != 0)
-		hakios_tl("UMI camera: no frame buffer for the iOS session\n");
+	/* The session's own mode (cam_mode, default 3); the front's 2592x1940 is
+	 * inside mode 3's frame.
+	 */
+	unsigned reserve_w = 3008, reserve_h = 2256;
+	ureserve_for_boot_mode(&reserve_w, &reserve_h);
+	if (umi_camera_dma_reserve(reserve_w, reserve_h) != 0)
+		hakios_tl("UMI camera: no frame buffer for the iOS session (%ux%u)\n", reserve_w, reserve_h);
 	hakios_tl("UMI camera: iOS session mappings reserved (%u blocks)\n", umaps_used);
 }
 
@@ -1286,11 +1327,13 @@ umi_camera_ios_start(unsigned width, unsigned height)
 		}
 		unext_pending = false;
 	}
-	if (width < 64 || height < 64 || width > 4096 || height > 3072 || width % 4) return EINVAL;
-	/* The module file's 1080p mode for the S5KHMX (the session gets a centre
-	 * crop); the S5K3T2's 2592x1940 mode 1 is the app's front stream.
+	if (width < 64 || height < 64 || width > 16384 || height > 16384 || width % 4) return EINVAL;
+	/* The rear runs the module file's resN the boot asked for: cam_mode
+	 * (default 3, 3008x2256; 0 is the whole 12032x9024 sensor, and camera.c
+	 * sizes the ring and the headers from the same table entry).  The
+	 * S5K3T2's 2592x1940 mode 1 is the app's front stream.
 	 */
-	uios_force_mode = ufront ? 1 : 3;
+	uios_force_mode = ufront ? 1 : 0;
 	int error = uprobe(8);
 	uios_force_mode = 0;
 	if (error) {

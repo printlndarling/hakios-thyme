@@ -1120,10 +1120,12 @@ static const struct ctab_mode fake_mode = {
     .line_length = 800, .frame_length = 750, .fps_milli = 15000, .data_type = 0x2b,
 };
 /* cam_real: the UMI modes the sessions run, whole -- the wide's mode 3 at
- * 3008x2256 and the front's mode 1 at 2592x1940, not a centre crop.
+ * 3008x2256 and the front's mode 1 at 2592x1940, not a centre crop.  The
+ * wide's is the module file's resN (cam_mode, default 3) and is filled from
+ * the table below at ctab_load(); the front keeps its one mode.
  */
-static const struct ctab_mode real_modes[2] = {
-	/* The wide's session runs the sensor's mode 3 whole: a photograph's source is every
+static struct ctab_mode real_modes[2] = {
+	/* The wide's session runs the sensor's mode whole: a photograph's source is every
 	 * pixel the sensor gives (the front's stream stays 2592x1940), so zooming into it
 	 * shows what the sensor resolved rather than an enlargement of a centre crop.
 	 */
@@ -1133,6 +1135,61 @@ static const struct ctab_mode real_modes[2] = {
 	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 11060, .data_type = 0x2b },
 };
 static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
+/* The wide's module mode the iOS session runs (cam_mode, default 3): for the logs
+ * (the real_modes index is 0 "the wide" whatever the module's mode is).
+ */
+static uint32_t real_mode_n = 3;
+
+/*
+ * The wide's iOS session mode: the module file's resN, cam_mode (default 3) --
+ * the same N umi_camera.c gives its session (its own cam_mode parse).  The
+ * ring, the frame headers and the AE take the numbers from the same table the
+ * sensor is programmed from, so a res0 session (12032x9024) needs no second
+ * hard-coded copy of them here.  The front keeps its one mode.
+ */
+static void
+real_mode_from_table(void)
+{
+	static const char *const files[2] = { "camera-s5khmx-v3.tab", "camera-s5khmx-v19.tab" };
+	uint32_t mode_n = 3;
+
+	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6) {
+		mode_n = 3;
+	}
+	for (int i = 0; i < 2; i++) {
+		uint64_t size = 0;
+		const uint8_t *file = hakios_image_file("fw", files[i], &size, NULL);
+		const struct ctab_head *head = (const struct ctab_head *)file;
+		struct ctab_mode mode;
+
+		if (file == NULL || size < sizeof(*head) + ((uint64_t)mode_n + 1) * sizeof(mode) ||
+		    memcmp(head->magic, "RWCTAB02", 8) != 0 || head->modes <= mode_n) {
+			continue;
+		}
+		memcpy(&mode, file + sizeof(*head) + (uint64_t)mode_n * sizeof(mode), sizeof(mode));
+		if (mode.width < 64 || mode.height < 64 || mode.width > 16384 || mode.height > 16384 ||
+		    mode.width % 4 != 0 || mode.lanes < 1 || mode.lanes > (mode.cphy ? 3u : 4u) ||
+		    mode.data_type != 0x2b || mode.line_length == 0 || mode.frame_length == 0 || mode.pixel_clock == 0) {
+			continue;
+		}
+		/* The table's fps field is the module's label ("30" for mode 3,
+		 * whose HTS x VTS / PCLK is 92 ms): the AE's line time comes from
+		 * the geometry, as the fixed modes' did, or it is wrong by the
+		 * label's factor. */
+		mode.fps_milli = (uint32_t)(((uint64_t)mode.pixel_clock * 1000) /
+		    ((uint64_t)mode.line_length * mode.frame_length));
+		if (mode.fps_milli == 0) {
+			continue;
+		}
+		real_modes[0] = mode;
+		real_mode_n = mode_n;
+		say("camera: the wide's iOS session runs res%u: %ux%u, %u.%03u frames/s at the most\n", mode_n,
+		    mode.width, mode.height, mode.fps_milli / 1000, mode.fps_milli % 1000);
+		return;
+	}
+	say("camera: no res%u in the module's tables; the wide's iOS session stays %ux%u\n", mode_n,
+	    real_modes[0].width, real_modes[0].height);
+}
 static const uint8_t fake_power[24];
 static const uint32_t fake_tables;
 static bool fake;
@@ -1165,6 +1222,9 @@ ctab_load(void)
 		 * UMI session, not a chart.
 		 */
 		ctab = real_source ? &real_ctab : &fake_ctab;
+		if (real_source) {
+			real_mode_from_table();
+		}
 		ctab_modes = real_source ? real_modes : &fake_mode;
 		ctab_power = fake_power;
 		ctab_tables = (const uint8_t *)&fake_tables;
@@ -3427,8 +3487,15 @@ exposure_limits(uint32_t *lines, uint32_t *gain, uint32_t *frame_lines)
 	}
 	if (*frame_lines < shortest) {
 		*frame_lines = shortest;
-	} else if (*frame_lines > FRAME_LINES_MAX) {
-		*frame_lines = FRAME_LINES_MAX;
+	} else if (*frame_lines > (real_source ? ios_mode->frame_length : FRAME_LINES_MAX)) {
+		/*
+		 * The mode's own VTS is the longest frame the UMI path runs
+		 * (umi_camera_ios_set_exposure() clamps to it too): a longer ask
+		 * left the header naming 18160 lines while the sensor ran res0's
+		 * 9162, and the capture stack's AE then computed its exposure
+		 * from twice the frame time the pixels saw (logs/124014-run.log).
+		 */
+		*frame_lines = real_source ? ios_mode->frame_length : FRAME_LINES_MAX;
 	}
 	if (*lines > *frame_lines - EXPOSURE_MARGIN) {
 		*lines = *frame_lines - EXPOSURE_MARGIN;
@@ -3859,8 +3926,8 @@ fake_session(void)
 			ring_free();
 			return;
 		}
-		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (mode 3 whole); the frame length follows "
-		    "the capture stack's AE\n", ios_mode->width, ios_mode->height);
+		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (res%u whole); the frame length follows "
+		    "the capture stack's AE\n", ios_mode->width, ios_mode->height, real_mode_n);
 	} else {
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
 		    ios_mode->height, hw->chip, fps);
@@ -4103,7 +4170,24 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 		}
 		__asm__ volatile ("dsb sy");
 		t1 = mach_absolute_time();
-		error = uiomove((caddr_t)at, (int)n, uio);
+		/*
+		 * A frame may not cross to the program in one copy: this platform
+		 * panics on a single copy{in,out} of more than 64 MB
+		 * (osfmk/arm64/copyio.c's copysize_limit_panic), and the whole
+		 * sensor's res0 frame is 129.4 MB.  Pieces of 16 MB stay well
+		 * under it; the uio advances across them as it would in one copy.
+		 */
+		{
+			uint64_t done_bytes = 0;
+
+			while (error == 0 && done_bytes < n) {
+				uint32_t piece = (uint32_t)((uint64_t)(16u << 20) < n - done_bytes ?
+				    (uint64_t)(16u << 20) : n - done_bytes);
+
+				error = uiomove((caddr_t)at + done_bytes, (int)piece, uio);
+				done_bytes += piece;
+			}
+		}
 		t2 = mach_absolute_time();
 		if (f.sequence <= 3 || f.sequence % 300 == 0) {
 			uint64_t a, b;

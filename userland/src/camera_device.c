@@ -1533,6 +1533,30 @@ still_accumulate(const struct hakios_camera_frame *f, const uint8_t *raw)
 {
 	uint32_t w = f->width, h = f->height, stride = f->stride;
 
+	/*
+	 * A whole-sensor frame is the photograph itself: res0 is 12032x9024, and
+	 * its sums would be a 217 MB buffer and eight passes over it while the
+	 * capture graph waits for the picture the shutter asked for (the graph
+	 * gives a still a few seconds; the sums take longer than that on this
+	 * processor, and the process may not even be allowed the buffer).  The
+	 * downscale to the graph's 4032x3024 still already averages about nine
+	 * sensor pixels into every output pixel.  Camera.app's 12 MP modes keep
+	 * the eight-frame sums.
+	 */
+	if ((uint64_t)w * h > 32000000) {
+		static bool said;
+
+		if (!said) {
+			said = true;
+			say("the photograph is one whole-sensor frame, %ux%u (no sums at this size)", w, h);
+		}
+		still_packed = (uint8_t *)raw;   /* (the worker's frame buffer: given before the next read) */
+		still_w = w;
+		still_h = h;
+		still_stride = stride;
+		still_n = 0;
+		return true;
+	}
 	if (still_acc == NULL || still_w != w || still_h != h || still_stride != stride) {
 		free(still_acc);
 		free(still_packed);
