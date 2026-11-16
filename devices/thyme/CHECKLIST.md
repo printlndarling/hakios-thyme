@@ -4202,3 +4202,35 @@ home screen -- the wallpaper, the status bar at 6:06 with 64% battery, the Weath
 The plug-in's fps line still says 0 presented because it counts `presentDrawable`
 calls; the display's swap log and the screenshots are the evidence.  This is the
 first stable full UI with the Metal window server, and Maps takes the same path.
+
+### Maps: the app opens, its renderer runs; the map view is the next wall (2026-11-17)
+
+With `metal_all=1` first in the command line and the Maps scene (`rc.jobs.maps`,
+`/var/jb/usr/bin/uiopen --bundleid com.apple.Maps`), Maps runs on the Metal
+window server: its first launch draws "What's New in Maps" (`logs/maps-1.png`),
+`rwtouch`'s taps at (0.5, 0.79) dismiss it, the notification screen follows
+("Not Now" at (0.5, 0.918)), and the app reaches its search, favorites and guides
+screen with the location alert up (`logs/maps6-1.png`; scene `metal650maps6`,
+kernel `82abf2539d68`).  No GPU wedge in any run (`no answer` 0).
+
+What it asked the GPU for, and what it got:
+
+- a 1125x2436 4-sample Depth32Float_Stencil8 render target (usage 4): refused 16
+  times in the first run (`logs/061230-run.log`); the runtime now lays it out as
+  its depth plane alone, and a pass that binds the stencil plane of a multisample
+  depth texture is refused with its own sentence (`ffad6b7b`).  The refusals are
+  gone and Maps' renderer proceeds;
+- its VectorKit pipeline library opens through the mirror with an empty cache for
+  `pipelines.Adreno(hakios-metal,chip0x6050002)` ("had no pipelines... opened
+  through /private/var"), the same path every pipeline library without a
+  precompiled file for this GPU takes; the pipelines are built from its functions
+  by this runtime's compiler, as CoreAnimation's are;
+- 64 command buffers a queue, memoryless textures given memory, and command
+  buffers run in commit order (each said once in the log).
+
+The map area is black in these runs.  Two causes are visible and both outside the
+window server: the Wi-Fi link was not joined in any run ("the network is NOT
+joined", no handshake, no map tiles), and in `maps6` the Wi-Fi service reset
+itself mid-run ("background MHI polling failed: 5", "endpoint reset", "service
+stopped"), the driver's MHI failure mode to chase separately.  The location
+alert is answered by the next scene's tap at (0.5, 0.609).

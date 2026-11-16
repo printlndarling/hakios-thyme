@@ -2,7 +2,10 @@
 # metal_all=1 first (the command line is 607 characters; the last arguments are cut), so
 # SpringBoard, Maps and the window server all take the Metal device.  The jailbreak
 # prefix's uiopen asks LaunchServices for the bundle, as it does for HakiOS's weather app.
-/redwood/bin/sleep_hold 300 &
+# A first launch shows "What's New in Maps" (Continue at (0.5, 0.79) of the screen), then
+# the notification screen ("Not Now" at (0.5, 0.918)), then the location alert's
+# "Allow While Using App" (0.5, 0.609); each is tapped twice as the screen draws.
+/redwood/bin/sleep_hold 400 &
 /redwood/bin/rwtouch wait 90
 /var/jb/usr/bin/uiopen --bundleid com.apple.Maps
-/redwood/bin/rwtouch wait 45
+/redwood/bin/rwtouch wait 40 tap 0.5 0.79 wait 12 tap 0.5 0.79 wait 20 tap 0.5 0.918 wait 12 tap 0.5 0.918 wait 20 tap 0.5 0.609 wait 12 tap 0.5 0.609 wait 60
