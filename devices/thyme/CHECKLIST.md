@@ -391,9 +391,16 @@ hand the compiler no function constants, stops in the same place (offset 4064 of
 `xnu-src/.../MiniIOMobileFramebuffer.cpp` and need `xnu/export.sh` before a kernel commit; the
 GPU driver's are in `devices/thyme/drivers/gpu/hakios.thyme_gpu.cpp`.
 
-Next: the words of the shared program buffer at 0x2399c000 around the third pass's draws, and a
-bisect of the pipelines and states that pass sets (which CoreAnimation pipeline it draws with),
-to find the shader or state that keeps the SP busy and the CP waiting.
+The cause: the uber fragment shader uses Metal's `air.point_coord`, which the front end made
+`nir_load_point_coord`; ir3 has no lowering for it and called `ir3_context_error("Unhandled
+intrinsic type: load_point_coord")`.  In the release build `unreachable()` is nothing, so the
+device's compiler went on and built a shader the GPU stopped in -- the CP's `WAIT_FOR_IDLE` above
+is that stop.  It was found by building the host Mesa (`tools/air/mk-host.sh`; the system's
+`pkg-config` was missing, so meson never saw libdrm) and compiling `fixed_frag_lph_cpf` with
+`ir3_compiler`, which aborted there once `ir3_context_error` was made to say its reason.  With the
+coordinate lowered to the constant (0, 0) (`tools/mesa/air/air_to_nir.c`, `a478c5cd`) the same
+module compiles with no error (68 951 lines of listing).  Scene `metal650j` (`cb144ed5`) carries
+the fix; the device run waits for the phone to be back on USB.
 
 To name that shader: `hakios_metal_program_stage_words_copy()` (`hakios_metal.h`, `c_api.cpp`)
 gives a stage's first instruction words, the plug-in logs them once per pipeline
