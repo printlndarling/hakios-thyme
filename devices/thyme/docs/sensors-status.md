@@ -1500,3 +1500,10 @@ request is still `hw_platform`), and the DSP does not crash.  The index the
 registry sensor needs at start is the empty file the phone's persist copy is
 too, so the AP upload is the only road -- and the upload's own answers are what
 the next build must separate from message 1.
+
+The four EFAILED groups are the large ones (4005 bytes for `ccd_ttw`, 4534 for
+`sns_reg_config`, both JSON with many items); the other 185 answer 5.  So the
+write path reaches the service, and the payload size is not what separates the
+two answers -- the service's own state is.  Which answer `sns_cm` itself got is
+not in this log (the driver prints only the refusals and the first result-5
+line), and separating it is part of the next build's work.
