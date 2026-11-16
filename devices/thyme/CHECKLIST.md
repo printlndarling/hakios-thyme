@@ -395,6 +395,13 @@ Next: the words of the shared program buffer at 0x2399c000 around the third pass
 bisect of the pipelines and states that pass sets (which CoreAnimation pipeline it draws with),
 to find the shader or state that keeps the SP busy and the CP waiting.
 
+To name that shader: `hakios_metal_program_stage_words_copy()` (`hakios_metal.h`, `c_api.cpp`)
+gives a stage's first instruction words, the plug-in logs them once per pipeline
+("fbstage: vs+fs ... vs N: ... fs N: ..."), and the driver's failure path logs the first words
+and address of every other buffer the stopped submission names ("fbbuf: ...").  Scene
+`metal650i` (kernel `4b60a1ae`, scene `09e36f62`) carries them; the device run waits for the
+phone to be back on USB (it was not there at 01:41).
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
