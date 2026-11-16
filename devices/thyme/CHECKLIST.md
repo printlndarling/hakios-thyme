@@ -167,6 +167,12 @@ allocates the three personas, has no "type 6 uid 501" and no "Unable to find
 persona with type 6" line, no panic and no jetsam, submits 189 `hakios-gl`
 frames and stays thermal-nominal at 54.9 and 54.5 °C (24 slowdowns).
 
+The kernel that carries the SNS diagnostics of the sensor work was then run on
+the same daily scene (`logs/114009-run.log`, kernel `ca09f4e2c186`, scene
+`3016cb869d3f`, 419 s): the boot allocation is there, the uid-501 line is 0,
+no panic and no jetsam, 164 `hakios-gl` frames, thermal nominal at 53.3 and
+54.1 °C (30 slowdowns) -- the sensor code is inert without `slpi=1`.
+
 The kvsd crash is not the persona API.  `syncdefaultsd`'s nil URL comes from
 `sandbox_container_path_for_audit_token` -- the sandbox container, not the
 persona's path -- and it still dies the same way with the personas present and
