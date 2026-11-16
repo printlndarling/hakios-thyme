@@ -141,6 +141,12 @@ went from 207 to **0** in the run that did it (`logs/044045-run.log`).
 may use the personas; without it the port keeps answering "not supported", as
 before.  The switch was taken and logged in that run.
 
+A daily soak on the same tree (`logs/081814-run.log`, kernel `ee62d18cb881`,
+scene `f8f50e0c83ee`, 726 s) carries the boot allocation in its log, has **no**
+"Unable to find persona with type 6" line, no panic and no jetsam, brings en0
+through DAD, has the H4 transport ready, stays thermal-nominal (52.9 then
+51.4 °C, three slowdowns) and shuts the audio DSP down cleanly at 726 s.
+
 The kvsd crash is not the persona API.  `syncdefaultsd`'s nil URL comes from
 `sandbox_container_path_for_audit_token` -- the sandbox container, not the
 persona's path -- and it still dies the same way with the personas present and
