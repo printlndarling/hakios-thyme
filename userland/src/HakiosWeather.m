@@ -378,6 +378,8 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 @property (nonatomic, assign) NSUInteger attempts;
 @property (nonatomic, assign) BOOL fallbackPending;
 @property (nonatomic, assign) BOOL wttrTried;
+@property (nonatomic, strong) CLLocation *fixLocation;
+@property (nonatomic, assign) BOOL geocodeRetried;
 @property (nonatomic, strong) NSTimer *fallback;
 @end
 
@@ -461,6 +463,21 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 	[manager stopUpdatingLocation];
 	hw_note(@"fix: %.4f, %.4f (+/- %.0f m)%@", location.coordinate.latitude, location.coordinate.longitude,
 	    location.horizontalAccuracy, fromFallback ? @", replacing the fallback" : @"");
+	self.fixLocation = location;
+	[self reverseGeocode:location];
+	if (fromFallback) {
+		/* the fallback's answer, if it landed, is for the wrong point: let
+		 * the real fix fetch (a result from the old coordinates is dropped
+		 * in the completion by the staleness check) */
+		self.fetching = NO;
+		self.attempts = 0;
+		self.wttrTried = NO;
+	}
+	[self fetchForLatitude:location.coordinate.latitude longitude:location.coordinate.longitude];
+}
+
+- (void)reverseGeocode:(CLLocation *)location
+{
 	[[[CLGeocoder alloc] init] reverseGeocodeLocation:location completionHandler:^(NSArray<CLPlacemark *> *places,
 	    NSError *error) {
 		CLPlacemark *place = places.firstObject;
@@ -479,20 +496,28 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 			}
 			hw_note(@"place: %@ (error %@)", name, error.localizedDescription);
 			[self.root showCity:name];
+			return;
+		}
+		hw_note(@"place: no placemark (error %@)", error.localizedDescription);
+		/* the geocoder asks Apple's service; at launch the link may not be up
+		 * yet and it fails at once -- ask again ten seconds later, once */
+		if (!self.geocodeRetried) {
+			self.geocodeRetried = YES;
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[NSTimer scheduledTimerWithTimeInterval:10.0 target:self
+				    selector:@selector(geocodeAgain) userInfo:nil repeats:NO];
+			});
 		} else {
-			hw_note(@"place: no placemark (error %@)", error.localizedDescription);
 			[self.root showCity:@"当前位置"];
 		}
 	}];
-	if (fromFallback) {
-		/* the fallback's answer, if it landed, is for the wrong point: let
-		 * the real fix fetch (a result from the old coordinates is dropped
-		 * in the completion by the staleness check) */
-		self.fetching = NO;
-		self.attempts = 0;
-		self.wttrTried = NO;
+}
+
+- (void)geocodeAgain
+{
+	if (self.fixLocation != nil) {
+		[self reverseGeocode:self.fixLocation];
 	}
-	[self fetchForLatitude:location.coordinate.latitude longitude:location.coordinate.longitude];
 }
 
 - (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error

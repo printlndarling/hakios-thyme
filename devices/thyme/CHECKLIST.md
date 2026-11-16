@@ -385,6 +385,20 @@ with two defects found and fixed on the way:
   api.open-meteo.com 443` at the same moment, to say whether the timeout is
   below or above TCP.
 
+The run after those fixes is the one where everything holds together
+(kernel `c98ee588`, scene `0dde7cbe`, `logs/weather-180.png`, 21:19): the
+application opens, Open-Meteo answers over HTTPS, and the screen reads
+**7°**, 毛毛雨 with its SF Symbol, 体感 6° · 湿度 90% · 风速 0 km/h, the
+twelve-hour strip (21时 7° … 02时 6°, each with its symbol), the seven-day
+list (周一 毛毛雨 9°/6° … 周日 阴 9°/-2°) and "数据：Open-Meteo" -- the
+redesigned UI, at last with data, and the battery's 44% did not move (the
+DSP-only fix above).  Two notes from that run: `uiopen` by URL scheme was a
+no-op in the boot before it, so the scene now opens by bundle id with one
+retry; and the reverse geocode failed before the link was up, leaving the
+title at "当前位置" -- the app now asks Apple's geocoder once more, ten
+seconds later.  The plain-HTTP wttr.in fallback stays in the app for the
+boots where Open-Meteo's TLS times out, and names its source when it is used.
+
 The battery guard is real but the runs are expensive: a 4 GB boot image
 uploaded at 24 MB/s, four minutes of kernel and the display on took the
 phone from ~28% to 0 across five sessions, and at 0 the phone disappeared
