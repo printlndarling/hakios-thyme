@@ -1383,6 +1383,21 @@ screenshots at all.
 
 ## The battery guard, and the charging bit that defeated it (2026-11-11)
 
+**2026-11-16, the percentage that fell to 2% and came back.**  On the phone the
+owner saw the battery go from the forties to 2% and, a while later, back --
+not a discharge, a reading.  Two paths publish the battery in this kernel:
+the loader's shared battery page (`battery_poll`) and the audio DSP's battery
+manager (`hakios_battery_report`, with `adsp=1`), and both wrote the same
+`battery_soc_percent` and the power source the status bar reads.  The DSP's
+fuel gauge is the one Android shows; the loader page's estimate is what can
+hand a 40-odd percent battery a 2% sample, and once it does, the status bar,
+Settings and the run's `battery_stop` guard all follow the bad number -- which
+is also the likely explanation for runs that the guard ended at "24-26%" while
+the phone still had hours of use.  The page's samples are no longer published
+once the DSP has reported (`battery_page_ignored` counts them); the DSP stays
+the only source.  The fix is in the kernel but not yet proven on hardware: the
+next runs watch the percentage and `kern.hakios.battery_from_dsp`.
+
 A 30-minute daily-scene soak on the baseline kernel (`logs/125243-run.log`, kernel
 `35d4e53f`, scene `8f5bc2aa`, SHA-256 `8268de80de00a089b3f24342a075bf314ccb1c074d4ecbf647de8ae19b9afc9c`)
 stayed up for the whole 1800 s: the network joined and held for 1657 s (215 frames

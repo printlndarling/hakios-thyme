@@ -42,6 +42,8 @@ static volatile struct loader_battery *shared_battery;
 static int battery_soc_percent = -1, battery_voltage_mv = -1, battery_current_ma;
 static int battery_temperature_c = -273, battery_present, battery_charger_present;
 static int battery_charging, battery_soc_estimated, battery_charger_action = -1;
+static unsigned long battery_page_ignored;      /* loader-page samples left unpublished: the DSP answers */
+static int battery_source_dsp;                  /* 1 when the audio DSP's battery manager answers */
 static uint64_t battery_updates, battery_failures;
 
 /* for others in the kernel (the flashlight's thermal guard): -273 while it is not known */
@@ -109,6 +111,17 @@ battery_poll(void)
 		battery_failures++;
 		return;
 	}
+	/*
+	 * Once the audio DSP's battery manager has reported, its fuel gauge is the
+	 * one Android shows and the only one published: the loader's battery page
+	 * handed a 40-odd percent battery a 2% sample and back (seen on the phone,
+	 * 2026-11-16), and letting it overwrite the DSP's value makes the status
+	 * bar and the run's battery guard follow the bad number.
+	 */
+	if (battery_source_dsp) {
+		battery_page_ignored++;
+		return;
+	}
 	battery_soc_percent = sample.soc_percent;
 	battery_voltage_mv = (sample.flags & LOADER_BATTERY_VOLTAGE_VALID) ? sample.voltage_mv : -1;
 	battery_current_ma = sample.current_ma;
@@ -153,7 +166,7 @@ battery_poll(void)
  * the values that Android shows, from where Android takes them. They are kept here for the sysctls
  * and passed on to the power source that Darwin reads (drivers/power/hakios.battery.cpp).
  */
-static int battery_full_uah, battery_design_uah, battery_cycles, battery_source_dsp;
+static int battery_full_uah, battery_design_uah, battery_cycles;
 
 SYSCTL_INT(_kern_hakios, OID_AUTO, battery_full_uah, CTLFLAG_RD | CTLFLAG_LOCKED,
     &battery_full_uah, 0, "the battery's full charge as the fuel gauge has learnt it, in uAh (0 if unknown)");
