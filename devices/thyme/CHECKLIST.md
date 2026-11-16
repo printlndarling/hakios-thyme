@@ -186,8 +186,16 @@ job's standard output is /dev/null, and its `dlopen("/usr/lib/libxpc.dylib")`
 failed because this image's dyld cache carries the library as
 `/usr/lib/system/libxpc.dylib` (its program says so on the console,
 `logs/135006-run.log`).  It now writes to /dev/console (its plist names the
-path too) and opens the right path; the next run's log carries the messages'
-descriptions.
+path too) and opens the right path: the next run's log has it listening on both
+names (`logs/140045-run.log`), the app's fairplayd lookups still succeed, and
+**the app connects to neither service and sends no message**.  What the app
+asks of fairplayd is therefore not a presence check it acts on over XPC -- it
+looks the names up and, with them there, still asks weatherd for nothing and
+makes no connection.  The stock forecast path stays behind FairPlay/SEP in the
+app's own WeatherKit client; making the Weather app show numbers means putting
+a data source in its place (fetch the forecast from a service that needs no
+device identity and hand it to WeatherKit's model), which is the project's next
+step, not a daemon switch.
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
