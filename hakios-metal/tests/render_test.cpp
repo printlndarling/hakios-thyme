@@ -5334,7 +5334,7 @@ TEST(the_gmem_plan_fits_the_bins_in_gmem_and_covers_the_target) {
         CHECK(render::gmemPlan(a, &p, &why));
         const uint32_t bpp = t->info().bytesPerPixel;
         CHECK(p.binW % 32 == 0 && p.binH % 16 == 0 && p.binW <= 1024 && p.binH <= 1008);
-        CHECK(uint64_t(p.binW) * p.binH * bpp <= a6xx::kGmemCcuColorOffset);
+        CHECK(uint64_t(p.binW) * p.binH * bpp <= a6xx::gmemCcuColorOffset());
         CHECK(p.cols * p.binW >= w && (p.cols - 1) * p.binW < w && p.rows * p.binH >= h && (p.rows - 1) * p.binH < h);
         std::printf("       %ux%u %s: %u x %u tiles of %u x %u\n", w, h, t->info().name, p.cols, p.rows, p.binW, p.binH);
     }

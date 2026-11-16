@@ -944,3 +944,22 @@ TEST(the_a650_row_is_mesa_info13_and_selection_keeps_the_default) {
     CHECK(&chip() == &kA650);
     chip_select(0);
 }
+
+TEST(the_a650_row_reaches_the_static_state_and_the_ccu_helpers) {
+    bool sp = false, tpl1 = false, uche = false;
+
+    CHECK(chip_select(kA650.chip_id));
+    a6xxInitStaticState();
+    for (const RegWrite &w : kStaticState) {
+        if (w.reg == REG_A6XX_SP_DBG_ECO_CNTL) { CHECK_EQ(w.value, kA650.magic_sp_dbg_eco_cntl); sp = true; }
+        if (w.reg == REG_A6XX_TPL1_DBG_ECO_CNTL) { CHECK_EQ(w.value, kA650.magic_tpl1_dbg_eco_cntl); tpl1 = true; }
+        if (w.reg == REG_A6XX_UCHE_CLIENT_PF) { CHECK_EQ(w.value, kA650.magic_uche_client_pf); uche = true; }
+    }
+    CHECK(sp && tpl1 && uche);
+    CHECK_EQ(gmemCcuColorOffset(), 1024u * 1024u - 3u * kSysmemPerCcuColorCacheSize / 2u);
+    CHECK_EQ(rbCcuCntlSysmem(3u * kSysmemPerCcuDepthCacheSize), rbCcuCntlSysmem());
+
+    chip_select(0);
+    a6xxInitStaticState();
+    CHECK_EQ(gmemCcuColorOffset(), 512u * 1024u - 2u * kSysmemPerCcuColorCacheSize / 4u);
+}

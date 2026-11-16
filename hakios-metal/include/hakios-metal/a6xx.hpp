@@ -1698,7 +1698,10 @@ constexpr uint32_t hlsqInvalidateCmdAll() {
 // RB_CCU_CNTL for rendering to memory on this chip: depth cache at 0, color cache after it, both full size
 // (the color offset is the depth cache's size: num_ccu * sysmem_per_ccu_depth_cache_size; the offsets' bit 21 goes
 // in the _HI fields, which 0x20000 does not reach)
-constexpr uint32_t rbCcuCntlSysmem(uint32_t colorOffset = kNumCcu * kSysmemPerCcuDepthCacheSize) {
+inline uint32_t rbCcuCntlSysmem(uint32_t colorOffset = 0) {
+    if (colorOffset == 0) {
+        colorOffset = chip().num_ccu * kSysmemPerCcuDepthCacheSize;
+    }
     return (kHasGmemFastClear ? 0u : A6XX_RB_CCU_CNTL_GMEM_FAST_CLEAR_DISABLE) |
            (kConcurrentResolve ? A6XX_RB_CCU_CNTL_CONCURRENT_RESOLVE : 0u) | A6XX_RB_CCU_CNTL_DEPTH_OFFSET_HI(0) |
            A6XX_RB_CCU_CNTL_COLOR_OFFSET_HI(colorOffset >> 21) | A6XX_RB_CCU_CNTL_DEPTH_CACHE_SIZE(CCU_CACHE_SIZE_FULL) |
@@ -1707,7 +1710,7 @@ constexpr uint32_t rbCcuCntlSysmem(uint32_t colorOffset = kNumCcu * kSysmemPerCc
 }
 
 // fd6_emit_static_regs, A6XX, this chip: up to CP_SET_DRAW_STATE
-inline constexpr RegWrite kStaticState[] = {
+inline RegWrite kStaticState[] = {
     {REG_A6XX_RB_DBG_ECO_CNTL, kMagicRbDbgEcoCntl},
     {REG_A6XX_SP_FLOAT_CNTL, A6XX_SP_FLOAT_CNTL_F16_NO_INF},   // computerator's dispatch prelude then writes 0 here
     {REG_A6XX_SP_DBG_ECO_CNTL, kMagicSpDbgEcoCntl},
@@ -1777,6 +1780,21 @@ inline constexpr RegWrite kStaticStateTail[] = {
     {REG_A6XX_PC_DGEN_SU_CONSERVATIVE_RAS_CNTL, 0},
     {REG_A6XX_RB_ALPHA_CONTROL, 0},
 };
+
+// The three entries of kStaticState that differ between the rows are patched from
+// chip() when the device is opened; until then the table holds the 642L's values,
+// which is what the host tests read without a device.
+inline void a6xxInitStaticState() {
+    for (RegWrite &w : kStaticState) {
+        if (w.reg == REG_A6XX_SP_DBG_ECO_CNTL) {
+            w.value = chip().magic_sp_dbg_eco_cntl;
+        } else if (w.reg == REG_A6XX_TPL1_DBG_ECO_CNTL) {
+            w.value = chip().magic_tpl1_dbg_eco_cntl;
+        } else if (w.reg == REG_A6XX_UCHE_CLIENT_PF) {
+            w.value = chip().magic_uche_client_pf;
+        }
+    }
+}
 
 // CP_SET_DRAW_STATE, 3 words per group: Gallium's batch start sends one group with DISABLE_ALL_GROUPS and no address,
 // to drop any state group a previous owner of the GPU left pending
@@ -4141,12 +4159,15 @@ constexpr uint32_t binControlGmem(bool lrzFeedback, uint32_t binw, uint32_t binh
 // RB_CCU_CNTL for tiled rendering: the colour cache shrunk to its GMEM fraction and moved to GMEM's end, so the tiles
 // own everything below it (tu_cmd_buffer.cc tu6_emit_ccu_cntl, gmem: ccu_offset_gmem = gmem - num_ccu * color cache /
 // fraction); depth cache unused (no depth attachment in a GMEM pass here). 0x3c400000 on this chip
-constexpr uint32_t kGmemCcuColorOffset = kGmemBytes - kNumCcu * kSysmemPerCcuColorCacheSize / kGmemCcuColorCacheFraction;
-constexpr uint32_t rbCcuCntlGmem() {
-    return (kHasGmemFastClear ? 0u : A6XX_RB_CCU_CNTL_GMEM_FAST_CLEAR_DISABLE) | A6XX_RB_CCU_CNTL_COLOR_OFFSET_HI(kGmemCcuColorOffset >> 21) |
-           A6XX_RB_CCU_CNTL_COLOR_CACHE_SIZE(CCU_CACHE_SIZE_QUARTER) | A6XX_RB_CCU_CNTL_COLOR_OFFSET(kGmemCcuColorOffset & 0x1fffff);
+inline uint32_t gmemCcuColorOffset() {
+    return chip().gmem_bytes - chip().num_ccu * kSysmemPerCcuColorCacheSize / chip().gmem_ccu_color_cache_fraction;
 }
-static_assert(rbCcuCntlGmem() == 0x3c400000, "the GMEM CCU layout turnip computes for this chip");
+inline uint32_t rbCcuCntlGmem() {
+    const uint32_t colorOffset = gmemCcuColorOffset();
+    return (kHasGmemFastClear ? 0u : A6XX_RB_CCU_CNTL_GMEM_FAST_CLEAR_DISABLE) | A6XX_RB_CCU_CNTL_COLOR_OFFSET_HI(colorOffset >> 21) |
+           A6XX_RB_CCU_CNTL_COLOR_CACHE_SIZE(CCU_CACHE_SIZE_QUARTER) | A6XX_RB_CCU_CNTL_COLOR_OFFSET(colorOffset & 0x1fffff);
+}
+// (that layout was 0x3c400000 for the 642L; tests/a6xx_test.cpp checks both rows now)
 
 // hardware binning (fd6_gmem.cc emit_binning_pass, update_vsc_pipe, fd6_emit_tile_prep): the binning pass runs every draw's
 // vertex stage once over the whole window and the VSC writes, for each pipe of bins, which draws and primitives reach

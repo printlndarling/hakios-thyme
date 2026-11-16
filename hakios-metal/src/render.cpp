@@ -2198,9 +2198,9 @@ bool gmemPlan(const RenderPass& pass, GmemPlan* plan, std::string* why) {
         const Attachment a = attachmentOf(pass, i);
         if (a.texture == nullptr) continue;
         p.bpp[i] = a.texture->info().bytesPerPixel;
-        p.base[i] = uint32_t(uint64_t(kGmemCcuColorOffset) * before / bytes) & ~0x3fffu;
+        p.base[i] = uint32_t(uint64_t(gmemCcuColorOffset()) * before / bytes) & ~0x3fffu;
         before += p.bpp[i];
-        p.room[i] = (uint32_t(uint64_t(kGmemCcuColorOffset) * before / bytes) & ~0x3fffu) - p.base[i];
+        p.room[i] = (uint32_t(uint64_t(gmemCcuColorOffset()) * before / bytes) & ~0x3fffu) - p.base[i];
     }
     const uint32_t whole[4] = {0, 0, W - 1, H - 1};
     if (!gmemTiles(&p, whole)) return refuse(why, "a bin too wide for GMEM");
@@ -2390,8 +2390,8 @@ void encodeGmem(pm4::Stream& stream, const RenderPass& pass, const GmemPlan& pla
         }
         regs(stream, REG_A6XX_VSC_PRIM_STRM_ADDRESS, {uint32_t(primStrm), uint32_t(primStrm >> 32), kVscPrimPitch, kVscPrimPitch - 64});
         regs(stream, REG_A6XX_VSC_DRAW_STRM_ADDRESS, {uint32_t(drawStrm), uint32_t(drawStrm >> 32), kVscDrawPitch, kVscDrawPitch - 64});
-        reg(stream, REG_A6XX_PC_POWER_CNTL, kMagicPcPowerCntl);
-        reg(stream, REG_A6XX_VFD_POWER_CNTL, kMagicPcPowerCntl);
+        reg(stream, REG_A6XX_PC_POWER_CNTL, chip().magic_pc_power_cntl);
+        reg(stream, REG_A6XX_VFD_POWER_CNTL, chip().magic_pc_power_cntl);
         event(stream, UNK_2C);
         reg(stream, REG_A6XX_RB_WINDOW_OFFSET, regXY(0, 0));
         reg(stream, REG_A6XX_SP_TP_WINDOW_OFFSET, regXY(0, 0));

@@ -243,6 +243,7 @@ hakios_metal_device* hakios_metal_open(void) {
         delete d;
         return nullptr;
     }
+    a6xx::a6xxInitStaticState();
     return d;
 #endif
 #endif
