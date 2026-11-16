@@ -176,6 +176,33 @@ left before a device run is the register-level audit the plan lists (whether
 `metal=1 ca_metallib=... metal_all=1` on the phone.  No A650 Metal frame has
 been submitted yet.
 
+On the night of 2026-11-16 the first A650 Metal boot ran (kernel `c98ee588`,
+scene `f99fe23e` -- `METAL_PLUGIN=ca`, the minimal QuartzCore metallib at
+`/redwood/share/cameta`, boot args `metal=1 metal_fps=1 ca_metallib=...
+gpu_recover=1 anim_max=1 metal_all=1`):
+
+* **The window server accepts the A650's device now**: "HakiosMetal[backboardd
+  104]: device: Adreno (hakios-metal, chip 0x6050002) on IOAcceleratorES
+  service 0x6f07; the compiler is in this build; feature profile 1 (Apple1,
+  Apple2 and Common1)".  It goes on to open CoreAnimation's pipeline library,
+  answer `targetDeviceInfo`, and take textures and command queues through the
+  plug-in -- the "no device: the GPU's chip ID is 0x6050002" of every earlier
+  `metal=1` boot is gone.
+* **The screen is black, from the first screenshot to the last** (every
+  `weather-*.png` of the run is 15,289 bytes, the bare framebuffer): with the
+  device accepted, CoreAnimation is drawing through the A650's render
+  sequence and that sequence does not put a frame on the panel yet -- the
+  next work is exactly the gen3 path the plan warns about (`docs/
+  metal-a650-plan.md`'s risks: preamble, LPAC, tile/GMEM sequence), compared
+  against what the 642L path emits and what the fake GPU model accepts.
+* The boot line is 607 characters (`BOOT_LINE_LENGTH`) and the run's ended
+  at "metal_" -- **`metal_all=1` was cut**, so Maps was not shown the device
+  in this run even if its window had drawn.  The next Metal boot puts
+  `metal_all=1` first or trims the daily arguments.
+
+This is the first time the accelerator has accepted thyme's GPU; it is not a
+working Metal path yet.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
