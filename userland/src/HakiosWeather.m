@@ -80,6 +80,14 @@ hw_condition(NSInteger code)
 	}
 }
 
+/* JSON numbers are NSNumbers; a null in the array is NSNull and would throw
+ * on doubleValue.  -999 means "no value" and the row is skipped. */
+static double
+hw_value(id object, double fallback)
+{
+	return [object isKindOfClass:[NSNumber class]] ? [object doubleValue] : fallback;
+}
+
 /* Open-Meteo's hourly time is local wall time ("2026-11-16T17:00"): the hour
  * is all the strip shows. */
 static NSString *
@@ -392,8 +400,16 @@ hw_hour(NSString *iso)
 		if (i >= hourTemps.count || i >= hourCodes.count) {
 			break;
 		}
-		[hourLines addObject:[NSString stringWithFormat:@"%@时 %.0f° %@", hw_hour(hours[i]),
-		    [hourTemps[i] doubleValue], hw_condition([hourCodes[i] integerValue])]];
+		{
+			double temperature = hw_value(hourTemps[i], -999);
+			double code = hw_value(hourCodes[i], -999);
+
+			if (temperature < -100 || code < 0) {
+				continue;
+			}
+			[hourLines addObject:[NSString stringWithFormat:@"%@时 %.0f° %@", hw_hour(hours[i]),
+			    temperature, hw_condition((NSInteger)code)]];
+		}
 	}
 
 	NSArray *dayCodes = [daily[@"weather_code"] isKindOfClass:[NSArray class]] ? daily[@"weather_code"] : @[];
@@ -410,9 +426,19 @@ hw_hour(NSString *iso)
 		}
 		formatter.dateFormat = @"yyyy-MM-dd";
 		date = [formatter dateFromString:days[i]];
-		name = date != nil ? dayNames[[[NSCalendar currentCalendar] component:NSCalendarUnitWeekday fromDate:date] - 1] : days[i];
-		[dayLines addObject:[NSString stringWithFormat:@"%@ %@ %.0f° / %.0f°", name,
-		    hw_condition([dayCodes[i] integerValue]), [dayMax[i] doubleValue], [dayMin[i] doubleValue]]];
+		name = date != nil ? dayNames[MAX(0, [[NSCalendar currentCalendar] component:NSCalendarUnitWeekday
+		    fromDate:date] - 1)] : days[i];
+		{
+			double code = hw_value(dayCodes[i], -999);
+			double high = hw_value(dayMax[i], -999);
+			double low = hw_value(dayMin[i], -999);
+
+			if (code < 0 || high < -100 || low < -100) {
+				continue;
+			}
+			[dayLines addObject:[NSString stringWithFormat:@"%@ %@ %.0f° / %.0f°", name,
+			    hw_condition((NSInteger)code), high, low]];
+		}
 	}
 
 	dispatch_async(dispatch_get_main_queue(), ^{
@@ -429,7 +455,7 @@ hw_hour(NSString *iso)
 			self.conditionLabel.text = hw_condition(code.integerValue);
 		}
 		self.detailsLabel.text = [NSString stringWithFormat:@"体感 %.0f° · 湿度 %.0f%% · 风速 %.0f km/h",
-		    feels.doubleValue, humidity.doubleValue, wind.doubleValue];
+		    hw_value(feels, 0), hw_value(humidity, 0), hw_value(wind, 0)];
 		self.hoursLabel.text = [@"未来 12 小时\n" stringByAppendingString:[hourLines componentsJoinedByString:@"\n"]];
 		self.daysLabel.text = [@"未来 7 天\n" stringByAppendingString:[dayLines componentsJoinedByString:@"\n"]];
 		self.statusLabel.text = @"数据：Open-Meteo";
