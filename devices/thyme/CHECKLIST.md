@@ -161,6 +161,12 @@ scene `f8f50e0c83ee`, 726 s) carries the boot allocation in its log, has **no**
 through DAD, has the H4 transport ready, stays thermal-nominal (52.9 then
 51.4 °C, three slowdowns) and shuts the audio DSP down cleanly at 726 s.
 
+A second soak on the final set -- the single uid-501 system proxy
+(`logs/100410-run.log`, kernel `ee62d18cb881`, scene `3016cb869d3f`, 719 s) --
+allocates the three personas, has no "type 6 uid 501" and no "Unable to find
+persona with type 6" line, no panic and no jetsam, submits 189 `hakios-gl`
+frames and stays thermal-nominal at 54.9 and 54.5 °C (24 slowdowns).
+
 The kvsd crash is not the persona API.  `syncdefaultsd`'s nil URL comes from
 `sandbox_container_path_for_audit_token` -- the sandbox container, not the
 persona's path -- and it still dies the same way with the personas present and
