@@ -5214,7 +5214,10 @@ HM_REFUSES_OUT_LOUD
 	if (_cb != NULL) {
 		hakios_metal_cb_skip_refused(_cb, !hm_strict());
 		hakios_metal_cb_set_profile(_cb, hm_fps_on());
-		hakios_metal_cb_set_gmem(_cb, hm_gmem_on() || hm_gmem_draws() != 0);
+		/* GMEM only with metal_gmem=1: metal_gmem_draws=N tunes it (56 when not given), and its
+		 * default being 56 must not turn tiled rendering on by itself -- run 055707 showed that
+		 * tiled CoreAnimation hangs the GPU where sysmem does not */
+		hakios_metal_cb_set_gmem(_cb, hm_gmem_on());
 		hakios_metal_cb_set_gmem_min_draws(_cb, hm_gmem_draws());
 		hakios_metal_cb_set_gmem_binning(_cb, (hm_gmem_off() & 16) == 0);   /* metal_gmem_off's 16: every draw in every tile */
 		hakios_metal_cb_set_null_fs_textures(_cb, (hm_gmem_off() & 32) != 0);   /* 32: no texture reads, to time the shaders alone */
@@ -8746,6 +8749,14 @@ HM_REFUSES_OUT_LOUD
 	hakios_metal_cb *sub = hakios_metal_cb_new([(HakiosMetalCommandQueue *)[_commandBuffer commandQueue] hakiosQueue]);
 	if (sub != NULL) {
 		hakios_metal_cb_skip_refused(sub, !hm_strict());
+		/* a sub-encoder's buffer starts with the library's defaults (GMEM on): the same choices as
+		 * the command buffer it belongs to, or tiled rendering comes back by this door */
+		hakios_metal_cb_set_gmem(sub, hm_gmem_on());
+		hakios_metal_cb_set_gmem_min_draws(sub, hm_gmem_draws());
+		hakios_metal_cb_set_gmem_binning(sub, (hm_gmem_off() & 16) == 0);
+		hakios_metal_cb_set_gmem_off(sub, hm_gmem_off());
+		hakios_metal_cb_set_gmem_tuned(sub, (hm_gmem_off() & 8) == 0);
+		hakios_metal_cb_set_null_fs_textures(sub, (hm_gmem_off() & 32) != 0);
 	}
 
 	[_lock lock];

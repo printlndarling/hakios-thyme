@@ -4145,3 +4145,48 @@ name]` no longer answers once the AIR has been taken, so the line now carries
 `hakios_metal_program_name(program)`, the same label as the `linked` line.  The
 stop itself is reproducible: submission 40, word 4064 of 11489, the GMEM store
 blit of a tile, the IB2 behind it consumed.
+
+With the body kept (`logs/054757-run.log`, scene `metal650q`, kernel
+`82abf2539d68`) the trap names the pass's draws: `fbbody: 7575 words at
+0x2396e000`, and the first eight words at each of the four (VS, FS) program
+pairs it runs, matched against the 315 `fbstage` rows of the same run (labels
+now `hakios_metal_program_name`):
+
+- 0x22100000 (VS `00001000 4070000a ...`) / 0x22110000 (FS `00000007 03820000
+  ...`): `fixed_vert_lph_spc` + `fixed_frag_lph_cpf`/`_cph` (the VS head is
+  shared with `std_vert1_lph`'s luma_boost/home_affordance pipelines, the FS
+  head by cpf and cph);
+- 0x237a0000 / 0x237b0000 (FS `00002004 4730090a ...`): cpf/cph again;
+- 0x21670000 / 0x21680000 (FS `00002000 47308902 ... a1000f0a`): the cph
+  variant only;
+- 0x21a80000 / 0x21a90000: cpf/cph again.
+
+So the wedged pass is CoreAnimation's own fixed-function compositor; the first
+eight words do not separate the cpf and cph variants except at 0x21680000 (cph),
+and the body is replayed once per bin, so any one of its draws hangs the tile
+loop.  What that leaves open is where the hang is: the GMEM tile machinery (a
+store blit or the bin state) or one of these draws.  The next run answers it by
+turning the plug-in's own GMEM switch off (`metal_gmem_draws=0`, which the
+`hm_gmem_draws() != 0` clause otherwise leaves at its default 56 and thus on).
+
+### GMEM off: the window server stops wedging (2026-11-17)
+
+The same scene and kernel (`metal650q`, `82abf2539d68`) with `metal_gmem_draws=0`
+in the command line (`logs/055707-run.log`): no "no answer", no refused
+submission, every commit completes (0.4 ms on average, 21.2 at most), 23 command
+buffers every two seconds, and the framebuffer swaps 2280 times -- the early
+swaps black, the late ones `black 3/2046` of the sampled pixels, a drawn frame.
+With GMEM at the plug-in's default the same image wedged in submission 40's tile
+loop every time (054757 and 055707 are the two sides).  So the hang is the GMEM
+path's tile loop of CoreAnimation's fixed-function draws, not a draw that sysmem
+cannot run.
+
+The plug-in now turns GMEM on only with `metal_gmem=1`: the condition was
+`hm_gmem_on() || hm_gmem_draws() != 0`, and `hm_gmem_draws()` is 56 when the
+boot-arg does not name it, so tiled rendering was on by default -- against the
+comment above `hm_gmem_on()` ("Off by default: for CoreAnimation it won
+nothing").  The parallel render encoder's sub-buffers, which start from the
+library's GMEM-on defaults and never took the plug-in's choice, now get the same
+settings.  The GMEM path itself (a tile's store blit stalling the command
+processor after the IB2 is consumed) remains to be fixed for the performance it
+was meant to bring; it is not on the daily path any more.
