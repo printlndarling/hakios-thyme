@@ -1,0 +1,11 @@
+# RC_JOBS=rc.jobs.widget: leave SpringBoard on its first page, then swipe
+# right into the Today View, where the stock Weather widget is, and stay
+# there -- the run's screenshots then show whether it has data.  The swipe
+# waits for SpringBoard: the home screen comes up about two and a half
+# minutes into a boot (logs/232133-run.log), so 150 s after this job starts.
+# The GL window server: this is the verified daily path, not Metal.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 150
+/redwood/bin/rwtouch swipe 0.02 0.5 0.85 0.5 400
+/redwood/bin/rwtouch wait 25
+/redwood/bin/rwtouch swipe 0.02 0.5 0.85 0.5 400

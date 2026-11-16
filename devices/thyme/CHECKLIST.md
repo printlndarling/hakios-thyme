@@ -325,6 +325,18 @@ So composition and the pipeline path work.  What remains is how the frame is
 presented (damage rectangles, or the surface's present, only part of the
 frame reaching the display) and input under the Metal window server.
 
+### The desktop Weather widget has no data (2026-11-16, hardware-verified)
+
+The Today View (a right swipe from the first home page; scene `weatherwidget2`,
+kernel `c24ac306`, log `logs/232926-run.log.live`) shows the stock Weather
+widget as "No weather data" beside a working Calendar widget
+(`logs/weather-widget-232926.png`).  That is WeatherKit's data, the FairPlay
+gate the stock Weather app also stops at; the native HakiOS weather app
+(Open-Meteo) and the district-level location it uses are unaffected.  The same
+run is also a GL-path stability check: the home screen and the Today View drew
+normally, with the window server on its verified OpenGL path and no Metal
+arguments.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from

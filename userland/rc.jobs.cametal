@@ -1,0 +1,5 @@
+# RC_JOBS=rc.jobs.cametal: leave the home screen alone -- the Metal window
+# server's own frames, with no application opened over them, to tell whether
+# the full-then-partial frame the weather scene showed comes with an
+# application's surface or happens on the home screen by itself.
+/redwood/bin/sleep_hold 300 &
