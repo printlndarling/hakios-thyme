@@ -1,11 +1,9 @@
 # Settings root page scrolled, and left there (RC_JOBS=rc.jobs.prefscroll):
-# the two swipes rc.jobs.prefstap3 uses, without the tap, so a screenshot shows
-# where Privacy & Security really is after them.
+# one swipe, without the tap, so a screenshot shows where Privacy & Security
+# sits after it (two swipes went past it, into the apps group).
 /redwood/bin/sleep_hold 240 &
 /redwood/bin/rwtouch wait 10
 /var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
 /redwood/bin/rwtouch wait 40
-/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.2 400
-/redwood/bin/rwtouch wait 3
-/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.2 400
+/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.35 400
 /redwood/bin/rwtouch wait 100
