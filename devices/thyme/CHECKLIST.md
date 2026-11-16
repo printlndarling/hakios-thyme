@@ -159,7 +159,9 @@ the device ...`).  Enabling Metal on the phone therefore needs hakios-metal's
 A650 (gen3) chip tables -- the kChipId, kFibersPerSp/kNumSpCores and kMagic*
 constants in a6xx.hpp, the compiler's chip id in compiler.cpp/texture.cpp, and
 whatever the gen3 render sequence differs in -- and `metal_all=1`, not only
-the boot argument.
+the boot argument.  The A650's row as Mesa has it (the `__info13` entry the
+chip id resolves to) and the constant-by-constant delta are in
+`docs/metal-a650.md`.
 
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
