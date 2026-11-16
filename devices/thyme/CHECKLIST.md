@@ -191,13 +191,16 @@ it back ("THE SAME PASSWORD", service `AirPort`, access group
 
 `wifipw_seed` (`src/wifipw_seed.c`) does the same with `fw/network`'s two
 lines, so the sheet would not need to ask.  As a launchd RunAtLoad job
-(`com.hakios.wifipw.plist`) it is too early: the process spawns at about 10 s
-and its first keychain call is still waiting when the run ends (no exit, no
-answer, `logs/091858-run.log`, `logs/093307-run.log`), while the same call from
-the scene-60 s program returns at once.  The keychain's daemon is not ready
-when the job starts, and the Security framework's call does not time out.  The
-job is therefore **not installed** by the build; the tool and the plist stay as
-the experiment, and the fix is a keychain call that can time out and retry.
+(`com.hakios.wifipw.plist`) it does not get an answer: the process spawns at
+about 10 s, waits its 50 s, and its first keychain call is still waiting when
+the run ends (no exit, no answer, `logs/091858-run.log`, `logs/093307-run.log`
+-- the second with the delay), while the same call from the scene-60 s program
+returns at once.  `securityd` never appears in either log, so the difference is
+the job's context (a launchd job in the user domain), not the moment; the
+Security framework's call does not time out either.  The job is therefore
+**not installed** by the build; the tool and the plist stay as the experiment,
+and the fix is a keychain call that can time out and retry, made from the same
+context the working call has.
 
 On the boots held on the home screen the sheet did not appear in the
 screenshots; it has been seen over Settings and Weather, so its appearance
