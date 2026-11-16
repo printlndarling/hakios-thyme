@@ -4254,3 +4254,25 @@ Metal side of Maps is now verified end to end -- launch, onboarding, permissions
 idle UI -- with no wedge; the map content waits on the Wi-Fi join, which the next
 scene starts with `net_test joinfile` and `wifi_wide=0` (the 2.4 GHz BSS the
 earlier A/B joined).
+
+That join works: in scene `metal650maps9` (`logs/071452-run.log`, `wifi_wide=0`)
+the link is up -- "the network is joined ... 1960 frames sent, 4805 received",
+TCP connections from 192.168.0.103 to 219.144.75.246:443 and 23.11.38.161:80 with
+14 ms and 328 ms RTT, 103,983,048 bytes received on en0 -- and Maps' map view
+fetches its data.  The screenshot shows the blue location dot drawn at the map's
+centre and the Amap attribution, so VectorKit's renderer runs.
+
+What it does not do is draw the map: in that run Maps made 42 buffers of 44 MB
+(the 1125x2436 RGBA/A16F colour and 4-sample depth-stencil targets) and its
+command buffers contain only "copy 1125x2436" passes -- no draws, and the
+plug-in's log has not one "linked" line from Maps (0 render pipelines in any of
+061230, 070220, 071452).  Its pipelines come from VectorKit's
+`iphoneos.pipelinelib`, which opens through the mirror with an empty cache for
+`pipelines.Adreno(hakios-metal,chip0x6050002)`; whatever path builds its pipeline
+states from that library does not come through this plug-in's
+`newRenderPipelineStateWithDescriptor:` -- that is the wall the map view is
+behind.  The 44 MB texture allocations that fail with "the driver gave no buffer
+... Input/output error" (IOReturn timeout, request 66) and the 796 "pass has no
+attachment" refusals, and Maps' SIGABRT "VectorKit received null buffer from
+Metal" at 07:20:55, all come after `loader_return_after expired` (line 10155
+against 10244+): the run's teardown, not the run.
