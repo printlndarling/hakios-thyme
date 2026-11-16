@@ -227,7 +227,7 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 		[self.hourlyStack.heightAnchor constraintEqualToAnchor:hourlyScroll.frameLayoutGuide.heightAnchor],
 	]];
 
-	daysTitle.text = @"未来 7 天";
+	daysTitle.text = @"未来几天";
 	self.dailyStack = [[UIStackView alloc] init];
 	self.dailyStack.axis = UILayoutConstraintAxisVertical;
 	self.dailyStack.spacing = 14;
@@ -377,6 +377,7 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 @property (nonatomic, assign) double lastLongitude;
 @property (nonatomic, assign) NSUInteger attempts;
 @property (nonatomic, assign) BOOL fallbackPending;
+@property (nonatomic, assign) BOOL wttrTried;
 @property (nonatomic, strong) NSTimer *fallback;
 @end
 
@@ -489,6 +490,7 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 		 * in the completion by the staleness check) */
 		self.fetching = NO;
 		self.attempts = 0;
+		self.wttrTried = NO;
 	}
 	[self fetchForLatitude:location.coordinate.latitude longitude:location.coordinate.longitude];
 }
@@ -540,6 +542,13 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 			    (long)status, error.domain, (long)error.code, again ? @", will retry" : @"");
 			[self.root showStatus:again ? @"正在重试（等待网络）…" :
 			    [NSString stringWithFormat:@"获取失败：%@", error.localizedDescription ?: @"无数据"]];
+			if (!self.wttrTried) {
+				/* the port's TLS to Open-Meteo stalls sometimes (-1001);
+				 * wttr.in answers over plain HTTP, and ATS allows it */
+				self.wttrTried = YES;
+				[self fetchWttrForLatitude:latitude longitude:longitude];
+				return;
+			}
 			if (again) {
 				/* the completion runs on a URLSession queue: a timer made
 				 * there is added to that thread's run loop, which never runs
@@ -557,6 +566,159 @@ static UIColor *hw_white(CGFloat alpha) { return [UIColor colorWithWhite:1.0 alp
 		[self renderData:data];
 	}];
 	[task resume];
+}
+
+
+/* WWO's weather codes (wttr.in's) as the WMO numbers the rest of the app
+ * speaks, so the condition text and the SF Symbol come from one place. */
+static NSInteger
+hw_wmo_from_wwo(NSInteger wwo)
+{
+	switch (wwo) {
+	case 113: return 0;
+	case 116: return 2;
+	case 119: return 3;
+	case 122: return 3;
+	case 143: return 45;
+	case 248: case 260: return 45;
+	case 176: case 263: case 266: case 293: case 296: return 61;
+	case 299: case 302: return 63;
+	case 305: case 308: return 65;
+	case 353: return 80;
+	case 356: case 359: return 82;
+	case 200: case 386: case 389: return 95;
+	case 392: case 395: return 95;
+	case 227: case 230: return 75;
+	case 281: case 284: return 56;
+	case 311: case 314: return 66;
+	case 317: case 320: case 323: case 326: return 71;
+	case 329: case 332: return 73;
+	case 335: case 338: return 75;
+	case 350: case 374: case 377: return 66;
+	case 362: case 365: return 71;
+	case 368: case 371: return 73;
+	default: return 3;
+	}
+}
+
+/* wttr.in over plain HTTP: the fallback when the port's TLS to Open-Meteo
+ * stalls (NSURLErrorTimedOut -1001, logs/203031-run.log).  Its j1 JSON has
+ * current conditions, today and tomorrow hour by hour, and three days. */
+- (void)fetchWttrForLatitude:(double)latitude longitude:(double)longitude
+{
+	NSString *url = [NSString stringWithFormat:@"http://wttr.in/%.2f,%.2f?format=j1", latitude, longitude];
+	NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]
+	    cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+	NSURLSessionDataTask *task;
+
+	if (self.fetching) {
+		return;
+	}
+	self.fetching = YES;
+	hw_note(@"fetch (wttr.in): %.4f, %.4f", latitude, longitude);
+	task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,
+	    NSURLResponse *response, NSError *error) {
+		NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ?
+		    (NSInteger)[(NSHTTPURLResponse *)response statusCode] : -1;
+		BOOL current = latitude == self.lastLatitude && longitude == self.lastLongitude;
+
+		if (!current) {
+			return;
+		}
+		self.fetching = NO;
+		if (data == nil || error != nil) {
+			hw_note(@"fetch (wttr.in) failed: status %ld, domain %@ code %ld", (long)status,
+			    error.domain, (long)error.code);
+			[self.root showStatus:@"获取失败（网络不可用）"];
+			return;
+		}
+		hw_note(@"fetch (wttr.in): status %ld, %lu bytes", (long)status, (unsigned long)data.length);
+		[self renderWttrData:data];
+	}];
+	[task resume];
+}
+
+- (void)renderWttrData:(NSData *)data
+{
+	NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+	NSDictionary *now;
+	NSArray *days;
+	NSMutableArray<NSDictionary *> *hourCells = [NSMutableArray array];
+	NSMutableArray<NSDictionary *> *dayRows = [NSMutableArray array];
+	NSArray *dayNames = @[@"周日", @"周一", @"周二", @"周三", @"周四", @"周五", @"周六"];
+
+	if (![root isKindOfClass:[NSDictionary class]]) {
+		[self.root showStatus:@"数据无法解析"];
+		return;
+	}
+	now = [root[@"current_condition"] isKindOfClass:[NSArray class]] ?
+	    [root[@"current_condition"] firstObject] : nil;
+	days = [root[@"weather"] isKindOfClass:[NSArray class]] ? root[@"weather"] : @[];
+	if (![now isKindOfClass:[NSDictionary class]] || days.count == 0) {
+		[self.root showStatus:@"数据缺少当前天气"];
+		return;
+	}
+
+	/* the hours: today's from the current one, then tomorrow's */
+	for (NSUInteger d = 0; d < days.count && hourCells.count < 12; d++) {
+		NSArray *hourly = [days[d][@"hourly"] isKindOfClass:[NSArray class]] ? days[d][@"hourly"] : @[];
+
+		for (NSUInteger i = 0; i < hourly.count && hourCells.count < 12; i++) {
+			NSDictionary *hour = hourly[i];
+			NSInteger code = hw_wmo_from_wwo([hour[@"weatherCode"] integerValue]);
+			double temperature = hw_value(hour[@"tempC"], -999);
+			NSInteger clock = [hour[@"time"] integerValue] / 100;
+
+			if (temperature < -100) {
+				continue;
+			}
+			[hourCells addObject:@{
+				@"hour": [NSString stringWithFormat:@"%02ld", (long)clock],
+				@"temperature": @(temperature),
+				@"symbol": hw_symbol(code),
+			}];
+		}
+	}
+
+	for (NSUInteger d = 0; d < days.count && dayRows.count < 7; d++) {
+		NSDictionary *day = days[d];
+		NSArray *hourly = [day[@"hourly"] isKindOfClass:[NSArray class]] ? day[@"hourly"] : @[];
+		NSDictionary *noon = hourly.count > 4 ? hourly[4] : hourly.firstObject;
+		NSInteger code = hw_wmo_from_wwo([noon[@"weatherCode"] integerValue]);
+		double high = hw_value(day[@"maxtempC"], -999);
+		double low = hw_value(day[@"mintempC"], -999);
+		NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+		NSDate *date;
+		NSString *name;
+
+		if (high < -100 || low < -100) {
+			continue;
+		}
+		formatter.dateFormat = @"yyyy-MM-dd";
+		date = [formatter dateFromString:day[@"date"]];
+		name = date != nil ? dayNames[MAX(0, [[NSCalendar currentCalendar] component:NSCalendarUnitWeekday
+		    fromDate:date] - 1)] : day[@"date"];
+		[dayRows addObject:@{
+			@"name": name,
+			@"condition": hw_condition(code),
+			@"symbol": hw_symbol(code),
+			@"high": @(high),
+			@"low": @(low),
+		}];
+	}
+
+	{
+		NSInteger code = hw_wmo_from_wwo([now[@"weatherCode"] integerValue]);
+
+		[self.root showCurrentTemperature:hw_value(now[@"temp_C"], 0) condition:hw_condition(code)
+		    symbol:hw_symbol(code)
+		    details:[NSString stringWithFormat:@"体感 %.0f° · 湿度 %.0f%% · 风速 %.0f km/h",
+		    hw_value(now[@"FeelsLikeC"], 0), hw_value(now[@"humidity"], 0),
+		    hw_value(now[@"windspeedKmph"], 0)]];
+	}
+	[self.root showHours:hourCells];
+	[self.root showDays:dayRows];
+	[self.root showStatus:@"数据：wttr.in（备用）"];
 }
 
 - (void)renderData:(NSData *)data

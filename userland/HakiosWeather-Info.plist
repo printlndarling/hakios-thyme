@@ -43,6 +43,11 @@
 	<string>1</string>
 	<key>MinimumOSVersion</key>
 	<string>15.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>HakiOS 天气使用你的位置来显示当地的天气。</string>
 	<key>UILaunchScreen</key>

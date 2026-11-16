@@ -1,15 +1,9 @@
 # HWEATHER (RC_JOBS=rc.jobs.hweather): the native weather screen, installed
 # and opened the way LocProbe is.  The stock Weather app stops at WeatherKit's
 # FairPlay token (CHECKLIST, "Weather: the app's own fairplayd gate"); this
-# application asks Open-Meteo instead.  The scene joins the network beside it
-# and waits 35 s before opening, so the first fetch has a link; the app tries
-# again every 15 s (up to 20) if it does not.
-#
-# The probes before the app answer the same question from outside it (no
-# sandbox, no injected library): mDNSResponder's answer, an IPv4 TCP connect,
-# and two NSURLSession fetches.  Their output goes to a file and is cat'ed,
-# because the kernel's log ring drops the middle of a boot and took the
-# console lines of an earlier run with it (logs/202029-run.log).
+# application asks Open-Meteo instead, and wttr.in over plain HTTP when the
+# port's TLS to Open-Meteo stalls.  The scene joins the network beside it and
+# waits 35 s before opening, so the first fetch has a link.
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
 /redwood/bin/sleep_hold 300 &
 /var/jb/usr/bin/mkdir -p /var/jb/hweather
@@ -19,11 +13,9 @@
 /var/jb/usr/bin/ls -l /var/jb/Applications/HakiosWeather.app/
 /var/jb/usr/bin/uicache -a
 /redwood/bin/rwtouch wait 35
-/redwood/bin/net_test resolve api.open-meteo.com >> /var/jb/hweather/probe.txt 2>&1
-/redwood/bin/net_test tcp api.open-meteo.com 443 >> /var/jb/hweather/probe.txt 2>&1
-/redwood/bin/https_test https://api.open-meteo.com/v1/forecast?latitude=34.15 10 >> /var/jb/hweather/probe.txt 2>&1
-/redwood/bin/https_test https://example.com/ 10 >> /var/jb/hweather/probe.txt 2>&1
-/var/jb/usr/bin/cat /var/jb/hweather/probe.txt
+# mDNSResponder's answer and a TCP connect beside the app, for the -1001 logs
+/redwood/bin/net_test resolve api.open-meteo.com
+/redwood/bin/net_test tcp api.open-meteo.com 443
 /var/jb/usr/bin/uiopen hakiosweather://
 /redwood/bin/rwtouch wait 12
 /redwood/bin/rwtouch tap 0.5 0.60
