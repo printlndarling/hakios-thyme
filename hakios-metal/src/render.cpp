@@ -1053,6 +1053,11 @@ bool checkTarget(const RenderPass& pass, std::string* why) {
         if ((d.usage() & kTextureUsageRenderTarget) == 0) {
             return refuse(why, "the depth texture was made without render-target usage (MTLTextureUsageRenderTarget, 4)");
         }
+        if (pass.stencil != nullptr && d.samples() > 1 && d.info().stencil) {
+            // (the texture's S8 plane is laid out apart for one sample: a multisample one is depth alone here)
+            return refuse(why, std::string("a stencil attachment beside a multisample ") + d.info().name +
+                                   " texture: the S8 plane's multisample layout is not laid out here");
+        }
         const Attachment c = attachmentOf(pass, 0).texture != nullptr ? attachmentOf(pass, 0) : Attachment{nullptr, 0, LoadAction::kLoad, StoreAction::kStore, nullptr, 0};
         if (pass.depthLevel >= d.levels()) {
             return refuse(why, "the depth attachment names mip level " + n(pass.depthLevel) + " of a texture of " + n(d.levels()));

@@ -362,12 +362,15 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
     }
     // (shader read is taken beside render target -- sokol asks for both on every attachment; a shader sampling one as a
     // 2D texture is refused at its draw by the type, a texture2d_ms read is served as such)
-    if (multisample && (info->stencil || info->blockW > 1 || desc.mipLevels != 1 || (desc.usage & ~kTextureUsageRead) != kTextureUsageRenderTarget)) {
+    if (multisample && ((info->stencil && !info->depth) || info->blockW > 1 || desc.mipLevels != 1 ||
+                        (desc.usage & ~kTextureUsageRead) != kTextureUsageRenderTarget)) {
         refuse(why, std::string("a multisample ") + info->name + " texture of " + n(desc.mipLevels) + " levels with usage " + n(desc.usage) +
-                        ": one level of an uncompressed colour format or Depth32Float, a render target (4) alone, is served (a stencil plane is "
-                        "laid out apart and not for samples here)");
+                        ": one level of an uncompressed colour format or a depth format, a render target (4) alone, is served");
         return false;
     }
+    // (a multisample Depth32Float_Stencil8 is laid out as its depth plane alone: the S8 plane's multisample layout is not
+    // here, so a pass that binds the stencil plane of one is refused at the pass -- Maps asks for this texture, and its
+    // render target is depth only)
     // (a slice texture is sampled or stored by a kernel, and may be drawn into a slice at a time: the slices are 2D layouts
     // like any target, and a kernel's store reaches slice z through the storage view's ARRAY_PITCH -- a 1D array's
     // through its rows, storageDescriptor says why. A cube is not stored: a kernel addressing one is refused at its
