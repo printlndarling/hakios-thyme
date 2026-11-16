@@ -1,0 +1,15 @@
+# Privacy & Security after the Wi-Fi password sheet is out of the way
+# (RC_JOBS=rc.jobs.prefstap4): at about 100 s into a boot the system asks for
+# "1701"'s password and its sheet swallows the tap.  The first tap is Cancel at
+# 0.11/0.145; on the root page it is the title area, so it is harmless when the
+# sheet is not there.  Then the one swipe and the Privacy row at 0.54/0.36.
+/redwood/bin/sleep_hold 320 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
+/redwood/bin/rwtouch wait 100
+/redwood/bin/rwtouch tap 0.11 0.145
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.35 400
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch tap 0.54 0.36
+/redwood/bin/rwtouch wait 60

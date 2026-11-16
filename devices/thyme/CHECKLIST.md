@@ -55,12 +55,18 @@ the specifier is named `Location Services`, and only a class whose name
 carries `PrivacyController` is treated as the page -- the alerts subpage,
 `PUILocationServicesPrivacyAlertsLevelController`, had been getting a row too
 and its title showed as "Location" with a "Location Alerts" back button.  A
-fresh screenshot of the corrected title was not obtained: a `prefs:` URL
-neither starts Settings nor navigates a running one in this userland
-(`logs/032631-run.log`, `logs/035357-run.log`: only `PSUIPrefsListController`
-loads), and the root page is unscrolled, so the scripted tap at 0.54/0.29
-landed on Wi-Fi.  The label and the narrower match are code and build; the
-row, its page and its master switch are the device-verified part above.
+`prefs:` URL neither starts Settings nor navigates a running one in this
+userland (`logs/032631-run.log`, `logs/035357-run.log`: only
+`PSUIPrefsListController` loads), so the page was reached by scrolling the root
+list (`rwtouch swipe`, one half-screen) and tapping the row at 0.54/0.36.  In
+the 09:00 run the tap did reach the page with this dylib:
+`PUIPrivacyController: Location row added at 1 of 26`, twice (the appearance
+and the reload) in `logs/090043-run.log`.  A clean screenshot of the corrected
+title was still not obtained: at about 100 s into a boot the system's Wi-Fi
+password sheet for "1701" covers the screen, and in the runs that dismissed it
+first the list had scrolled to a different row (Battery).  The label and the
+narrower match are code and build; the row, its page and its master switch are
+the device-verified part above.
 
 ## Weather's data, kvsd, and what the app waits for (2026-11-16)
 
