@@ -4239,3 +4239,13 @@ serve both the What's New "Continue" and the notification screen's "Not Now",
 which sit at about 0.92 of the screen.  The first attempt at 0.609 was the
 display-scaled estimate, not the picture's, and only put the finger in the
 alert's text; the taps are corrected in the scene.
+
+With the corrected taps (scene `metal650maps8`, `logs/070220-run.log`) the alert
+is dismissed and Maps sits in its normal state: the search field, Favorites
+(Home/Work/Add), My Guides and New Guide drawn, the map's location button
+spinning while locationd positions by Wi-Fi (`logs/maps8-2.png`).  The map area
+is still black: the Wi-Fi link is not joined in this run either ("the network is
+NOT joined", the MHI endpoint reset again), so there are no tiles and VectorKit
+has nothing to draw them from.  The Metal side of Maps is now verified end to
+end -- launch, onboarding, permissions, idle UI -- with no wedge; the map
+content waits on the Wi-Fi join.
