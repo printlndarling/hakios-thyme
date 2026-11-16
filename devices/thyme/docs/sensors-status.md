@@ -1487,3 +1487,16 @@ sent, `registry 0 of 0` written; zero `sns_err_handler`/`dog_virtual_user`
 lines and the one `hw_platform` file request still served.  The SNS gate is
 unchanged on this tree; what remains is the client manager's instance and the
 registry group it needs.
+
+The registry upload was then repeated **with the live framework** -- the
+combination the 10 November runs did not have (`sns_registry_upload=1` on top
+of `slpi=1 sns=1 servreg=1` and the chain, `logs/104903-run.log`): all **189 of
+189** groups go out (the earlier run sent 188, the index file being the one it
+could not open), and the QMI 514 answers split -- 185 groups result 5, and four
+result 1 (`SNS_EFAILED`): `ccd_ttw`, `sns_diag_sensor_datatyp`, `sns_reg_config`
+and `sx933x_0_platform.regis`.  Message 1 is still not answered, the config is
+not sent, no registry index read appears in the file service (the one file
+request is still `hw_platform`), and the DSP does not crash.  The index the
+registry sensor needs at start is the empty file the phone's persist copy is
+too, so the AP upload is the only road -- and the upload's own answers are what
+the next build must separate from message 1.
