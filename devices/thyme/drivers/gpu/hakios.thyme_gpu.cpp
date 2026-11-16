@@ -43,6 +43,7 @@
 #include "MiniIOSurface.h"
 
 extern "C" void hakios_tl(const char * format, ...) __printflike(1, 2);
+extern "C" void loader_log_line(const char *line);
 
 extern "C" {
 /* drivers/gpu/hakios.adreno.c ("the GPU kept on"; declared in bsd/sys/hakios.input.h, which is not seen from here) */
@@ -176,6 +177,7 @@ struct hakios_show {
 
 static IOLock * gGPULock;                       /* around everything that is the GPU's (hakios_gpu_...) */
 static bool gGPUReported;
+static unsigned gGPUReports;                    /* how many of the first refusals were said (a few, for the CP's state) */
 static bool gGPUCached;                         /* boot-arg gpu_cached=1 */
 
 /* What the last seconds' submissions were and cost here, for the log. */
@@ -209,7 +211,8 @@ gpuWait(uint32_t fence, uint64_t milliseconds)
 		delay_for_interval(GPU_ASK_AGAIN_US, NSEC_PER_USEC);
 		IOLockLock(gGPULock);
 	}
-	if (milliseconds >= 1000 && !gGPUReported) {
+	if (milliseconds >= 1000 && gGPUReports < 3) {
+		gGPUReports++;
 		gGPUReported = true;
 		hakios_gpu_report("no answer");
 	}
@@ -982,6 +985,59 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 		words[count++] = cmds[i].size / 4;
 	}
 	request->fence = hakios_gpu_submit(addresses, words, count);
+	if (request->fence != 0) {
+		static unsigned logged;
+
+		/* the big command streams (the window server's frames), with their ends: the one the core stops in is
+		 * among them, and the buffer's content at this moment is the frame it was given */
+		if (logged < 64 && count != 0 && words[0] >= 1024) {
+			static unsigned dumps;
+
+			logged++;
+			struct gpu_buffer * cb = count != 0 && cmds[0].submit_idx < request->nr_bos ?
+			    buffer(bos[cmds[0].submit_idx].handle) : NULL;
+			char line[256];
+			size_t at = 0;
+
+			at += (size_t) snprintf(line + at, sizeof(line) - at, "fbsubmit: %u: %u words at %#llx",
+			    request->fence, count ? words[0] : 0, count ? (unsigned long long) addresses[0] : 0ull);
+			loader_log_line(line);
+			if (cb != NULL && cb->kernel != NULL && cmds[0].size >= 96 &&
+			    cmds[0].submit_offset + cmds[0].size <= cb->size) {
+				const uint32_t * w = (const uint32_t *)(cb->kernel + cmds[0].submit_offset);
+
+				if (words[0] > 4160 && dumps++ < 8) {
+					/* the words around the 3985th of a big stream (a CP_WAIT_FOR_IDLE): where the CP has stopped in
+					 * every run of this scene, the reports' remains (7317-7423 of 11381-11487) being its prefetch;
+					 * and the draws before it, before a later frame overwrites the same buffer */
+					for (uint32_t off = 3808; off < 4160 && off < words[0]; off += 16) {
+						at = 0;
+						at += (size_t) snprintf(line + at, sizeof(line) - at, "fbword: %u %u:",
+						    request->fence, off);
+						for (uint32_t i = 0; i < 16 && off + i < words[0] && at + 10 < sizeof(line); i++) {
+							at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", w[off + i]);
+						}
+						loader_log_line(line);
+					}
+				} else {
+					char fl[256];
+					size_t fa = 0;
+
+					fa += (size_t) snprintf(fl + fa, sizeof(fl) - fa, "fbsubmit: %u first:", request->fence);
+					for (unsigned i = 0; i < 10 && fa + 10 < sizeof(fl); i++) {
+						fa += (size_t) snprintf(fl + fa, sizeof(fl) - fa, " %08x", w[i]);
+					}
+					loader_log_line(fl);
+					fa = 0;
+					fa += (size_t) snprintf(fl + fa, sizeof(fl) - fa, "fbsubmit: %u last:", request->fence);
+					for (unsigned i = 10; i > 0 && fa + 10 < sizeof(fl); i--) {
+						fa += (size_t) snprintf(fl + fa, sizeof(fl) - fa, " %08x", w[cmds[0].size / 4 - i]);
+					}
+					loader_log_line(fl);
+				}
+			}
+		}
+	}
 	if (gpu_log && request->fence != 0) {
 		/* "tl: Q FENCE at US: N buffers, B of 4 MB or more, W words of commands": what was given (tl: q: what it took) */
 		uint32_t big = 0, all_words = 0;
@@ -1021,9 +1077,41 @@ HakiosGPUUserClient::submit(struct msm_gem_submit * request)
 		}
 	}
 	reap();
-	if (request->fence == 0 && !gGPUReported) {
-		gGPUReported = true;
-		hakios_gpu_report("the ring is full");
+	if (request->fence == 0) {
+		static unsigned told;
+		char line[256];
+		struct gpu_buffer * cb = count != 0 && cmds[0].submit_idx < request->nr_bos ?
+		    buffer(bos[cmds[0].submit_idx].handle) : NULL;
+
+		/* (the report's CP_IB1_REM_SIZE beside this total says how far into the command buffer the core got) */
+		if (told < 4) {
+			told++;
+			snprintf(line, sizeof(line), "fbsubmit: fence 0: %u command buffer(s), the first %u words at %#llx\n",
+			    count, count ? words[0] : 0, count ? (unsigned long long) addresses[0] : 0ull);
+			loader_log_line(line);
+			if (cb != NULL && cb->kernel != NULL && cmds[0].size >= 128 && cmds[0].submit_offset + cmds[0].size <= cb->size) {
+				const uint32_t * w = (const uint32_t *)(cb->kernel + cmds[0].submit_offset);
+				size_t at = 0;
+
+				at += (size_t) snprintf(line + at, sizeof(line) - at, "fbsubmit: first:");
+				for (unsigned i = 0; i < 24 && at + 10 < sizeof(line); i++) {
+					at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x", w[i]);
+				}
+				loader_log_line(line);
+				at = 0;
+				at += (size_t) snprintf(line + at, sizeof(line) - at, "fbsubmit: last:");
+				for (unsigned i = 0; i < 24 && at + 10 < sizeof(line); i++) {
+					at += (size_t) snprintf(line + at, sizeof(line) - at, " %08x",
+					    w[cmds[0].size / 4 - 24 + i]);
+				}
+				loader_log_line(line);
+			}
+		}
+		if (gGPUReports < 4) {
+			gGPUReports++;
+			gGPUReported = true;
+			hakios_gpu_report("the ring is full");
+		}
 	}
 	if (fSubmits++ < 4) {
 		/* (addresses and words are only set up to `count`: with no command buffer among the commands, the first would be stack garbage) */

@@ -369,6 +369,32 @@ and then stop the CP; the next work is to capture the first submissions'
 command words and the CP's state at the timeout, and find the packet or
 shader that wedges it.
 
+### The window server's first frame stops at a WAIT_FOR_IDLE inside its third pass (2026-11-17)
+
+The quiet runs (kernel diagnostics through `loader_log_line()`, `touch_lat` off so the loader's
+log keeps them) show the command stream of the first composited frame: a command buffer at
+`0x21780000` of 11 487 words whose offset 3985 is a `CP_WAIT_FOR_IDLE`; the CP's report ("in the
+first command buffer ... 7423 words to go") is that packet plus its prefetch, and every later
+submission waits behind it (fences 37-41; "the core has done 36-40").
+
+The packets before the wait (offsets 3808-4160, read back with `tools`-style scanning of the
+kernel's `fbword` lines) are three repeated passes: type-4 register writes (0x8890, 0x88d4,
+0x88d6, 0x88d7, 0x8b307, 0x8b4d1, 0x8f0, 0x840a, 0x800, 0x80a1, 0x88d3), `EVENT_WRITE 0x1e`,
+a `WAIT_FOR_IDLE`, `EVENT_WRITE 0x31`, and `CP_INDIRECT_BUFFER` to `0x2399c000` of 0x1e44
+words -- a shared program buffer, the same every pass.  The wait that never completes follows
+the third pass's event write (0x1e at 3983), so the work that hangs is inside that shared
+program buffer's draws, with the state the pass set.
+
+The function-constants hypothesis was tested and does not hold: scene `metal650h`, whose pipelines
+hand the compiler no function constants, stops in the same place (offset 4064 of 11 387 words,
+7323 left).  The framebuffer's `fbshow`/`fbLine` diagnostics live in the working tree's
+`xnu-src/.../MiniIOMobileFramebuffer.cpp` and need `xnu/export.sh` before a kernel commit; the
+GPU driver's are in `devices/thyme/drivers/gpu/hakios.thyme_gpu.cpp`.
+
+Next: the words of the shared program buffer at 0x2399c000 around the third pass's draws, and a
+bisect of the pipelines and states that pass sets (which CoreAnimation pipeline it draws with),
+to find the shader or state that keeps the SP busy and the CP waiting.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
