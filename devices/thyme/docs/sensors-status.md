@@ -1480,3 +1480,10 @@ registry instance still the gate.
 
 A first attempt at this baseline omitted `slpi=1`: it had no sensor activity
 at all, the recorded rule that `sns=1` alone does not start the DSP.
+
+With `sns=1` on the same chain (`logs/103924-run.log`): 20 QMI responses with
+result 0, message 1 still not answered (its TLV 0x11 is 5), the config not
+sent, `registry 0 of 0` written; zero `sns_err_handler`/`dog_virtual_user`
+lines and the one `hw_platform` file request still served.  The SNS gate is
+unchanged on this tree; what remains is the client manager's instance and the
+registry group it needs.
