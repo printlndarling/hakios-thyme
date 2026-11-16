@@ -297,10 +297,31 @@ run about 100 s in -- "battguard: the charge is 24%, at or below
 battery_stop=25 three looks in a row: back to the loader"
 (`logs/155121-run.log.live`).  That is just before `weatherd` is normally
 spawned (it did not spawn at all in that run), so the probe never saw it.
-`PE_parse_boot_argn` takes the first occurrence of an argument
-(`pexpert/gen/bootargs.c`), so `weather.sh` now takes `BATTERY_STOP=<percent>`
-and puts it ahead of `ram.args`: a watched long run uses 10, while the
-default image keeps 25.
+`PE_parse_boot_argn` does **not** stop at the first match: the `=` branch
+parses the value and then `gotit` skips the token and the loop goes on, so a
+later occurrence overwrites (`pexpert/gen/bootargs.c`).  A first try that put
+`battery_stop=10` before `ram.args` still ran with 25
+(`logs/155909-run.log.live`); `weather.sh` now takes `BATTERY_STOP=<percent>`
+and appends it after `ram.args`: a watched long run uses 10, the default image
+keeps 25.
+
+The logger's second flood is the Weather widget's relationship to
+runningboardd: it retries `handshakeWithRequest:` synchronously 1444 times in
+one run (`logs/155909-run.log.live`), which fills the log on its own.  That
+is a separate failure of the widget's assertions on this port; the probe now
+skips `rbs_selector`/`bsx_class` traffic as it skips cfprefsd's.
+
+The first run with both weather libraries exposed a limit, not a result:
+`init: kern.exec_inject: error 22` (`logs/160615-run.log`).  The kernel's
+insertion list is a `SYSCTL_STRING` over `exec_inject_conf[512]`
+(`bsd/kern/kern_exec.c`), and `root/etc/inject.conf` had grown to 541 bytes
+with weatherlog's four programs and weatherjwt's one; the write failed with
+EINVAL and **no library was inserted at all** in that boot (no weatherlog,
+no tweaks, no prefs).  The buffer is now 2048 bytes
+(`xnu/hakios.patch`), enough for the next probe; the 16:06 run itself lasted
+its full ~240 s -- `battery_stop=10` appended after `ram.args` did take
+effect -- but with the injection refused, it only showed the app's normal
+screen and then the panel's idle blank from about t=120.
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 

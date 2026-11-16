@@ -21,19 +21,21 @@ SCENE=${SCENE:-out/thyme-boot/root-weather.apfs}
 SECS=${SECS:-200}
 STEP=${STEP:-20}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
-# BATTERY_STOP=<percent>: this run's own battery_stop, ahead of ram.args' (the
-# kernel's PE_parse_boot_argn takes the first occurrence).  The guard stopped
-# three runs at ~100 s because the phone sat at 24-26% and ram.args says 25
-# ("the charge is 24%, at or below battery_stop=25 three looks in a row",
-# logs/155121-run.log.live), just before weatherd is spawned; a watched
-# session can run longer on 10.
-if [ -n "${BATTERY_STOP:-}" ]; then
-	ARGS="battery_stop=$BATTERY_STOP $ARGS"
-fi
 # one word more for the kernel, e.g. personas=1 (the container manager's switch)
 EXTRA_ARGS=${EXTRA_ARGS-}
 if [ -n "$EXTRA_ARGS" ]; then
 	ARGS="$ARGS $EXTRA_ARGS"
+fi
+# BATTERY_STOP=<percent>: this run's own battery_stop, AFTER ram.args'.  The
+# kernel's PE_parse_boot_argn keeps scanning after a match and the last
+# occurrence overwrites (pexpert/gen/bootargs.c: the '=' branch parses, then
+# gotit skips the token and the loop goes on) -- a value put first is the one
+# the later ram.args value replaces.  The guard stopped runs at ~100 s because
+# the phone sat at 24-26% and ram.args says 25 ("the charge is 24%, at or
+# below battery_stop=25 three looks in a row", logs/155121-run.log.live),
+# just before weatherd is spawned; a watched session can run longer on 10.
+if [ -n "${BATTERY_STOP:-}" ]; then
+	ARGS="$ARGS battery_stop=$BATTERY_STOP"
 fi
 PHONE=${XDG_RUNTIME_DIR:-/tmp}/darwin-hakios-phone
 

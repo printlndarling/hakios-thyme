@@ -8,7 +8,11 @@
 # fetch.  This run joins the network written in fw/network first, so those
 # requests can succeed and the next one can be seen: its host, its path and
 # whether it carries an Authorization header.
-/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+# In the background: one boot's join stuck in net_test's keepalive
+# ("net_test: keepalive: the link is gone; joining ... again",
+# logs/161855-run.log) and rc never reached uiopen, so Weather never opened.
+# The auth probe does not need the link; the join can make it later.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
 /redwood/bin/weatherprefs
 /redwood/bin/sleep_hold 420 &
 /redwood/bin/rwtouch wait 30

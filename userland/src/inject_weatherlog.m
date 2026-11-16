@@ -179,17 +179,23 @@ wl_flatten(char *text)
 	}
 }
 
-/* Not everything a process says over XPC belongs in the run's log: the
- * Weather app and widget both poll cfprefsd in tight synchronous loops (898
- * and 1058 messages in two runs), and those enough were to rotate the rest
- * out of the kernel's 1 MB log (logs/154426-run.log.live,
- * logs/155121-run.log.live).  Preference traffic is skipped; everything else
- * is said, because the auth and data calls are what this probe exists for. */
+/* Not everything a process says over XPC belongs in the run's log.  Two
+ * loops in these processes retry forever and flood the kernel's 1 MB log:
+ * cfprefsd polling (898 and 1058 messages in two runs) and the Weather
+ * widget's runningboard handshake (1444 messages in a run -- it fails on this
+ * port, a separate matter).  Those are skipped; everything else is said,
+ * because the auth and data calls are what this probe exists for. */
 static int
 wl_interesting(const char *connection_name, const char *description)
 {
 	(void)connection_name;
-	if (description != NULL && strcasestr(description, "CFPreferences") != NULL) {
+	if (description == NULL) {
+		return 1;
+	}
+	if (strcasestr(description, "CFPreferences") != NULL ||
+	    strcasestr(description, "rbs_selector") != NULL ||
+	    strcasestr(description, "bsx_class") != NULL ||
+	    strcasestr(description, "handshakeWithRequest:") != NULL) {
 		return 0;
 	}
 	return 1;

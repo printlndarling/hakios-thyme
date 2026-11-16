@@ -170,6 +170,13 @@ if [ -n "${WEATHERLOG:-}" ]; then
 	INJECT="$INJECT
 /redwood/lib/libhakios.weatherlog.dylib Weather WeatherWidget Preferences weatherd"
 fi
+# WEATHERJWT=1: weatherd's JWT service answers with a local token instead of
+# asking FairPlay/Apple (src/inject_weatherjwt.m; the SEP wall leaves no real
+# token on this hardware).
+if [ -n "${WEATHERJWT:-}" ]; then
+	INJECT="$INJECT
+/redwood/lib/libhakios.weatherjwt.dylib weatherd"
+fi
 mkdir -p obj
 
 if [ -z "$PREBUILT" ] && ! command -v ld64 >/dev/null; then PREBUILT=1; fi
@@ -328,6 +335,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			$DYN -fblocks -dynamiclib -install_name /redwood/lib/libhakios.weatherlog.dylib -framework Foundation -lobjc \
 				-Wl,-undefined,dynamic_lookup \
 				-o obj/libhakios.weatherlog.dylib src/inject_weatherlog.m
+		fi
+		# weatherd's JWT service answered locally (src/inject_weatherjwt.m)
+		if [ -n "${WEATHERJWT:-}" ]; then
+			$DYN -fblocks -dynamiclib -install_name /redwood/lib/libhakios.weatherjwt.dylib -framework Foundation -lobjc \
+				-o obj/libhakios.weatherjwt.dylib src/inject_weatherjwt.m
 		fi
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.app.dylib -framework CoreFoundation -lobjc \
@@ -494,6 +506,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/libhakios.prefs.dylib ] && cp obj/libhakios.prefs.dylib root/lib/
 	[ -f obj/libhakios.sydexc.dylib ] && cp obj/libhakios.sydexc.dylib root/lib/
 	[ -f obj/libhakios.weatherlog.dylib ] && cp obj/libhakios.weatherlog.dylib root/lib/
+	[ -f obj/libhakios.weatherjwt.dylib ] && cp obj/libhakios.weatherjwt.dylib root/lib/
 	if [ -f obj/HakiosAudio ]; then
 		mkdir -p root/lib/HakiosAudio.driver
 		cp obj/HakiosAudio root/lib/HakiosAudio.driver/
