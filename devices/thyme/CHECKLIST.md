@@ -301,6 +301,30 @@ The boot line is cut again: the kernel reports 100 characters that did not fit
 the 607 (`logs/223636-run.log` line 13), so the last extra arguments
 (`gpu_recover=1`, `anim_max=1`, the run's `battery_stop=10`) are not in force.
 
+### The first UI frame the A650's Metal window server composed (2026-11-16, owner-observed)
+
+With the image's own CoreAnimation library (scene `metal650f`, kernel
+`c98ee588`, the rebuilt system image of 628 760 blocks, `metal=1` alone so
+that only the window server takes the device and the applications stay on
+GL), the window server linked CoreAnimation's fixed pipelines -- 20 "linked
+fixed_vert_lph_spc+fixed_frag_lph_cph ... for pixel format 80" lines in the
+live log (`logs/230236-run.log.live`).  That settles the earlier question:
+the missing "linked" line in `metal650c` was the 1 MiB log ring dropping its
+middle, not the compile.
+
+And it drew: `logs/metal-frame-230236.png` (2 887 212 bytes) is the home
+screen -- wallpaper, icons, dock, status bar -- composed by the A650's Metal
+window server: the first complete UI frame on this path.  The next screenshot
+is not: `logs/metal-partial-230236.png` (89 089 bytes) has one blue tile at
+the top left and black everywhere else.  The owner, watching the phone during
+the run, reported exactly that: "异常闪烁，无法触控，频繁黑屏" (2026-11-16)
+-- the display alternates between a full frame and a partial/black one, and
+touch does nothing while the window server is in that state.
+
+So composition and the pipeline path work.  What remains is how the frame is
+presented (damage rectangles, or the surface's present, only part of the
+frame reaching the display) and input under the Metal window server.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
