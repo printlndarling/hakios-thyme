@@ -337,6 +337,38 @@ run is also a GL-path stability check: the home screen and the Today View drew
 normally, with the window server on its verified OpenGL path and no Metal
 arguments.
 
+### The Metal compositor's command buffers time out; the CP is wedged (2026-11-17)
+
+The idle home screen with the window server on Metal (scene `metal650g`, kernel
+`79f7a8f1` with the framebuffer's diagnostics, `metal=1` alone, log
+`logs/235940-run.log.live`) shows what the flicker and the black screens are:
+the compositor's command buffers fail, each about 2.3 s apart --
+
+    2026-11-17 00:01:43.533 backboardd[18:2554] [Metal] MTLCommandBuffer
+    0x10109b2d0, protection 0x0, label com.apple.coreanimation.command-buffer,
+    error = the driver refused the submission: Operation timed out
+
+-- and `metal_fps` counts "0.0 frames/s over 2.3 s (0 presented, 1 command
+buffer)" with a negative GPU-busy figure and 2.3 s from commit to completion.
+The layer-0 surface a whole-screen swap names (`fbshow` diagnostics through
+`loader_log_line()`, which the loader's log keeps: `IOLog` and `printf` do not
+reach it) is 1125x2436 BGRA, rows of 4608 bytes, and at swap 360 and swap 480
+alike **1310 of 2046 sampled pixels are black** (about 64%): the frame the
+compositor drew into it is the partial one, and it is the same twice.
+
+At the run's end the 3D core says why:
+
+    adreno: 0: the 3D core before it is stopped: status 0xc00905,
+    interrupts 0, ring read up to 1088 of 1063; the GMU sees it busy: 0x70c00905
+
+-- the command processor has read past the words the driver submitted and is
+wedged, so later submissions get no fence (`hakios.thyme_gpu.cpp` returns
+`kIOReturnTimeout` from `request->fence == 0`) and the compositor drops them.
+The first composed frame's commands partly execute (a tile, the rest black)
+and then stop the CP; the next work is to capture the first submissions'
+command words and the CP's state at the timeout, and find the packet or
+shader that wedges it.
+
 ### Weather: the app's own fairplayd gate, and a stand-in that owns the names (2026-11-16)
 
 `weatherd`'s WDSAuthenticatorFactory takes `isJWTEnabled` from
