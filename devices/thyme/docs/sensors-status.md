@@ -1461,3 +1461,22 @@ probe and this quiet one -- crashed. The "unsteady" sensor process was
 therefore not unsteady: a boot without the chain never serves the framework's
 file calls and the process dies in its start; a boot with it serves
 `hw_platform` and then stalls. The stall is the remaining piece, unchanged.
+
+## Current-tree baseline (2026-11-16)
+
+The quiet baseline was repeated on the tree with the day's persona work, to
+have a fresh control: `slpi=1 sns=0 servreg=1` plus the phone daemon's chain
+(`fastrpc_phone=2 fastrpc_pd=2 fastrpc_smmu=2 fastrpc_call=9 fastrpc_early=1
+fastrpc_grow_kb=4096 fastrpc_grow_after=1`), scene `root-slpitest`
+`2348302152ca`, kernel `ee62d18cb881` (`logs/102934-run.log`).  The sensor DSP
+comes up and is linked (node 9, 8 services); the file service serves
+`/fw/sensors/soc0/hw_platform` (6 bytes; counters at teardown: 1 module open,
+`apps_std`, 4 `apps_std` calls, 1 file request, 0 failed); there are **zero**
+`sns_err_handler` and `dog_virtual_user` lines; the listener's `next2` times
+out after 120 s at 266 s with the DSP's "SFR Init: wdog or kernel error
+suspected.", and the DSP stops when asked at the end.  The state is the
+recorded one: framework alive, file service used, the SNS client path and the
+registry instance still the gate.
+
+A first attempt at this baseline omitted `slpi=1`: it had no sensor activity
+at all, the recorded rule that `sns=1` alone does not start the DSP.
