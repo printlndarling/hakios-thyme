@@ -1,0 +1,14 @@
+# Privacy & Security, reached by scrolling (RC_JOBS=rc.jobs.prefstap3): the
+# root page shows no Privacy row until it is scrolled, so two swipes bring the
+# group with Emergency SOS/Battery/Privacy & Security to the top, where the
+# row sits at 0.54/0.29 (rowcheck-85.png).
+/redwood/bin/sleep_hold 240 &
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid com.apple.Preferences
+/redwood/bin/rwtouch wait 40
+/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.2 400
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch swipe 0.5 0.85 0.5 0.2 400
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch tap 0.54 0.29
+/redwood/bin/rwtouch wait 90

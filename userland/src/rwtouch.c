@@ -177,6 +177,24 @@ main(int argc, char **argv)
 			usleep(60000);
 			post(HAKIOS_TOUCH_UP, x, y);
 			i += 2;
+		} else if (strcmp(step, "swipe") == 0 && left >= 4) {
+			/* swipe X1 Y1 X2 Y2 [MS]: a finger that travels, for a page that
+			 * only scrolls when moved (settings pages).  Twenty moves, so the
+			 * window server sees a drag, not a fling. */
+			double x1 = atof(argv[i + 1]), y1 = atof(argv[i + 2]);
+			double x2 = atof(argv[i + 3]), y2 = atof(argv[i + 4]);
+			int ms = left >= 5 && atoi(argv[i + 5]) > 0 ? atoi(argv[i + 5]) : 300;
+			int steps = 20;
+
+			post(HAKIOS_TOUCH_DOWN, x1, y1);
+			for (int s = 1; s <= steps; s++) {
+				double t = (double)s / (double)steps;
+
+				post(HAKIOS_TOUCH_MOVE, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+				usleep((useconds_t)(ms * 1000 / steps));
+			}
+			post(HAKIOS_TOUCH_UP, x2, y2);
+			i += left >= 5 && atoi(argv[i + 5]) > 0 ? 5 : 4;
 		} else if (strcmp(step, "zigzag") == 0 && left >= 5) {
 			int step_ms = left >= 6 && atoi(argv[i + 6]) > 0 ? atoi(argv[i + 6]) : 8;
 
