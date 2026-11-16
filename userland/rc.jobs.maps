@@ -1,0 +1,8 @@
+# RC_JOBS=rc.jobs.maps: open Maps and leave it on screen.  The boot arguments put
+# metal_all=1 first (the command line is 607 characters; the last arguments are cut), so
+# SpringBoard, Maps and the window server all take the Metal device.  The jailbreak
+# prefix's uiopen asks LaunchServices for the bundle, as it does for HakiOS's weather app.
+/redwood/bin/sleep_hold 300 &
+/redwood/bin/rwtouch wait 90
+/var/jb/usr/bin/uiopen --bundleid com.apple.Maps
+/redwood/bin/rwtouch wait 45
