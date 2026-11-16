@@ -188,13 +188,21 @@ gpu_recover=1 anim_max=1 metal_all=1`):
   answer `targetDeviceInfo`, and take textures and command queues through the
   plug-in -- the "no device: the GPU's chip ID is 0x6050002" of every earlier
   `metal=1` boot is gone.
-* **The screen is black, from the first screenshot to the last** (every
-  `weather-*.png` of the run is 15,289 bytes, the bare framebuffer): with the
-  device accepted, CoreAnimation is drawing through the A650's render
-  sequence and that sequence does not put a frame on the panel yet -- the
-  next work is exactly the gen3 path the plan warns about (`docs/
-  metal-a650-plan.md`'s risks: preamble, LPAC, tile/GMEM sequence), compared
-  against what the 642L path emits and what the fake GPU model accepts.
+* **The screen is black, and the window server is why**: backboardd crashed
+  27 times (SIGABRT, "crashed 6 times in a row"), every screenshot is the
+  bare framebuffer, and the log has the assertion that ended it:
+  `getLibraryByIndex_block_invoke, line 292: error 'MTLLibraryErrorDomain
+  Code=6 "library not found"'`.  CoreAnimation's pipeline library names a
+  `default.metallib` that this image does not carry; the plug-in's mirror of
+  it looks for the stand-in at the fixed path
+  `/redwood/share/ca-share/QuartzCore-default.metallib`
+  (`userland/src/HakiosMetalCA.m`, the `ours` string), while this run put it
+  under `/redwood/share/cameta` and pointed the kernel's `ca_metallib=` at
+  that -- the boot argument satisfies the framework-bundle lookup, not the
+  pipeline library's.  So the mirror had no metallib, the library lookup
+  missed, and the window server aborted in a loop.  The fix is the path (or
+  the plug-in reading the boot argument); the next run rebuilds with
+  `EXTRA_SHARE` naming a `ca-share` directory.
 * The boot line is 607 characters (`BOOT_LINE_LENGTH`) and the run's ended
   at "metal_" -- **`metal_all=1` was cut**, so Maps was not shown the device
   in this run even if its window had drawn.  The next Metal boot puts
