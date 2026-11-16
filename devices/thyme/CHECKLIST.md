@@ -195,7 +195,9 @@ makes no connection.  The stock forecast path stays behind FairPlay/SEP in the
 app's own WeatherKit client; making the Weather app show numbers means putting
 a data source in its place (fetch the forecast from a service that needs no
 device identity and hand it to WeatherKit's model), which is the project's next
-step, not a daemon switch.
+step, not a daemon switch.  The pieces and their order --
+`WeatherKit.Weather` is public and Codable, Open-Meteo needs no identity, the
+injection mechanism is the kernel's -- are in `docs/weather-data-shim.md`.
 
 ## Personas, and the container path kvsd cannot get (2026-11-16)
 
