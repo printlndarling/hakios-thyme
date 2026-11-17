@@ -4847,3 +4847,20 @@ sign/MCM/LS steps print to the console through NSLog; then it opens the same IPA
 TrollStore with `uiopen --url` to test the hand-off as well. `launchctl` is not in the image, so
 `OS_ACTIVITY_DT_MODE` cannot be set globally for the UI's own os_log. Image: `root-tstore.apfs`
 `8e0f2556`.
+
+### QEMU as a bench for the map app (2026-11-17, evening)
+
+With the phone away, the current system image and the map scene were booted under
+`qemu/run-darwin.sh` (ROOT=`out/thyme-boot/root-mapapp.apfs`, IMG=`userland/system.apfs`,
+QEMU_NET=1, 600 s; qemu-system-arm 8.2.2 installed for it): SpringBoard draws the home
+screen through the GL path, Settings opens (`Successfully spawned Preferences`,
+`logs/qmap5-1.png`), and the map scene's install steps run and leave the bundle at
+`/var/jb/Applications/HakiosMaps.app` with its binary 0755 (`install.log`). But
+`uicache -a` + `uiopen --bundleid com.hakios.maps` (and later `--path` and a URL-scheme
+open) never reached launchd -- no `UIKitApplication:com.hakios.maps` line at all -- while
+Settings opened in the same boot. The phone's own LocProbe launch (`Successfully spawned
+LocProbe[224]`, bundle path `/private/var/jb/Applications/LocProbe.app`, 2026-11-15) shows
+the runtime registration route can work there, so this is either a QEMU-only limit of
+LaunchServices' third-party registration or a real change since that image. The scene now
+runs `uicache -p <bundle>` and `uicache -i <id>` and prints both into `install.log`, which
+will say which; app launch for the map has not yet been verified on the phone.
