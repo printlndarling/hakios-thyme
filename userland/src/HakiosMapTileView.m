@@ -17,7 +17,7 @@
 #define HM_TILE_POINTS 128.0
 #define HM_MIN_ZOOM 3
 #define HM_MAX_ZOOM 18
-#define HM_TILE_CACHE_MAX 512
+#define HM_TILE_CACHE_MAX 160
 
 static double
 hm_mercator_y(double latitude)
@@ -238,7 +238,14 @@ hm_inverse_mercator_y(double y)
 			UIImage *image = (error == nil && data != nil) ? [UIImage imageWithData:data] : nil;
 
 			if (self.tiles.count > HM_TILE_CACHE_MAX) {
-				[self.tiles removeAllObjects];
+				/* A decoded 256x256 tile is a quarter of a megabyte; drop half of the cache
+				 * rather than all of it, so the screen keeps what it is showing. */
+				NSArray *keys = [self.tiles allKeys];
+				NSUInteger drop = keys.count / 2;
+
+				for (NSUInteger i = 0; i < drop; i++) {
+					[self.tiles removeObjectForKey:keys[i]];
+				}
 			}
 			self.tiles[key] = (image != nil) ? (id)image : (id)[NSNull null];
 			[self.pending removeObject:key];
@@ -305,6 +312,38 @@ hm_inverse_mercator_y(double y)
 			CGContextSetFillColorWithColor(context, [UIColor colorWithRed:0.04 green:0.52 blue:1.0 alpha:1.0].CGColor);
 			CGContextFillEllipseInRect(context, CGRectMake(px - 8, py - 8, 16, 16));
 		}
+	}
+
+	/* The scale bar: a round distance no longer than 120 points at this latitude. */
+	{
+		double metersPerPoint = 40075016.686 * cos(self.centerLatitude * M_PI / 180.0) / [self worldSize];
+		double target = 120.0 * metersPerPoint;
+		double magnitude = pow(10.0, floor(log10(target)));
+		double nice = magnitude;
+
+		if (target / magnitude >= 5.0) {
+			nice = 5.0 * magnitude;
+		} else if (target / magnitude >= 2.0) {
+			nice = 2.0 * magnitude;
+		}
+		CGFloat barPoints = (CGFloat)(nice / metersPerPoint);
+		CGFloat barY = height - 34, barX = 12;
+		NSString *label = (nice >= 1000.0)
+		    ? [NSString stringWithFormat:@"%.0f km", nice / 1000.0]
+		    : [NSString stringWithFormat:@"%.0f m", nice];
+		UIFont *barFont = [UIFont boldSystemFontOfSize:11];
+		NSDictionary *barAttributes = @{ NSFontAttributeName : barFont, NSForegroundColorAttributeName : [UIColor colorWithWhite:0.2 alpha:1.0] };
+		CGSize barLabel = [label sizeWithAttributes:barAttributes];
+
+		CGContextSetFillColorWithColor(context, [UIColor colorWithWhite:1.0 alpha:0.7].CGColor);
+		CGContextFillRect(context, CGRectMake(barX - 4, barY - barLabel.height - 4, MAX(barPoints, barLabel.width) + 8,
+		    barLabel.height + 10));
+		CGContextSetStrokeColorWithColor(context, [UIColor colorWithWhite:0.15 alpha:1.0].CGColor);
+		CGContextSetLineWidth(context, 2.0);
+		CGContextMoveToPoint(context, barX, barY);
+		CGContextAddLineToPoint(context, barX + barPoints, barY);
+		CGContextStrokePath(context);
+		[label drawAtPoint:CGPointMake(barX, barY - barLabel.height - 3) withAttributes:barAttributes];
 	}
 
 	/* The attribution OpenStreetMap's licence requires. */
