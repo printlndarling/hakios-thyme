@@ -4468,7 +4468,18 @@ anywhere readable -- Metal.framework's metadata is inside the cache -- so the
 same answer is also installed on `_MTLLibrary` when VectorKit's library opens
 (the class M2V's patch put the twin `functionCache:` call on); each answers
 only when Metal's own implementation gives nil, and falls through to it
-otherwise.  `vkn=1` remains as an opt-in for anything that does
+otherwise.
+
+The two runs that carried those answers (36% and 40% at their starts, `wifi_wide=0
+vkn=1`) put Maps' UI up over the same black canvas and lost the evidence again:
+`logs/ptm2-1..4.png` are the app at 12:01-12:03, and `logs/115838-run.log` has
+neither the probe's output nor a single Maps pipeline line -- the loader's live
+file is a fixed 1.3 MB window, so the early lines are overwritten before the run
+ends.  The next run keeps them in files instead: the job list writes the probe's
+output to `/private/var/tmp/pipetest.out` with init's `>>`, the plug-in appends
+its VectorKit lines to `/private/var/tmp/hakios-vk.log` under `vklog=1`, and the
+same two files are `cat`-ed again after the taps and every 30 s, where the log
+ring still holds them (`rc.jobs.pipetestmaps`, image `9c6070d9`).  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
