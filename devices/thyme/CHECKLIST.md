@@ -4584,7 +4584,23 @@ the stencil clear fills the wider plane (width from its pitch, rows to 32).
 Rebuilding the runtime is `make ios MESA=1`: without `MESA=1` the library leaves
 the AIR compiler out (`compiler.o` 12 KB instead of 111 KB) and every pipeline
 would fail; the scene image then shrinks by about 1.3 MB, which is how the
-mistake was caught before a run.  `vkn=1` remains as an opt-in for anything that does
+mistake was caught before a run.
+
+That run (`135944`, image `59eade14`) passed the stencil gate -- the refusal is
+gone and Maps' Clear pipeline links -- and then failed on the GPU's own address
+space: every canvas texture, colour and depth, came back "Cannot allocate
+memory", and the kernel's log named the real reason --
+`HakiosGPU: a buffer of 44285952 bytes cannot be entered into the GPU's address
+space`.  The Adreno driver's page-table pool was `SPACE_TABLES 1024`, about 2 GB
+of mapped addresses, and VectorKit's canvases (each 44 MB colour, now 56 MB
+depth with its S8 plane) plus everything else walked past it; `space_new_table`
+returned NULL and the mapping failed without a page-table slot.  The pool is now
+`2064` (2048 two-megabyte tables, the four level-2 tables they hang off, and the
+root: 4 GB, the whole 32-bit window the allocator hands out,
+`devices/thyme/drivers/gpu/hakios.thyme_adreno.c` and the kernel tree's copy;
+the kernel is rebuilt with `./xnu-build.sh` and the boot image with
+`devices/thyme/build-loader.sh`).  This is the same class of limit the annibale
+port hit at 1024 slots on the Adreno 830, and the fix is the same.  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)

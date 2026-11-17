@@ -1284,7 +1284,8 @@ to_memory(vm_offset_t start, vm_size_t size)
 	settle();
 }
 
-#define SPACE_TABLES            1024            /* 2 GB of addresses, were they all in use */
+#define SPACE_TABLES            2064            /* 4 GB of addresses: 2048 2 MB tables, the 4 that each GB of them hangs off,
+						   and the root (VectorKit's canvases alone map more than 2 GB) */
 
 struct gpu_space {
 	const char *name;
