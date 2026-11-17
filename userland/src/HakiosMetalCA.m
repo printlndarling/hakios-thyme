@@ -2598,6 +2598,14 @@ static id
 hm_lib_function(id self, SEL _cmd, NSString *name, id values, id library, NSError **error)
 {
 	id function = ((id (*)(id, SEL, id, id, id, NSError **))hm_lib_by_pipeline_library)(self, _cmd, name, values, library, error);
+	{
+		static unsigned said;
+
+		if (said++ < 40) {
+			hm_vk_log("the function road was asked at a library for %s: Metal's own answer %s\n", [name UTF8String],
+				 function != nil ? "a function" : "nil");
+		}
+	}
 
 	if (function == nil && name != nil && hm_vk_device != nil) {
 		function = hm_vk_function_values(name, values, NULL);
@@ -2620,6 +2628,25 @@ hm_pl_road_function(id self, SEL _cmd, NSString *name, id values, id library, NS
 		function = hm_vk_function_values(name, values, NULL);
 		hm_vk_log("VectorKit's function %s, asked at the pipeline library: %s\n", [name UTF8String],
 			 function != nil ? "compiled from its metallib" : "not in its metallib");
+	}
+	return function;
+}
+
+/* the plain -newFunctionWithName: on a library, said: a library handed to VectorKit (the carried metallib, through
+ * the 0-byte archive answer) may be asked for its functions this way, and no other line would witness it */
+static IMP hm_lib_by_name_only;
+
+static id
+hm_lib_new_function(id self, SEL _cmd, NSString *name)
+{
+	id function = ((id (*)(id, SEL, id))hm_lib_by_name_only)(self, _cmd, name);
+	{
+		static unsigned said;
+
+		if (said++ < 40) {
+			hm_vk_log("a library was asked for function %s: %s\n", [name UTF8String],
+				 function != nil ? "found" : "NOT FOUND");
+		}
 	}
 	return function;
 }
@@ -2824,6 +2851,17 @@ hm_vk_note_library(id device, NSString *path, id library)
 			hm_lib_by_pipeline_library = method_getImplementation(libraryMethod);
 			class_replaceMethod(libraryClass, withLibrary, (IMP)hm_lib_function, method_getTypeEncoding(libraryMethod));
 			hm_vk_log("VectorKit's function road (constant values and a pipeline library) is answered at _MTLLibrary too\n");
+		}
+	}
+	if (hm_lib_by_name_only == NULL) {
+		SEL byNameOnly = @selector(newFunctionWithName:);
+		Class libClass = objc_getClass("_MTLLibrary");
+		Method byNameMethod = libClass != Nil ? class_getInstanceMethod(libClass, byNameOnly) : NULL;
+
+		if (byNameMethod != NULL) {
+			hm_lib_by_name_only = method_getImplementation(byNameMethod);
+			class_replaceMethod(libClass, byNameOnly, (IMP)hm_lib_new_function, method_getTypeEncoding(byNameMethod));
+			hm_vk_log("a library's -newFunctionWithName: is said here too\n");
 		}
 	}
 	if (hm_pl_road_original == NULL) {

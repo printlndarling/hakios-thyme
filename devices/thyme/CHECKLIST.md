@@ -4512,7 +4512,24 @@ receiver of the function road, answered the same way (image `ff064bf2`).
 Whether the app's renderer encodes any pass at all is said too: once VectorKit's
 library is open in a process, the command buffer logs the first 20 render passes
 (colour and depth format and size), which tells an idle renderer from one
-encoding passes with no pipeline (image `2299fb92`).  `vkn=1` remains as an opt-in for anything that does
+encoding passes with no pipeline (image `2299fb92`).
+
+That answered it (run `124956`, image `9f4b5c3d`): Maps **does** call
+`newLibraryWithData:` with **0 bytes** -- the pipelinelib's `functions` archive,
+read straight out -- and the answer written for it (the carried
+`VectorKit.framework/default.metallib`) is taken: "a library from 0 bytes of
+data: the carried VectorKit metallib is given instead", then the library opens
+with its functions.  Maps also encodes render passes, with exactly the canvas
+this session measured before: `a render pass was encoded: colour format 81
+1125x2436, depth format 260 1125x2436` -- so VectorKit's renderer is running,
+in a process with the right library, and still draws nothing (no `linked`
+pipeline in the whole run, canvas black, `logs/ptm2-4.png` after the favorites
+sheet was swiped away: only the search bar is left).  The function road is not
+called on the device or seen at a library; whether a library is asked for
+functions by plain `-newFunctionWithName:` is now said too (the first 40
+lookups in a process that opened VectorKit's library), and the function road at
+a library is said on every call, not only when Metal's own answer is nil (image
+`693be046`).  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
