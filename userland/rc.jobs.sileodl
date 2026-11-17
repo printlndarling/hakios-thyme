@@ -1,0 +1,17 @@
+# RC_JOBS=rc.jobs.sileodl: the package manager's download path, on the full-driver image.
+#
+# The store question the user put first: a store must be able to download software.  Sileo is the
+# package manager here, and what it runs underneath is apt against the Procursus repository.  This
+# scene joins Wi-Fi (as rc.jobs.wirelessfull does), then has apt fetch the repository index and
+# download and install a real package (tree), then shows what dpkg recorded.  Built by
+# devices/thyme/build-root.sh so every driver is present.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/apt-get -q update
+/var/jb/usr/bin/apt-get -q -y install tree
+/var/jb/usr/bin/tree --version
+/var/jb/usr/bin/dpkg -l tree >> /private/var/tmp/apt.txt
+/var/jb/usr/bin/cat /private/var/tmp/apt.txt
+/redwood/bin/net_test resolve apt.procurs.us
+/redwood/bin/net_test tcp apt.procurs.us 443
