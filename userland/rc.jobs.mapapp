@@ -4,6 +4,11 @@
 #
 # Why a map of our own: Apple Maps' canvas stays black because VectorKit's Metal pipelines are
 # not served yet; the tile images here take the path Safari already renders.
+#
+# The Wi-Fi join: a fresh RAM boot does not associate by itself, and without it neither the tiles
+# nor the search have a network at all ("lx: the network is NOT joined" in logs/231436-run.log,
+# 2026-11-17 23:19).  net_test joins from the network file the image carries, in the background,
+# the way rc.jobs.hweather does; the app waits for it.
 # The app logs to /private/var/tmp/hmaps.log (and /var/jb/hmaps/maps.log, for which the directory
 # must be world-writable: the app runs as uid 501).  A run cannot type, so the search query is
 # left in /private/var/tmp/hmaps-search.txt and the app searches by itself three seconds in
@@ -15,6 +20,7 @@
 # Settings opened, so the id's registration is the first thing to read there; on the phone the
 # same route launched LocProbe from /private/var/jb/Applications.  Three launch routes follow:
 # bundle id, the app's URL scheme (LocProbe's first launch took that one), and --path.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
 /redwood/bin/rwtouch wait 35
 /var/jb/usr/bin/mkdir -p /var/jb/Applications /var/jb/hmaps
 /var/jb/usr/bin/chmod 777 /var/jb/hmaps
