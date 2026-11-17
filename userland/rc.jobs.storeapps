@@ -70,7 +70,12 @@
 /redwood/bin/rwtouch tap 0.5 0.78
 /redwood/bin/rwtouch wait 2
 /redwood/bin/rwtouch tap 0.5 0.76
-/redwood/bin/rwtouch wait 30
+# An early look while the download is still on disk: the app deletes the IPA after the helper
+# returns, so the later listing alone cannot tell a download that never started from one that
+# installed cleanly.
+/redwood/bin/rwtouch wait 8
+/var/jb/usr/bin/ls -la /var/mobile/.TrollApps/tmp/ >> /private/var/tmp/storeapps.txt
+/redwood/bin/rwtouch wait 22
 # With skip_install_prompt the app downloads and then spawns TrollStore's helper itself; the
 # queue file is removed by the app after the helper returns.  The container list says whether
 # the helper installed; then the app it installed is started to show that it runs.
