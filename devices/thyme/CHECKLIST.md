@@ -4883,3 +4883,30 @@ record of the Chinese query reads E8 A5 BF ... as it is written, but the console
 68 25 3F ... (each byte & 0x7F; checked with od). Whether the phone's loader console does the
 same has not been measured; either way a mangled 中文 line in a run log is the console's doing,
 not necessarily the data's.
+
+### The map's network is blocked here, and the source is now a setting (2026-11-17, late)
+
+The QEMU run with `CONFIGD=1` and `DNS=1` settled the rest: `net_test dhcp en0` got en0 an
+address from QEMU's DHCP (`setservice en0 DHCP: 0 (done)`), mDNSResponder then resolved
+`tile.openstreetmap.org` in 1.55 s -- but to **185.60.219.41**, a Facebook address, and every
+TCP connection to 443 timed out. The host's own resolver gives the same answers for both
+`tile.openstreetmap.org` (185.60.219.41) and `nominatim.openstreetmap.org` (157.240.20.8):
+this network poisons openstreetmap.org, and the host only reaches it because its own HTTPS
+goes through a transparent proxy that the guest (and the phone) do not use. The app's sockets
+show the same: `SYN_SENT` to those addresses and a `RST` back (QEMU run log, process
+HakiosMaps:56). So on this Wi-Fi neither tiles nor Nominatim can work from the phone as it
+stands; the app is not at fault.
+
+The answer is a setting, not a rebuild: `HakiosMaps` reads `/var/jb/hmaps/tiles.conf` (or
+`/private/var/tmp/hmaps-tiles.conf`, which wins) at launch --
+`tile_url` with {z}/{x}/{y}, `attribution`, `max_zoom`, and `search_url` with {q} -- and logs
+both URLs it will use. `userland/maps/tiles.conf.example` carries the defaults and a
+Tianditu WMTS line (a free key from tianditu.gov.cn) as the reachable-in-China example.
+The example rides in the root image as `/redwood/share/hmaps/tiles.conf.example`.
+
+Also settled: `uicache -p <bundle>` registers the app where `uicache -a` did not under QEMU,
+and the first `uiopen --bundleid com.hakios.maps` then launches it
+(`Successfully spawned HakiosMaps[56]`) -- the map scene uses `-p` now. And mDNSResponder is
+not in the minimal job list: `DNS=1` in build.sh adds it and its helper, which is what turned
+"nodename nor servname" into an answer at all. The phone image (`root-mapapp.apfs`,
+`165b00c9`) now carries both.
