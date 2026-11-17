@@ -5030,3 +5030,46 @@ run `logs/001330-run.log`, screenshots `logs/full2-1.png`..`-5.png`:
   (`logs/full2-5.png`) -- a real network download through the store, on the Wi-Fi this boot joined.
 - Safari opened apple.com's "Success" page on the same link (`logs/full-1.png` of the 23:51 run;
   this boot's `full2-2.png` is HakiOS LocProbe in front, `full2-3.png` the Wi-Fi pane).
+
+### A store front-end for TrollStore: TrollApps on the phone (2026-11-18, night)
+
+The ask: a store that behaves like an app store -- search, browse, download, install, update --
+preferring an existing one over writing a new one, with Chinese apps as the goal.  Survey first:
+
+- **TrollApps 2.3** (TheResonanceTeam/TrollApps, 648 stars, `org.resonance.store`): a front-end
+  for TrollStore.  Repositories are AltStore-style JSON; it downloads an IPA and hands it to
+  TrollStore through `apple-magnifier://install?url=` (TrollStore's scheme, declared in its
+  Info.plist).  Needs TrollStore with URL schemes enabled.  English UI.
+- **ESign (轻松签)**: a certificate-based signer with its own catalog; needs a signing certificate
+  (paid/enterprise, or third-party "free" certificates) and its shared catalog is built on
+  decrypted commercial apps.  Its site answered HTTP 522 when probed.  Not chosen.
+- **Feather**: certificate-based signer as well; the GitHub repo under the expected name was not
+  found (moved/private).  Not chosen.
+- No store carries a lawful unencrypted WeChat/QQ/Bilibili/Douyin/Xiaohongshu/Alipay: App Store
+  builds are FairPlay-encrypted and every store's Chinese catalog is decrypted/pirated copies
+  (often modified).  That is excluded by the task's own rule 6 and by this project's policy; the
+  store can therefore be a real ecosystem for legal/open-source apps but not for those six.
+
+**On the phone** (`logs/012656-run.log`, image `root-storeapps.apfs` `a299b51c`/`284b373f`,
+screenshots `logs/store-1.png`..`-4.png`):
+
+- The 5.5 MB TrollApps IPA could not ride in the root image: with it the payload upload failed
+  ("xl: upload failed"); the payload tops out near 50 MB.  A new `userland/src/hk_download.m`
+  (`hk_download URL PATH`, NSURLSession) fetched it from the host on the LAN instead --
+  `5549018 bytes (http 200)` -- which also proves arbitrary downloads over the phone's Wi-Fi.
+- TrollStore's helper installed TrollApps into its own MCM container
+  (`00B49947-.../TrollApps.app`, `trollstorehelper returning 0`) and the app launched
+  (`Successfully spawned TrollApps[249]`); its first-run sheet and then the **Featured catalog**
+  render, with Resonance Team and haxi0's source listed and GET buttons (`logs/store-2.png`,
+  `-3.png`).
+- The **sources themselves are reachable from this network**: `hk_download
+  https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json`
+  returned 8170 bytes (http 200), so the GitHub-hosted catalogs load here.
+- The one-tap install was not yet observed end to end: a tap on TrollLock's GET left the list
+  unchanged and no third container appeared (the two are TrollStore and TrollApps).  That is the
+  next test -- either a detail sheet needs a confirming tap, or the scheme hand-off needs the
+  TrollStore URL-scheme setting confirmed; the helper route underneath is proven.
+
+Honest limit, stated for the record: this makes a store *work*, not the Chinese app ecosystem.
+The six target apps have no lawful unencrypted IPA; we will not use cracked or modified copies of
+them, and the stock App Store cannot run them here (FairPlay).

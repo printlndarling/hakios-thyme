@@ -27,10 +27,25 @@
 /var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
 /var/jb/usr/bin/uicache -a
 /var/jb/usr/bin/uiopen --bundleid org.resonance.store
-/redwood/bin/rwtouch wait 30
+/redwood/bin/rwtouch wait 15
+# The first launch shows the "What's New in 2.3" sheet; Next takes it to the catalog.
+/redwood/bin/rwtouch tap 0.5 0.91
+/redwood/bin/rwtouch wait 10
+/redwood/bin/rwtouch tap 0.5 0.91
+/redwood/bin/rwtouch wait 20
+# The store's default sources live on GitHub; fetch one for a plain answer either way, and let
+# net_test resolve the host too (its line prints the address or the failure).
+/redwood/bin/hk_download https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json /private/var/tmp/repo.json
 /var/jb/usr/bin/net_test resolve raw.githubusercontent.com
 /var/jb/usr/bin/net_test tcp raw.githubusercontent.com 443
-/var/jb/usr/bin/net_test resolve github.com
-/var/jb/usr/bin/net_test tcp github.com 443
 /redwood/bin/rwtouch wait 20
+# One tap on GET (TrollLock, the third row of haxi0's source): TrollApps hands the IPA URL to
+# TrollStore through apple-magnifier://, TrollStore downloads it and, with
+# installAlertConfiguration = 2, installs it without asking.  The container list afterwards says
+# whether the whole one-tap path ran.
+/redwood/bin/rwtouch tap 0.86 0.586
+/redwood/bin/rwtouch wait 40
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
 /var/jb/usr/bin/cat /private/var/tmp/storeapps.txt
