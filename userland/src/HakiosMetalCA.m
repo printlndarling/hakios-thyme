@@ -2667,6 +2667,33 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	return pipeline;
 }
 
+/* The library's own list of names: it would come from the precompiled file this GPU has none of, so Metal's
+ * answer is empty and a client that asks the library what it holds learns nothing.  With vkn=1 the list is the
+ * descriptions' own names (both functions of every pipeline), which the answer above then serves by name. */
+static NSArray *hm_vk_names;
+
+static id
+hm_vk_pipeline_names(id self, SEL _cmd)
+{
+	if (hm_vk_names == nil) {
+		NSMutableArray *names = [NSMutableArray array];
+		NSMutableSet *seen = [NSMutableSet set];
+
+		for (NSArray *pair in hm_vk_pairs) {
+			for (NSString *name in pair) {
+				if (![seen containsObject:name]) {
+					[seen addObject:name];
+					[names addObject:name];
+				}
+			}
+		}
+		hm_vk_names = [names copy];
+		hm_print("VectorKit's pipeline library was asked for its names: %lu are given (vkn=1)\n",
+			 (unsigned long)[hm_vk_names count]);
+	}
+	return hm_vk_names;
+}
+
 /* the call a library's own by-name lookups take: installed only for the VectorKit library this device opened */
 static void
 hm_vk_note_library(id device, NSString *path, id library)
@@ -2696,6 +2723,16 @@ hm_vk_note_library(id device, NSString *path, id library)
 	class_replaceMethod(object_getClass(library), byName, (IMP)hm_vk_new_pipeline, method_getTypeEncoding(method));
 	hm_print("VectorKit's pipeline library opened: %lu pipelines described, none precompiled for this GPU; its by-name "
 		 "lookups are answered from its functions here\n", (unsigned long)[hm_vk_pairs count]);
+	if (hm_boot_arg_int("vkn", 0) == 1) {
+		SEL names = @selector(pipelineNames);
+		Method namesMethod = class_getInstanceMethod(object_getClass(library), names);
+
+		if (namesMethod != NULL) {
+			class_replaceMethod(object_getClass(library), names, (IMP)hm_vk_pipeline_names,
+					    method_getTypeEncoding(namesMethod));
+			hm_print("VectorKit's pipeline library's names are answered here too (vkn=1)\n");
+		}
+	}
 }
 
 /* A pipeline library (a .pipelinelib directory: pipelines.desc naming each pipeline's functions, formats and state, and
