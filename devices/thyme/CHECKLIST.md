@@ -5162,6 +5162,14 @@ run below used `1675f323`) proved the seeding and the language on the device:
   Confirm at 0.75/0.78/0.76 -- inside the button's 0.740..0.804 span with the sheet's 95 pt
   bottom padding, and above Clear Queue's 0.814..0.878.  That scene's result is next.
 
+**Update-path assets, ready for after the install.**  An UPDATE needs an older version
+installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
+`CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
+`LocProbe-1.1.ipa` (9646 bytes, `Payload/LocProbe.app/...`) and `repo-1.1.json`, both in
+the LAN server's root.  A later scene only has to point the seeded `repos` at
+`repo-1.1.json`; TrollApps compares the installed 1.0 with 1.1 and shows UPDATE, whose
+queue/Confirm path is the same one this run exercises.
+
 **The kernel side of that spawn is already there.**  `xnu/hakios.patch` rewrites
 `spawn_validate_persona()` and `spawn_persona_adopt()`: the entitlement and the persona
 lookup are gone, and when no persona exists the requested credential (persona 99, uid/gid 0,
