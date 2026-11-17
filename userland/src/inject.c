@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
@@ -1449,9 +1450,58 @@ metallib_answer(id self, id name, id extension, id found)
 	}
 	if (found == NULL && ca_metallib != NULL && name != NULL && strcmp(utf8(name), "default") == 0 &&
 	    strcmp(ext, "metallib") == 0) {
-		id text = ((id (*)(Class, SEL, const char *))objc_msgSend)(objc_getClass("NSString"),
-		    sel_registerName("stringWithUTF8String:"), ca_metallib);
+		static char copy[256];
+		static int tried;
+		id text;
 
+		/*
+		 * Metal reads this file itself, and on some boots that read of the image's compressed copy fails:
+		 * "Metal failed to load library: library not found" right after this answer, then backboardd aborts
+		 * in a loop and the screen stays black (logs/081114-run.log, three boots of eight).  A plain copy
+		 * into the writable /private/var/tmp, read back through the ordinary file path, is handed over
+		 * instead; if even that cannot be made, the file is answered as it always was.
+		 */
+		if (!tried) {
+			struct stat st;
+			const char *slash = strrchr(ca_metallib, '/');
+			int in = -1, out = -1, rc = -1;
+
+			tried = 1;
+			mkdir("/private/var/tmp/hakios-ca", 0777);
+			snprintf(copy, sizeof(copy), "/private/var/tmp/hakios-ca/%s",
+			    slash != NULL && slash[1] != 0 ? slash + 1 : "default.metallib");
+			in = open(ca_metallib, O_RDONLY);
+			if (in >= 0) {
+				out = open(copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				if (out >= 0) {
+					char buf[65536];
+					ssize_t n;
+
+					rc = 0;
+					while ((n = read(in, buf, sizeof(buf))) > 0) {
+						if (write(out, buf, (size_t) n) != n) {
+							rc = -1;
+							break;
+						}
+					}
+					if (n < 0) {
+						rc = -1;
+					}
+					close(out);
+				}
+				close(in);
+			}
+			if (rc == 0 && stat(copy, &st) == 0) {
+				say("hakios: %s: ca_metallib copied to %s: %lld bytes\n", getprogname(), copy,
+				    (long long) st.st_size);
+			} else {
+				say("hakios: %s: ca_metallib %s could not be copied (errno %d); answering it as it is\n",
+				    getprogname(), ca_metallib, errno);
+				snprintf(copy, sizeof(copy), "%s", ca_metallib);
+			}
+		}
+		text = ((id (*)(Class, SEL, const char *))objc_msgSend)(objc_getClass("NSString"),
+		    sel_registerName("stringWithUTF8String:"), copy);
 		return ((id (*)(Class, SEL, id))objc_msgSend)(objc_getClass("NSURL"), sel_registerName("fileURLWithPath:"), text);
 	}
 	return found;

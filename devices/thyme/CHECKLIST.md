@@ -4328,3 +4328,28 @@ system.  The next attempt is a standalone tool, one step of a scene and no windo
 server: a small Metal program that opens VectorKit's `iphoneos.pipelinelib`
 itself, asks for a pipeline by name, prints what Metal answers, and then tries
 the carried `default.metallib`'s base function with the same constants.
+
+### The boot that stays black: Metal's read of the carried metallib fails (2026-11-17)
+
+Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
+frame: backboardd aborted in a loop ("service has crashed 22 times in a row"),
+the screen stayed black, and every instance printed `[Metal] Metal failed to load
+library: library not found` immediately after inject.c's answer to
+CoreAnimation's bundle lookup ("asks bundle ... default.metallib:
+/redwood/share/ca-share/QuartzCore-default.metallib").  The good boots
+(`maps9`, `maps11`) have none of those lines.
+
+What can be compared says the inputs were the same: the scenes' carried files
+are byte-identical in all five images (sha256 `d7cdaaaf...`), maps9 and maps13
+carry the same plug-in binary (`553d251f...`), the kernel is `82abf2539d68` in
+every run, and both logs show the same mounts ("resident image ... it is the root
+(md0), the payload ramdisk is md1") and the GPU's firmware read from `/dev/md1`
+at the same steps.  What differs is the read of that one compressed file at that
+one moment -- it is `[decmpfs 4]` in the image, where the plug-in's own binary
+is not.
+
+`inject.c` now copies the carried metallib into `/private/var/tmp/hakios-ca/`
+with ordinary read/write and answers that URL instead, saying the copy's size, or
+the errno when it cannot; Metal then reads a plain file on the memory file
+system, not the image's compressed one.  The next scenes' boots are the test:
+with the copy, the loop should be gone on every boot, good or bad before.
