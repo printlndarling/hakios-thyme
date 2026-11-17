@@ -4573,7 +4573,18 @@ change is the S8 plane of a multisample D32S8 (per-sample stencil, laid out
 like the depth plane's samples side by side) and the stencil buffer setup for a
 multisample pass; the single-sample S8 plane is already served from the same
 texture (stencilOffset/stencilPitch, RB stencil branch), so the work is the
-multisample pitch and the pass check.  `vkn=1` remains as an opt-in for anything that does
+multisample pitch and the pass check.
+
+That change is in (`hakios-metal/src/texture.cpp`, `render.cpp`; image `59eade14`):
+`plan()` allocates the S8 plane of the multisample memory after the depth
+plane (samples side by side, one byte each, `s8Bytes(width * samples)`), the
+depth-plane/stencil accessors are samples-aware, the pass check that refused a
+multisample stencil is gone (the same-texture and load/store checks stay), and
+the stencil clear fills the wider plane (width from its pitch, rows to 32).
+Rebuilding the runtime is `make ios MESA=1`: without `MESA=1` the library leaves
+the AIR compiler out (`compiler.o` 12 KB instead of 111 KB) and every pipeline
+would fail; the scene image then shrinks by about 1.3 MB, which is how the
+mistake was caught before a run.  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
