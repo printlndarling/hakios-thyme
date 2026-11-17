@@ -4425,6 +4425,22 @@ loader's fetches that flood overwrites what it has not read.  A diagnostic run
 can drop it: `ram.args` without `touch_lat=1` is otherwise the same line, and
 the next Maps run does that (the taps still work; only their logging is gone).
 
+Answered on the device, at last (quiet run, `logs/111646-run.log` and its live
+capture): the probe's by-name request for
+`default_DaVinci::ground_base_vertex_909AB73C...` came back a
+`HakiosMetalRenderPipelineState`.  The plug-in opened the library ("235
+pipelines described, none precompiled for this GPU; its by-name lookups are
+answered from its functions here"), opened the carried `default.metallib`, and
+built the state from `DaVinci::ground_base_vertex + DaVinci::ground_fragment`
+-- "it compiled", with the canvas's own kinds (81 / 260 / 4) accepted on the
+first try.  Maps opened the same library and installed the same answer, but in
+that run it asked nothing by name: the library's own `pipelineNames` is 0 (the
+precompiled file it would be read from is absent), so a client that enumerates
+the library learns nothing.  `vkn=1` answers that list with the descriptions'
+334 names, which the by-name answer then serves; it is off unless a boot asks
+for it, and the next run tries it (with `wifi_wide=0`, so the map has data to
+draw).
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
