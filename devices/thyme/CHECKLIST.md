@@ -4840,3 +4840,10 @@ URL with `uiopen --url` -- TrollStore is the only app on the system that claims
 with a root persona. The IPA is the LocProbe bundle packed by `tools/ipa.py` (mode-preserving:
 a 644 binary was the iSH wall, and `zip(1)` is not on this host). The image carries
 `/fw/ipa/LocProbe.ipa` (9,200 bytes) and the preferences file; the run waits for the phone.
+
+The scene now runs TrollStore's helper directly first (`trollstorehelper install custom
+/private/var/tmp/LocProbe.ipa`, as root, exactly what the UI spawns with a root persona), so the
+sign/MCM/LS steps print to the console through NSLog; then it opens the same IPA through
+TrollStore with `uiopen --url` to test the hand-off as well. `launchctl` is not in the image, so
+`OS_ACTIVITY_DT_MODE` cannot be set globally for the UI's own os_log. Image: `root-tstore.apfs`
+`8e0f2556`.
