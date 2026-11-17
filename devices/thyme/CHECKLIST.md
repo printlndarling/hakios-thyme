@@ -4820,3 +4820,14 @@ a row` (17:42:56).  The phone was then found at 16% on Android's USB charger (le
 status 2, 3020 mV, 37.7 C) and left charging; it dropped off adb/fastboot entirely a few
 minutes later, so the fallback build's run is waiting for it to come back.  Lesson for the
 scene runner: check the battery before a run and keep runs short below ~30%.
+
+What TrollStore's own install path needs, read from its source (opa334/TrollStore, `RootHelper/main.m`,
+`TSApplicationsManager.m`): by default (`installationMethod` 1) the helper's `install custom` creates an
+app container through MCM (containermanagerd), copies the bundle into it, applies its CoreTrust bypass
+and registers the app with LSApplicationWorkspace; the other method (`installd`) goes through
+MobileInstallation. Both containermanagerd and lsd are running on this port, so the "custom" path is
+the one to try first; the open questions are whether the helper gets root with TrollStore's
+entitlements here (entitlement enforcement is thin on this port) and whether the copied bundle's
+signature matters at all. `build.sh` now takes `INSTALLD=1`, which adds `com.apple.mobile.installd`
+and `com.apple.mobile_installation_proxy` to the job list for the second method; it is off until a
+run shows them up harmlessly.

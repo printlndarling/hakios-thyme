@@ -139,6 +139,11 @@ DARWIN_JOBS=${JOBS-"
 # its program is in the image (usr/libexec/routined). fairplayd and searchpartyd are not in the
 # rootfs extraction at all, so they stay out. ROUTINED=0 leaves it out.
 [ "${ROUTINED-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.routined"
+# The installation stack, for TrollStore's own IPA path (its default "custom" method creates an
+# app container through containermanagerd and registers with LSApplicationWorkspace; its
+# "installd" method goes through MobileInstallation instead).  Off by default until a run shows
+# the pair up without hurting the boot: INSTALLD=1 names installd and its proxy.
+[ "${INSTALLD-0}" = 1 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.mobile.installd com.apple.mobile_installation_proxy"
 # The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
 # device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
 # in mkjobs.py when that program was put in this build's root: the kernel has already booted
