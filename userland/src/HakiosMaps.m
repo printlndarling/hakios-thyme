@@ -189,6 +189,25 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	self.locateButton.frame = CGRectMake(12, 44, 76, 44);
 	[self.locateButton addTarget:self action:@selector(locateTapped) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:self.locateButton];
+
+	UIButton *zoomIn = [UIButton buttonWithType:UIButtonTypeSystem];
+	UIButton *zoomOut = [UIButton buttonWithType:UIButtonTypeSystem];
+	NSArray *zoomButtons = @[ zoomIn, zoomOut ];
+	NSArray *zoomTitles = @[ @"+", @"−" ];
+	NSArray *zoomActions = @[ @"zoomInTapped", @"zoomOutTapped" ];
+
+	for (NSUInteger i = 0; i < zoomButtons.count; i++) {
+		UIButton *button = zoomButtons[i];
+
+		[button setTitle:zoomTitles[i] forState:UIControlStateNormal];
+		button.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+		button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.94];
+		button.layer.cornerRadius = 10;
+		button.frame = CGRectMake(self.view.bounds.size.width - 60, 44 + i * 56, 44, 44);
+		button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+		[button addTarget:self action:NSSelectorFromString(zoomActions[i]) forControlEvents:UIControlEventTouchUpInside];
+		[self.view addSubview:button];
+	}
 	[self givePosition];
 }
 
@@ -196,6 +215,22 @@ hm_set_bool(id object, NSString *name, BOOL value)
 {
 	if (self.tileView != nil && self.hasFix) {
 		[self.tileView recenterOnFix];
+	}
+}
+
+- (void)zoomInTapped
+{
+	if (self.tileView != nil) {
+		self.tileView.zoom = MIN(18, self.tileView.zoom + 1);
+		[self.tileView setNeedsDisplay];
+	}
+}
+
+- (void)zoomOutTapped
+{
+	if (self.tileView != nil) {
+		self.tileView.zoom = MAX(3, self.tileView.zoom - 1);
+		[self.tileView setNeedsDisplay];
 	}
 }
 

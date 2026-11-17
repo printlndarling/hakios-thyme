@@ -38,7 +38,7 @@ hm_inverse_mercator_y(double y)
 	return 90.0 - 360.0 * atan(exp((0.5 - y) * 2.0 * M_PI)) / M_PI;
 }
 
-@interface HakiosMapTileView () <NSURLSessionDataDelegate>
+@interface HakiosMapTileView ()
 @property (nonatomic, strong) NSMutableDictionary<NSString *, id> *tiles;   /* UIImage, or NSNull */
 @property (nonatomic, strong) NSMutableSet<NSString *> *pending;
 @property (nonatomic, strong) NSURLSession *session;
@@ -193,11 +193,14 @@ hm_inverse_mercator_y(double y)
 {
 	CGPoint point = [tap locationInView:self];
 	CGPoint center = [self centerInWorld];
+	CGFloat halfWidth = self.bounds.size.width / 2.0, halfHeight = self.bounds.size.height / 2.0;
+	double worldX = center.x + (point.x - halfWidth);
+	double worldY = center.y + (point.y - halfHeight);
 
-	/* The point under the fingers stays under them when the zoom goes up. */
+	/* The point under the fingers stays under them: its position doubles with the world. */
 	self.zoom = MAX(HM_MIN_ZOOM, MIN(HM_MAX_ZOOM, self.zoom + 1));
-	center.x = (center.x - self.bounds.size.width / 2.0 + (point.x - self.bounds.size.width / 2.0) / 2.0);
-	center.y = (center.y - self.bounds.size.height / 2.0 + (point.y - self.bounds.size.height / 2.0) / 2.0);
+	center.x = worldX * 2.0 - (point.x - halfWidth);
+	center.y = worldY * 2.0 - (point.y - halfHeight);
 	[self setCenterFromWorld:center];
 	[self setNeedsDisplay];
 }
@@ -214,6 +217,10 @@ hm_inverse_mercator_y(double y)
 	if (self.tiles[key] != nil || [self.pending containsObject:key]) {
 		return;
 	}
+	/* Enough at a time to fill a screen, not the whole neighbourhood. */
+	if (self.pending.count > 24) {
+		return;
+	}
 	NSArray<NSString *> *parts = [key componentsSeparatedByString:@"/"];
 
 	if (parts.count != 3) {
@@ -221,51 +228,25 @@ hm_inverse_mercator_y(double y)
 	}
 	NSString *url = [NSString stringWithFormat:@"https://tile.openstreetmap.org/%@/%@/%@.png",
 	    parts[0], parts[1], parts[2]];
-	NSURLSessionDataTask *task = [self.session dataTaskWithURL:[NSURL URLWithString:url]];
 
-	task.taskDescription = key;
 	[self.pending addObject:key];
-	[task resume];
-}
+	NSURLSessionDataTask *task = [self.session dataTaskWithURL:[NSURL URLWithString:url]
+	    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+		/* The completion handler runs on a session queue: the dictionaries and the view
+		 * belong to the main queue, so everything happens there. */
+		dispatch_async(dispatch_get_main_queue(), ^{
+			UIImage *image = (error == nil && data != nil) ? [UIImage imageWithData:data] : nil;
 
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
-    didReceiveData:(NSData *)data
-{
-	NSString *key = task.taskDescription;
-	UIImage *image = [UIImage imageWithData:data];
-
-	if (key == nil) {
-		return;
-	}
-	if (image != nil) {
-		@synchronized (self.tiles) {
 			if (self.tiles.count > HM_TILE_CACHE_MAX) {
 				[self.tiles removeAllObjects];
 			}
-			self.tiles[key] = image;
-		}
-	} else {
-		self.tiles[key] = [NSNull null];
-	}
-	[self.pending removeObject:key];
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[self setNeedsDisplay];
-	});
-}
+			self.tiles[key] = (image != nil) ? (id)image : (id)[NSNull null];
+			[self.pending removeObject:key];
+			[self setNeedsDisplay];
+		});
+	}];
 
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error
-{
-	NSString *key = task.taskDescription;
-
-	if (key == nil) {
-		return;
-	}
-	[self.pending removeObject:key];
-	if (error != nil) {
-		@synchronized (self.tiles) {
-			self.tiles[key] = [NSNull null];        /* no retry storm for this one */
-		}
-	}
+	[task resume];
 }
 
 /* ---------------------------------------------------------------- drawing */
