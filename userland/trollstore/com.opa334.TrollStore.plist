@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TSInstallationController presentInstallationAlertIfEnabledForFile:isRemoteInstall::
+	     configuration 2 = install without asking for any file opened into TrollStore.  A scene
+	     cannot tap the alert, so rc.jobs.tstore seeds this before TrollStore starts. -->
+	<key>installAlertConfiguration</key>
+	<integer>2</integer>
+</dict>
+</plist>

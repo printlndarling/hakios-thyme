@@ -507,7 +507,16 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	if [ -d obj/LocProbe.app ]; then
 		mkdir -p root/fw/locprobe
 		cp -R obj/LocProbe.app root/fw/locprobe/
+		# and as an IPA, for TrollStore's own install path (rc.jobs.tstore): a scene opens the
+		# file URL into TrollStore, which installs it the way it installs any IPA (tools/ipa.py
+		# keeps the bundle's modes, which zip(1) on this host is not here to do)
+		python3 ../tools/ipa.py obj/LocProbe.app obj/LocProbe.ipa
+		mkdir -p root/fw/ipa
+		cp obj/LocProbe.ipa root/fw/ipa/
 	fi
+	# TrollStore's preferences: install without asking, so a scene can drive it (see the file)
+	mkdir -p root/share/trollstore
+	cp trollstore/com.opa334.TrollStore.plist root/share/trollstore/
 	# the weather screen travels the same way (src/HakiosWeather.m)
 	if [ -f obj/HakiosWeather.app/HakiosWeather ]; then
 		mkdir -p root/fw/hweather

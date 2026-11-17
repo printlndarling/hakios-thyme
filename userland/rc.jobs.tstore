@@ -1,0 +1,29 @@
+# RC_JOBS=rc.jobs.tstore: TrollStore installs an IPA by itself, with no taps.
+#
+# TrollStore installs a file opened into it (TSSceneDelegate handleURLContexts:, the .ipa branch)
+# and asks first unless its installAlertConfiguration preference is 2 (TSInstallationController
+# presentInstallationAlertIfEnabledForFile:).  The scene seeds that preference, installs
+# TrollStore with the usual helper, then opens /private/var/tmp/LocProbe.ipa as a file URL:
+# LaunchServices routes it to TrollStore (the only app that claims com.apple.itunes.ipa), and
+# TrollStore's root helper (spawnRoot, a root persona) does the MCM container + LS registration
+# install.  The app it installs is the LocProbe bundle packed by tools/ipa.py; when it appears
+# and opens, TrollStore's IPA path works on this port.
+/redwood/bin/rwtouch wait 35
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/fw/ipa/LocProbe.ipa /private/var/tmp/LocProbe.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 3
+/var/jb/usr/bin/uiopen --url file:///private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/tstore.txt
+/var/jb/usr/bin/cat /private/var/tmp/inst.log
+/var/jb/usr/bin/cat /private/var/tmp/tstore.txt
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid com.hakios.locprobe
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/cat /private/var/tmp/tstore.txt
