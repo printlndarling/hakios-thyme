@@ -774,11 +774,20 @@ TEST(a_multisample_depth_is_tiled_at_its_samples_cpp) {
     CHECK_EQ(a->bytesPerRow(), 512u);    // 100 * 4 to 256
     CHECK_EQ(m->bytesPerRow(), 2048u);   // 100 * 16 to 1024
     CHECK_EQ(m->buffer()->length(), 32u * 2048);   // 20 rows to 32, 64 KiB
-    // a stencil plane is not served multisampled, nor a multisample depth that is stored into
+    // a multisample Depth32Float_Stencil8 is served, its S8 plane after its depth plane (the samples side by side,
+    // one byte each: 100 * 4 -> 512 a row), nor is a multisample depth that is stored into
+    TextureDesc ds = four;
+    ds.format = PixelFormat::kDepth32FloatStencil8;
+    auto d = Texture::make(r.gpu, ds, &why);
+    CHECK(d != nullptr);
+    if (d != nullptr) {
+        // its depth plane: 100 * 16 to 2048 a row, 20 rows to 32; then the S8 plane: 400 to 512 a row, 20 rows to 32
+        CHECK_EQ(d->buffer()->length(), 32u * 2048 + 32u * 512);
+        CHECK_EQ(d->stencilOffset(), 32u * 2048);
+        CHECK_EQ(d->stencilPitch(), 512u);
+        CHECK_EQ(d->stencilPlaneBytes(), 32u * 512);
+    }
     TextureDesc bad = four;
-    bad.format = PixelFormat::kDepth32FloatStencil8;
-    CHECK(has(refusedMake(r, bad), "a multisample Depth32Float_Stencil8 texture"));
-    bad = four;
     bad.usage = kTextureUsageRenderTarget | kTextureUsageWrite;   // (read beside render target is taken, as sokol asks)
     CHECK(has(refusedMake(r, bad), "sampled too (5), not stored"));
     TextureDesc readToo = four;
