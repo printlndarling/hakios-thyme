@@ -4992,18 +4992,41 @@ Sileo is the package manager that downloads from repositories over the now-worki
 ID signing with a computer-side server / pairing file and a MobileDevice stack this port does not
 carry, so they are not usable here.
 
-### The wallpaper was never missing: it follows the clock (2026-11-18, night)
+### The wallpaper: present on the full-driver image, black frames on the test images (2026-11-18, night)
 
-The user saw a black home screen at 23:xx and thought the wallpaper had gone.  Screenshots of the
-same system image at different hours say otherwise:
+The user saw a black home screen at 23:xx and thought the wallpaper had gone.  The first reading
+(black frames at 21:27 and 23:32, colour at 09:08/17:05) suggested a time-of-day effect; the
+full-driver run at 00:15 settled it the other way:
 
-- `logs/maps16-1.png` (09:08): bright blue/green/yellow gradient;
-- `logs/app4-2.png` (17:05) and `logs/app5-1.png` (17:22): warm orange/green gradient;
-- `logs/ts-3.png` (21:27) and `logs/map8-2.png` (23:32): the same home screen with a black
-  background (the icon layout is identical).
+- `logs/full2-1.png` (00:15, the canonical image with REST/BLUETOOTH/ADSP/GL) shows the bright
+  blue/green/yellow wallpaper, with the Wi-Fi icon and the newly installed LocProbe icon;
+- `logs/ts-3.png` (21:27) and `logs/map8-2.png` (23:32), both from ad-hoc test images, show the
+  same icon layout on black.
 
-The iOS 16 default wallpaper is dynamic and darkens with the time of day, which matches the
-progression exactly; all of these are RAM boots of one unchanged `userland/system.apfs`.  So no
-wallpaper regression: the "missing" wallpaper is the night phase.  A fixed full-driver image
-(`root-wirelessstore.apfs` `b192f3a8`) leaves a 30-second home-screen window before any app opens
-so the next run captures it at that hour for the record.
+So it is not the clock: the wallpaper renders on the canonical image at midnight too.  The black
+frames belong to the ad-hoc test images (or to the moment a scene's uicache/SpringBoard restart
+caught the home screen before the wallpaper redrew).  The canonical image is the reference from
+now on; the ad-hoc images are retired.  (`root-wirelessstore.apfs` `b192f3a8`, `logs/001330-run.log`.)
+
+### The full-driver image: Wi-Fi, Bluetooth and the store in one boot (2026-11-18, 00:15)
+
+`root-wirelessstore.apfs` `b192f3a8` (build-root.sh: REST/BLUETOOTH/ADSP/GL, check-root passed),
+run `logs/001330-run.log`, screenshots `logs/full2-1.png`..`-5.png`:
+
+- **Wi-Fi**: joined the network `1701`; "the network is joined ... 17,944 frames sent, 61,221
+  received"; `net_test resolve www.baidu.com` 0.01 s, TCP 443 connected 0.04 s.  Settings > Wi-Fi
+  shows the checkmark, the network list and the status-bar icon (`logs/full2-3.png`).
+- **Bluetooth**: 146 `UMI BT` lines with the canonical QCA launch set; Settings > Bluetooth was
+  on and the phone discoverable as "HakiOS Mi 10S" (`logs/full-4.png` of the 23:51 run; same
+  image family).
+- **Home screen / wallpaper**: `logs/full2-1.png` at 00:15 shows the bright wallpaper -- see the
+  correction above; the black frames were the ad-hoc images.
+- **The store**: `mcm_test` seeded TrollStore's own container with ldid (copied to
+  `.../TrollStore.app/ldid`), `trollstorehelper install custom` returned 0 (its ldid runs exited
+  0), the app landed in `/private/var/containers/Bundle/Application/149ABD62-.../LocProbe.app`,
+  and LocProbe launched twice (pid 250, 253; `Successfully spawned LocProbe`).  The TrollStore UI
+  also opened (`Successfully spawned TrollStore[288]`) and lists the app
+  ("LocProbe 1.0 • com.hakios.locprobe"); on launch it began its own "Installing ldid" download
+  (`logs/full2-5.png`) -- a real network download through the store, on the Wi-Fi this boot joined.
+- Safari opened apple.com's "Success" page on the same link (`logs/full-1.png` of the 23:51 run;
+  this boot's `full2-2.png` is HakiOS LocProbe in front, `full2-3.png` the Wi-Fi pane).
