@@ -4947,3 +4947,21 @@ The store's UI route (TrollStore's own window, + or a file URL) is still unteste
 `uicache -a` (no `Successfully spawned TrollStore`), while the UI itself is known to render
 (logs/app5-2.png..-4.png). The helper it calls is the same one proven here. The scene is
 `rc.jobs.tstore`, the image `root-tstore.apfs` `ae237c1c`.
+
+### Two things the user saw at the end of a run (2026-11-17, night)
+
+- **A frozen screen after a run is the loader, not a hang.** When `XL_SECS` runs out the kernel
+  returns to the loader, which shows the last framebuffer image until something reboots it; touch
+  and Wi-Fi are then dead because no OS is running.  `xl reboot` brings Android back
+  (`/tmp/vk/backandroid.sh` does the PATH-and-wait dance).  Worth saying to anyone watching the
+  phone: a still screen after a run is expected.
+- **The ad-hoc scenes did not join Wi-Fi by themselves.** The 23:14 TrollStore run logged
+  `lx: the network is NOT joined` and `net_test: wifi: configd has no network service for en0`:
+  a fresh RAM boot does not associate, and only scenes that call `net_test joinfile /redwood/fw/network`
+  (as rc.jobs.hweather does) get a network.  So the map app's 0 search results at 21:17 were first
+  of all "no network", before the DNS poisoning question.  rc.jobs.mapapp now starts the join in
+  the background before anything else (image `root-mapapp.apfs` `d6562049`).
+
+The touch screen itself was up in that same boot: `hakios: input: touch screen service 0x1538e60c0`,
+`backboardd [TouchEvents] init: <BKDirectTouchState: ... touchScreen; builtin>` and
+`hakios: input: touch detection mode 0xff`; the scene's injected taps reached SpringBoard.
