@@ -148,6 +148,10 @@ DARWIN_JOBS=${JOBS-"
 # that a QEMU virtio network can use ("net_test dhcp en0"); the phone's Wi-Fi gets its address
 # without it.  CONFIGD=1 names it; off by default.
 [ "${CONFIGD-0}" = 1 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.configd"
+# The system resolver: "net_test resolve" answered "nodename nor servname" under QEMU once DHCP
+# had given en0 an address, because nothing was listening for DNS.  DNS=1 names the responder and
+# its helper; off by default (the phone's runs resolve hosts with the jobs they already carry).
+[ "${DNS-0}" = 1 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.mDNSResponder com.apple.mDNSResponderHelper"
 # The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
 # device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
 # in mkjobs.py when that program was put in this build's root: the kernel has already booted
