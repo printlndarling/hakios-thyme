@@ -6212,6 +6212,20 @@ hm_shadow_targets(MTLRenderPassDescriptor *d, id<MTLCommandBuffer> cb)
 	struct hakios_metal_render_pass pass;
 	HakiosMetalTexture *texture = nil;
 	char why[256];
+	{
+		static unsigned said;
+
+		/* once VectorKit's pipeline library is open in this process: what kind of pass the app encodes, if any */
+		if (hm_vk_pairs != nil && said++ < 20) {
+			id colour = descriptor.colorAttachments[0].texture, deep = descriptor.depthAttachment.texture;
+
+			hm_vk_log("a render pass was encoded: colour %s%lu %lux%lu, depth %s%lu %lux%lu\n",
+				  colour != nil ? "format " : "", colour != nil ? (unsigned long)[colour pixelFormat] : 0,
+				  colour != nil ? (unsigned long)[colour width] : 0, colour != nil ? (unsigned long)[colour height] : 0,
+				  deep != nil ? "format " : "", deep != nil ? (unsigned long)[deep pixelFormat] : 0,
+				  deep != nil ? (unsigned long)[deep width] : 0, deep != nil ? (unsigned long)[deep height] : 0);
+		}
+	}
 
 	if (!hm_read_render_pass(descriptor, &pass, &texture, why, sizeof(why))) {
 		hm_print("refused: a render pass: %s; the command buffer is failed and no encoder is returned\n", why);
