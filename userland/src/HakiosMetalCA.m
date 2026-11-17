@@ -2443,9 +2443,38 @@ hm_print_callers(const char *what)
 	[fm createDirectoryAtPath:copy withIntermediateDirectories:YES attributes:nil error:NULL];
 	/* the library's own files, and the libraries its descriptions name, which are found beside it */
 	for (NSString *entry in [fm contentsOfDirectoryAtPath:path error:NULL]) {
-		if ([entry isEqualToString:@"pipelines.desc"] || [entry isEqualToString:@"functions"]) {
+		NSString *source = [path stringByAppendingPathComponent:entry];
+
+		if ([entry isEqualToString:@"pipelines.desc"]) {
 			[fm createSymbolicLinkAtPath:[copy stringByAppendingPathComponent:entry]
-				 withDestinationPath:[path stringByAppendingPathComponent:entry] error:NULL];
+				 withDestinationPath:source error:NULL];
+		} else if ([entry isEqualToString:@"functions"]) {
+			/* VectorKit's iphoneos.pipelinelib has a `functions` of 0 bytes: the OS shipped it with the pipelines
+			 * precompiled per Apple GPU only (pipelines.g10p ... g15p) and no function archive, so Metal cannot
+			 * open it as its function cache and the whole library is nil ("Could not open function cache file",
+			 * logs/061230-run.log).  A cache with no entries is the truth of this library -- nothing is precompiled
+			 * for this GPU -- and has the format every library's functions file has: LPPM, 0x30 bytes of header
+			 * (version words, the file's size, then the offset of the table's count and the offset the blobs
+			 * would start at), and count * 48 bytes of (32-byte key, offset, size) after it. */
+			NSDictionary *attrs = [fm attributesOfItemAtPath:source error:NULL];
+			if (attrs != nil && [attrs fileSize] == 0) {
+				static const uint8_t empty[] = {
+					'L', 'P', 'P', 'M',   1, 0, 0, 0,   1, 0, 0, 0,   0, 0, 0, 0,
+					0x30, 0, 0, 0, 0, 0, 0, 0,    /* the file's size */
+					0x28, 0, 0, 0, 0, 0, 0, 0,    /* where the count is read */
+					0x30, 0, 0, 0, 0, 0, 0, 0,    /* where the blobs would start */
+					0, 0, 0, 0, 0, 0, 0, 0,       /* no entries */
+				};
+				NSData *cache = [NSData dataWithBytes:empty length:sizeof(empty)];
+
+				if ([cache writeToFile:[copy stringByAppendingPathComponent:entry] atomically:YES]) {
+					hm_print("the functions of %s are 0 bytes: the mirror gets an empty LPPM cache (%lu bytes) "
+						 "for Metal to open\n", [path fileSystemRepresentation], (unsigned long)sizeof(empty));
+				}
+			} else {
+				[fm createSymbolicLinkAtPath:[copy stringByAppendingPathComponent:entry]
+					 withDestinationPath:source error:NULL];
+			}
 		}
 	}
 	for (NSString *entry in [fm contentsOfDirectoryAtPath:parent error:NULL]) {

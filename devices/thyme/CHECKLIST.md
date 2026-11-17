@@ -4329,6 +4329,40 @@ server: a small Metal program that opens VectorKit's `iphoneos.pipelinelib`
 itself, asks for a pipeline by name, prints what Metal answers, and then tries
 the carried `default.metallib`'s base function with the same constants.
 
+### The pipeline library opens now: a 0-byte functions archive given an empty LPPM cache (2026-11-17)
+
+The refusal that kept VectorKit's library nil was not the missing
+`pipelines.Adreno(...)` file -- the mirror already gives that miss an empty cache
+Metal writes itself.  It was the library's `functions` file being 0 bytes: the
+opened mirror answered "Could not open function cache file:
+.../iphoneos.pipelinelib/functions" (`logs/061230-run.log`, `070220-run.log`).
+Metal reads that file as its function cache, in LPPM: the magic, a 0x30-byte
+header (two version words, a zero, the file's size at 0x10, 0x28 at 0x18, the
+offset the blobs would start at in 0x20, the entry count at 0x28), then 48 bytes
+per entry -- a 32-byte key, the blob's offset, its size -- as CoreAnimation's
+3,584,636-byte file shows (451 entries; its first key is
+`cccbc6fb6e0127d1fecff072d46105ca ece4ac02b29c0da3038b6c12902d1a35`).  A cache
+with no entries is exactly this library's truth: nothing on this OS is
+precompiled for this GPU.  The mirror now writes that 48-byte file where the
+library's own `functions` is 0 bytes (`HakiosMetalCA.m`,
+-newPipelineLibraryWithFilePath:error:), and in scene `metal650maps17` (run
+`093154`) Maps' library opens: "the functions of .../iphoneos.pipelinelib are 0
+bytes: the mirror gets an empty LPPM cache (48 bytes) for Metal to open" and
+"had no pipelines.Adreno(hakios-metal,chip0x6050002); opened through ...: it
+opened".  The map area was still black in that run (`logs/maps17-1.png`, the
+search sheet, the location dot and the Amap attribution drawn over a black
+canvas), so what Metal then makes of each pipeline by name is the next question;
+`src/pipelinelib_test.m` (`RC_JOBS=rc.jobs.pipetest`) asks it of the same
+library outside the window server.
+
+Two facts from that run's plumbing: the loader's final log fetch can be empty
+(`logs/093154-run.log` is 0 bytes where the `.live` file had 1.3 MB), so evidence
+has to be taken from the `.live` file during the run; and the cmdline truncated
+again by 2 characters -- the last `wifi_wide=0` lost its `=0` -- because the
+loader's own prefix (the kernel version string included) leaves less room than
+the payload's 378 characters suggest.  The arguments that matter (`ca_metallib`
+whole) were intact.
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
