@@ -2591,10 +2591,11 @@ No item moves to `PASS` from source inspection alone.
 - [x] Official-main kernel reaches launchd and SpringBoard on the phone.
 - [x] Official-main kernel returns to Android safely.
 - [x] Official loader and `xnu-usb.img` boot on the phone.
-- Upstream check, 2026-11-16: `upstream/main`'s tip is `63fc2b46` (2026-11-06,
-  PR #53, soc-args register-cells) and it is already the merge base of this
-  branch -- 655 commits ahead, no upstream commit outside it.  Nothing to
-  merge until upstream moves.
+- Upstream check, 2026-11-18: `upstream/main`'s tip is still `63fc2b46`
+  (2026-11-06, PR #53, soc-args register-cells), it is already the merge base
+  of this branch, and `git rev-list --left-right --count main...upstream/main`
+  reads `803 0` -- 803 local commits on top, no upstream commit outside.
+  Nothing to merge until upstream moves.
 
 ## Boot and interaction
 
