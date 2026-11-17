@@ -22,6 +22,8 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <CoreLocation/CoreLocation.h>
+#import <QuartzCore/QuartzCore.h>
+#import "HakiosMapTileView.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
@@ -75,12 +77,15 @@ hm_set_bool(id object, NSString *name, BOOL value)
 
 @interface HMapsController : UIViewController <WKNavigationDelegate, WKUIDelegate, CLLocationManagerDelegate>
 @property (nonatomic, strong) WKWebView *web;
+@property (nonatomic, strong) HakiosMapTileView *tileView;
+@property (nonatomic, strong) UIButton *locateButton;
 @property (nonatomic, strong) CLLocationManager *manager;
 @property (nonatomic, assign) double latitude;
 @property (nonatomic, assign) double longitude;
 @property (nonatomic, assign) BOOL hasFix;
 @property (nonatomic, assign) BOOL pageReady;
 @property (nonatomic, assign) BOOL terminated;
+@property (nonatomic, assign) BOOL fellBack;
 @end
 
 @implementation HMapsController
@@ -143,6 +148,10 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	hm_note(@"loading the page from a string (%lu characters)", (unsigned long)html.length);
 	[self.web loadHTMLString:html baseURL:[NSURL URLWithString:@"https://tile.openstreetmap.org/"]];
 
+	/* WebKit's renderer does not come up on every boot of this port; the tile view below is
+	 * the map either way, so the page gets fourteen seconds and no more. */
+	[NSTimer scheduledTimerWithTimeInterval:14.0 target:self selector:@selector(fallbackFired:) userInfo:nil repeats:NO];
+
 	self.manager = [[CLLocationManager alloc] init];
 	self.manager.delegate = self;
 	if ([self.manager respondsToSelector:@selector(requestWhenInUseAuthorization)]) {
@@ -151,9 +160,57 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	[self.manager startUpdatingLocation];
 }
 
+- (void)fallbackFired:(NSTimer *)timer
+{
+	(void)timer;
+	if (self.pageReady || self.fellBack) {
+		return;
+	}
+	self.fellBack = YES;
+	hm_note(@"WebKit has not drawn the page: the native tile view takes over");
+	[self.web removeFromSuperview];
+	self.web = nil;
+
+	self.tileView = [[HakiosMapTileView alloc] initWithFrame:self.view.bounds];
+	self.tileView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	if (self.hasFix) {
+		self.tileView.fixLatitude = self.latitude;
+		self.tileView.fixLongitude = self.longitude;
+		self.tileView.hasFix = YES;
+		[self.tileView recenterOnFix];
+	}
+	[self.view insertSubview:self.tileView atIndex:0];
+
+	self.locateButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	[self.locateButton setTitle:@"定位" forState:UIControlStateNormal];
+	self.locateButton.titleLabel.font = [UIFont boldSystemFontOfSize:17];
+	self.locateButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.94];
+	self.locateButton.layer.cornerRadius = 12;
+	self.locateButton.frame = CGRectMake(12, 44, 76, 44);
+	[self.locateButton addTarget:self action:@selector(locateTapped) forControlEvents:UIControlEventTouchUpInside];
+	[self.view addSubview:self.locateButton];
+	[self givePosition];
+}
+
+- (void)locateTapped
+{
+	if (self.tileView != nil && self.hasFix) {
+		[self.tileView recenterOnFix];
+	}
+}
+
 - (void)givePosition
 {
-	if (!self.pageReady || !self.hasFix) {
+	if (!self.hasFix) {
+		return;
+	}
+	if (self.tileView != nil) {
+		self.tileView.fixLatitude = self.latitude;
+		self.tileView.fixLongitude = self.longitude;
+		self.tileView.hasFix = YES;
+		return;
+	}
+	if (!self.pageReady || self.web == nil) {
 		return;
 	}
 	NSString *call = [NSString stringWithFormat:@"window.hmapsFix && window.hmapsFix(%.6f, %.6f);",

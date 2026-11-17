@@ -4781,3 +4781,40 @@ this port will fetch.  The replacement being built instead is HakiOS Maps
 OpenStreetMap raster tiles, the same WebKit path Safari already renders here, so
 the screen does not depend on VectorKit at all.  The stock Apps remain installed;
 an IPA the user owns can be installed with TrollStore or the two scripts above.
+
+### HakiOS Maps: the map without VectorKit (2026-11-17)
+
+`userland/src/HakiosMaps.m` (and `HakiosMapTileView.m`, with `userland/maps/` for the page
+and Leaflet 1.9.4, BSD-2, credited in `LICENSE.leaflet`) is the replacement map screen.
+It is installed the LocProbe way (`rc.jobs.mapapp` copies it from `/redwood/fw/hmaps` into
+`/var/jb/Applications`, `chmod 755`, `uicache -a`, `uiopen com.hakios.maps`) and logs to
+`/private/var/tmp/hmaps.log` (world-writable; the app cannot rely on `/var/jb/hmaps`, which
+is a graft like the rest of `/var/jb`).
+
+Two renderers, one screen:
+
+- WKWebView over the bundled Leaflet page, with the CSS and JS inlined and the page loaded
+  from a string (a file URL's read access and the GPU process were both suspects).  The
+  WebKit knobs are SPI and are set only where the class answers them:
+  `_setUseGPUProcessForDOMRenderingEnabled:`, `_setUseGPUProcessForCanvasRenderingEnabled:`
+  and `_setUseGPUProcessForWebGLEnabled:`.  Why: in the first map run the GPU process
+  (pid 63) created its hakios-metal device, a command queue and a 1125x1536 BGRA IOSurface,
+  then died with SIGABRT (`logs/174007-run.log`, "exited due to SIGABRT", the
+  `EXC_CORPSE_NOTIFY` error code 5 follows), and the view stayed its own background colour
+  (`logs/map-1.png`).  Safari's pages render on this port, so WebContent's own drawing is
+  the path that works; whether these preferences exist in 16.5's WebKit is answered in
+  hmaps.log at run time.
+- A native `HakiosMapTileView` (UIKit + Core Graphics): slippy-map Mercator math over
+  OpenStreetMap's 256-pixel tiles fetched one zoom higher and drawn at 128 points (sharp on
+  the 3x panel), with pan, pinch, double-tap, the position dot and the required attribution.
+  The controller gives WKWebView fourteen seconds and then swaps this in, so the screen is
+  a map whether or not WebKit's renderer comes up.  Tiles are NSURLSession GETs to
+  `tile.openstreetmap.org` with a `HakiosMaps/1.0 (HakiOS, thyme)` User-Agent; no key.
+
+The first device run of the page showed the app running (`Successfully spawned
+HakiosMaps[57]`, `logs/174007-run.log`) but no tile had drawn when the run was returned by
+the battery guard: `battguard: the charge is 23%, at or below battery_stop=25 three looks in
+a row` (17:42:56).  The phone was then found at 16% on Android's USB charger (level 16,
+status 2, 3020 mV, 37.7 C) and left charging; it dropped off adb/fastboot entirely a few
+minutes later, so the fallback build's run is waiting for it to come back.  Lesson for the
+scene runner: check the battery before a run and keep runs short below ~30%.

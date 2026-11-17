@@ -311,7 +311,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# bundled Leaflet and OpenStreetMap's raster tiles, so Safari's own path draws it
 		mkdir -p obj/HakiosMaps.app
 		$DYN -fobjc-arc -framework Foundation -framework UIKit -framework WebKit -framework CoreLocation \
-			-framework QuartzCore -o obj/HakiosMaps.app/HakiosMaps src/HakiosMaps.m
+			-framework QuartzCore -framework CoreGraphics \
+			-o obj/HakiosMaps.app/HakiosMaps src/HakiosMaps.m src/HakiosMapTileView.m
 		cp HakiosMaps-Info.plist obj/HakiosMaps.app/Info.plist
 		cp maps/index.html maps/leaflet.js maps/leaflet.css maps/LICENSE.leaflet obj/HakiosMaps.app/
 		cp maps/AppIcon60x60@2x.png maps/AppIcon60x60@3x.png obj/HakiosMaps.app/
