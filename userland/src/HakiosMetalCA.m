@@ -2535,8 +2535,10 @@ hm_vk_pair_for(NSString *name)
 }
 
 /* one base function of VectorKit's default.metallib; the caller owns the +1 object (new* naming) */
+/* VectorKit's default.metallib as a library, opened once per process (the functions road below and the
+ * device's -newFunctionWithName:constantValues:pipelineLibrary:error: both use it) */
 static id
-hm_vk_function(NSString *base)
+hm_vk_function_library(void)
 {
 	static id library;
 	static BOOL tried;
@@ -2558,10 +2560,30 @@ hm_vk_function(NSString *base)
 			}
 		}
 	}
-	if (library == nil) {
+	return library;
+}
+
+static id
+hm_vk_function(NSString *base)
+{
+	id library = hm_vk_function_library();
+
+	return library != nil ? [library newFunctionWithName:base] : nil;
+}
+
+/* the same, with the constant values a description specialises it with (the values Metal's own
+ * -newFunctionWithName:constantValues:error: takes; the function's AIRC script carries them to this runtime's
+ * compiler, HakiosMetalCA.m's hm_script_constants) */
+static id
+hm_vk_function_values(NSString *name, id values, NSError **error)
+{
+	id library = hm_vk_function_library();
+	NSString *base = hm_vk_base(name);
+
+	if (library == nil || base == nil) {
 		return nil;
 	}
-	return [library newFunctionWithName:base];
+	return [library newFunctionWithName:base constantValues:values error:error];
 }
 
 /* an integer boot argument "name=N", or DEF when it is not there (the pipeline's attachment state below
@@ -3880,6 +3902,45 @@ hm_describe_function(id f)
 		}
 	}
 	return [super newLibraryWithURL:url error:error];
+}
+
+/* VectorKit's road to a shader: GeoGL/MetalRenderer.mm asks -[MTLDevice newFunctionWithName:constantValues:
+ * pipelineLibrary:error:] -- the selector sits in the shared cache beside VectorKit's own method names, and
+ * neither newRenderPipelineStateWithName: nor pipelineNames appears anywhere in it.  Metal would answer from the
+ * pipeline library's functions archive, which is 0 bytes in this OS image; here the name (a description's
+ * "default_<base>_<hash>", or the base name) is looked up in the carried VectorKit/default.metallib with the same
+ * constant values, which is the function the description stands for.  A name the metallib has not goes to the base
+ * class's own answer, untouched.  (The call is logged both ways: whether this device is the receiver at all is part
+ * of what a run is to say.) */
+- (id)newFunctionWithName:(NSString *)name constantValues:(id)values pipelineLibrary:(id)library error:(NSError **)error
+{
+	SEL sel = @selector(newFunctionWithName:constantValues:pipelineLibrary:error:);
+	Class superclass = class_getSuperclass([self class]);
+	Method base = superclass != Nil ? class_getInstanceMethod(superclass, sel) : NULL;
+	NSError *why = nil;
+	id function = nil;
+
+	if (name != nil && values != nil) {
+		function = hm_vk_function_values(name, values, &why);
+		hm_print("VectorKit's function %s, asked with constants and a pipeline library: %s\n", [name UTF8String],
+			 function != nil ? "compiled from its metallib" : "not in its metallib");
+	} else {
+		hm_print("VectorKit's function %s: asked with %s, %s\n", [name UTF8String],
+			 values != nil ? "constant values" : "no constant values",
+			 library != nil ? "a pipeline library" : "no pipeline library");
+	}
+	if (function != nil) {
+		return function;
+	}
+	if (base != NULL) {
+		return ((id (*)(id, SEL, id, id, id, NSError **))method_getImplementation(base))(self, sel, name, values, library, error);
+	}
+	if (error != NULL) {
+		*error = [NSError errorWithDomain:@"HakiosMetal" code:3
+					 userInfo:[NSDictionary dictionaryWithObject:@"no such function and no pipeline library to ask"
+									      forKey:NSLocalizedDescriptionKey]];
+	}
+	return nil;
 }
 
 /* Metal source needs Metal's own compiler service, which this device has not got; what it compiles is AIR out of a

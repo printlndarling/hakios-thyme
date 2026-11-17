@@ -4441,6 +4441,31 @@ the library learns nothing.  `vkn=1` answers that list with the descriptions'
 for it, and the next run tries it (with `wifi_wide=0`, so the map has data to
 draw).
 
+Then the shared cache itself answered how the app asks.  In
+`out/thyme-boot/dsc-arm64/dyld_shared_cache_arm64.09` (the same region holds
+VectorKit's function-name table -- every `DaVinci::...`, `Textured::...` base
+name -- and, 15 KB on, the string `iphoneos.pipelinelib` and its
+`.../VectorKit/geo/GeoGL/GeoGL/MetalRenderer.mm` assert path), the selector
+names include:
+
+- `newPipelineLibraryWithFilePath:error:`
+- `newFunctionWithName:constantValues:pipelineLibrary:error:`
+- `newRenderPipelineStateWithDescriptor:options:reflection:error:`
+
+and **neither `newRenderPipelineStateWithName` nor `pipelineNames` occurs
+anywhere in the cache**.  So VectorKit does not look pipelines up by name at
+all: it opens the library, asks for a *function* with constant values and the
+pipeline library, and builds the state by descriptor.  Metal would answer that
+function from the library's `functions` archive, which is 0 bytes on this OS
+image -- the missing piece was the function lookup, not a name lookup.  The
+plug-in's device now answers
+`-newFunctionWithName:constantValues:pipelineLibrary:error:` from the carried
+VectorKit `default.metallib` with the same constant values (the name stripped
+back to its base function when it is a `default_<base>_<hash>` description
+name), and logs every such call either way, so the next run says whether the
+device is the receiver.  `vkn=1` remains as an opt-in for anything that does
+enumerate names, but nothing in the cache calls `pipelineNames`.
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
