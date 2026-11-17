@@ -2586,6 +2586,26 @@ hm_vk_function_values(NSString *name, id values, NSError **error)
 	return [library newFunctionWithName:base constantValues:values error:error];
 }
 
+/* The same answer for the other possible receiver of VectorKit's call: Metal's library class.  Whose method
+ * -newFunctionWithName:constantValues:pipelineLibrary:error: is is not written down anywhere this device can read
+ * (the selector's name is in the cache, its class is in Metal.framework's metadata unbuilt), so both are answered:
+ * the device's -newFunctionWithName:... above, and here, for whichever library the call arrives at.  Each falls
+ * through to Metal's own implementation when it has no answer. */
+static IMP hm_lib_by_pipeline_library;
+
+static id
+hm_lib_function(id self, SEL _cmd, NSString *name, id values, id library, NSError **error)
+{
+	id function = ((id (*)(id, SEL, id, id, id, NSError **))hm_lib_by_pipeline_library)(self, _cmd, name, values, library, error);
+
+	if (function == nil && name != nil && hm_vk_device != nil) {
+		function = hm_vk_function_values(name, values, NULL);
+		hm_print("VectorKit's function %s, asked at a library with a pipeline library: %s\n", [name UTF8String],
+			 function != nil ? "compiled from its metallib" : "not in its metallib");
+	}
+	return function;
+}
+
 /* an integer boot argument "name=N", or DEF when it is not there (the pipeline's attachment state below
  * is chosen with these until pipelines.desc's own is decoded: vkc=<pixel format>, vkd=<depth format>,
  * vks=<samples>; three short names, because the kernel's line is 607 characters) */
@@ -2745,6 +2765,17 @@ hm_vk_note_library(id device, NSString *path, id library)
 	class_replaceMethod(object_getClass(library), byName, (IMP)hm_vk_new_pipeline, method_getTypeEncoding(method));
 	hm_print("VectorKit's pipeline library opened: %lu pipelines described, none precompiled for this GPU; its by-name "
 		 "lookups are answered from its functions here\n", (unsigned long)[hm_vk_pairs count]);
+	if (hm_lib_by_pipeline_library == NULL) {
+		SEL withLibrary = @selector(newFunctionWithName:constantValues:pipelineLibrary:error:);
+		Class libraryClass = objc_getClass("_MTLLibrary");
+		Method libraryMethod = libraryClass != Nil ? class_getInstanceMethod(libraryClass, withLibrary) : NULL;
+
+		if (libraryMethod != NULL) {
+			hm_lib_by_pipeline_library = method_getImplementation(libraryMethod);
+			class_replaceMethod(libraryClass, withLibrary, (IMP)hm_lib_function, method_getTypeEncoding(libraryMethod));
+			hm_print("VectorKit's function road (constant values and a pipeline library) is answered at _MTLLibrary too\n");
+		}
+	}
 	if (hm_boot_arg_int("vkn", 0) == 1) {
 		SEL names = @selector(pipelineNames);
 		Method namesMethod = class_getInstanceMethod(object_getClass(library), names);
