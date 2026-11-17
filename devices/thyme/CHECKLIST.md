@@ -4600,7 +4600,17 @@ root: 4 GB, the whole 32-bit window the allocator hands out,
 `devices/thyme/drivers/gpu/hakios.thyme_adreno.c` and the kernel tree's copy;
 the kernel is rebuilt with `./xnu-build.sh` and the boot image with
 `devices/thyme/build-loader.sh`).  This is the same class of limit the annibale
-port hit at 1024 slots on the Adreno 830, and the fix is the same.  `vkn=1` remains as an opt-in for anything that does
+port hit at 1024 slots on the Adreno 830, and the fix is the same.
+
+One packaging trap, learned the hard way in the same hour: `xl run` takes the
+kernel from `./hakios-kernel` (its `inputs: kernel=<hash>` line is that file's),
+not from the boot image and not from XNU's `BUILD/obj/.../mach.development.*`.
+A manual `./xnu-build.sh` leaves `hakios-kernel` untouched; the kernel is
+installed only by `tools/make-kernel.sh` (what `make kernel` runs), which also
+syncs `drivers/` into the tree and judges the build by what failed -- the kext
+symbol-set steps always fail on this configuration and are accepted, anything
+else is not. A run started after only `xnu-build.sh` silently ran the old
+kernel.  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
