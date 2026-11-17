@@ -4831,3 +4831,12 @@ entitlements here (entitlement enforcement is thin on this port) and whether the
 signature matters at all. `build.sh` now takes `INSTALLD=1`, which adds `com.apple.mobile.installd`
 and `com.apple.mobile_installation_proxy` to the job list for the second method; it is off until a
 run shows them up harmlessly.
+
+That path is now a scene (`userland/rc.jobs.tstore`, image `out/thyme-boot/root-tstore.apfs`,
+`bd369554`): it seeds TrollStore's `installAlertConfiguration` = 2 (install without asking),
+installs TrollStore with `hk-appinstall.sh`, and opens `/private/var/tmp/LocProbe.ipa` as a file
+URL with `uiopen --url` -- TrollStore is the only app on the system that claims
+`com.apple.itunes.ipa` -- so its root helper can do the MCM-container and LS-registration install
+with a root persona. The IPA is the LocProbe bundle packed by `tools/ipa.py` (mode-preserving:
+a 644 binary was the iSH wall, and `zip(1)` is not on this host). The image carries
+`/fw/ipa/LocProbe.ipa` (9,200 bytes) and the preferences file; the run waits for the phone.
