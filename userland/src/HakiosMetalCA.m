@@ -2607,6 +2607,23 @@ hm_lib_function(id self, SEL _cmd, NSString *name, id values, id library, NSErro
 	return function;
 }
 
+/* and the third possible receiver: the pipeline library itself (VectorKit's -newPipelineLibraryWithFilePath: made
+ * it; -newFunctionWithName: with it would be the shortest road to the functions it holds none of) */
+static IMP hm_pl_road_original;
+
+static id
+hm_pl_road_function(id self, SEL _cmd, NSString *name, id values, id library, NSError **error)
+{
+	id function = ((id (*)(id, SEL, id, id, id, NSError **))hm_pl_road_original)(self, _cmd, name, values, library, error);
+
+	if (function == nil && name != nil && hm_vk_device != nil) {
+		function = hm_vk_function_values(name, values, NULL);
+		hm_vk_log("VectorKit's function %s, asked at the pipeline library: %s\n", [name UTF8String],
+			 function != nil ? "compiled from its metallib" : "not in its metallib");
+	}
+	return function;
+}
+
 /* an integer boot argument "name=N", or DEF when it is not there (the pipeline's attachment state below
  * is chosen with these until pipelines.desc's own is decoded: vkc=<pixel format>, vkd=<depth format>,
  * vks=<samples>; three short names, because the kernel's line is 607 characters) */
@@ -2807,6 +2824,17 @@ hm_vk_note_library(id device, NSString *path, id library)
 			hm_lib_by_pipeline_library = method_getImplementation(libraryMethod);
 			class_replaceMethod(libraryClass, withLibrary, (IMP)hm_lib_function, method_getTypeEncoding(libraryMethod));
 			hm_vk_log("VectorKit's function road (constant values and a pipeline library) is answered at _MTLLibrary too\n");
+		}
+	}
+	if (hm_pl_road_original == NULL) {
+		SEL road = @selector(newFunctionWithName:constantValues:pipelineLibrary:error:);
+		Class plClass = object_getClass(library);
+		Method plMethod = class_getInstanceMethod(plClass, road);
+
+		if (plMethod != NULL) {
+			hm_pl_road_original = method_getImplementation(plMethod);
+			class_replaceMethod(plClass, road, (IMP)hm_pl_road_function, method_getTypeEncoding(plMethod));
+			hm_vk_log("VectorKit's function road is answered at the pipeline library too (%s)\n", object_getClassName(library));
 		}
 	}
 	if (hm_boot_arg_int("vkn", 0) == 1) {
@@ -4005,6 +4033,53 @@ hm_describe_function(id f)
 									      forKey:NSLocalizedDescriptionKey]];
 	}
 	return nil;
+}
+
+/* How VectorKit gets its functions after -newPipelineLibraryWithFilePath: is not written down anywhere this device
+ * can read; these are the two roads a library of functions can arrive by, and both are said (vklog=1 keeps them).
+ * A 0-byte data (the pipelinelib's `functions` archive is exactly that), or a path to the archive itself, is
+ * answered with the carried VectorKit default.metallib once this process has opened VectorKit's pipeline library
+ * (hm_vk_pairs is set then) -- the same functions, from the file that did carry them. */
+- (id)newLibraryWithFile:(NSString *)path error:(NSError **)error
+{
+	static unsigned said;
+
+	if (path != nil && hm_vk_pairs != nil && [path rangeOfString:@"VectorKit.framework"].location != NSNotFound &&
+	    [[path lastPathComponent] isEqualToString:@"functions"]) {
+		id library = hm_vk_function_library();
+
+		hm_vk_log("a library was asked for at %s (the functions archive): the carried metallib is given instead: %s\n",
+			  [path UTF8String], library != nil ? "it opened" : "it did not");
+		if (library != nil) {
+			return [library retain];
+		}
+	}
+	if (said++ < 12) {
+		hm_vk_log("a library was asked for at %s\n", path != nil ? [path UTF8String] : "(nil)");
+	}
+	return [super newLibraryWithFile:path error:error];
+}
+
+- (id)newLibraryWithData:(id)data error:(NSError **)error
+{
+	static unsigned said;
+	NSUInteger length = [data respondsToSelector:@selector(length)] ? (NSUInteger)[data length] : 0;
+	const uint8_t *bytes = [data respondsToSelector:@selector(bytes)] ? (const uint8_t *)[data bytes] : NULL;
+
+	if (said++ < 12) {
+		hm_vk_log("a library was asked for from %lu bytes of data%s%02x%02x%02x%02x\n", (unsigned long)length,
+			  bytes != NULL ? " starting " : "", bytes != NULL ? bytes[0] : 0, bytes != NULL ? bytes[1] : 0,
+			  bytes != NULL ? bytes[2] : 0, bytes != NULL ? bytes[3] : 0);
+	}
+	if (length == 0 && hm_vk_pairs != nil) {
+		id library = hm_vk_function_library();
+
+		if (library != nil) {
+			hm_vk_log("a library from 0 bytes of data: the carried VectorKit metallib is given instead\n");
+			return [library retain];
+		}
+	}
+	return [super newLibraryWithData:data error:error];
 }
 
 /* Metal source needs Metal's own compiler service, which this device has not got; what it compiles is AIR out of a

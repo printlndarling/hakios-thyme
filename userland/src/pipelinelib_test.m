@@ -207,14 +207,14 @@ main(int argc, char **argv)
 		 * (the selector is in the shared cache beside VectorKit's method names).  Asked of the device and of
 		 * the functions library: whichever it is, the plug-in answers it from the carried metallib. */
 		SEL road = sel_registerName("newFunctionWithName:constantValues:pipelineLibrary:error:");
-		for (int i = 0; i < 2; i++) {
-			id receiver = i == 0 ? (id)device : (id)functions;
+		for (int i = 0; i < 3; i++) {
+			id receiver = i == 0 ? (id)device : i == 1 ? (id)functions : library;
+			const char *who = i == 0 ? "the device" : i == 1 ? "the library" : "the pipeline library";
 			MTLFunctionConstantValues *values = [[MTLFunctionConstantValues alloc] init];
 			NSError *roadError = nil;
 			id function;
 
-			printf("pipelinelib_test: %s answers the pipeline-library function road: %s\n",
-			       i == 0 ? "the device" : "the library",
+			printf("pipelinelib_test: %s answers the pipeline-library function road: %s\n", who,
 			       [receiver respondsToSelector:road] ? "yes" : "NO");
 			if (![receiver respondsToSelector:road]) {
 				continue;

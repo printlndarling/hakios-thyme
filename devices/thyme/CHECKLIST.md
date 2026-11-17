@@ -4479,7 +4479,36 @@ ends.  The next run keeps them in files instead: the job list writes the probe's
 output to `/private/var/tmp/pipetest.out` with init's `>>`, the plug-in appends
 its VectorKit lines to `/private/var/tmp/hakios-vk.log` under `vklog=1`, and the
 same two files are `cat`-ed again after the taps and every 30 s, where the log
-ring still holds them (`rc.jobs.pipetestmaps`, image `9c6070d9`).  `vkn=1` remains as an opt-in for anything that does
+ring still holds them (`rc.jobs.pipetestmaps`, image `9c6070d9`).
+
+That worked, and the files answered the isolated question (run `122309`): the
+probe asked the function road of **both** receivers and both answered --
+
+```
+pipelinelib_test: the device answers the pipeline-library function road: yes
+pipelinelib_test:   newFunctionWithName:constantValues:pipelineLibrary:error: = a function
+pipelinelib_test:   it carries 6784 bytes of AIR
+pipelinelib_test: the library answers the pipeline-library function road: yes
+HakiosMetal[pipelinelib_test 123]: VectorKit's function DaVinci::ground_base_vertex,
+  asked with constants and a pipeline library: compiled from its metallib
+```
+
+`_MTLLibrary` does declare the selector (Metal's own implementation answered the
+library receiver with a function without any hook of ours), so the road is an
+MTLLibrary method, and the device has been given one too.  Maps wrote its own
+lines to `/private/var/tmp/hakios-vk.log` (the sandbox does allow it) and the
+log shows it opening the library and installing both answers -- but it never
+asks for a function or builds a pipeline: the last Maps line in that file is the
+library's names being given, and the canvas stays black (`logs/ptm2-3.png`).
+
+So the app's road to functions is neither the device's nor a library's road, or
+it never gets as far as asking.  Whatever it does next after creating the
+pipeline library is now said too: the device logs every `newLibraryWithFile:`
+and `newLibraryWithData:` (with the data's first four bytes), answers a 0-byte
+data -- the pipelinelib's `functions` archive is exactly that -- and the
+archive's own path with the carried VectorKit `default.metallib` once the
+pipeline library has opened, and the pipeline library itself is the third
+receiver of the function road, answered the same way (image `ff064bf2`).  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
