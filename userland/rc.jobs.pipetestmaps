@@ -1,7 +1,8 @@
 # RC_JOBS=rc.jobs.pipetestmaps: the pipeline question and Maps in one boot.  The probe first
 # (src/pipelinelib_test.m): it opens VectorKit's library through the plug-in, asks the function road
-# and one description name, and builds a Grid pipeline by hand.  Then Maps, as rc.jobs.maps runs it:
-# Wi-Fi joined in the background, the app opened and its onboarding and location rows tapped.
+# of all three receivers and one description name, and builds a Grid pipeline by hand.  Then Maps:
+# Wi-Fi joined in the background, the app opened, its onboarding and location rows tapped, then the
+# Favorites sheet swiped away and the map tapped, so VectorKit has a visible, focused map to render.
 #
 # The kernel's log ring overwrites what the loader has not fetched, and the lines this boot is for
 # (the probe's, and the plug-in's inside Maps) fall out of it before the run ends.  So both are also
@@ -13,7 +14,8 @@
 /redwood/bin/net_test waitaddr en0 90 &
 /redwood/bin/rwtouch wait 60
 /var/jb/usr/bin/uiopen --bundleid com.apple.Maps
-/redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 60
+/redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 20
+/redwood/bin/rwtouch swipe 0.5 0.61 0.5 0.95 250 wait 20 tap 0.5 0.35 wait 40
 /var/jb/usr/bin/cat /private/var/tmp/pipetest.out
 /var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
 sleep 30
