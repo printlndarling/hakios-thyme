@@ -4638,6 +4638,19 @@ scene leaves Maps alone after the sheet is swiped away (the tap at 0.35 opened
 the "My Location" card, which pauses the map), runs for 600 s and takes shots at
 4, 5.5, 7 and 8.5 minutes (image `8d68102a`).
 
+Result of that long run (`152458`, 600 s): still no map content.  Maps linked
+only `Clear::clear_vertex + Clear::clear_fragment`; no `DaVinci`,
+`SolidRibbon` or other ground pipeline was created; the four shots
+(`logs/ptm3-1..4.png`, 150-186 KB each) show the app over a black canvas.
+geod's connections to the Chinese map hosts were seen again, so the data path
+is alive, but VectorKit never got to drawing tiles.  **The user's direction on
+2026-11-17: set Apple Maps aside for now** and turn to third-party maps --
+install a third-party store / IPA apps (Baidu Maps, Amap), check they run, and
+use one of them as the daily map if it works.  The way in is already in the
+image: `rc.jobs.ssh` starts OpenSSH from the jailbreak prefix (sshd/scp/sftp)
+and the host can push an `.app` over Wi-Fi; `/var/jb/usr/bin/uicache` refreshes
+the icon cache, and the host can `ldid -S` the bundles before they are pushed.
+
 `vkn=1` remains as an opt-in for anything that does enumerate names, but
 nothing in the cache calls `pipelineNames`.
 
