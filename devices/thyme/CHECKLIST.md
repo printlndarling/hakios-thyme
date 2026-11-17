@@ -4629,6 +4629,15 @@ the next thing to check is the tile/data path (geod, the map style resources,
 and a run long enough after the join for the first tiles to arrive), not the
 GPU.
 
+That guess was half wrong: geod *is* fetching.  The same run's connection
+records show `geod[57]` connected to Chinese map hosts -- 106.11.43.101:443 (one
+connection open 120 s, 13,968 bytes in / 981 out) and 219.144.78.208:443 (15 s,
+7,411 in / 1,908 out) -- so the resource/tile path works and the run was simply
+short: those are manifests and the first resources, not tiles yet.  The next
+scene leaves Maps alone after the sheet is swiped away (the tap at 0.35 opened
+the "My Location" card, which pauses the map), runs for 600 s and takes shots at
+4, 5.5, 7 and 8.5 minutes (image `8d68102a`).
+
 `vkn=1` remains as an opt-in for anything that does enumerate names, but
 nothing in the cache calls `pipelineNames`.
 

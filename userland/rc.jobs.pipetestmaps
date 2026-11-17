@@ -15,15 +15,15 @@
 /redwood/bin/rwtouch wait 60
 /var/jb/usr/bin/uiopen --bundleid com.apple.Maps
 /redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 20
-/redwood/bin/rwtouch swipe 0.5 0.61 0.5 0.95 250 wait 20 tap 0.5 0.35 wait 40
+/redwood/bin/rwtouch swipe 0.5 0.61 0.5 0.95 250 wait 60
 /var/jb/usr/bin/cat /private/var/tmp/pipetest.out
 /var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
-sleep 30
+sleep 60
 /var/jb/usr/bin/cat /private/var/tmp/pipetest.out
 /var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
-sleep 30
+sleep 60
 /var/jb/usr/bin/cat /private/var/tmp/pipetest.out
 /var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
-sleep 30
+sleep 60
 /var/jb/usr/bin/cat /private/var/tmp/pipetest.out
 /var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
