@@ -4864,3 +4864,22 @@ the runtime registration route can work there, so this is either a QEMU-only lim
 LaunchServices' third-party registration or a real change since that image. The scene now
 runs `uicache -p <bundle>` and `uicache -i <id>` and prints both into `install.log`, which
 will say which; app launch for the map has not yet been verified on the phone.
+
+The next QEMU boot settled the launch question: with `uicache -p /var/jb/Applications/HakiosMaps.app`
+(the bundle named, instead of a rescan) the app is registered and the first `uiopen --bundleid
+com.hakios.maps` launches it -- `Successfully spawned HakiosMaps[56]`, and `logs/qmap6-1.png`
+shows the app's own screen: the search field carrying 西安大雁塔 (the auto-search query), the
+定位 button, + and −, the 500 m scale bar and "© OpenStreetMap contributors".  So `uicache -a`
+was the weak step under QEMU, not the app; the phone scene uses `uicache -p` now, with `-i`
+printing what LaunchServices holds into `install.log`.
+
+No tile arrived and the search said 0 results in that boot, for a network reason: en0 sent
+0 frames (no DHCP in the image, and configd's IPConfiguration -- the only DHCP client the port
+has for virtio -- was not a job). `CONFIGD=1` in build.sh adds com.apple.configd, and the
+QEMU-only scene `rc.jobs.mapqemu` asks for DHCP and probes both map hosts before opening the app.
+
+One anomaly worth knowing: in a QEMU run, console output masks every byte to 7 bits. The app's
+record of the Chinese query reads E8 A5 BF ... as it is written, but the console capture holds
+68 25 3F ... (each byte & 0x7F; checked with od). Whether the phone's loader console does the
+same has not been measured; either way a mangled 中文 line in a run log is the console's doing,
+not necessarily the data's.

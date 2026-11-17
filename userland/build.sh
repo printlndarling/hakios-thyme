@@ -144,6 +144,10 @@ DARWIN_JOBS=${JOBS-"
 # "installd" method goes through MobileInstallation instead).  Off by default until a run shows
 # the pair up without hurting the boot: INSTALLD=1 names installd and its proxy.
 [ "${INSTALLD-0}" = 1 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.mobile.installd com.apple.mobile_installation_proxy"
+# configd (SystemConfiguration) with its IPConfiguration plugin: the only DHCP client the port has
+# that a QEMU virtio network can use ("net_test dhcp en0"); the phone's Wi-Fi gets its address
+# without it.  CONFIGD=1 names it; off by default.
+[ "${CONFIGD-0}" = 1 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.configd"
 # The QCA6390's Bluetooth jobs. mkjobs.py's --rest deliberately denies these names, so a
 # device with the radio names them here. com.apple.BlueTool becomes /redwood/bin/umi_bluetool
 # in mkjobs.py when that program was put in this build's root: the kernel has already booted
