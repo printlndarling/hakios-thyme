@@ -4385,7 +4385,13 @@ plug-in now answers VectorKit's by-name calls itself: when
 `-newRenderPipelineStateWithName:options:reflection:error:` finds nothing in the
 library, it takes the two functions the name's description pairs, resolves them
 to the base functions of the carried `default.metallib`, and builds the pipeline
-through the device (`HakiosMetalCA.m`, `hm_vk_new_pipeline`).  The first run
+through the device (`HakiosMetalCA.m`, `hm_vk_new_pipeline`).  Until
+`pipelines.desc`'s own attachment state is decoded, the pipeline is built for
+the canvas's kinds first -- BGRA8_sRGB (81) with a 4-sample
+Depth32Float_Stencil8 (260), what VectorKit's colour and depth textures were --
+and, only if this runtime refuses those, for one plain BGRA8 target with no
+depth; `vkc=`/`vkd=`/`vks=` override the three for an A/B run (the arguments
+cost 21 characters of the 607, so an A/B run drops the camera ones).  The first run
 meant to exercise it (`metal650maps19`) never reached Maps: the battery guard
 ended it at 24%, at or below `battery_stop=25` ("battguard: ... back to the
 loader", `logs/102725-run.log`), before the scene's `uiopen` at rc+90 s.  The
@@ -4400,6 +4406,24 @@ pair -- a lookup of any of them can be answered; a name outside that set is
 logged and left nil.  `rc.jobs.pipetestmaps` runs the probe first and Maps after
 in one boot, so the answered library is exercised both by a name the probe asks
 for directly and by whatever names the app itself asks.
+
+The first run of that scene (`logs/105440-run.log`, at 28% battery, the guard
+holding) did not settle the question: its log jumps from launchd straight to
+10:59:44, so the whole window in which Maps starts -- the probe's output and any
+pipeline-library lines with it -- is missing.  What the tail does show is Maps
+up and drawn (`logs/ptm-3.png`: search sheet, favorites, the location dot, the
+Amap attribution, a transient black band across the favorites) over a black map
+canvas, and then, at the return, its 44 MB colour and depth textures refused
+with `0xe00002d8` -- kIOReturnNotReady, the kernel's "the run is ending" answer
+-- followed by the same "VectorKit received null buffer from Metal" abort seen
+in earlier runs.  Those refusals are the run's end, not its cause, for the third
+time; do not read them as the map's wall.
+
+The lost window is the log ring: `touch_lat=1` writes a line for every swap and
+every frame at 90 Hz (`tl:` lines, MiniIOMobileFramebuffer.cpp), and between the
+loader's fetches that flood overwrites what it has not read.  A diagnostic run
+can drop it: `ram.args` without `touch_lat=1` is otherwise the same line, and
+the next Maps run does that (the taps still work; only their logging is gone).
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
