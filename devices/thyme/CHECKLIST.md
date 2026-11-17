@@ -4550,7 +4550,30 @@ rule.  The plug-in now falls through to that library for any name the default
 metallib has not: the plain `-newFunctionWithName:` (where the NOT FOUND names
 came from) and the constant-values function road both try it, with a re-entry
 guard so the plug-in's own lookups do not loop (image `23b3794b`).  The Alloy
-library is carried beside the default one in the same `ca-metallibs` tree.  `vkn=1` remains as an opt-in for anything that does
+library is carried beside the default one in the same `ca-metallibs` tree.
+
+And that worked on the device (run `133635`, image `23b3794b`): the Alloy library
+opens ("VectorKit's other functions: .../AlloyCommonLibrary.metallib: it
+opened") and Maps' `Clear::clear_vertex` / `Clear::clear_fragment` come back
+"found in the Alloy library".  Maps then encodes 60 passes and draws -- and the
+draw is refused 1,636 times with the same sentence:
+
+```
+refused: a draw of Clear::clear_vertex+Clear::clear_fragment, primitive 3,
+6 vertices from 0, 1 instance(s), load 0 store 0, 2 vertex and 1 fragment
+buffer slots: a stencil attachment beside a multisample Depth32Float_Stencil8
+texture: the S8 plane's multisample layout is not laid out here
+```
+
+So the map's canvas is now blocked by the one thing the runtime left out on
+purpose: a multisample Depth32Float_Stencil8 is laid out as its depth plane
+alone (`hakios-metal/src/texture.cpp`), and a pass that binds its stencil plane
+is refused (`render.cpp`).  VectorKit's clear pass binds exactly that.  The next
+change is the S8 plane of a multisample D32S8 (per-sample stencil, laid out
+like the depth plane's samples side by side) and the stencil buffer setup for a
+multisample pass; the single-sample S8 plane is already served from the same
+texture (stencilOffset/stencilPitch, RB stencil branch), so the work is the
+multisample pitch and the pass check.  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
