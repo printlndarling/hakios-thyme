@@ -4377,6 +4377,21 @@ state, not looked up by name; `pipelinelib_test` now also asks the library for
 `pipelineNames` and builds a Grid pipeline from the two plain functions, to tell
 which of those two roads this runtime can take.
 
+The answer came back clear: the library says its `pipelineNames` are 0, and a
+Grid pipeline built by hand from `Grid::grid_vertex` + `Grid::grid_fragment`
+compiled to a `HakiosMetalRenderPipelineState` -- the runtime's compiler is not
+the limit; the by-name lookup is (`logs/095313-pipetest2-captured.log`).  So the
+plug-in now answers VectorKit's by-name calls itself: when
+`-newRenderPipelineStateWithName:options:reflection:error:` finds nothing in the
+library, it takes the two functions the name's description pairs, resolves them
+to the base functions of the carried `default.metallib`, and builds the pipeline
+through the device (`HakiosMetalCA.m`, `hm_vk_new_pipeline`).  The first run
+meant to exercise it (`metal650maps19`) never reached Maps: the battery guard
+ended it at 24%, at or below `battery_stop=25` ("battguard: ... back to the
+loader", `logs/102725-run.log`), before the scene's `uiopen` at rc+90 s.  The
+loader does not charge -- a phone at this level has to go back to Android, or to
+a charger, before the next run.
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
@@ -4434,3 +4449,33 @@ not the boot -- so its `cmdline:` line and the seed messages could not be read;
 the drawn frames are the evidence that the argument was whole.  Maps did not
 come up in that run (the scene's `uiopen` either lost the race with LaunchServices
 or its taps went to the home screen); that is the scene's timing, not the boot.
+
+### Another port to learn from: the Redmi K90 (annibale) (2026-11-17)
+
+The user pointed at <https://github.com/iola1999/hackios-redmi-k90-annibale>: a
+HakiOS port to the REDMI K90 (SM8750, Adreno 830) that runs the iOS 26.6.2
+userland and states much further app coverage.  Read for what crosses over; its
+Metal is another stack (Mesa freedreno behind an AIR-to-NIR translator,
+`annibalemetal`), so its shader fixes (`alias.rt`/`fsat`, sampler swizzle,
+`rgb2p`) do not bear on hakios-metal's own compiler.  On the walls this session
+is on:
+
+- Maps' map area is blank there too: its backlog's S12 still lists "Weather 无温度、
+  Maps 停在定位提示" (`docs/backlog/system.md`).  Its Today-view map *widget* does
+  draw after a blit-over-resource and colour-attachment fix in its Mesa layer
+  (`docs/analysis/2026-11-17-transient-render-and-icon-fixes.md` §4), not by
+  solving VectorKit's pipeline library -- so the by-name pipeline wall here has
+  no ready-made answer there.
+- FairPlay: it masks `fairplayd.H2` so `locationd`'s `HostSpecialPort 17`
+  request fails fast (Wallet's 10 s black screen); we answer those services
+  with `fairplaystub` instead.  Worth remembering if something here blocks on a
+  fairplayd request that never returns.
+- Its Adreno 830 SMMU had a fixed 1024-slot page table (a 2 GB IOVA window) that
+  failed 12-29 MB allocations once the low space fragmented; ours is a per-client
+  table of 8192 buffers with a 256 MB maximum each, so that exact limit is not
+  here -- but the symptom (a large GPU buffer failing with EIO) is worth
+  checking against it if one ever fails before teardown rather than after.
+- Its kernel-side framebuffer ring recorder plus `fb_filmstrip.py` (96 MiB,
+  104 frames, black-flash/horizontal-band/alternating-flicker detection) is a
+  better tool than `xl screenshot` for the transient flicker seen here; a
+  candidate for the next display investigation.

@@ -2398,6 +2398,262 @@ hm_print_callers(const char *what)
 	hm_print("%s\n", line);
 }
 
+/* --- VectorKit's pipelines: its library has none for this GPU, so they are built from its functions --- */
+
+/*
+ * VectorKit (Maps' map view) makes its render pipelines by name out of iphoneos.pipelinelib, and that library can
+ * only answer with states precompiled for an Apple GPU: `pipelines.g10p` ... `g15p`, none for Adreno, a 0-byte
+ * `functions` archive, and no build-on-demand behind -newRenderPipelineStateWithName: (src/pipelinelib_test.m,
+ * logs/094819-pipetest-captured.log: every name answers "not found in pipelineLibrary").  What the library does
+ * carry is the description of every pipeline and the base functions of its `default.metallib`, and this runtime's
+ * compiler builds pipelines from those: a Grid pipeline made by hand from the two functions compiled
+ * (HakiosMetalRenderPipelineState, same log).  So the by-name call is answered here when the library has nothing:
+ * the name is looked up in the descriptions, the pair of functions it names is taken from the base functions of
+ * the metallib, and the device builds the pipeline as any other.  Until the description's own attachment state is
+ * decoded, the pipeline is built for one BGRA8 colour target and no depth -- enough to put the map on the screen,
+ * and the state is the next thing to read out of pipelines.desc.
+ */
+static id hm_vk_device;
+static NSMutableArray *hm_vk_pairs;      /* @[ @[vertexName, fragmentName], ... ] from pipelines.desc section 7 */
+static IMP hm_vk_by_name;                /* _MTLPipelineLibrary's own -newRenderPipelineStateWithName:options:reflection:error: */
+
+/* the base function a description's name stands for: "default_Grid::grid_vertex_<32 bytes of hex>" is Grid::grid_vertex */
+static NSString *
+hm_vk_base(NSString *name)
+{
+	NSString *rest;
+	NSRange underscore;
+
+	if (![name hasPrefix:@"default_"]) {
+		return name;
+	}
+	rest = [name substringFromIndex:8];
+	underscore = [rest rangeOfString:@"_" options:NSBackwardsSearch];
+	if (underscore.location == NSNotFound || [rest length] - NSMaxRange(underscore) != 64) {
+		return rest;
+	}
+	for (NSUInteger i = NSMaxRange(underscore); i < [rest length]; i++) {
+		unichar c = [rest characterAtIndex:i];
+
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+			return rest;
+		}
+	}
+	return [rest substringToIndex:underscore.location];
+}
+
+/* the printable strings of one description entry: a pipeline's two function names, as "Namespace::name" */
+static void
+hm_vk_scan(const uint8_t *e, size_t n, NSMutableArray *out)
+{
+	size_t i = 0;
+
+	while (i < n) {
+		if (e[i] >= 32 && e[i] < 127) {
+			size_t j = i;
+
+			while (j < n && e[j] >= 32 && e[j] < 127) {
+				j++;
+			}
+			if (j - i >= 6 && memmem(e + i, j - i, "::", 2) != NULL) {
+				NSString *s = [[NSString alloc] initWithBytes:e + i length:j - i encoding:NSUTF8StringEncoding];
+
+				if (s != nil) {
+					[out addObject:s];
+					[s release];
+				}
+			}
+			i = j;
+		} else {
+			i++;
+		}
+	}
+}
+
+static void
+hm_vk_load_pairs(void)
+{
+	NSString *desc = @"/System/Library/PrivateFrameworks/VectorKit.framework/iphoneos.pipelinelib/pipelines.desc";
+	NSData *data = [NSData dataWithContentsOfFile:desc];
+	const uint8_t *d = [data bytes];
+	size_t n = [data length];
+	uint32_t sections, off7, count;
+
+	hm_vk_pairs = [[NSMutableArray alloc] init];
+	if (d == NULL || n < 8) {
+		return;
+	}
+	memcpy(&sections, d, 4);
+	if (sections <= 7 || 4 + 4 * sections > n) {
+		return;
+	}
+	memcpy(&off7, d + 4 + 4 * 7, 4);
+	if (off7 + 8 > n) {
+		return;
+	}
+	memcpy(&count, d + off7, 4);
+	for (uint32_t i = 0; i < count && off7 + 8 + 4 * i <= n; i++) {
+		uint32_t r, next;
+		NSMutableArray *strings;
+
+		memcpy(&r, d + off7 + 4 + 4 * i, 4);
+		next = (uint32_t)(i + 1 < count ? 0 : n - off7);
+		if (i + 1 < count) {
+			memcpy(&next, d + off7 + 4 + 4 * (i + 1), 4);
+		}
+		if (next <= r || off7 + next > n) {
+			continue;
+		}
+		strings = [NSMutableArray array];
+		hm_vk_scan(d + off7 + r, next - r, strings);
+		if ([strings count] >= 2) {
+			[hm_vk_pairs addObject:@[ strings[0], strings[1] ]];
+		}
+	}
+}
+
+static NSArray *
+hm_vk_pair_for(NSString *name)
+{
+	NSString *base = hm_vk_base(name);
+	NSArray *byBase = nil;
+
+	for (NSArray *pair in hm_vk_pairs) {
+		if ([pair[0] isEqualToString:name] || [pair[1] isEqualToString:name]) {
+			return pair;
+		}
+		if (byBase == nil) {
+			for (NSString *function in pair) {
+				if ([hm_vk_base(function) isEqualToString:base]) {
+					byBase = pair;
+					break;
+				}
+			}
+		}
+	}
+	return byBase;
+}
+
+/* one base function of VectorKit's default.metallib; the caller owns the +1 object (new* naming) */
+static id
+hm_vk_function(NSString *base)
+{
+	static id library;
+	static BOOL tried;
+	NSString *paths[] = {
+		@"/private/var/tmp/com.apple.backboardd/hakios-ca/metallibs/System/Library/PrivateFrameworks/VectorKit.framework/default.metallib",
+		@"/private/var/tmp/hakios-ca/metallibs/System/Library/PrivateFrameworks/VectorKit.framework/default.metallib",
+		@"/redwood/share/ca-metallibs/System/Library/PrivateFrameworks/VectorKit.framework/default.metallib",
+	};
+
+	if (!tried) {
+		tried = YES;
+		for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && library == nil; i++) {
+			if ([[NSFileManager defaultManager] fileExistsAtPath:paths[i]]) {
+				NSError *why = nil;
+
+				library = [[hm_vk_device newLibraryWithFile:paths[i] error:&why] retain];
+				hm_print("VectorKit's pipelines: %s is the library of its functions: %s\n", [paths[i] fileSystemRepresentation],
+					 library != nil ? "it opened" : (why != nil ? [[why localizedDescription] UTF8String] : "nil"));
+			}
+		}
+	}
+	if (library == nil) {
+		return nil;
+	}
+	return [library newFunctionWithName:base];
+}
+
+static id
+hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *reflection, NSError **error)
+{
+	id pipeline = ((id (*)(id, SEL, id, NSUInteger, id *, NSError **))hm_vk_by_name)(self, _cmd, name, options, reflection, error);
+	static unsigned said;
+	NSArray *pair;
+	NSString *vertexBase, *fragmentBase;
+	id vertex, fragment;
+	MTLRenderPipelineDescriptor *descriptor;
+	NSError *why = nil;
+
+	if (pipeline != nil) {
+		return pipeline;
+	}
+	pair = hm_vk_pair_for(name);
+	if (hm_vk_pairs == nil || pair == nil) {
+		if (said++ < 20) {
+			hm_print("VectorKit's pipeline %s: not in the library, and %s of its descriptions\n", [name UTF8String],
+				 hm_vk_pairs == nil ? "the descriptions are not read" : "the name is not in either");
+		}
+		return nil;
+	}
+	vertexBase = hm_vk_base(pair[0]);
+	fragmentBase = hm_vk_base(pair[1]);
+	if ([vertexBase rangeOfString:@"fragment"].location != NSNotFound &&
+	    [fragmentBase rangeOfString:@"vertex"].location != NSNotFound) {
+		NSString *swap = vertexBase;
+
+		vertexBase = fragmentBase;
+		fragmentBase = swap;
+	}
+	vertex = hm_vk_function(vertexBase);
+	fragment = hm_vk_function(fragmentBase);
+	if (vertex == nil || fragment == nil) {
+		if (said++ < 20) {
+			hm_print("VectorKit's pipeline %s: %s and %s are its functions, and %s\n", [name UTF8String],
+				 [vertexBase UTF8String], [fragmentBase UTF8String],
+				 vertex == nil && fragment == nil ? "neither is in the metallib" : vertex == nil ? "the vertex one is not" : "the fragment one is not");
+		}
+		[vertex release];
+		[fragment release];
+		return nil;
+	}
+	descriptor = [[[MTLRenderPipelineDescriptor alloc] init] autorelease];
+	descriptor.label = name;
+	descriptor.vertexFunction = vertex;
+	descriptor.fragmentFunction = fragment;
+	descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+	[vertex release];
+	[fragment release];
+	pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];
+	if (said++ < 60) {
+		hm_print("VectorKit's pipeline %s: not in the library; built from %s + %s: %s%s\n", [name UTF8String],
+			 [vertexBase UTF8String], [fragmentBase UTF8String], pipeline != nil ? "it compiled" : "it did not",
+			 pipeline == nil && why != nil ? [[NSString stringWithFormat:@" (%@)", [why localizedDescription]] UTF8String] : "");
+	}
+	return pipeline;
+}
+
+/* the call a library's own by-name lookups take: installed only for the VectorKit library this device opened */
+static void
+hm_vk_note_library(id device, NSString *path, id library)
+{
+	SEL byName = @selector(newRenderPipelineStateWithName:options:reflection:error:);
+	Method method;
+	NSArray *names = [path componentsSeparatedByString:@"/"];
+
+	if (library == nil || path == nil || [names count] < 2 ||
+	    ![names[[names count] - 2] isEqualToString:@"VectorKit.framework"]) {
+		return;
+	}
+	hm_vk_device = device;
+	if (hm_vk_pairs == nil) {
+		hm_vk_load_pairs();
+	}
+	if (hm_vk_by_name != NULL) {
+		return;
+	}
+	method = class_getInstanceMethod(object_getClass(library), byName);
+	if (method == NULL) {
+		hm_print("VectorKit's pipeline library (%s) does not answer newRenderPipelineStateWithName:options:reflection:error:\n",
+			 object_getClassName(library));
+		return;
+	}
+	hm_vk_by_name = method_getImplementation(method);
+	class_replaceMethod(object_getClass(library), byName, (IMP)hm_vk_new_pipeline, method_getTypeEncoding(method));
+	hm_print("VectorKit's pipeline library opened: %lu pipelines described, none precompiled for this GPU; its by-name "
+		 "lookups are answered from its functions here\n", (unsigned long)[hm_vk_pairs count]);
+}
+
 /* A pipeline library (a .pipelinelib directory: pipelines.desc naming each pipeline's functions, formats and state, and
  * one file of compiled pipelines per Apple GPU) is how ActivityRingsUI -- the Fitness widget's rings -- and QuartzCore
  * build their pipelines: -newRenderPipelineStateWithName:... turns pipelines.desc into an ordinary descriptor and hands
@@ -2420,6 +2676,7 @@ hm_print_callers(const char *what)
 	id cache;
 
 	if (library != nil || path == nil) {
+		hm_vk_note_library(self, path, library);
 		if (error != NULL) *error = first;
 		return library;
 	}
@@ -2531,6 +2788,7 @@ hm_print_callers(const char *what)
 	hm_print("a pipeline library at %s had no %s; opened through %s with an empty cache Metal wrote: %s\n",
 		 [path fileSystemRepresentation], [missing UTF8String], [copy fileSystemRepresentation],
 		 library != nil ? "it opened" : (second != nil ? [[second localizedDescription] UTF8String] : "nil, no reason given"));
+	hm_vk_note_library(self, path, library);
 	if (error != NULL) *error = library != nil ? nil : (second != nil ? second : first);
 	return library;
 }
