@@ -35,7 +35,10 @@ hm_mercator_y(double latitude)
 static double
 hm_inverse_mercator_y(double y)
 {
-	return 90.0 - 360.0 * atan(exp((0.5 - y) * 2.0 * M_PI)) / M_PI;
+	/* lat = atan(sinh(pi * (1 - 2y))): the inverse of the term above.  The 90 - 360*atan(exp(...))/pi
+	 * form has its sign the other way round and would turn every pan into a jump across the equator
+	 * (caught on the host by feeding a known point through the pair, 2026-11-17). */
+	return atan(sinh(M_PI * (1.0 - 2.0 * y))) * 180.0 / M_PI;
 }
 
 @interface HakiosMapTileView ()
