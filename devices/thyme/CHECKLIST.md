@@ -4910,3 +4910,40 @@ and the first `uiopen --bundleid com.hakios.maps` then launches it
 not in the minimal job list: `DNS=1` in build.sh adds it and its helper, which is what turned
 "nodename nor servname" into an answer at all. The phone image (`root-mapapp.apfs`,
 `165b00c9`) now carries both.
+
+### TrollStore installs an IPA on the device (2026-11-17, night)
+
+It works, through the same helper the store's UI spawns. `logs/225723-run.log`:
+`[installApp] doing custom installation using MCMAppContainer`, the container
+`/private/var/containers/Bundle/Application/6C370502-.../LocProbe.app`, `trollstorehelper
+returning 0`, and then `Successfully spawned LocProbe[83]`. The steps and the walls:
+
+1. **Entitlements are real on this port.** `mcm_test` (src/mcm_test.m) asked
+   `MCMAppContainer containerWithIdentifier:createIfNecessary:existed:error:` as root and got
+   MCMErrorDomain 98; signed with the keys TrollStore's root helper carries
+   (`platform-application`, `com.apple.private.security.container-manager`,
+   `com.apple.private.MobileContainerManager.allowed`, ...; src/mcm_test.entitlements) the same
+   call **created** a container under /private/var/containers/Bundle/Application
+   (`logs/223433-run.log`). An ad-hoc ldid signature is enough; the port's userland honours the
+   embedded entitlements. (The private class only exists once its framework is loaded: the probe
+   dlopens MobileContainerManager.framework before looking it up.)
+2. **TrollStore needs an MCM container of its own.** The helper's `isLdidInstalled()` asks
+   `trollStoreAppPath()`, which is the MCM container of com.opa334.TrollStore -- not the
+   /var/jb copy. Without one it answered 173 even with ldid sitting in the bundle
+   (`logs/214043-run.log`). `install-trollstore` cannot make it either: the system image carries
+   TrollStore.app in /Applications, LaunchServices counts that as an immutable system app, and
+   the install is refused with 179 (unregistering it with `uicache -u` fails,
+   `logs/220354-run.log`). So the scene has `mcm_test` create that container and copy the app
+   plus the arm64 ldid (github.com/opa334/ldid/releases/latest/download/ldid, latest) into it.
+3. **Sign the IPA with entitlements that are not restricted.** A binary with no entitlements at
+   all gets TrollStore's fallback `get-task-allow`, which on iOS 16 makes the helper arm
+   developer mode after installing; arming fails here and it returns 183 although the app was
+   installed and registered (`logs/224550-run.log`). Signing LocProbe with
+   application-identifier / team-identifier / keychain-access-groups and no get-task-allow
+   (src/locprobe.entitlements, tools/ipa.py keeps the mode) makes the same install return 0.
+
+The store's UI route (TrollStore's own window, + or a file URL) is still untested on the phone:
+`uiopen --bundleid com.opa334.TrollStore` did not reach launchd in that run even after
+`uicache -a` (no `Successfully spawned TrollStore`), while the UI itself is known to render
+(logs/app5-2.png..-4.png). The helper it calls is the same one proven here. The scene is
+`rc.jobs.tstore`, the image `root-tstore.apfs` `ae237c1c`.
