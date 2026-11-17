@@ -1,13 +1,27 @@
 # RC_JOBS=rc.jobs.pipetestmaps: the pipeline question and Maps in one boot.  The probe first
-# (src/pipelinelib_test.m): it opens VectorKit's library through the plug-in, asks one description
-# name by name (the plug-in answers it from the library's own functions), and builds a Grid pipeline
-# by hand.  Then the Maps scene as rc.jobs.maps runs it: Wi-Fi joined in the background, Maps opened
-# and its onboarding and location rows tapped, so the same boot shows whether the app draws through
-# the answered library.
+# (src/pipelinelib_test.m): it opens VectorKit's library through the plug-in, asks the function road
+# and one description name, and builds a Grid pipeline by hand.  Then Maps, as rc.jobs.maps runs it:
+# Wi-Fi joined in the background, the app opened and its onboarding and location rows tapped.
+#
+# The kernel's log ring overwrites what the loader has not fetched, and the lines this boot is for
+# (the probe's, and the plug-in's inside Maps) fall out of it before the run ends.  So both are also
+# written to files under /private/var/tmp (the probe with ">>", the plug-in with vklog=1), and the
+# files are shown again at the end of the list, where the ring still holds them.
 /redwood/bin/rwtouch wait 25
-/redwood/bin/pipelinelib_test
+/redwood/bin/pipelinelib_test >> /private/var/tmp/pipetest.out
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
 /redwood/bin/net_test waitaddr en0 90 &
 /redwood/bin/rwtouch wait 60
 /var/jb/usr/bin/uiopen --bundleid com.apple.Maps
-/redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 120
+/redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 60
+/var/jb/usr/bin/cat /private/var/tmp/pipetest.out
+/var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/pipetest.out
+/var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/pipetest.out
+/var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/pipetest.out
+/var/jb/usr/bin/cat /private/var/tmp/hakios-vk.log

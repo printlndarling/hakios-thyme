@@ -2413,6 +2413,7 @@ hm_print_callers(const char *what)
  * decoded, the pipeline is built for one BGRA8 colour target and no depth -- enough to put the map on the screen,
  * and the state is the next thing to read out of pipelines.desc.
  */
+static void hm_vk_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));  /* (defined with hm_boot_arg_int) */
 static id hm_vk_device;
 static NSMutableArray *hm_vk_pairs;      /* @[ @[vertexName, fragmentName], ... ] from pipelines.desc section 7 */
 static IMP hm_vk_by_name;                /* _MTLPipelineLibrary's own -newRenderPipelineStateWithName:options:reflection:error: */
@@ -2555,7 +2556,7 @@ hm_vk_function_library(void)
 				NSError *why = nil;
 
 				library = [[hm_vk_device newLibraryWithFile:paths[i] error:&why] retain];
-				hm_print("VectorKit's pipelines: %s is the library of its functions: %s\n", [paths[i] fileSystemRepresentation],
+				hm_vk_log("VectorKit's pipelines: %s is the library of its functions: %s\n", [paths[i] fileSystemRepresentation],
 					 library != nil ? "it opened" : (why != nil ? [[why localizedDescription] UTF8String] : "nil"));
 			}
 		}
@@ -2600,7 +2601,7 @@ hm_lib_function(id self, SEL _cmd, NSString *name, id values, id library, NSErro
 
 	if (function == nil && name != nil && hm_vk_device != nil) {
 		function = hm_vk_function_values(name, values, NULL);
-		hm_print("VectorKit's function %s, asked at a library with a pipeline library: %s\n", [name UTF8String],
+		hm_vk_log("VectorKit's function %s, asked at a library with a pipeline library: %s\n", [name UTF8String],
 			 function != nil ? "compiled from its metallib" : "not in its metallib");
 	}
 	return function;
@@ -2626,6 +2627,38 @@ hm_boot_arg_int(const char *name, int def)
 	return atoi(at + strlen(name) + 1);
 }
 
+/* A line of the VectorKit pipeline work: hm_print, and with vklog=1 the same line appended to
+ * /private/var/tmp/hakios-vk.log, because the kernel's log ring overwrites what the loader has not fetched and
+ * these lines are the ones a run is looking for (the job list cats the file at its end, where the ring still is). */
+static void hm_vk_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+static void
+hm_vk_log(const char *fmt, ...)
+{
+	static int on = -1;
+	char body[900], line[1024];
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	vsnprintf(body, sizeof(body), fmt, ap);
+	va_end(ap);
+	hm_print("%s", body);
+	if (on < 0) {
+		on = hm_boot_arg_int("vklog", 0) == 1;
+	}
+	if (on) {
+		int fd;
+
+		n = snprintf(line, sizeof(line), "HakiosMetal[%s %d]: %s", getprogname(), getpid(), body);
+		fd = open("/private/var/tmp/hakios-vk.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+		if (fd >= 0) {
+			(void)!write(fd, line, (size_t)n);
+			close(fd);
+		}
+	}
+}
+
 static id
 hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *reflection, NSError **error)
 {
@@ -2644,7 +2677,7 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	pair = hm_vk_pair_for(name);
 	if (hm_vk_pairs == nil || pair == nil) {
 		if (said++ < 20) {
-			hm_print("VectorKit's pipeline %s: not in the library, and %s of its descriptions\n", [name UTF8String],
+			hm_vk_log("VectorKit's pipeline %s: not in the library, and %s of its descriptions\n", [name UTF8String],
 				 hm_vk_pairs == nil ? "the descriptions are not read" : "the name is not in either");
 		}
 		return nil;
@@ -2662,7 +2695,7 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	fragment = hm_vk_function(fragmentBase);
 	if (vertex == nil || fragment == nil) {
 		if (said++ < 20) {
-			hm_print("VectorKit's pipeline %s: %s and %s are its functions, and %s\n", [name UTF8String],
+			hm_vk_log("VectorKit's pipeline %s: %s and %s are its functions, and %s\n", [name UTF8String],
 				 [vertexBase UTF8String], [fragmentBase UTF8String],
 				 vertex == nil && fragment == nil ? "neither is in the metallib" : vertex == nil ? "the vertex one is not" : "the fragment one is not");
 		}
@@ -2695,14 +2728,14 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 		why = nil;
 		pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];
 		if (said++ < 60) {
-			hm_print("VectorKit's pipeline %s: the canvas's kinds did not compile; the plain one %s\n", [name UTF8String],
+			hm_vk_log("VectorKit's pipeline %s: the canvas's kinds did not compile; the plain one %s\n", [name UTF8String],
 				 pipeline != nil ? "did" : "did not");
 		}
 	}
 	[vertex release];
 	[fragment release];
 	if (said++ < 60) {
-		hm_print("VectorKit's pipeline %s: not in the library; built from %s + %s: %s%s\n", [name UTF8String],
+		hm_vk_log("VectorKit's pipeline %s: not in the library; built from %s + %s: %s%s\n", [name UTF8String],
 			 [vertexBase UTF8String], [fragmentBase UTF8String], pipeline != nil ? "it compiled" : "it did not",
 			 pipeline == nil && why != nil ? [[NSString stringWithFormat:@" (%@)", [why localizedDescription]] UTF8String] : "");
 	}
@@ -2730,7 +2763,7 @@ hm_vk_pipeline_names(id self, SEL _cmd)
 			}
 		}
 		hm_vk_names = [names copy];
-		hm_print("VectorKit's pipeline library was asked for its names: %lu are given (vkn=1)\n",
+		hm_vk_log("VectorKit's pipeline library was asked for its names: %lu are given (vkn=1)\n",
 			 (unsigned long)[hm_vk_names count]);
 	}
 	return hm_vk_names;
@@ -2757,13 +2790,13 @@ hm_vk_note_library(id device, NSString *path, id library)
 	}
 	method = class_getInstanceMethod(object_getClass(library), byName);
 	if (method == NULL) {
-		hm_print("VectorKit's pipeline library (%s) does not answer newRenderPipelineStateWithName:options:reflection:error:\n",
+		hm_vk_log("VectorKit's pipeline library (%s) does not answer newRenderPipelineStateWithName:options:reflection:error:\n",
 			 object_getClassName(library));
 		return;
 	}
 	hm_vk_by_name = method_getImplementation(method);
 	class_replaceMethod(object_getClass(library), byName, (IMP)hm_vk_new_pipeline, method_getTypeEncoding(method));
-	hm_print("VectorKit's pipeline library opened: %lu pipelines described, none precompiled for this GPU; its by-name "
+	hm_vk_log("VectorKit's pipeline library opened: %lu pipelines described, none precompiled for this GPU; its by-name "
 		 "lookups are answered from its functions here\n", (unsigned long)[hm_vk_pairs count]);
 	if (hm_lib_by_pipeline_library == NULL) {
 		SEL withLibrary = @selector(newFunctionWithName:constantValues:pipelineLibrary:error:);
@@ -2773,7 +2806,7 @@ hm_vk_note_library(id device, NSString *path, id library)
 		if (libraryMethod != NULL) {
 			hm_lib_by_pipeline_library = method_getImplementation(libraryMethod);
 			class_replaceMethod(libraryClass, withLibrary, (IMP)hm_lib_function, method_getTypeEncoding(libraryMethod));
-			hm_print("VectorKit's function road (constant values and a pipeline library) is answered at _MTLLibrary too\n");
+			hm_vk_log("VectorKit's function road (constant values and a pipeline library) is answered at _MTLLibrary too\n");
 		}
 	}
 	if (hm_boot_arg_int("vkn", 0) == 1) {
@@ -2783,7 +2816,7 @@ hm_vk_note_library(id device, NSString *path, id library)
 		if (namesMethod != NULL) {
 			class_replaceMethod(object_getClass(library), names, (IMP)hm_vk_pipeline_names,
 					    method_getTypeEncoding(namesMethod));
-			hm_print("VectorKit's pipeline library's names are answered here too (vkn=1)\n");
+			hm_vk_log("VectorKit's pipeline library's names are answered here too (vkn=1)\n");
 		}
 	}
 }
@@ -3953,10 +3986,10 @@ hm_describe_function(id f)
 
 	if (name != nil && values != nil) {
 		function = hm_vk_function_values(name, values, &why);
-		hm_print("VectorKit's function %s, asked with constants and a pipeline library: %s\n", [name UTF8String],
+		hm_vk_log("VectorKit's function %s, asked with constants and a pipeline library: %s\n", [name UTF8String],
 			 function != nil ? "compiled from its metallib" : "not in its metallib");
 	} else {
-		hm_print("VectorKit's function %s: asked with %s, %s\n", [name UTF8String],
+		hm_vk_log("VectorKit's function %s: asked with %s, %s\n", [name UTF8String],
 			 values != nil ? "constant values" : "no constant values",
 			 library != nil ? "a pipeline library" : "no pipeline library");
 	}
