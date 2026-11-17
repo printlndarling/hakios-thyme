@@ -901,6 +901,92 @@ empty_tree(const char *path, int depth)
 	close(fd);
 }
 
+/* mkdir -p: every missing directory of PATH (an existing last one is fine; EEXIST is 17) */
+static int
+mkdir_p(const char *path)
+{
+	char buf[512];
+	size_t n = strlen(path);
+
+	if (n >= sizeof(buf)) {
+		return -1;
+	}
+	memcpy(buf, path, n + 1);
+	for (char *p = buf + 1; *p != 0; p++) {
+		if (*p != '/') {
+			continue;
+		}
+		*p = 0;
+		if (mkdir(buf, 0755) != 0 && errno != 17) {
+			return -1;
+		}
+		*p = '/';
+	}
+	if (mkdir(buf, 0755) != 0 && errno != 17) {
+		return -1;
+	}
+	return 0;
+}
+
+/*
+ * The metallibs this system image carries for the frameworks that load one (QuartzCore's default.metallib, and
+ * the pipeline libraries' beside their .pipelinelib): the window server reads them with Metal's own file access,
+ * which on some boots cannot see the image's /redwood -- open answers ENOENT -- and backboardd then aborts in a
+ * loop with the screen black (logs/081114-run.log and 082608-run.log; three boots of eight).  This process is not
+ * sandboxed and has the image mounted, so the files are copied into /private/var/tmp/hakios-ca, which every boot's
+ * window server reads; inject.c answers CoreAnimation's lookup with that copy and the plug-in looks there first.
+ */
+static void
+seed_carried_metallibs(void)
+{
+	static const char *const rel[] = {
+		"System/Library/PrivateFrameworks/RenderBox.framework/default.metallib",
+		"System/Library/PrivateFrameworks/VectorKit.framework/metal_libraries/AlloyCommonLibrary.metallib",
+		"System/Library/PrivateFrameworks/VectorKit.framework/default.metallib",
+		"System/Library/PrivateFrameworks/TextInputUI.framework/default.metallib",
+		"System/Library/PrivateFrameworks/SiriUICore.framework/default.metallib",
+		"System/Library/PrivateFrameworks/LocalAuthenticationPrivateUI.framework/default.metallib",
+		"System/Library/PrivateFrameworks/ActivityRingsUI.framework/default.metallib",
+		"System/Library/PrivateFrameworks/PassKitUIFoundation.framework/default.metallib",
+		"System/Library/Frameworks/PencilKit.framework/default.metallib",
+	};
+	const char *base = "/private/var/tmp/hakios-ca";
+	char to[512], dir[512];
+	int seeded = 0, failed = 0;
+
+	mkdir_p(base);
+	strcpy(to, join(base, "/QuartzCore-default.metallib", ""));
+	if (copy_file(in_image("/share/ca-share/QuartzCore-default.metallib"), to, 0644, 0, 0)) {
+		seeded++;
+	} else {
+		failed++;
+		printf("  %s: %s\n", to, strerror(errno));
+	}
+	for (unsigned i = 0; i < sizeof(rel) / sizeof(rel[0]); i++) {
+		size_t cut;
+
+		strcpy(dir, join(base, "/metallibs/", rel[i]));
+		cut = strlen(dir);
+		while (cut > 0 && dir[cut - 1] != '/') {
+			cut--;
+		}
+		dir[cut] = 0;
+		if (mkdir_p(dir) != 0) {
+			failed++;
+			printf("  %s: %s\n", dir, strerror(errno));
+			continue;
+		}
+		strcpy(to, join(base, "/metallibs/", rel[i]));
+		if (copy_file(in_image(join("/share/ca-metallibs/", rel[i], "")), to, 0644, 0, 0)) {
+			seeded++;
+		} else {
+			failed++;
+			printf("  %s: %s\n", to, strerror(errno));
+		}
+	}
+	printf("  %d metallibs seeded in %s%s\n", seeded, base, failed != 0 ? ", some failed" : "");
+}
+
 static void
 mount_writable(void)
 {
@@ -978,6 +1064,9 @@ mount_writable(void)
 	}
 	printf("  %d directories, %d files\n", made, files);
 	check(ok && made > 50, "create the directories of the data volume");
+	if (ok) {
+		seed_carried_metallibs();
+	}
 
 	/*
 	 * and the package manager's prefix, when the image was built with one (tools/mk-jb.sh): /jb of

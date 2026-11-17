@@ -4348,8 +4348,19 @@ at the same steps.  What differs is the read of that one compressed file at that
 one moment -- it is `[decmpfs 4]` in the image, where the plug-in's own binary
 is not.
 
-`inject.c` now copies the carried metallib into `/private/var/tmp/hakios-ca/`
-with ordinary read/write and answers that URL instead, saying the copy's size, or
-the errno when it cannot; Metal then reads a plain file on the memory file
-system, not the image's compressed one.  The next scenes' boots are the test:
-with the copy, the loop should be gone on every boot, good or bad before.
+The bad boot's tell is sharper than that: a copy attempt made from inside
+backboardd (`inject.c`, scene `metal650maps14`) opened the same path and answered
+**ENOENT (errno 2)** -- the file is in the mounted image (the loader received the
+whole 0x2f31000-byte payload in every run, and init itself runs as
+`/redwood/sbin/init`), yet that process cannot see it.  The window server's
+access to the image's files is what fails on those boots, not the file.
+
+So the files are brought into a path the window server always has: init
+(`userland/src/init.c`, `seed_carried_metallibs`) -- unsandboxed, with the image
+mounted -- copies CoreAnimation's metallib and the nine carried framework
+metallibs into `/private/var/tmp/hakios-ca/` right after it creates the data
+volume's directories; `inject.c` answers CoreAnimation's lookup with the seeded
+copy when it is there (and says whether it is), and the plug-in's two carried
+metallib lookups ask `/private/var/tmp/hakios-ca/metallibs` before
+`/redwood/share/ca-metallibs`.  The next scenes' boots are the test: with the
+copy, the loop should be gone on every boot, good or bad before.

@@ -1467,37 +1467,43 @@ metallib_answer(id self, id name, id extension, id found)
 			int in = -1, out = -1, rc = -1;
 
 			tried = 1;
-			mkdir("/private/var/tmp/hakios-ca", 0777);
+			/* init copies this file into /private/var before launchd starts (init.c: seed_carried_metallibs):
+			 * the image's /redwood is not readable from here on some boots (open ENOENT) */
 			snprintf(copy, sizeof(copy), "/private/var/tmp/hakios-ca/%s",
 			    slash != NULL && slash[1] != 0 ? slash + 1 : "default.metallib");
-			in = open(ca_metallib, O_RDONLY);
-			if (in >= 0) {
-				out = open(copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				if (out >= 0) {
-					char buf[65536];
-					ssize_t n;
-
-					rc = 0;
-					while ((n = read(in, buf, sizeof(buf))) > 0) {
-						if (write(out, buf, (size_t) n) != n) {
-							rc = -1;
-							break;
-						}
-					}
-					if (n < 0) {
-						rc = -1;
-					}
-					close(out);
-				}
-				close(in);
-			}
-			if (rc == 0 && stat(copy, &st) == 0) {
-				say("hakios: %s: ca_metallib copied to %s: %lld bytes\n", getprogname(), copy,
+			if (stat(copy, &st) == 0) {
+				say("hakios: %s: ca_metallib is the seeded copy %s (%lld bytes)\n", getprogname(), copy,
 				    (long long) st.st_size);
 			} else {
-				say("hakios: %s: ca_metallib %s could not be copied (errno %d); answering it as it is\n",
-				    getprogname(), ca_metallib, errno);
-				snprintf(copy, sizeof(copy), "%s", ca_metallib);
+				in = open(ca_metallib, O_RDONLY);
+				if (in >= 0) {
+					out = open(copy, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+					if (out >= 0) {
+						char buf[65536];
+						ssize_t n;
+
+						rc = 0;
+						while ((n = read(in, buf, sizeof(buf))) > 0) {
+							if (write(out, buf, (size_t) n) != n) {
+								rc = -1;
+								break;
+							}
+						}
+						if (n < 0) {
+							rc = -1;
+						}
+						close(out);
+					}
+					close(in);
+				}
+				if (rc == 0 && stat(copy, &st) == 0) {
+					say("hakios: %s: ca_metallib copied to %s: %lld bytes\n", getprogname(), copy,
+					    (long long) st.st_size);
+				} else {
+					say("hakios: %s: ca_metallib %s could not be copied (errno %d); answering it as it is\n",
+					    getprogname(), ca_metallib, errno);
+					snprintf(copy, sizeof(copy), "%s", ca_metallib);
+				}
 			}
 		}
 		text = ((id (*)(Class, SEL, const char *))objc_msgSend)(objc_getClass("NSString"),
