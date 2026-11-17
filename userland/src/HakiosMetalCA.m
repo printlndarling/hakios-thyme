@@ -4044,14 +4044,21 @@ hm_describe_function(id f)
 {
 	static unsigned said;
 
-	if (path != nil && hm_vk_pairs != nil && [path rangeOfString:@"VectorKit.framework"].location != NSNotFound &&
-	    [[path lastPathComponent] isEqualToString:@"functions"]) {
-		id library = hm_vk_function_library();
+	if (path != nil && hm_vk_pairs != nil && [path rangeOfString:@"VectorKit.framework"].location != NSNotFound) {
+		NSString *leaf = [path lastPathComponent];
+		BOOL archive = [leaf isEqualToString:@"functions"];
+		BOOL missing = [leaf isEqualToString:@"default.metallib"] &&
+			       ![[NSFileManager defaultManager] fileExistsAtPath:path];
 
-		hm_vk_log("a library was asked for at %s (the functions archive): the carried metallib is given instead: %s\n",
-			  [path UTF8String], library != nil ? "it opened" : "it did not");
-		if (library != nil) {
-			return [library retain];
+		if (archive || missing) {
+			id library = hm_vk_function_library();
+
+			hm_vk_log("a library was asked for at %s (%s): the carried metallib is given instead: %s\n", [path UTF8String],
+				  archive ? "the functions archive" : "missing beside the app",
+				  library != nil ? "it opened" : "it did not");
+			if (library != nil) {
+				return [library retain];
+			}
 		}
 	}
 	if (said++ < 12) {
