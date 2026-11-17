@@ -26,7 +26,7 @@ stamp = (2020, 1, 1, 0, 0, 0)
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
     for root, dirs, files in os.walk(app):
         dirs.sort()
-        rel = os.path.relpath(root, base)
+        rel = os.path.join('Payload', os.path.relpath(root, base))
         info = zipfile.ZipInfo(rel + '/')
         mode = os.stat(root).st_mode
         info.external_attr = ((mode & 0xFFFF) << 16) | 0x10
