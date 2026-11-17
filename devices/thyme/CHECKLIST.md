@@ -4363,6 +4363,20 @@ loader's own prefix (the kernel version string included) leaves less room than
 the payload's 378 characters suggest.  The arguments that matter (`ca_metallib`
 whole) were intact.
 
+The probe answers the next question (scene `pipetest`, run `094819`, captured in
+`logs/094819-pipetest-captured.log`): the library opens as `_MTLPipelineLibrary`,
+but every name the descriptions list answers nil -- "render pipeline
+default_DaVinci::ground_base_vertex_909AB... not found in pipelineLibrary" -- so
+the by-name road is a lookup with no build-on-demand; what is not precompiled
+for this GPU is simply absent.  The other pieces are there: VectorKit's
+`default.metallib` opens as `_MTLLibrary`, and `DaVinci::ground_base_vertex`
+(23,296 bytes of AIR), `Grid::grid_fragment` (6,640) and
+`DaVinci::ground_fragment` (35,632) all answer `newFunctionWithName:`.  So a
+pipeline for Maps has to be built from those functions and the description's
+state, not looked up by name; `pipelinelib_test` now also asks the library for
+`pipelineNames` and builds a Grid pipeline from the two plain functions, to tell
+which of those two roads this runtime can take.
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn

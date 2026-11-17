@@ -1,0 +1,7 @@
+# The pipeline library Maps cannot draw from (RC_JOBS=rc.jobs.pipetest): VectorKit's iphoneos.pipelinelib
+# has no compiled pipeline for this GPU and a 0-byte functions archive, and Metal refuses the library before
+# any pipeline is asked for.  src/pipelinelib_test.m asks Metal step by step: does the library open through
+# the mirror's empty LPPM cache, which of its named pipelines build, and are the base functions of its
+# default.metallib there to build them from.  See HakiosMetalCA.m, -newPipelineLibraryWithFilePath:error:.
+/redwood/bin/rwtouch wait 25
+/redwood/bin/pipelinelib_test

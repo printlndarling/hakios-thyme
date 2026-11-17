@@ -256,6 +256,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -Wno-deprecated-declarations -framework Foundation -framework CoreGraphics \
 			-framework CoreImage -framework IOKit -framework Metal -framework OpenGLES \
 			-lMobileGestalt -o obj/metal_test src/metal_test.m
+		# what Metal makes of VectorKit's pipeline library: nil, a library with nil pipelines, or built ones
+		# (src/pipelinelib_test.m; RC_JOBS=rc.jobs.pipetest)
+		$DYN -framework Foundation -framework Metal -o obj/pipelinelib_test src/pipelinelib_test.m
 		# what CoreAnimation and UIKit believe the screen's frame rate is (src/fps_info.m)
 		$DYN -fobjc-arc -framework Foundation -framework QuartzCore -o obj/fps_info src/fps_info.m
 		$DYN -o obj/shm_test src/shm_test.c
@@ -474,6 +477,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/killby ] && cp obj/killby root/bin/
 	[ -f obj/font_test ] && cp obj/font_test root/bin/
 	[ -f obj/metal_test ] && cp obj/metal_test root/bin/
+	[ -f obj/pipelinelib_test ] && cp obj/pipelinelib_test root/bin/
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
