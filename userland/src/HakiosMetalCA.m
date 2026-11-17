@@ -2594,7 +2594,7 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	id vertex, fragment;
 	MTLRenderPipelineDescriptor *descriptor;
 	NSError *why = nil;
-	int depth;
+	int depth, explicitColor;
 
 	if (pipeline != nil) {
 		return pipeline;
@@ -2632,19 +2632,33 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	descriptor.label = name;
 	descriptor.vertexFunction = vertex;
 	descriptor.fragmentFunction = fragment;
-	/* until pipelines.desc's own attachment state is decoded: one colour attachment, no depth, one sample,
-	 * unless the boot changes it (vkc/vkd/vks).  The map canvas itself is BGRA8_sRGB (81) with a 4-sample
-	 * Depth32Float_Stencil8 (260) -- what a run tries once a plain pipeline has drawn */
-	descriptor.colorAttachments[0].pixelFormat = (MTLPixelFormat)hm_boot_arg_int("vkc", 80);
-	depth = hm_boot_arg_int("vkd", 0);
+	/* Until pipelines.desc's own attachment state is decoded: the map canvas's own kinds first -- BGRA8_sRGB
+	 * (81) with a 4-sample Depth32Float_Stencil8 (260), which is what VectorKit's colour and depth textures
+	 * were -- and if this runtime's compiler refuses that, one plain BGRA8 target with no depth.  A boot can
+	 * name any of them: vkc=/vkd=/vks= (hm_boot_arg_int above). */
+	explicitColor = hm_boot_arg_int("vkc", 0);
+	descriptor.colorAttachments[0].pixelFormat = (MTLPixelFormat)(explicitColor != 0 ? explicitColor : 81);
+	depth = hm_boot_arg_int("vkd", explicitColor != 0 ? 0 : 260);
 	if (depth != 0) {
 		descriptor.depthAttachmentPixelFormat = (MTLPixelFormat)depth;
 		descriptor.stencilAttachmentPixelFormat = (MTLPixelFormat)depth;
 	}
-	descriptor.rasterSampleCount = (NSUInteger)MAX(hm_boot_arg_int("vks", 1), 1);
+	descriptor.rasterSampleCount = (NSUInteger)MAX(hm_boot_arg_int("vks", explicitColor != 0 ? 1 : 4), 1);
+	pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];
+	if (pipeline == nil && explicitColor == 0) {
+		descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		descriptor.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+		descriptor.stencilAttachmentPixelFormat = MTLPixelFormatInvalid;
+		descriptor.rasterSampleCount = 1;
+		why = nil;
+		pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];
+		if (said++ < 60) {
+			hm_print("VectorKit's pipeline %s: the canvas's kinds did not compile; the plain one %s\n", [name UTF8String],
+				 pipeline != nil ? "did" : "did not");
+		}
+	}
 	[vertex release];
 	[fragment release];
-	pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];
 	if (said++ < 60) {
 		hm_print("VectorKit's pipeline %s: not in the library; built from %s + %s: %s%s\n", [name UTF8String],
 			 [vertexBase UTF8String], [fragmentBase UTF8String], pipeline != nil ? "it compiled" : "it did not",
