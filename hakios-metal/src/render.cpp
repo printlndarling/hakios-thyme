@@ -948,7 +948,11 @@ void depthClearStream(pm4::Stream& stream, const Texture& depth, double clearDep
 // SOLID_C0, FMT6_8_UINT through R2D_INT8, TILE6_3 as the plane is laid out), then the colour CCU and the depth CCU
 // cleaned -- the depth CCU holds stencil -- and the depth one invalidated, as depthClearStream does
 void stencilClearStream(pm4::Stream& stream, const Texture& t, uint32_t value, uint64_t table) {
-    const uint32_t W = t.width(), H = t.height();
+    // (a multisample plane is filled as the wider texture its memory is -- every sample of every pixel the value, one
+    // byte each: the width its pitch holds, the rows counted to the plane's 32, as s8Bytes lays it out)
+    const bool whole = t.samples() > 1;
+    const uint32_t W = whole ? uint32_t(t.stencilPitch()) : t.width();
+    const uint32_t H = whole ? (t.height() + 31) / 32 * 32 : t.height();
     const uint32_t blit = rb2dBlitCntlClear(FMT6_8_UINT, R2D_INT8);
     const uint64_t at = t.gpuAddress() + t.stencilOffset();
     reg(stream, REG_A6XX_RB_2D_UNKNOWN_8C01, 0);
@@ -1053,11 +1057,8 @@ bool checkTarget(const RenderPass& pass, std::string* why) {
         if ((d.usage() & kTextureUsageRenderTarget) == 0) {
             return refuse(why, "the depth texture was made without render-target usage (MTLTextureUsageRenderTarget, 4)");
         }
-        if (pass.stencil != nullptr && d.samples() > 1 && d.info().stencil) {
-            // (the texture's S8 plane is laid out apart for one sample: a multisample one is depth alone here)
-            return refuse(why, std::string("a stencil attachment beside a multisample ") + d.info().name +
-                                   " texture: the S8 plane's multisample layout is not laid out here");
-        }
+        // (a multisample Depth32Float_Stencil8's S8 plane is laid out with its samples side by side, like its depth plane:
+        // the stencil attachment of a multisample pass is served -- VectorKit's clear pass asks for exactly that)
         const Attachment c = attachmentOf(pass, 0).texture != nullptr ? attachmentOf(pass, 0) : Attachment{nullptr, 0, LoadAction::kLoad, StoreAction::kStore, nullptr, 0};
         if (pass.depthLevel >= d.levels()) {
             return refuse(why, "the depth attachment names mip level " + n(pass.depthLevel) + " of a texture of " + n(d.levels()));

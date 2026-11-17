@@ -368,9 +368,9 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
                         ": one level of an uncompressed colour format or a depth format, a render target (4) alone, is served");
         return false;
     }
-    // (a multisample Depth32Float_Stencil8 is laid out as its depth plane alone: the S8 plane's multisample layout is not
-    // here, so a pass that binds the stencil plane of one is refused at the pass -- Maps asks for this texture, and its
-    // render target is depth only)
+    // (a multisample Depth32Float_Stencil8 is its depth plane and, after it, the S8 plane of the same multisample memory:
+    // the samples side by side, one byte each, laid out as s8Bytes lays a plane -- Maps' clear pass binds that stencil
+    // plane, and VectorKit refuses to draw without it)
     // (a slice texture is sampled or stored by a kernel, and may be drawn into a slice at a time: the slices are 2D layouts
     // like any target, and a kernel's store reaches slice z through the storage view's ARRAY_PITCH -- a 1D array's
     // through its rows, storageDescriptor says why. A cube is not stored: a kernel addressing one is refused at its
@@ -400,6 +400,11 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
         const uint64_t cpp = uint64_t(info->bytesPerPixel) * desc.samples;
         pitch = (uint64_t(desc.width) * cpp + 64 * cpp - 1) / (64 * cpp) * (64 * cpp);
         bytes = ((uint64_t(desc.height) + 15) / 16 * 16 * pitch + 4095) / 4096 * 4096;
+        // ...and a stencil plane beside it, the S8 plane of the same multisample memory: the samples side by side as
+        // the depth's are, one byte each, 128-byte pitch rows and rows counted to 32 (s8Bytes), after the depth plane
+        if (info->stencil) {
+            bytes += s8Bytes(desc.width * desc.samples, desc.height);
+        }
     }
     *infoOut = info;
     *pitchOut = pitch;
@@ -527,10 +532,22 @@ bool regionFits(const Texture& t, uint32_t level, uint32_t x, uint32_t y, uint32
 }
 }  // namespace
 
-uint64_t Texture::depthPlaneBytes() const { return info_->depth ? depthBytes(*info_, desc_.width, desc_.height) : buffer_->length(); }
+uint64_t Texture::depthPlaneBytes() const {
+    if (!info_->depth) return buffer_->length();
+    if (desc_.samples > 1) {
+        // the multisample depth plane plan() laid out: its pitch over the samples side by side, rows counted to 16
+        const uint64_t cpp = uint64_t(info_->bytesPerPixel) * desc_.samples;
+        const uint64_t pitch = (uint64_t(desc_.width) * cpp + 64 * cpp - 1) / (64 * cpp) * (64 * cpp);
+        return ((uint64_t(desc_.height) + 15) / 16 * 16 * pitch + 4095) / 4096 * 4096;
+    }
+    return depthBytes(*info_, desc_.width, desc_.height);
+}
 uint64_t Texture::stencilOffset() const { return info_->stencil ? depthPlaneBytes() : 0; }
-uint64_t Texture::stencilPitch() const { return info_->stencil ? s8Pitch(desc_.width) : 0; }
-uint64_t Texture::stencilPlaneBytes() const { return info_->stencil ? s8Bytes(desc_.width, desc_.height) : 0; }
+// the S8 plane's memory: as wide as the pixels' samples side by side (a multisample plane's, one byte a sample)
+uint64_t Texture::stencilPitch() const { return info_->stencil ? s8Pitch(desc_.samples > 1 ? desc_.width * desc_.samples : desc_.width) : 0; }
+uint64_t Texture::stencilPlaneBytes() const {
+    return info_->stencil ? s8Bytes(desc_.samples > 1 ? desc_.width * desc_.samples : desc_.width, desc_.height) : 0;
+}
 
 TextureLevel Texture::level(uint32_t l) const {
     if (surface_ != 0 || desc_.mipLevels <= 1) return TextureLevel{0, pitch_, desc_.width, desc_.height};
