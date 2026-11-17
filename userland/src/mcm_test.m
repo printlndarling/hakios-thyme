@@ -7,6 +7,7 @@
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#include <dlfcn.h>
 
 typedef id (*ContainerFn)(id, SEL, NSString *, BOOL, BOOL *, NSError **);
 
@@ -32,6 +33,15 @@ main(int argc, char *argv[])
 		SEL selector = sel_registerName("containerWithIdentifier:createIfNecessary:existed:error:");
 
 		printf("mcm_test: identifier %s\n", identifier.UTF8String);
+		if (cls == NULL) {
+			/* The class is only in the process once its image is loaded; a program that
+			 * merely looks it up has not linked the private framework, so load it by path. */
+			const char *path = "/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager";
+			void *handle = dlopen(path, RTLD_NOW);
+
+			printf("mcm_test: dlopen %s -> %s\n", path, handle != NULL ? "ok" : dlerror());
+			cls = objc_getClass("MCMAppContainer");
+		}
 		if (cls == NULL) {
 			printf("mcm_test: MCMAppContainer is not there\n");
 			return 1;

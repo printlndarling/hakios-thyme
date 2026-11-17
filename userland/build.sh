@@ -305,7 +305,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -framework CoreFoundation -o obj/setup_seed src/setup_seed.c
 		# whether MobileContainerManager can make an app container at all, which is what
 		# TrollStore's IPA install stands on (src/mcm_test.m; rc.jobs.mcmtest)
-		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/mcm_test src/mcm_test.m
+		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/mcm_test src/mcm_test.m &&
+			{ ${LDID:-ldid} -Ssrc/mcm_test.entitlements obj/mcm_test 2>/dev/null ||
+			  echo "build.sh: no ldid: mcm_test is unsigned, and MobileContainerManager will answer 98"; }
 		# the smallest application that can ask for a position: a bundle identifier and a
 		# usage description, which a command line program has not (src/LocProbe.m)
 		mkdir -p obj/LocProbe.app &&
