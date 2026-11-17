@@ -1,15 +1,15 @@
 # RC_JOBS=rc.jobs.wirelessstore: the full daily-driver image, Wi-Fi first, then the store.
 #
 # Built by devices/thyme/build-root.sh (REST=1 BLUETOOTH=1 ADSP=1 GL=1) so every driver and
-# daemon of the daily image is present.  The first half is rc.jobs.wirelessfull's network gate:
-# join, DHCP, an address -- without that nothing can be downloaded, which is the mistake this
-# scene exists to prevent.  Then TrollStore is installed and its own container seeded (the MCM
-# finding), and the IPA is handed to it; finally Settings is opened on Wi-Fi and Bluetooth so the
-# two radios show what they found.  Screenshots come from outside (xl screenshot).
+# daemon of the daily image is there; check-root.py refuses the image otherwise.  The first half
+# is rc.jobs.wirelessfull's network gate (join, DHCP, an address) because without a link nothing
+# can be downloaded.  Then TrollStore is installed: its own MCM container is seeded (mcm_test) and
+# the IPA is installed by the helper directly -- the tap-plus-file-URL hand-off did not open the
+# store in the 23:51 run, while the helper returns 0 (logs/225723-run.log).  A Safari success
+# page and the two radio panes follow, and a home screen sits before all of it for the wallpaper.
 /redwood/bin/loc_test enable
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network
 /redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
-/redwood/bin/battery_test open https://www.apple.com/library/test/success.html
 /redwood/bin/rwtouch wait 30
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
 /redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
@@ -19,17 +19,16 @@
 /var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
 /var/jb/usr/bin/cp /redwood/fw/ipa/LocProbe.ipa /private/var/tmp/LocProbe.ipa
 /var/jb/usr/bin/chmod 644 /private/var/tmp/LocProbe.ipa
-/redwood/bin/rwtouch wait 5
-/redwood/bin/rwtouch tap 0.886 0.62
-/redwood/bin/rwtouch wait 25
-/var/jb/usr/bin/uiopen --url file:///private/var/tmp/LocProbe.ipa
-/redwood/bin/rwtouch wait 30
-/var/jb/usr/bin/cat /private/var/tmp/inst.log
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 20
 /var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/tstore.txt
-/var/jb/usr/bin/cat /private/var/tmp/tstore.txt
 /var/jb/usr/bin/uicache -a
 /var/jb/usr/bin/uiopen --bundleid com.hakios.locprobe
 /redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uiopen --url file:///private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 20
+/redwood/bin/battery_test open https://www.apple.com/library/test/success.html
+/redwood/bin/rwtouch wait 25
 /redwood/bin/battery_test open prefs:root=WIFI
 /redwood/bin/rwtouch wait 20
 /redwood/bin/battery_test open prefs:root=Bluetooth
@@ -37,5 +36,6 @@
 /redwood/bin/net_test resolve www.baidu.com
 /redwood/bin/net_test tcp www.baidu.com 443
 /redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/cat /private/var/tmp/tstore.txt
 /var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/tstore.txt
 /var/jb/usr/bin/cat /private/var/tmp/tstore.txt

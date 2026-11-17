@@ -4965,3 +4965,29 @@ The store's UI route (TrollStore's own window, + or a file URL) is still unteste
 The touch screen itself was up in that same boot: `hakios: input: touch screen service 0x1538e60c0`,
 `backboardd [TouchEvents] init: <BKDirectTouchState: ... touchScreen; builtin>` and
 `hakios: input: touch detection mode 0xff`; the scene's injected taps reached SpringBoard.
+
+### The full-driver image with Wi-Fi and Bluetooth, and the store on top (2026-11-17, late)
+
+The lesson the user made explicit: test images must carry every driver.  `devices/thyme/build-root.sh`
+(SCENE=wirelessstore) builds the canonical image -- REST=1, BLUETOOTH=1, ADSP=1, GL=1, and
+check-root.py refuses an image that lost any of them (12,028 blocks, `a6725f3e`; the scene later
+gained the direct helper install, `b192f3a8`).  Verified on the phone (`logs/235104-run.log`,
+`logs/full-1.png`, `logs/full-4.png`):
+
+- Wi-Fi **joined**: "the network is joined ... 12,842 frames sent ... 53,408 received"; DHCP gave
+  en0 an address; `net_test resolve www.baidu.com` answered 183.2.172.177 in 0.02 s and TCP 443
+  connected in 0.05 s; Safari rendered apple.com's "Success" page (`logs/full-1.png`).
+- Bluetooth: Settings > Bluetooth is on and the phone is "discoverable as HakiOS Mi 10S"
+  (`logs/full-4.png`); the QCA launch set and the H4 transport are the canonical ones.
+- The store: TrollStore's own MCM container was seeded (mcm_test copied the app and ldid in,
+  `logs/235104-run.log` line 8955 ff.).  The icon tap + file-URL hand-off did **not** open
+  TrollStore that boot (no `Successfully spawned TrollStore`), so the scene now installs the IPA
+  through the helper directly -- the route proven to return 0 (`logs/225723-run.log`).
+- The home screen before any app was opened is captured at +30 s of the scene, so the wallpaper
+  question (black at 23:32 on an ad-hoc image) can be answered from the same run.
+
+Store choice, for the record: TrollStore installs local IPA files (no download source of its own);
+Sileo is the package manager that downloads from repositories over the now-working Wi-Fi
+(apt fetched the Procursus index in earlier sessions).  AltStore Classic and SideStore need Apple
+ID signing with a computer-side server / pairing file and a MobileDevice stack this port does not
+carry, so they are not usable here.
