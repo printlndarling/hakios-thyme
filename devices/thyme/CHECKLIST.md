@@ -4376,3 +4376,13 @@ lookups ask the seeded trees first.  ram.args is back to the proven 268-characte
 set (the `wifi_wide=0` this session had added to it is gone again; the run
 scripts pass it when a scene wants it), so the daily line has the margin the
 previous ones did not.
+
+Verified: the next boot with the shortened line (`logs/090448-run.log`, kernel
+`82abf2539d68`, scene `metal650maps16`) drew the whole home screen again
+(`logs/maps16-1.png` at 09:10, `-3.png` at 09:11), Wi-Fi joined in the status
+bar, and its screenshots are 2.4 MB where the cut boots' were 15 KB of black.
+That run's log came back from the loader as 10 MB of binary noise -- the fetch,
+not the boot -- so its `cmdline:` line and the seed messages could not be read;
+the drawn frames are the evidence that the argument was whole.  Maps did not
+come up in that run (the scene's `uiopen` either lost the race with LaunchServices
+or its taps went to the home screen); that is the scene's timing, not the boot.
