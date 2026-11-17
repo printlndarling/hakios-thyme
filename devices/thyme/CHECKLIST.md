@@ -4991,3 +4991,19 @@ Sileo is the package manager that downloads from repositories over the now-worki
 (apt fetched the Procursus index in earlier sessions).  AltStore Classic and SideStore need Apple
 ID signing with a computer-side server / pairing file and a MobileDevice stack this port does not
 carry, so they are not usable here.
+
+### The wallpaper was never missing: it follows the clock (2026-11-18, night)
+
+The user saw a black home screen at 23:xx and thought the wallpaper had gone.  Screenshots of the
+same system image at different hours say otherwise:
+
+- `logs/maps16-1.png` (09:08): bright blue/green/yellow gradient;
+- `logs/app4-2.png` (17:05) and `logs/app5-1.png` (17:22): warm orange/green gradient;
+- `logs/ts-3.png` (21:27) and `logs/map8-2.png` (23:32): the same home screen with a black
+  background (the icon layout is identical).
+
+The iOS 16 default wallpaper is dynamic and darkens with the time of day, which matches the
+progression exactly; all of these are RAM boots of one unchanged `userland/system.apfs`.  So no
+wallpaper regression: the "missing" wallpaper is the night phase.  A fixed full-driver image
+(`root-wirelessstore.apfs` `b192f3a8`) leaves a 30-second home-screen window before any app opens
+so the next run captures it at that hour for the record.
