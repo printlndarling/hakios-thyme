@@ -1,27 +1,19 @@
 # RC_JOBS=rc.jobs.tstore: TrollStore installs an IPA, with the log on the console.
 #
-# What the first device runs taught (logs/212435-run.log, logs/214043-run.log): the helper refuses
-# with 173 -- "the app is not signed with a fake CoreTrust certificate and ldid is not installed" --
-# even with ldid placed in /var/jb/Applications/TrollStore.app, because isLdidInstalled() asks
-# trollStoreAppPath() for it and that is the MCM app container of com.opa334.TrollStore
-# (trollStorePath() -> MCMAppContainer), not the /var/jb copy.
+# The walls so far, in order: the helper answered 173 (ldid not installed) because
+# isLdidInstalled() asks trollStoreAppPath() -- an MCM app container of com.opa334.TrollStore --
+# and there was no container; `install-trollstore` then answered 179 because the system image
+# carries TrollStore.app in /Applications, which LaunchServices counts as an immutable system app
+# and uicache cannot unregister (logs/220354-run.log).
 #
-# So the scene first has the helper install TrollStore itself from its release tar
-# (`install-trollstore`, which skips signing and creates that container), then hk-tsldid.sh puts
-# the arm64 ldid (github.com/opa334/ldid/releases/latest/download/ldid) into the container's
-# bundle, and then the normal IPA install runs.  The UI path follows as before: the same IPA
-# opened as a file URL goes to TrollStore (it claims com.apple.itunes.ipa) and, with
-# installAlertConfiguration = 2, installs without asking.
-#
-# The app being installed is the LocProbe bundle packed by tools/ipa.py; when it appears and opens,
-# TrollStore's IPA path works on this port.
+# What mcm_test proved (logs/223433-run.log): with TrollStore's helper entitlements the MCM app
+# container can be created -- "container created ... /private/var/containers/Bundle/Application/
+# 065D0F44-.../".  So the scene builds TrollStore's container itself (the app plus ldid inside),
+# and the helper then finds both: no install-trollstore, no 179.  The IPA install itself -- sign
+# with ldid, MCM container for the app, mark, register -- is what should follow.
 /redwood/bin/rwtouch wait 35
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
-/var/jb/usr/bin/cp /redwood/share/tstoretar/TrollStore.tar /private/var/tmp/TrollStore.tar
-/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollStore.tar
-/var/jb/Applications/TrollStore.app/trollstorehelper install-trollstore /private/var/tmp/TrollStore.tar
-/redwood/bin/rwtouch wait 25
-/var/jb/bin/sh /redwood/bin/hk-tsldid.sh
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
 /var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
 /var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
 /var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist

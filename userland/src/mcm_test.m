@@ -65,13 +65,42 @@ main(int argc, char *argv[])
 		if (container != nil) {
 			printf("mcm_test: object: %s\n", [container description].UTF8String);
 			SEL urlSelector = sel_registerName("url");
+			NSURL *url = nil;
 
 			if ([container respondsToSelector:urlSelector]) {
-				id url = ((id (*)(id, SEL))[container methodForSelector:urlSelector])(container, urlSelector);
-
+				url = ((id (*)(id, SEL))[container methodForSelector:urlSelector])(container, urlSelector);
 				printf("mcm_test: url: %s\n", [url description].UTF8String);
 			} else {
 				printf("mcm_test: -url is not there\n");
+			}
+
+			/* Optional: put a bundle in the container and files into that bundle, which is how
+			 * TrollStore's own bundle (and its ldid) can be given the container it looks for. */
+			if (argc > 2 && url != nil) {
+				NSFileManager *files = [NSFileManager defaultManager];
+				NSString *source = [NSString stringWithUTF8String:argv[2]];
+				NSString *destination = [url.path stringByAppendingPathComponent:source.lastPathComponent];
+				NSError *copyError = nil;
+
+				[files removeItemAtPath:destination error:NULL];
+				if ([files copyItemAtPath:source toPath:destination error:&copyError]) {
+					printf("mcm_test: copied %s -> %s\n", source.UTF8String, destination.UTF8String);
+				} else {
+					printf("mcm_test: copy of %s failed: %s\n", source.UTF8String, copyError.description.UTF8String);
+				}
+				for (int i = 3; i < argc; i++) {
+					NSString *extra = [NSString stringWithUTF8String:argv[i]];
+					NSString *target = [destination stringByAppendingPathComponent:extra.lastPathComponent];
+
+					copyError = nil;
+					if ([files copyItemAtPath:extra toPath:target error:&copyError]) {
+						printf("mcm_test: copied %s -> %s\n", extra.UTF8String, target.UTF8String);
+					} else {
+						printf("mcm_test: copy of %s failed: %s\n", extra.UTF8String, copyError.description.UTF8String);
+					}
+				}
+				[files setAttributes:@{ NSFilePosixPermissions : @0755 } ofItemAtPath:
+				    [destination stringByAppendingPathComponent:@"ldid"] error:NULL];
 			}
 			return 0;
 		}
