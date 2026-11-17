@@ -75,10 +75,15 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	return YES;
 }
 
-@interface HMapsController : UIViewController <WKNavigationDelegate, WKUIDelegate, CLLocationManagerDelegate>
+@interface HMapsController : UIViewController <WKNavigationDelegate, WKUIDelegate, CLLocationManagerDelegate,
+    UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) WKWebView *web;
 @property (nonatomic, strong) HakiosMapTileView *tileView;
 @property (nonatomic, strong) UIButton *locateButton;
+@property (nonatomic, strong) UITextField *searchField;
+@property (nonatomic, strong) UITableView *resultsTable;
+@property (nonatomic, strong) NSArray<NSDictionary *> *results;
+@property (nonatomic, strong) NSURLSession *searchSession;
 @property (nonatomic, strong) CLLocationManager *manager;
 @property (nonatomic, assign) double latitude;
 @property (nonatomic, assign) double longitude;
@@ -86,6 +91,7 @@ hm_set_bool(id object, NSString *name, BOOL value)
 @property (nonatomic, assign) BOOL pageReady;
 @property (nonatomic, assign) BOOL terminated;
 @property (nonatomic, assign) BOOL fellBack;
+@property (nonatomic, assign) BOOL autoSearch;
 @end
 
 @implementation HMapsController
@@ -138,6 +144,7 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	self.web.opaque = NO;
 	self.web.backgroundColor = [UIColor colorWithWhite:0.91 alpha:1.0];
 	[self.view addSubview:self.web];
+	[self addSearchBar];
 
 	NSString *html = [self pageString];
 
@@ -158,6 +165,169 @@ hm_set_bool(id object, NSString *name, BOOL value)
 		[self.manager requestWhenInUseAuthorization];
 	}
 	[self.manager startUpdatingLocation];
+
+	/* A run cannot type: a scene leaves a query in /private/var/tmp/hmaps-search.txt and the
+	 * search runs by itself three seconds in, so the Nominatim path is exercised end to end. */
+	[NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(autoSearchFired:) userInfo:nil repeats:NO];
+}
+
+- (void)autoSearchFired:(NSTimer *)timer
+{
+	NSString *query = [NSString stringWithContentsOfFile:@"/private/var/tmp/hmaps-search.txt"
+	    encoding:NSUTF8StringEncoding error:NULL];
+
+	(void)timer;
+	query = [query stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	if (query.length == 0) {
+		return;
+	}
+	hm_note(@"auto search: %@", query);
+	self.autoSearch = YES;
+	self.searchField.text = query;
+	[self searchSubmitted];
+}
+
+/* ---------------------------------------------------------------- search (Nominatim) */
+
+- (void)addSearchBar
+{
+	UIControl *padding = [[UIControl alloc] initWithFrame:CGRectMake(0, 0, 12, 40)];
+
+	self.searchField = [[UITextField alloc] initWithFrame:CGRectMake(12, 44, self.view.bounds.size.width - 24, 40)];
+	self.searchField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.96];
+	self.searchField.layer.cornerRadius = 10;
+	self.searchField.placeholder = @"搜索地点（OpenStreetMap）";
+	self.searchField.font = [UIFont systemFontOfSize:16];
+	self.searchField.returnKeyType = UIReturnKeySearch;
+	self.searchField.clearButtonMode = UITextFieldViewModeWhileEditing;
+	self.searchField.leftView = padding;
+	self.searchField.leftViewMode = UITextFieldViewModeAlways;
+	self.searchField.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+	[self.searchField addTarget:self action:@selector(searchSubmitted) forControlEvents:UIControlEventEditingDidEndOnExit];
+	[self.view addSubview:self.searchField];
+
+	self.resultsTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+	self.resultsTable.dataSource = self;
+	self.resultsTable.delegate = self;
+	self.resultsTable.rowHeight = 54;
+	self.resultsTable.hidden = YES;
+	self.resultsTable.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.97];
+	self.resultsTable.layer.cornerRadius = 10;
+	self.resultsTable.separatorInset = UIEdgeInsetsMake(0, 12, 0, 12);
+	[self.view addSubview:self.resultsTable];
+
+	NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
+
+	configuration.HTTPAdditionalHeaders = @{ @"User-Agent" : @"HakiosMaps/1.0 (HakiOS, thyme)" };
+	configuration.timeoutIntervalForRequest = 20;
+	self.searchSession = [NSURLSession sessionWithConfiguration:configuration];
+}
+
+- (void)searchSubmitted
+{
+	NSString *query = [self.searchField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+	if (query.length == 0) {
+		return;
+	}
+	NSString *escaped = [query stringByAddingPercentEncodingWithAllowedCharacters:
+	    [NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSString *address = [NSString stringWithFormat:
+	    @"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=%@", escaped];
+	NSURL *url = [NSURL URLWithString:address];
+
+	hm_note(@"search: %@", query);
+	[self.searchField resignFirstResponder];
+	if (url == nil) {
+		return;
+	}
+	NSURLSessionDataTask *task = [self.searchSession dataTaskWithURL:url
+	    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+		NSArray *items = nil;
+
+		if (data != nil) {
+			id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+
+			if ([json isKindOfClass:[NSArray class]]) {
+				items = json;
+			}
+		}
+		dispatch_async(dispatch_get_main_queue(), ^{
+			self.results = (items != nil) ? items : @[];
+			hm_note(@"search: %lu results (%@)", (unsigned long)self.results.count,
+			    error != nil ? error.localizedDescription : @"ok");
+
+			CGRect field = self.searchField.frame;
+			CGFloat height = MIN(54.0 * (CGFloat)self.results.count, self.view.bounds.size.height - 220);
+
+			self.resultsTable.frame = CGRectMake(field.origin.x, CGRectGetMaxY(field) + 6,
+			    field.size.width, MAX(height, 0));
+			self.resultsTable.hidden = (self.results.count == 0);
+			[self.resultsTable reloadData];
+			[self.view bringSubviewToFront:self.resultsTable];
+
+			/* Nobody can tap in a run: the first hit is taken for the scene. */
+			if (self.autoSearch && self.results.count > 0) {
+				self.autoSearch = NO;
+				hm_note(@"auto search: taking the first hit");
+				[self tableView:self.resultsTable didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+			}
+		});
+	}];
+
+	[task resume];
+}
+
+- (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section
+{
+	(void)table;
+	(void)section;
+	return (NSInteger)self.results.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+	UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"hit"];
+
+	if (cell == nil) {
+		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"hit"];
+	}
+	NSDictionary *item = self.results[(NSUInteger)indexPath.row];
+	id name = item[@"display_name"], type = item[@"type"];
+
+	cell.textLabel.text = [name isKindOfClass:[NSString class]] ? name : @"?";
+	cell.textLabel.font = [UIFont systemFontOfSize:14];
+	cell.textLabel.numberOfLines = 2;
+	cell.detailTextLabel.text = [type isKindOfClass:[NSString class]] ? type : @"";
+	cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
+	return cell;
+}
+
+- (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+	NSDictionary *item = self.results[(NSUInteger)indexPath.row];
+	double latitude = [item[@"lat"] doubleValue];
+	double longitude = [item[@"lon"] doubleValue];
+
+	(void)table;
+	self.resultsTable.hidden = YES;
+	[self.searchField resignFirstResponder];
+	hm_note(@"search: going to %.5f, %.5f", latitude, longitude);
+	[self goToLatitude:latitude longitude:longitude];
+}
+
+- (void)goToLatitude:(double)latitude longitude:(double)longitude
+{
+	if (self.tileView != nil) {
+		[self.tileView setCenterLatitude:latitude longitude:longitude zoom:MAX(15, self.tileView.zoom)];
+		return;
+	}
+	if (self.pageReady && self.web != nil) {
+		NSString *call = [NSString stringWithFormat:@"window.hmapsGo && window.hmapsGo(%.6f, %.6f);",
+		    latitude, longitude];
+
+		[self.web evaluateJavaScript:call completionHandler:nil];
+	}
 }
 
 - (void)fallbackFired:(NSTimer *)timer
@@ -186,7 +356,7 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	self.locateButton.titleLabel.font = [UIFont boldSystemFontOfSize:17];
 	self.locateButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.94];
 	self.locateButton.layer.cornerRadius = 12;
-	self.locateButton.frame = CGRectMake(12, 44, 76, 44);
+	self.locateButton.frame = CGRectMake(12, 92, 76, 44);
 	[self.locateButton addTarget:self action:@selector(locateTapped) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:self.locateButton];
 
@@ -203,7 +373,7 @@ hm_set_bool(id object, NSString *name, BOOL value)
 		button.titleLabel.font = [UIFont boldSystemFontOfSize:22];
 		button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.94];
 		button.layer.cornerRadius = 10;
-		button.frame = CGRectMake(self.view.bounds.size.width - 60, 44 + i * 56, 44, 44);
+		button.frame = CGRectMake(self.view.bounds.size.width - 60, 92 + i * 56, 44, 44);
 		button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
 		[button addTarget:self action:NSSelectorFromString(zoomActions[i]) forControlEvents:UIControlEventTouchUpInside];
 		[self.view addSubview:button];
