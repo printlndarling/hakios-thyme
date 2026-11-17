@@ -653,6 +653,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# is launched from /Applications, read-only; the copy has no twin there
 	cp bin/hk-appjb.sh root/bin/hk-appjb.sh
 	chmod 755 root/bin/hk-appjb.sh
+	# ldid into TrollStore's own MCM container bundle (rc.jobs.tstore)
+	cp bin/hk-tsldid.sh root/bin/hk-tsldid.sh
+	chmod 755 root/bin/hk-tsldid.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand

@@ -1,19 +1,27 @@
 # RC_JOBS=rc.jobs.tstore: TrollStore installs an IPA, with the log on the console.
 #
-# First the helper directly (it is the program TrollStore's UI spawns with a root persona):
-#   trollstorehelper install custom <ipa>
-# runs as root here, prints every step with NSLog (which reaches the console because this job's
-# stderr is the console), and does the real work: sign, MCM app container, LS registration.
-# Then the UI path, for the hand-off as well: the IPA opened as a file URL with uiopen --url goes
-# to TrollStore (the only app that claims com.apple.itunes.ipa; TSSceneDelegate handleURLContexts:),
-# and with installAlertConfiguration = 2 it installs without asking (TSInstallationController
-# presentInstallationAlertIfEnabledForFile:).  Two rounds of the same install are harmless: the
-# second finds the app installed and bails with its own message.
+# What the first device runs taught (logs/212435-run.log, logs/214043-run.log): the helper refuses
+# with 173 -- "the app is not signed with a fake CoreTrust certificate and ldid is not installed" --
+# even with ldid placed in /var/jb/Applications/TrollStore.app, because isLdidInstalled() asks
+# trollStoreAppPath() for it and that is the MCM app container of com.opa334.TrollStore
+# (trollStorePath() -> MCMAppContainer), not the /var/jb copy.
+#
+# So the scene first has the helper install TrollStore itself from its release tar
+# (`install-trollstore`, which skips signing and creates that container), then hk-tsldid.sh puts
+# the arm64 ldid (github.com/opa334/ldid/releases/latest/download/ldid) into the container's
+# bundle, and then the normal IPA install runs.  The UI path follows as before: the same IPA
+# opened as a file URL goes to TrollStore (it claims com.apple.itunes.ipa) and, with
+# installAlertConfiguration = 2, installs without asking.
 #
 # The app being installed is the LocProbe bundle packed by tools/ipa.py; when it appears and opens,
 # TrollStore's IPA path works on this port.
 /redwood/bin/rwtouch wait 35
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/var/jb/usr/bin/cp /redwood/share/tstoretar/TrollStore.tar /private/var/tmp/TrollStore.tar
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollStore.tar
+/var/jb/Applications/TrollStore.app/trollstorehelper install-trollstore /private/var/tmp/TrollStore.tar
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-tsldid.sh
 /var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
 /var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
 /var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
