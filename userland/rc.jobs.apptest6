@@ -1,0 +1,22 @@
+# RC_JOBS=rc.jobs.apptest6: TrollStore again, and iSH as a copy with a bundle id of its own.
+#
+# apptest5 (logs/172052-run.log) proved the graft fix works for TrollStore -- its /Applications
+# copy is already 755, it launched (pid 89) and drew its Apps/Settings window (logs/app5-2.png..-4.png).
+# iSH still failed, but at /Applications/iSH.app/iSH this time: uicache/LS found the preinstalled
+# copy first, and that volume is read-only, so the binary stays 644 and xpcproxy's
+# access(X_OK) says EACCES.  The copy below has a new CFBundleIdentifier and no twin in
+# /Applications, so it is registered and launched from /var/jb/Applications -- the same path a
+# freshly installed IPA would take.  Its Info.plist is carried in the image as
+# /redwood/share/ishjb/ishjb.plist (built on the host from the app's own, XML).
+/redwood/bin/rwtouch wait 35
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/rwtouch wait 3
+/var/jb/bin/sh /redwood/bin/hk-appjb.sh iSH.app iSHjb.app app.ish.iSH.jb /redwood/share/ishjb/ishjb.plist iSH
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uiopen --bundleid app.ish.iSH.jb
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore
+/redwood/bin/rwtouch wait 40
+/var/jb/usr/bin/cat /private/var/tmp/inst.log
+sleep 25
+/var/jb/usr/bin/cat /private/var/tmp/inst.log

@@ -1,0 +1,17 @@
+# RC_JOBS=rc.jobs.apptest2: are TrollStore and iSH registered, and what does uiopen answer?
+# The listing and uiopen's own words go to a file, shown again late in the run where the log ring
+# still holds it; the home screen is swiped to the later pages where their icons would be.
+/redwood/bin/rwtouch wait 25
+/bin/ls /Applications > /private/var/tmp/apps.txt
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore >> /private/var/tmp/apps.txt 2>&1
+sleep 10
+/var/jb/usr/bin/uiopen --bundleid app.ish.iSH >> /private/var/tmp/apps.txt 2>&1
+sleep 10
+/redwood/bin/rwtouch swipe 0.9 0.5 0.1 0.5 300 wait 2 swipe 0.9 0.5 0.1 0.5 300 wait 2 swipe 0.9 0.5 0.1 0.5 300
+/var/jb/usr/bin/cat /private/var/tmp/apps.txt
+sleep 20
+/var/jb/usr/bin/cat /private/var/tmp/apps.txt
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/apps.txt
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/apps.txt

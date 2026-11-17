@@ -1,0 +1,22 @@
+# RC_JOBS=rc.jobs.apptest4: the third-party apps, with their executable bits put back (Python's
+# zipfile unpacked iSH with mode 644, so launchd's access(..., X_OK) failed and xpcproxy exited 78).
+# Copies from the system image's /Applications into the package manager's Applications, chmods the
+# binaries, registers with uicache, opens iSH and then TrollStore; their answers go to a file that
+# is shown again late in the run.
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/mkdir -p /var/jb/Applications
+/var/jb/usr/bin/cp -R /Applications/iSH.app /var/jb/Applications/ >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/cp -R /Applications/TrollStore.app /var/jb/Applications/ >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/chmod 755 /var/jb/Applications/iSH.app/iSH >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/chmod 755 /var/jb/Applications/iSH.app/PlugIns/iSHFileProvider.appex/iSHFileProvider >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/chmod 755 /var/jb/Applications/TrollStore.app/TrollStore /var/jb/Applications/TrollStore.app/PersistenceHelper /var/jb/Applications/TrollStore.app/trollstorehelper >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/ls -l /var/jb/Applications/iSH.app/iSH >> /private/var/tmp/apps3.txt 2>&1
+/var/jb/usr/bin/uicache -a >> /private/var/tmp/apps3.txt 2>&1
+/redwood/bin/rwtouch wait 10
+/var/jb/usr/bin/uiopen --bundleid app.ish.iSH >> /private/var/tmp/apps3.txt 2>&1
+/redwood/bin/rwtouch wait 60
+/var/jb/usr/bin/cat /private/var/tmp/apps3.txt
+sleep 25
+/var/jb/usr/bin/cat /private/var/tmp/apps3.txt
+sleep 25
+/var/jb/usr/bin/cat /private/var/tmp/apps3.txt

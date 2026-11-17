@@ -1,0 +1,8 @@
+# RC_JOBS=rc.jobs.apptest: the third-party applications staged in the package manager's prefix
+# (TrollStore and iSH; build.sh copies them into the system image's /Applications, where
+# LaunchServices finds them at boot).  Opens each of them in turn so a screenshot can be taken.
+/redwood/bin/rwtouch wait 25
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore
+/redwood/bin/rwtouch wait 90
+/var/jb/usr/bin/uiopen --bundleid app.ish.iSH
+/redwood/bin/rwtouch wait 90

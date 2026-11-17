@@ -4741,3 +4741,43 @@ is on:
   104 frames, black-flash/horizontal-band/alternating-flicker detection) is a
   better tool than `xl screenshot` for the transient flicker seen here; a
   candidate for the next display investigation.
+
+### Third-party applications: the store and an App Store app (2026-11-17)
+
+The next daily-use pieces after Maps was set aside: a third-party store, then the
+Chinese map apps the user named, if they run.  Two findings gate both, both found
+in `logs/170310-run.log` while iSH kept failing:
+
+- A scene line ending in ">> FILE 2>&1" loses BOTH the append and its last words.
+  init's `run_command` (src/init.c) understands ">> FILE" only as the line's last
+  two words; with "2>&1" after it, append_to stays NULL and ">>", the path and
+  "2>&1" are passed to the program as arguments.  apps3.txt was never created
+  and the late cats said so.  Scenes now use a shell script for redirection.
+- /var/jb is a graft of the read-only /jb (src/init.c, "the rootless prefix"):
+  the directories are real, every file is a symbolic link.  chmod and cp
+  "into" the bundle therefore write through the link into the read-only volume
+  and fail EROFS, which is why iSH's binary stayed 644 in jb/root/var/jb/...
+  in the image.  xpcproxy's access(..., X_OK) then failed with EACCES.
+
+The working install path is now `userland/bin/hk-appinstall.sh` (copied to
+`/redwood/bin`): it replaces each executable link with a real copy from
+`/Applications` and chmods it, then runs `uicache -a`.  Verified on the phone:
+TrollStore 2.1.1 launches (pid 89, `logs/172052-run.log`) and draws its
+Apps/Settings window (`logs/app5-2.png`..`-4.png`).  For an app the system image
+already carries, LaunchServices finds `/Applications/<app>.app` first and that
+copy cannot be chmod'ed; `hk-appjb.sh` installs a copy with a CFBundleIdentifier
+of its own (`iSHjb.app`, `app.ish.iSH.jb`, its Info.plist carried as
+`/redwood/share/ishjb/ishjb.plist`), so the launch takes the writable path.
+Verified: iSH spawns (pid 76, "Successfully spawned iSH[76]",
+`logs/173118-run.log`), its terminal takes the keyboard (`logs/app6-1.png`), and
+the switcher shows the iSH back item (`logs/app6-3.png`).  That is the path a
+newly-installed IPA takes; the store and the install mechanism now work.
+
+What was NOT done, and why: the user chose "download from public sources" for the
+Baidu/Amap IPAs, but the public pages found are login/VIP-gated, and the only
+other source is decrypted ("砸壳") copies of copyrighted apps -- not something
+this port will fetch.  The replacement being built instead is HakiOS Maps
+(`src/HakiosMaps.m`, `userland/maps/`): a WKWebView over Leaflet and
+OpenStreetMap raster tiles, the same WebKit path Safari already renders here, so
+the screen does not depend on VectorKit at all.  The stock Apps remain installed;
+an IPA the user owns can be installed with TrollStore or the two scripts above.

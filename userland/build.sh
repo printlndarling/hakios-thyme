@@ -307,6 +307,15 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		cp HakiosWeather-Info.plist obj/HakiosWeather.app/Info.plist
 		cp icons/AppIcon60x60@2x.png icons/AppIcon60x60@3x.png obj/HakiosWeather.app/
 		{ ${LDID:-ldid} -S obj/HakiosWeather.app/HakiosWeather 2>/dev/null || true; }
+		# the map screen that does not need VectorKit (src/HakiosMaps.m): WKWebView over the
+		# bundled Leaflet and OpenStreetMap's raster tiles, so Safari's own path draws it
+		mkdir -p obj/HakiosMaps.app
+		$DYN -fobjc-arc -framework Foundation -framework UIKit -framework WebKit -framework CoreLocation \
+			-framework QuartzCore -o obj/HakiosMaps.app/HakiosMaps src/HakiosMaps.m
+		cp HakiosMaps-Info.plist obj/HakiosMaps.app/Info.plist
+		cp maps/index.html maps/leaflet.js maps/leaflet.css maps/LICENSE.leaflet obj/HakiosMaps.app/
+		cp maps/AppIcon60x60@2x.png maps/AppIcon60x60@3x.png obj/HakiosMaps.app/
+		{ ${LDID:-ldid} -S obj/HakiosMaps.app/HakiosMaps 2>/dev/null || true; }
 		# a scene that must not be suspended by the system idle sleep (src/sleep_hold.c)
 		# one URL over NSURLSession, for the TLS-stall question (src/https_test.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/https_test src/https_test.m
@@ -498,6 +507,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		mkdir -p root/fw/hweather
 		cp -R obj/HakiosWeather.app root/fw/hweather/
 	fi
+	# and so does the map screen (src/HakiosMaps.m)
+	if [ -f obj/HakiosMaps.app/HakiosMaps ]; then
+		mkdir -p root/fw/hmaps
+		cp -R obj/HakiosMaps.app root/fw/hmaps/
+	fi
 	[ -f obj/https_test ] && cp obj/https_test root/bin/
 	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
@@ -605,6 +619,14 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			printf 'f\t600\t0\t0\t/private/var/root/.ssh/%s\t/var/root/.ssh/%s\n' $k $k >> root/etc/var.skel
 		done
 	fi
+	# the third-party install helper (rc.jobs.apptest5): a list line cannot carry ">> FILE 2>&1",
+	# and the /var/jb graft's links have to be replaced by real files before an app can exec
+	cp bin/hk-appinstall.sh root/bin/hk-appinstall.sh
+	chmod 755 root/bin/hk-appinstall.sh
+	# and the copy-under-a-new-id helper (rc.jobs.apptest6): an app the system image already carries
+	# is launched from /Applications, read-only; the copy has no twin there
+	cp bin/hk-appjb.sh root/bin/hk-appjb.sh
+	chmod 755 root/bin/hk-appjb.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand

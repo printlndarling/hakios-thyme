@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- HakiOS Maps: Leaflet over OpenStreetMap's raster tiles (src/HakiosMaps.m).  Raster images on
+     WebKit's own path, so nothing here touches VectorKit or its pipeline library. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>HakiOS 地图</title>
+<link rel="stylesheet" href="leaflet.css">
+<style>
+html, body, #map { height: 100%; margin: 0; background: #e9e7e2; }
+body { -webkit-user-select: none; }
+#hud { position: fixed; left: 10px; right: 10px; top: calc(env(safe-area-inset-top, 0px) + 8px);
+       z-index: 1000; display: flex; gap: 8px; pointer-events: none; }
+#hud .pill { pointer-events: auto; background: rgba(255,255,255,.94); border-radius: 12px;
+             padding: 9px 12px; font: 15px -apple-system, "PingFang SC"; color: #222;
+             box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+#hud .status { margin-left: auto; color: #555; }
+#locate { font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud"><div class="pill" id="locate">定位</div><div class="pill status" id="status">打开中…</div></div>
+<script src="leaflet.js"></script>
+<script>
+var here = null;
+var map = L.map('map', { zoomControl: true, attributionControl: true }).setView([34.3416, 108.9398], 12);
+var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+	maxZoom: 19,
+	attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+tiles.on('tileload', function () { setStatus('OpenStreetMap'); });
+tiles.on('tileerror', function () { setStatus('瓦片加载失败'); });
+L.control.scale({ imperial: false }).addTo(map);
+
+function setStatus(text) { document.getElementById('status').textContent = text; }
+
+window.hmapsFix = function (lat, lon) {
+	setStatus('已定位 ' + lat.toFixed(4) + ', ' + lon.toFixed(4));
+	if (!here) {
+		here = L.circleMarker([lat, lon], { radius: 7, weight: 3, color: '#fff', fillColor: '#0a84ff', fillOpacity: 1 }).addTo(map);
+		map.setView([lat, lon], 15);
+	} else {
+		here.setLatLng([lat, lon]);
+	}
+};
+
+document.getElementById('locate').onclick = function () {
+	if (here) { map.setView(here.getLatLng(), 15); }
+};
+</script>
+</body>
+</html>

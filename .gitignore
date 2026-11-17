@@ -61,7 +61,10 @@ __pycache__/
 !/userland/*.py
 !/userland/rc.*
 !/userland/com.hakios.*.plist
+!/userland/*-Info.plist
 !/userland/src/
+!/userland/bin/
+!/userland/maps/
 !/userland/libmini/
 !/userland/var/
 

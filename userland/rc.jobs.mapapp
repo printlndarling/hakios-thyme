@@ -1,0 +1,24 @@
+# RC_JOBS=rc.jobs.mapapp: HakiOS Maps, the Leaflet/OpenStreetMap screen, installed the LocProbe
+# way (copy into /var/jb/Applications, uicache, uiopen) and left up; its own log is cat'd late,
+# and the external screenshot script catches the window.
+#
+# Why a map of our own: Apple Maps' canvas stays black because VectorKit's Metal pipelines are
+# not served yet; the tile images here take the path Safari already renders.
+# The app logs to /private/var/tmp/hmaps.log (and /var/jb/hmaps/maps.log, for which the directory
+# must be world-writable: the app runs as uid 501).
+/redwood/bin/rwtouch wait 35
+/var/jb/usr/bin/mkdir -p /var/jb/Applications /var/jb/hmaps
+/var/jb/usr/bin/chmod 777 /var/jb/hmaps
+/var/jb/usr/bin/cp -R /redwood/fw/hmaps/HakiosMaps.app /var/jb/Applications/
+/var/jb/usr/bin/chmod 755 /var/jb/Applications/HakiosMaps.app/HakiosMaps
+/var/jb/usr/bin/ls -l /var/jb/Applications/HakiosMaps.app >> /var/jb/hmaps/install.log
+/var/jb/usr/bin/uicache -a >> /var/jb/hmaps/install.log
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uiopen --bundleid com.hakios.maps
+/redwood/bin/rwtouch wait 75
+/var/jb/usr/bin/cat /private/var/tmp/hmaps.log
+/var/jb/usr/bin/cat /var/jb/hmaps/maps.log
+sleep 25
+/var/jb/usr/bin/cat /private/var/tmp/hmaps.log
+sleep 25
+/var/jb/usr/bin/cat /private/var/tmp/hmaps.log

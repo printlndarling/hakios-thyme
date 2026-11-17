@@ -1,0 +1,23 @@
+# RC_JOBS=rc.jobs.apptest5: the third-party apps, installed through a real shell this time.
+#
+# What apptest4 showed (logs/170310-run.log): iSH still failed with launchd's
+# access(/var/jb/Applications/iSH.app/iSH, X_OK) -> EACCES.  Two causes, both visible there:
+#  1. a list line's ">> FILE" is only understood as the last two words (src/init.c), so every
+#     line ending in ">> FILE 2>&1" appended nothing and handed ">>", the path and "2>&1" to
+#     the program; /private/var/tmp/apps3.txt was never made, and the cats said so.
+#  2. /var/jb is a graft of the read-only /jb: the files are symlinks, so chmod and cp
+#     "through" them cannot change the executable that stays at mode 644 in /jb.
+# hk-appinstall.sh replaces each link with a real executable copy and chmods that; uicache
+# then registers the bundles and the two apps are opened in turn.  The log is cat'd late,
+# where the loader's log window still has it.
+/redwood/bin/rwtouch wait 35
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh iSH.app app.ish.iSH
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uiopen --bundleid app.ish.iSH
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/cat /private/var/tmp/inst.log
+sleep 30
+/var/jb/usr/bin/cat /private/var/tmp/inst.log
