@@ -5073,3 +5073,28 @@ screenshots `logs/store-1.png`..`-4.png`):
 Honest limit, stated for the record: this makes a store *work*, not the Chinese app ecosystem.
 The six target apps have no lawful unencrypted IPA; we will not use cracked or modified copies of
 them, and the stock App Store cannot run them here (FairPlay).
+
+### TrollApps' install path, read from its source (2026-11-18, after midnight)
+
+The earlier note said TrollApps hands IPAs to TrollStore through `apple-magnifier://`; that is
+only how it updates itself from a source that supplies such a URL.  The install path
+(`Managers/InstallManager.swift`) is different and simpler:
+
+1. GET (`Views/Supplements/DynamicButton.swift`, `getButton`) only adds a `QueueItem`; the button
+   turns red **QUEUED** (seen in `logs/store-3.png` of the 01:53 run), and a bottom sheet appears.
+2. In that sheet, **Confirm** downloads every queued IPA to `/var/mobile/.TrollApps/tmp/<uuid>.ipa`
+   (`downloadIPA`); when the downloads finish it either shows **Install Apps** or, with
+   `skipInstallPrompt`, goes straight on.
+3. `InstallIPA` finds TrollStore with `SBFApplication(applicationBundleIdentifier:
+   "com.opa334.TrollStore")` and spawns **its trollstorehelper** as root (`spawnRoot`, the persona
+   spawn) with `install <ipa>` -- the same helper and arguments this project's scenes run
+   directly, only through a root persona instead of a root scene.
+
+So the remaining work for the one-tap test is UI automation inside its own sheet (swipe the sheet
+up, Confirm, then Install Apps), not a different install mechanism.  `SBFApplication` and the
+persona spawn are the two things that may still fail on this port; both have fallbacks in our
+scene-side path (mcm_test + helper as root).
+
+By the way: TrollApps ships `zh-Hans.lproj` and `zh-Hant.lproj`, so with the system language set
+to Chinese its interface is Chinese -- the English screenshots are only because the last boots
+ran in English.
