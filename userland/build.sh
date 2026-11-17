@@ -308,6 +308,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/mcm_test src/mcm_test.m &&
 			{ ${LDID:-ldid} -Ssrc/mcm_test.entitlements obj/mcm_test 2>/dev/null ||
 			  echo "build.sh: no ldid: mcm_test is unsigned, and MobileContainerManager will answer 98"; }
+		# one URL into one file: the payload cannot carry an IPA beside the kernel (src/hk_download.m)
+		$DYN -fobjc-arc -framework Foundation -o obj/hk_download src/hk_download.m
 		# the smallest application that can ask for a position: a bundle identifier and a
 		# usage description, which a command line program has not (src/LocProbe.m)
 		mkdir -p obj/LocProbe.app &&
@@ -516,6 +518,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/persona_test ] && cp obj/persona_test root/bin/
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
 	[ -f obj/mcm_test ] && cp obj/mcm_test root/bin/
+	[ -f obj/hk_download ] && cp obj/hk_download root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
 	if [ -d obj/LocProbe.app ]; then

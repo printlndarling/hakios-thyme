@@ -1,0 +1,36 @@
+# RC_JOBS=rc.jobs.storeapps: a real store front-end on the full-driver image.
+#
+# TrollApps (TheResonanceTeam/TrollApps 2.3, org.resonance.store) is the app-store alternative
+# built on TrollStore: it lists AltStore-style JSON repositories, downloads the IPA and hands it
+# to TrollStore through apple-magnifier://, which the TrollStore.app in /Applications already
+# declares (its Info.plist carries the scheme).  The scene joins Wi-Fi first, sets TrollStore up
+# the proven way (helper + its own MCM container with ldid), installs TrollApps with the helper,
+# and opens it.  The store's default sources live on GitHub, so raw.githubusercontent.com is
+# probed too: that is the difference between a store that works and one that spins in China.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+# The IPA is not in the payload: the root image beside the kernel tops out near 50 MB (the
+# 5.5 MB IPA made the upload fail).  hk_download fetches it from the machine on the LAN that
+# serves it (python3 -m http.server on the host's own address), which also proves the phone can
+# download bytes over the Wi-Fi this scene joined; the store's GitHub sources are probed below.
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/net_test resolve raw.githubusercontent.com
+/var/jb/usr/bin/net_test tcp raw.githubusercontent.com 443
+/var/jb/usr/bin/net_test resolve github.com
+/var/jb/usr/bin/net_test tcp github.com 443
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/cat /private/var/tmp/storeapps.txt
