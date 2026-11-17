@@ -1,0 +1,13 @@
+# RC_JOBS=rc.jobs.mcmtest: can MobileContainerManager make an app container?
+#
+# TrollStore's IPA install (and the app store's own) puts the bundle in an MCM app container:
+# "MCMAppContainer containerWithIdentifier:createIfNecessary:existed:error:" (RootHelper/main.m,
+# the custom method).  This asks for one directly, as root, and then looks at the container root
+# /var/containers/Bundle/Application, which was absent in every TrollStore run so far.
+/redwood/bin/rwtouch wait 30
+/redwood/bin/mcm_test com.hakios.mcmtest
+sleep 2
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application
+/redwood/bin/mcm_test com.hakios.mcmtest2
+sleep 2
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application

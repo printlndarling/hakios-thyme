@@ -303,6 +303,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			  echo "build.sh: no ldid: persona_test is unsigned, and the persona syscalls will be refused"; }
 		# the setup-completion preferences a new phone has and this port never wrote (src/setup_seed.c)
 		$DYN -framework CoreFoundation -o obj/setup_seed src/setup_seed.c
+		# whether MobileContainerManager can make an app container at all, which is what
+		# TrollStore's IPA install stands on (src/mcm_test.m; rc.jobs.mcmtest)
+		$DYN -fobjc-arc -framework Foundation -framework CoreFoundation -o obj/mcm_test src/mcm_test.m
 		# the smallest application that can ask for a position: a bundle identifier and a
 		# usage description, which a command line program has not (src/LocProbe.m)
 		mkdir -p obj/LocProbe.app &&
@@ -510,6 +513,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/reach_test ] && cp obj/reach_test root/bin/
 	[ -f obj/persona_test ] && cp obj/persona_test root/bin/
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
+	[ -f obj/mcm_test ] && cp obj/mcm_test root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
 	if [ -d obj/LocProbe.app ]; then
