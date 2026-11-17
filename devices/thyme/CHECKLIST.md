@@ -5161,6 +5161,16 @@ run below used `1675f323`) proved the seeding and the language on the device:
   Confirm at 0.75/0.78/0.76 -- inside the button's 0.740..0.804 span with the sheet's 95 pt
   bottom padding, and above Clear Queue's 0.814..0.878.  That scene's result is next.
 
+**The kernel side of that spawn is already there.**  `xnu/hakios.patch` rewrites
+`spawn_validate_persona()` and `spawn_persona_adopt()`: the entitlement and the persona
+lookup are gone, and when no persona exists the requested credential (persona 99, uid/gid 0,
+the OVERRIDE flag) is applied to the child directly.  The patch says why -- Sileo's APTWrapper
+becomes root exactly this way for apt and dpkg -- so TrollApps' `spawnRoot` asks for
+precisely the path this port already walks.  The other unknown, `SBFApplication(...)`, needs
+no probe of its own: TrollApps launched and drew its catalog, and an Objective-C class
+reference such as `_OBJC_CLASS_$_SBFApplication` is bound by dyld at launch.  What remains is
+the UI reaching InstallIPA; that is the run `persona_spawn_test` rides along with.
+
 ### The loader's fastboot endpoint, wedged by an interrupted upload (2026-11-18 ~03:50)
 
 After the 03:35 run the phone was still in the loader, but `xl state` answered "android":
