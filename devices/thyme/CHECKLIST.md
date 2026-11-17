@@ -4508,7 +4508,11 @@ and `newLibraryWithData:` (with the data's first four bytes), answers a 0-byte
 data -- the pipelinelib's `functions` archive is exactly that -- and the
 archive's own path with the carried VectorKit `default.metallib` once the
 pipeline library has opened, and the pipeline library itself is the third
-receiver of the function road, answered the same way (image `ff064bf2`).  `vkn=1` remains as an opt-in for anything that does
+receiver of the function road, answered the same way (image `ff064bf2`).
+Whether the app's renderer encodes any pass at all is said too: once VectorKit's
+library is open in a process, the command buffer logs the first 20 render passes
+(colour and depth format and size), which tells an idle renderer from one
+encoding passes with no pipeline (image `2299fb92`).  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
