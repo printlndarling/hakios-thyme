@@ -19,6 +19,14 @@
 @property (nonatomic, assign) double fixLatitude;
 @property (nonatomic, assign) double fixLongitude;
 
+/* The tile source: "{z}", "{x}" and "{y}" are substituted.  The app sets these from its
+ * configuration file (tiles.conf), because openstreetmap.org is blocked on some networks
+ * (mainland China answers with a poisoned address) and a reachable mirror or a keyed
+ * service has to be usable without rebuilding the app. */
+@property (nonatomic, copy) NSString *tileURLTemplate;
+@property (nonatomic, copy) NSString *attributionText;
+@property (nonatomic, assign) NSInteger maximumZoom;
+
 - (void)setCenterLatitude:(double)latitude longitude:(double)longitude zoom:(NSInteger)zoom;
 - (void)recenterOnFix;
 

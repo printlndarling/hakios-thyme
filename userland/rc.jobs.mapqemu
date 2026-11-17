@@ -17,6 +17,9 @@
 /var/jb/usr/bin/chmod 755 /var/jb/Applications/HakiosMaps.app/HakiosMaps
 /var/jb/usr/bin/uicache -p /var/jb/Applications/HakiosMaps.app >> /var/jb/hmaps/install.log
 /var/jb/usr/bin/uicache -i com.hakios.maps >> /var/jb/hmaps/install.log
+# A deliberately unusable tile source: the app's own log line says which URL it will use, so the
+# tiles.conf path is proven even though this network cannot reach any tile server (see below).
+/var/jb/bin/echo tile_url=https://example.invalid/{z}/{x}/{y}.png >> /var/jb/hmaps/tiles.conf
 /redwood/bin/rwtouch wait 10
 /var/jb/usr/bin/uiopen --bundleid com.hakios.maps
 /redwood/bin/rwtouch wait 60

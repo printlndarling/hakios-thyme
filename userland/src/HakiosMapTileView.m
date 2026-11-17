@@ -67,6 +67,9 @@ hm_inverse_mercator_y(double y)
 	_centerLatitude = 34.3416;      /* Xi'an, until a fix arrives */
 	_centerLongitude = 108.9398;
 	_pinchScale = 1.0;
+	_maximumZoom = HM_MAX_ZOOM;
+	_tileURLTemplate = @"https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+	_attributionText = @"© OpenStreetMap contributors";
 
 	NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
 
@@ -127,7 +130,7 @@ hm_inverse_mercator_y(double y)
 {
 	self.centerLatitude = latitude;
 	self.centerLongitude = longitude;
-	self.zoom = MAX(HM_MIN_ZOOM, MIN(HM_MAX_ZOOM, zoom));
+	self.zoom = MAX(HM_MIN_ZOOM, MIN(self.maximumZoom, zoom));
 	[self setNeedsDisplay];
 }
 
@@ -186,7 +189,7 @@ hm_inverse_mercator_y(double y)
 
 		self.pinchScale = 1.0;
 		if (step != 0) {
-			self.zoom = MAX(HM_MIN_ZOOM, MIN(HM_MAX_ZOOM, self.zoom + step));
+			self.zoom = MAX(HM_MIN_ZOOM, MIN(self.maximumZoom, self.zoom + step));
 		}
 		[self setNeedsDisplay];
 	}
@@ -201,7 +204,7 @@ hm_inverse_mercator_y(double y)
 	double worldY = center.y + (point.y - halfHeight);
 
 	/* The point under the fingers stays under them: its position doubles with the world. */
-	self.zoom = MAX(HM_MIN_ZOOM, MIN(HM_MAX_ZOOM, self.zoom + 1));
+	self.zoom = MAX(HM_MIN_ZOOM, MIN(self.maximumZoom, self.zoom + 1));
 	center.x = worldX * 2.0 - (point.x - halfWidth);
 	center.y = worldY * 2.0 - (point.y - halfHeight);
 	[self setCenterFromWorld:center];
@@ -229,8 +232,9 @@ hm_inverse_mercator_y(double y)
 	if (parts.count != 3) {
 		return;
 	}
-	NSString *url = [NSString stringWithFormat:@"https://tile.openstreetmap.org/%@/%@/%@.png",
-	    parts[0], parts[1], parts[2]];
+	NSString *url = [[[self.tileURLTemplate stringByReplacingOccurrencesOfString:@"{z}" withString:parts[0]]
+	    stringByReplacingOccurrencesOfString:@"{x}" withString:parts[1]]
+	    stringByReplacingOccurrencesOfString:@"{y}" withString:parts[2]];
 
 	[self.pending addObject:key];
 	NSURLSessionDataTask *task = [self.session dataTaskWithURL:[NSURL URLWithString:url]
@@ -352,7 +356,7 @@ hm_inverse_mercator_y(double y)
 	/* The attribution OpenStreetMap's licence requires. */
 	UIFont *font = [UIFont systemFontOfSize:11];
 	NSDictionary *attributes = @{ NSFontAttributeName : font, NSForegroundColorAttributeName : [UIColor colorWithWhite:0.25 alpha:1.0] };
-	NSString *credit = @"© OpenStreetMap contributors";
+	NSString *credit = self.attributionText;
 	CGSize creditSize = [credit sizeWithAttributes:attributes];
 	CGRect creditRect = CGRectMake(width - creditSize.width - 8, height - creditSize.height - 6,
 	    creditSize.width, creditSize.height);

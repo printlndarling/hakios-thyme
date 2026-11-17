@@ -1,0 +1,21 @@
+# HakiOS Maps tile source and search endpoint.
+# Copy this file to /var/jb/hmaps/tiles.conf (or /private/var/tmp/hmaps-tiles.conf, which wins)
+# and open the app again; every key is optional and the defaults are the openstreetmap.org ones.
+#
+# Why it exists: openstreetmap.org is DNS-poisoned on mainland China networks (the address
+# answers from a Facebook range and every connection times out), so the source has to be
+# changeable without rebuilding the app: a reachable mirror, a keyed service, or a VPN.
+#
+# Raster tiles: {z}, {x} and {y} are substituted; tiles are drawn at half their pixel size.
+#tile_url=https://tile.openstreetmap.org/{z}/{x}/{y}.png
+#attribution=© OpenStreetMap contributors
+# Deepest display zoom (tiles are fetched one level deeper): 18 by default.
+#max_zoom=18
+#
+# 天地图 (Tianditu, official and reachable in China): register a free key, then use its WMTS.
+#tile_url=https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=YOUR_KEY
+#attribution=© 天地图
+#max_zoom=18
+#
+# Search: any Nominatim-compatible endpoint; {q} is the percent-encoded query.
+#search_url=https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q={q}

@@ -59,6 +59,61 @@ hm_note(NSString *format, ...)
 	hm_log_path("/var/jb/hmaps/maps.log", line);
 }
 
+/*
+ * tiles.conf: key=value lines, read from /var/jb/hmaps/tiles.conf and /private/var/tmp/hmaps-tiles.conf
+ * at launch (the latter wins).  Keys:
+ *   tile_url=https://host/{z}/{x}/{y}.png      the raster tile source ("{z}" "{x}" "{y}")
+ *   attribution=© ...                          the credit drawn and shown on the page
+ *   max_zoom=18                                the deepest display zoom (tiles are fetched one more)
+ *   search_url=https://host/search?...&q={q}   a Nominatim-compatible endpoint ("{q}" is the query)
+ *   search_credit=...                          what the page's status line calls the search
+ * Why: openstreetmap.org answers with a poisoned address on mainland networks, so the source has
+ * to be changeable without rebuilding the app (a reachable mirror, a keyed service, or a VPN);
+ * the app logs the two URLs it will use, which is how a run says what it talked to.
+ */
+static NSDictionary<NSString *, NSString *> *
+hm_config(void)
+{
+	NSString *paths[] = { @"/var/jb/hmaps/tiles.conf", @"/private/var/tmp/hmaps-tiles.conf" };
+	NSMutableDictionary *config = [NSMutableDictionary dictionary];
+
+	for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		NSString *text = [NSString stringWithContentsOfFile:paths[i] encoding:NSUTF8StringEncoding error:NULL];
+		NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
+
+		if (text == nil) {
+			continue;
+		}
+		for (NSString *line in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+			NSRange equals = [line rangeOfString:@"="];
+
+			if (equals.location == NSNotFound) {
+				continue;
+			}
+			NSString *key = [[line substringToIndex:equals.location] stringByTrimmingCharactersInSet:spaces];
+			NSString *value = [[line substringFromIndex:equals.location + 1] stringByTrimmingCharactersInSet:spaces];
+
+			if (key.length > 0 && value.length > 0) {
+				config[key] = value;
+			}
+		}
+	}
+	return config;
+}
+
+/* A string as a JavaScript string literal (quoted and escaped). */
+static NSString *
+hm_js_string(NSString *text)
+{
+	NSData *data = [NSJSONSerialization dataWithJSONObject:@[ text ] options:0 error:NULL];
+	NSString *array = data != nil ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+
+	if (array.length >= 2) {
+		return [array substringWithRange:NSMakeRange(1, array.length - 2)];
+	}
+	return @"\"\"";
+}
+
 /* WebKit's own knobs are SPI; set them when the class answers, and say what happened. */
 static BOOL
 hm_set_bool(id object, NSString *name, BOOL value)
@@ -84,6 +139,11 @@ hm_set_bool(id object, NSString *name, BOOL value)
 @property (nonatomic, strong) UITableView *resultsTable;
 @property (nonatomic, strong) NSArray<NSDictionary *> *results;
 @property (nonatomic, strong) NSURLSession *searchSession;
+@property (nonatomic, strong) NSDictionary<NSString *, NSString *> *config;
+@property (nonatomic, copy) NSString *tileURLTemplate;
+@property (nonatomic, copy) NSString *attributionText;
+@property (nonatomic, copy) NSString *searchURLTemplate;
+@property (nonatomic, assign) NSInteger maximumZoom;
 @property (nonatomic, strong) CLLocationManager *manager;
 @property (nonatomic, assign) double latitude;
 @property (nonatomic, assign) double longitude;
@@ -118,6 +178,12 @@ hm_set_bool(id object, NSString *name, BOOL value)
 		html = [html stringByReplacingOccurrencesOfString:@"<script src=\"leaflet.js\"></script>"
 		    withString:[NSString stringWithFormat:@"<script>%@</script>", js]];
 	}
+	html = [html stringByReplacingOccurrencesOfString:@"__TILE_URL_LITERAL__"
+	    withString:hm_js_string(self.tileURLTemplate)];
+	html = [html stringByReplacingOccurrencesOfString:@"__ATTRIBUTION_LITERAL__"
+	    withString:hm_js_string(self.attributionText)];
+	html = [html stringByReplacingOccurrencesOfString:@"__MAX_ZOOM_LITERAL__"
+	    withString:[NSString stringWithFormat:@"%ld", (long)(self.maximumZoom + 1)]];
 	return html;
 }
 
@@ -125,6 +191,17 @@ hm_set_bool(id object, NSString *name, BOOL value)
 {
 	[super viewDidLoad];
 	self.view.backgroundColor = [UIColor colorWithWhite:0.91 alpha:1.0];
+
+	self.config = hm_config();
+	self.tileURLTemplate = self.config[@"tile_url"] != nil
+	    ? self.config[@"tile_url"] : @"https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+	self.attributionText = self.config[@"attribution"] != nil
+	    ? self.config[@"attribution"] : @"© OpenStreetMap contributors";
+	self.maximumZoom = self.config[@"max_zoom"] != nil ? self.config[@"max_zoom"].integerValue : 18;
+	self.searchURLTemplate = self.config[@"search_url"] != nil
+	    ? self.config[@"search_url"] : @"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q={q}";
+	hm_note(@"tiles: %@", self.tileURLTemplate);
+	hm_note(@"search: %@", self.searchURLTemplate);
 
 	WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
 	WKPreferences *preferences = configuration.preferences;
@@ -232,8 +309,8 @@ hm_set_bool(id object, NSString *name, BOOL value)
 	}
 	NSString *escaped = [query stringByAddingPercentEncodingWithAllowedCharacters:
 	    [NSCharacterSet URLQueryAllowedCharacterSet]];
-	NSString *address = [NSString stringWithFormat:
-	    @"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=%@", escaped];
+	NSString *address = [self.searchURLTemplate stringByReplacingOccurrencesOfString:@"{q}"
+	    withString:escaped];
 	NSURL *url = [NSURL URLWithString:address];
 
 	hm_note(@"search: %@", query);
@@ -343,6 +420,9 @@ hm_set_bool(id object, NSString *name, BOOL value)
 
 	self.tileView = [[HakiosMapTileView alloc] initWithFrame:self.view.bounds];
 	self.tileView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	self.tileView.tileURLTemplate = self.tileURLTemplate;
+	self.tileView.attributionText = self.attributionText;
+	self.tileView.maximumZoom = self.maximumZoom;
 	if (self.hasFix) {
 		self.tileView.fixLatitude = self.latitude;
 		self.tileView.fixLongitude = self.longitude;
@@ -391,7 +471,7 @@ hm_set_bool(id object, NSString *name, BOOL value)
 - (void)zoomInTapped
 {
 	if (self.tileView != nil) {
-		self.tileView.zoom = MIN(18, self.tileView.zoom + 1);
+		self.tileView.zoom = MIN(self.maximumZoom, self.tileView.zoom + 1);
 		[self.tileView setNeedsDisplay];
 	}
 }

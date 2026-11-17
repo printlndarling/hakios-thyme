@@ -534,6 +534,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	if [ -f obj/HakiosMaps.app/HakiosMaps ]; then
 		mkdir -p root/fw/hmaps
 		cp -R obj/HakiosMaps.app root/fw/hmaps/
+		# HakiOS Maps' tile-source file, ready to copy to /var/jb/hmaps/tiles.conf
+		mkdir -p root/share/hmaps
+		cp maps/tiles.conf.example root/share/hmaps/
 	fi
 	[ -f obj/https_test ] && cp obj/https_test root/bin/
 	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/

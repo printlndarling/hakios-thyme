@@ -24,11 +24,17 @@ body { -webkit-user-select: none; }
 <div id="hud"><div class="pill" id="locate">定位</div><div class="pill status" id="status">打开中…</div></div>
 <script src="leaflet.js"></script>
 <script>
+/* The source is HakiosMaps' tiles.conf, substituted in when the app loads the page
+   (HakiosMaps.m, pageString): openstreetmap.org is poisoned on mainland networks. */
+var TILE_URL = __TILE_URL_LITERAL__;
+var ATTRIBUTION = __ATTRIBUTION_LITERAL__;
+var MAX_ZOOM = __MAX_ZOOM_LITERAL__;
+
 var here = null, searchPin = null;
 var map = L.map('map', { zoomControl: true, attributionControl: true }).setView([34.3416, 108.9398], 12);
-var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-	maxZoom: 19,
-	attribution: '&copy; OpenStreetMap contributors'
+var tiles = L.tileLayer(TILE_URL, {
+	maxZoom: MAX_ZOOM,
+	attribution: ATTRIBUTION
 }).addTo(map);
 tiles.on('tileload', function () { setStatus('OpenStreetMap'); });
 tiles.on('tileerror', function () { setStatus('瓦片加载失败'); });
