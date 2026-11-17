@@ -8,6 +8,13 @@
 # must be world-writable: the app runs as uid 501).  A run cannot type, so the search query is
 # left in /private/var/tmp/hmaps-search.txt and the app searches by itself three seconds in
 # (HakiosMaps.m, autoSearchFired:): the first hit is then taken and the map recenters.
+#
+# Registration: `uicache -p` names this bundle instead of rescanning everything, and
+# `uicache -i` then says what LaunchServices holds for the id -- both into install.log, which is
+# cat'd at the end.  Under QEMU `uicache -a` + `uiopen --bundleid` left no trace in launchd while
+# Settings opened, so the id's registration is the first thing to read there; on the phone the
+# same route launched LocProbe from /private/var/jb/Applications.  Three launch routes follow:
+# bundle id, the app's URL scheme (LocProbe's first launch took that one), and --path.
 /redwood/bin/rwtouch wait 35
 /var/jb/usr/bin/mkdir -p /var/jb/Applications /var/jb/hmaps
 /var/jb/usr/bin/chmod 777 /var/jb/hmaps
@@ -15,10 +22,16 @@
 /var/jb/usr/bin/cp -R /redwood/fw/hmaps/HakiosMaps.app /var/jb/Applications/
 /var/jb/usr/bin/chmod 755 /var/jb/Applications/HakiosMaps.app/HakiosMaps
 /var/jb/usr/bin/ls -l /var/jb/Applications/HakiosMaps.app >> /var/jb/hmaps/install.log
-/var/jb/usr/bin/uicache -a >> /var/jb/hmaps/install.log
-/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/uicache -p /var/jb/Applications/HakiosMaps.app >> /var/jb/hmaps/install.log
+/var/jb/usr/bin/uicache -i com.hakios.maps >> /var/jb/hmaps/install.log
+/redwood/bin/rwtouch wait 10
 /var/jb/usr/bin/uiopen --bundleid com.hakios.maps
-/redwood/bin/rwtouch wait 75
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uiopen hakiosmaps://
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uiopen --path /var/jb/Applications/HakiosMaps.app
+/redwood/bin/rwtouch wait 45
+/var/jb/usr/bin/cat /var/jb/hmaps/install.log
 /var/jb/usr/bin/cat /private/var/tmp/hmaps.log
 sleep 25
 /var/jb/usr/bin/cat /private/var/tmp/hmaps.log
