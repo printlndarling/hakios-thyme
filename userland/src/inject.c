@@ -1463,14 +1463,19 @@ metallib_answer(id self, id name, id extension, id found)
 		 */
 		if (!tried) {
 			struct stat st;
-			const char *slash = strrchr(ca_metallib, '/');
 			int in = -1, out = -1, rc = -1;
 
 			tried = 1;
-			/* init copies this file into /private/var before launchd starts (init.c: seed_carried_metallibs):
-			 * the image's /redwood is not readable from here on some boots (open ENOENT) */
-			snprintf(copy, sizeof(copy), "/private/var/tmp/hakios-ca/%s",
-			    slash != NULL && slash[1] != 0 ? slash + 1 : "default.metallib");
+			/* init copies this file into /private/var before launchd starts (init.c: seed_carried_metallibs),
+			 * and the name is the seed's own: the boot-arg path can be cut by the kernel's 607-character
+			 * command line (that is what the black boots were: ca_metallib=/redwood/.../QuartzCore-defa,
+			 * logs/085328-run.log), so it is not a name to take this file's from */
+			const char *leaf = "QuartzCore-default.metallib";
+
+			snprintf(copy, sizeof(copy), "/private/var/tmp/com.apple.backboardd/hakios-ca/%s", leaf);
+			if (stat(copy, &st) != 0) {
+				snprintf(copy, sizeof(copy), "/private/var/tmp/hakios-ca/%s", leaf);
+			}
 			if (stat(copy, &st) == 0) {
 				say("hakios: %s: ca_metallib is the seeded copy %s (%lld bytes)\n", getprogname(), copy,
 				    (long long) st.st_size);

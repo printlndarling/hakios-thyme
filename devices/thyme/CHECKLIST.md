@@ -4329,7 +4329,7 @@ server: a small Metal program that opens VectorKit's `iphoneos.pipelinelib`
 itself, asks for a pipeline by name, prints what Metal answers, and then tries
 the carried `default.metallib`'s base function with the same constants.
 
-### The boot that stays black: Metal's read of the carried metallib fails (2026-11-17)
+### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
 frame: backboardd aborted in a loop ("service has crashed 22 times in a row"),
@@ -4348,19 +4348,31 @@ at the same steps.  What differs is the read of that one compressed file at that
 one moment -- it is `[decmpfs 4]` in the image, where the plug-in's own binary
 is not.
 
-The bad boot's tell is sharper than that: a copy attempt made from inside
-backboardd (`inject.c`, scene `metal650maps14`) opened the same path and answered
-**ENOENT (errno 2)** -- the file is in the mounted image (the loader received the
-whole 0x2f31000-byte payload in every run, and init itself runs as
-`/redwood/sbin/init`), yet that process cannot see it.  The window server's
-access to the image's files is what fails on those boots, not the file.
+The cause was simpler and in the command line, not in the file system: the bad
+boots' `ca_metallib` is cut.  The kernel's boot-args buffer is 607 characters and
+truncates the line; the boots that failed carry
+`ca_metallib=/redwood/share/ca-share/QuartzCore-defa` or `...-default.me` in
+their `cmdline:` line, and the boots that drew carry the whole
+`/redwood/share/ca-share/QuartzCore-default.metallib`.  Every one of the eight
+boots matches its own line: `071452` and `075207` complete and good, `073849`,
+`080047`, `081114`, `082608`, `084141`, `085328` cut and black (the last with the
+kernel's own "the kernel command line is TRUNCATED: 97 characters ... did not
+fit").  Metal was handed a path that does not exist -- the "library not found"
+is literal.  What made the line long was this session's own diagnostics: a
+duplicate `wifi_wide=0` (one from ram.args, one from the run script),
+`metal_fps=1`, and xl's three `*_sha=` words.
 
-So the files are brought into a path the window server always has: init
-(`userland/src/init.c`, `seed_carried_metallibs`) -- unsandboxed, with the image
-mounted -- copies CoreAnimation's metallib and the nine carried framework
-metallibs into `/private/var/tmp/hakios-ca/` right after it creates the data
-volume's directories; `inject.c` answers CoreAnimation's lookup with the seeded
-copy when it is there (and says whether it is), and the plug-in's two carried
-metallib lookups ask `/private/var/tmp/hakios-ca/metallibs` before
-`/redwood/share/ca-metallibs`.  The next scenes' boots are the test: with the
-copy, the loop should be gone on every boot, good or bad before.
+The fix is the command line, and a seed that does not depend on it:
+`tools`-side the run scripts now pass `XL_NO_HASHES=1`, one `wifi_wide`, and no
+`metal_fps` (about 95 characters less; the line fits with room).  On the device,
+init (`userland/src/init.c`, `seed_carried_metallibs`) copies CoreAnimation's
+metallib and the nine carried framework metallibs into
+`/private/var/tmp/hakios-ca` and into the window server's own
+`/private/var/tmp/com.apple.backboardd/hakios-ca` before launchd starts;
+`inject.c` answers CoreAnimation's lookup with the seed's fixed name
+(`QuartzCore-default.metallib`, taken from the seed rather than from the boot
+argument, which is what the cut broke) and the plug-in's two carried-metallib
+lookups ask the seeded trees first.  ram.args is back to the proven 268-character
+set (the `wifi_wide=0` this session had added to it is gone again; the run
+scripts pass it when a scene wants it), so the daily line has the margin the
+previous ones did not.
