@@ -203,6 +203,38 @@ main(int argc, char **argv)
 		} else {
 			printf("pipelinelib_test: the library does not answer newFunctionWithName:constantValues:functionCache:error:\n");
 		}
+		/* VectorKit's own road, in isolation: -newFunctionWithName:constantValues:pipelineLibrary:error:
+		 * (the selector is in the shared cache beside VectorKit's method names).  Asked of the device and of
+		 * the functions library: whichever it is, the plug-in answers it from the carried metallib. */
+		SEL road = sel_registerName("newFunctionWithName:constantValues:pipelineLibrary:error:");
+		for (int i = 0; i < 2; i++) {
+			id receiver = i == 0 ? (id)device : (id)functions;
+			MTLFunctionConstantValues *values = [[MTLFunctionConstantValues alloc] init];
+			NSError *roadError = nil;
+			id function;
+
+			printf("pipelinelib_test: %s answers the pipeline-library function road: %s\n",
+			       i == 0 ? "the device" : "the library",
+			       [receiver respondsToSelector:road] ? "yes" : "NO");
+			if (![receiver respondsToSelector:road]) {
+				continue;
+			}
+			@try {
+				function = ((id (*)(id, SEL, id, id, id, NSError **))objc_msgSend)(receiver, road,
+				    @"DaVinci::ground_base_vertex", values, library, &roadError);
+				printf("pipelinelib_test:   newFunctionWithName:constantValues:pipelineLibrary:error: = %s%s\n",
+				       function != nil ? "a function" : "NIL",
+				       roadError != nil ? [[NSString stringWithFormat:@" (%@)", [roadError localizedDescription]] UTF8String] : "");
+				if (function != nil && [function respondsToSelector:sel_registerName("bitcodeData")]) {
+					NSData *air = ((NSData *(*)(id, SEL))objc_msgSend)(function, sel_registerName("bitcodeData"));
+
+					printf("pipelinelib_test:   it carries %lu bytes of AIR\n", (unsigned long)[air length]);
+				}
+			} @catch (NSException *exception) {
+				printf("pipelinelib_test:   the road raised %s: %s\n", [[exception name] UTF8String],
+				       [[exception reason] UTF8String]);
+			}
+		}
 	}
 	printf("pipelinelib_test: done\n");
 	return 0;
