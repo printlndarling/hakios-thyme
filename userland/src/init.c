@@ -937,7 +937,7 @@ mkdir_p(const char *path)
  * window server reads; inject.c answers CoreAnimation's lookup with that copy and the plug-in looks there first.
  */
 static void
-seed_carried_metallibs(void)
+seed_one(const char *base, int owner)
 {
 	static const char *const rel[] = {
 		"System/Library/PrivateFrameworks/RenderBox.framework/default.metallib",
@@ -950,13 +950,15 @@ seed_carried_metallibs(void)
 		"System/Library/PrivateFrameworks/PassKitUIFoundation.framework/default.metallib",
 		"System/Library/Frameworks/PencilKit.framework/default.metallib",
 	};
-	const char *base = "/private/var/tmp/hakios-ca";
 	char to[512], dir[512];
 	int seeded = 0, failed = 0;
 
 	mkdir_p(base);
+	if (owner != 0) {
+		chown(base, owner, owner);
+	}
 	strcpy(to, join(base, "/QuartzCore-default.metallib", ""));
-	if (copy_file(in_image("/share/ca-share/QuartzCore-default.metallib"), to, 0644, 0, 0)) {
+	if (copy_file(in_image("/share/ca-share/QuartzCore-default.metallib"), to, 0644, owner, owner)) {
 		seeded++;
 	} else {
 		failed++;
@@ -976,8 +978,11 @@ seed_carried_metallibs(void)
 			printf("  %s: %s\n", dir, strerror(errno));
 			continue;
 		}
+		if (owner != 0) {
+			chown(dir, owner, owner);
+		}
 		strcpy(to, join(base, "/metallibs/", rel[i]));
-		if (copy_file(in_image(join("/share/ca-metallibs/", rel[i], "")), to, 0644, 0, 0)) {
+		if (copy_file(in_image(join("/share/ca-metallibs/", rel[i], "")), to, 0644, owner, owner)) {
 			seeded++;
 		} else {
 			failed++;
@@ -985,6 +990,18 @@ seed_carried_metallibs(void)
 		}
 	}
 	printf("  %d metallibs seeded in %s%s\n", seeded, base, failed != 0 ? ", some failed" : "");
+}
+
+static void
+seed_carried_metallibs(void)
+{
+	/* two places: /private/var/tmp for the processes whose sandbox lets them read it, and the window server's
+	 * own temporary directory (owned by mobile, 501) for backboardd, whose sandbox hides the first (the lookup
+	 * answered ENOENT for /private/var/tmp/hakios-ca on a boot where init had seeded it: logs/084141-run.log) */
+	mkdir_p("/private/var/tmp/com.apple.backboardd");
+	chown("/private/var/tmp/com.apple.backboardd", 501, 501);
+	seed_one("/private/var/tmp/hakios-ca", 0);
+	seed_one("/private/var/tmp/com.apple.backboardd/hakios-ca", 501);
 }
 
 static void

@@ -2469,10 +2469,15 @@ hm_print_callers(const char *what)
 	 * /redwood/share/ca-metallibs, at the same path below it; the mirror takes the one there. */
 	if (![fm fileExistsAtPath:beside] && parent != nil) {
 		NSString *rel = [parent hasPrefix:@"/"] ? [parent substringFromIndex:1] : parent;
-		/* init's copy in /private/var comes first: the image's /redwood is not readable from here on some boots
-		 * (init.c: seed_carried_metallibs; inject.c's answer says the same for CoreAnimation's) */
-		NSString *carried = [[@"/private/var/tmp/hakios-ca/metallibs" stringByAppendingPathComponent:rel]
+		/* init's copies in /private/var come first: the image's /redwood is not readable from here on some
+		 * boots, and this process's own temporary directory is the one its sandbox always lets it read
+		 * (init.c: seed_carried_metallibs) */
+		NSString *carried = [[@"/private/var/tmp/com.apple.backboardd/hakios-ca/metallibs" stringByAppendingPathComponent:rel]
 				     stringByAppendingPathComponent:@"default.metallib"];
+		if (![fm fileExistsAtPath:carried]) {
+			carried = [[@"/private/var/tmp/hakios-ca/metallibs" stringByAppendingPathComponent:rel]
+				   stringByAppendingPathComponent:@"default.metallib"];
+		}
 		if (![fm fileExistsAtPath:carried]) {
 			carried = [[@"/redwood/share/ca-metallibs" stringByAppendingPathComponent:rel]
 				   stringByAppendingPathComponent:@"default.metallib"];
@@ -3493,8 +3498,11 @@ hm_describe_function(id f)
 	}
 	if ([url isFileURL] && path != nil && ![fm fileExistsAtPath:path]) {
 		NSString *rel = [path hasPrefix:@"/"] ? [path substringFromIndex:1] : path;
-		NSString *carried = [@"/private/var/tmp/hakios-ca/metallibs" stringByAppendingPathComponent:rel];
+		NSString *carried = [@"/private/var/tmp/com.apple.backboardd/hakios-ca/metallibs" stringByAppendingPathComponent:rel];
 
+		if (![fm fileExistsAtPath:carried]) {
+			carried = [@"/private/var/tmp/hakios-ca/metallibs" stringByAppendingPathComponent:rel];
+		}
 		if (![fm fileExistsAtPath:carried]) {
 			carried = [@"/redwood/share/ca-metallibs" stringByAppendingPathComponent:rel];
 		}
