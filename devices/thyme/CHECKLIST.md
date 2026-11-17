@@ -4306,3 +4306,25 @@ the builder's descriptor reaches this runtime's compiler exactly as
 CoreAnimation's does.  That is a pipeline-library feature, not a GPU one; the
 mountains (`pipelines.desc` parsing) are Apple's own code, which is why the
 function fallback is the smaller door.
+
+### Probing the lookup from inside the system is not safe (2026-11-17)
+
+Two attempts to watch Metal's function lookups from the plug-in itself:
+
+- a global swizzle of `_MTLLibrary`'s `newFunctionWithName:constantValues:error:`
+  and its `functionCache` form, installed for every library (scene
+  `metal650maps10`): backboardd aborted (SIGABRT) in a loop right after its
+  first "Metal failed to load library" at boot -- launchd's "service has crashed
+  7 times in a row" -- and the run's screen stayed black;
+- a gated install, only for a library whose functions archive is empty:
+  `metal650maps11` (an NSFileManager test -- the gate never fired) and
+  `metal650maps12` (stat(); the same SIGABRT loop, and the once-per-process
+  "pipeline library functions:" line never reached the log).
+
+The committed plug-in has no probe: the source is back to the GMEM fix and the
+fbstage logging, and `metal650maps13` is the baseline run after the revert.  The
+library's open path is not somewhere to add instrumentation on a booting
+system.  The next attempt is a standalone tool, one step of a scene and no window
+server: a small Metal program that opens VectorKit's `iphoneos.pipelinelib`
+itself, asks for a pipeline by name, prints what Metal answers, and then tries
+the carried `default.metallib`'s base function with the same constants.
