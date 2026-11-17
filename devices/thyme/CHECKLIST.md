@@ -4529,7 +4529,28 @@ called on the device or seen at a library; whether a library is asked for
 functions by plain `-newFunctionWithName:` is now said too (the first 40
 lookups in a process that opened VectorKit's library), and the function road at
 a library is said on every call, not only when Metal's own answer is nil (image
-`693be046`).  `vkn=1` remains as an opt-in for anything that does
+`693be046`).
+
+That hook named the missing functions (run `131739`): Maps asks the library it
+was given (the carried `default.metallib`) for
+
+```
+a library was asked for function Clear::clear_vertex: NOT FOUND
+a library was asked for function clear_vertex: NOT FOUND
+a library was asked for function Clear::clear_fragment: NOT FOUND
+a library was asked for function clear_fragment: NOT FOUND
+```
+
+-- and `default.metallib` has no `Clear` at all.  They are in VectorKit's second
+library, `metal_libraries/AlloyCommonLibrary.metallib` (46,569 bytes, a plain
+MTLB with `Clear::clear_vertex`, `clear_depth_stencil_fragment`,
+`clear_fragment`, `clear_vertex_mrt`, `clear_fragment2..4`, `ShadedColor`,
+`ColoredText`, `TextureRect`, ...), which the system image drops by the same
+rule.  The plug-in now falls through to that library for any name the default
+metallib has not: the plain `-newFunctionWithName:` (where the NOT FOUND names
+came from) and the constant-values function road both try it, with a re-entry
+guard so the plug-in's own lookups do not loop (image `23b3794b`).  The Alloy
+library is carried beside the default one in the same `ca-metallibs` tree.  `vkn=1` remains as an opt-in for anything that does
 enumerate names, but nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)

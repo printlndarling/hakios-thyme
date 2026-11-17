@@ -2564,12 +2564,47 @@ hm_vk_function_library(void)
 	return library;
 }
 
+/* VectorKit's second library of functions: metal_libraries/AlloyCommonLibrary.metallib (a plain MTLB: Clear's
+ * vertex, depth-stencil and fragment, ShadedColor, ColoredText, TextureRect, ...), which the system image leaves
+ * out by the same rule as default.metallib.  The app asks for those names of the library it was given (the
+ * default metallib, through the 0-byte archive answer) and they are not there; the lookups fall through to this
+ * one. */
+static id
+hm_vk_alloy_library(void)
+{
+	static id library;
+	static BOOL tried;
+	NSString *paths[] = {
+		@"/private/var/tmp/com.apple.backboardd/hakios-ca/metallibs/System/Library/PrivateFrameworks/VectorKit.framework/metal_libraries/AlloyCommonLibrary.metallib",
+		@"/private/var/tmp/hakios-ca/metallibs/System/Library/PrivateFrameworks/VectorKit.framework/metal_libraries/AlloyCommonLibrary.metallib",
+		@"/redwood/share/ca-metallibs/System/Library/PrivateFrameworks/VectorKit.framework/metal_libraries/AlloyCommonLibrary.metallib",
+	};
+
+	if (!tried) {
+		tried = YES;
+		for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && library == nil; i++) {
+			if ([[NSFileManager defaultManager] fileExistsAtPath:paths[i]]) {
+				NSError *why = nil;
+
+				library = [[hm_vk_device newLibraryWithFile:paths[i] error:&why] retain];
+				hm_vk_log("VectorKit's other functions: %s: %s\n", [paths[i] fileSystemRepresentation],
+					  library != nil ? "it opened" : (why != nil ? [[why localizedDescription] UTF8String] : "nil"));
+			}
+		}
+	}
+	return library;
+}
+
 static id
 hm_vk_function(NSString *base)
 {
-	id library = hm_vk_function_library();
+	id library = hm_vk_function_library(), function = library != nil ? [library newFunctionWithName:base] : nil;
 
-	return library != nil ? [library newFunctionWithName:base] : nil;
+	if (function == nil) {
+		library = hm_vk_alloy_library();
+		function = library != nil ? [library newFunctionWithName:base] : nil;
+	}
+	return function;
 }
 
 /* the same, with the constant values a description specialises it with (the values Metal's own
@@ -2578,13 +2613,19 @@ hm_vk_function(NSString *base)
 static id
 hm_vk_function_values(NSString *name, id values, NSError **error)
 {
-	id library = hm_vk_function_library();
 	NSString *base = hm_vk_base(name);
+	id library, function;
 
-	if (library == nil || base == nil) {
+	if (base == nil) {
 		return nil;
 	}
-	return [library newFunctionWithName:base constantValues:values error:error];
+	library = hm_vk_function_library();
+	function = library != nil ? [library newFunctionWithName:base constantValues:values error:error] : nil;
+	if (function != nil) {
+		return function;
+	}
+	library = hm_vk_alloy_library();
+	return library != nil ? [library newFunctionWithName:base constantValues:values error:error] : nil;
 }
 
 /* The same answer for the other possible receiver of VectorKit's call: Metal's library class.  Whose method
@@ -2635,11 +2676,32 @@ hm_pl_road_function(id self, SEL _cmd, NSString *name, id values, id library, NS
 /* the plain -newFunctionWithName: on a library, said: a library handed to VectorKit (the carried metallib, through
  * the 0-byte archive answer) may be asked for its functions this way, and no other line would witness it */
 static IMP hm_lib_by_name_only;
+static __thread int hm_lib_in_lookup;
 
 static id
 hm_lib_new_function(id self, SEL _cmd, NSString *name)
 {
-	id function = ((id (*)(id, SEL, id))hm_lib_by_name_only)(self, _cmd, name);
+	id function;
+
+	if (hm_lib_in_lookup) {                 /* our own lookups in the two libraries must not come back here */
+		return ((id (*)(id, SEL, id))hm_lib_by_name_only)(self, _cmd, name);
+	}
+	hm_lib_in_lookup = 1;
+	function = ((id (*)(id, SEL, id))hm_lib_by_name_only)(self, _cmd, name);
+	if (function == nil && name != nil && hm_vk_device != nil) {
+		id alloy = hm_vk_alloy_library();
+
+		if (alloy != nil) {
+			function = [alloy newFunctionWithName:name];
+			if (function != nil) {
+				static unsigned found;
+
+				if (found++ < 10) {
+					hm_vk_log("a library was asked for function %s: found in the Alloy library\n", [name UTF8String]);
+				}
+			}
+		}
+	}
 	{
 		static unsigned said;
 
@@ -2648,6 +2710,7 @@ hm_lib_new_function(id self, SEL _cmd, NSString *name)
 				 function != nil ? "found" : "NOT FOUND");
 		}
 	}
+	hm_lib_in_lookup = 0;
 	return function;
 }
 
