@@ -1,0 +1,31 @@
+# RC_JOBS=rc.jobs.tstoreui: the store's own UI does the install.
+#
+# The helper route is proven (rc.jobs.tstore: `trollstorehelper returning 0`, LocProbe spawned).
+# This scene tests the path a person takes: the TrollStore icon on the home screen is tapped,
+# the IPA is handed to the running app as a file URL, and the app -- whose preferences say
+# install without asking -- spawns the same helper with a root persona.  What differs from a
+# root-run helper is that spawnRoot goes through posix_spawnattr_set_persona_np, so a failure
+# here would be about personas in the kernel, not about the install itself.
+#
+# The container seed stays: without it the app's isLdidInstalled() finds nothing to look at.
+/redwood/bin/rwtouch wait 40
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/fw/ipa/LocProbe.ipa /private/var/tmp/LocProbe.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 5
+# the TrollStore icon: fifth row, fourth column of the home screen (logs/app5-4.png measures it)
+/redwood/bin/rwtouch tap 0.886 0.62
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/uiopen --url file:///private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 40
+/var/jb/usr/bin/cat /private/var/tmp/inst.log
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/tstore.txt
+/var/jb/usr/bin/cat /private/var/tmp/tstore.txt
+sleep 20
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/tstore.txt
+/var/jb/usr/bin/cat /private/var/tmp/tstore.txt

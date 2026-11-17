@@ -1,0 +1,30 @@
+# RC_JOBS=rc.jobs.storeqemu: TrollApps on the QEMU bench, to read its queue sheet without
+# spending phone battery.  The bench has no Wi-Fi: en0 is virtio with QEMU's user network, so
+# the scene asks for DHCP (configd) and talks to 10.0.2.2, which is the machine running QEMU
+# -- an http.server there serves the IPA, the icon and the repo.  The source list is seeded
+# for 10.0.2.2 instead of the LAN address (org.resonance.store.qemu.plist).  Everything else
+# is rc.jobs.storeapps up to the app's launch; the taps are sent from the host with
+# qemu/touch.py, so each step can be looked at before the next one.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/net_test dhcp en0
+/redwood/bin/net_test show dhcp en0 waitaddr en0 20 store wait 15
+/redwood/bin/net_test tcp 10.0.2.2 8000
+/redwood/bin/rwtouch wait 10
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.qemu.plist /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
+/redwood/bin/hk_download http://10.0.2.2:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+/redwood/bin/rwtouch wait 25
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeqemu.txt
+/var/jb/usr/bin/cat /private/var/tmp/storeqemu.txt

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The same entitlements the store app carries for its helper spawn (TrollApps dumps
+	     them at install): the process drops to uid 501, then asks posix_spawn for persona 99
+	     with uid/gid 0.  Without persona-mgmt the kernel refuses the attributes. -->
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>platform-application</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The QEMU bench's variant of org.resonance.store.plist: the same one-source list and the
+	     same in-app language, but QEMU's user network puts the machine running QEMU at 10.0.2.2
+	     (there is no Wi-Fi on the bench).  rc.jobs.storeqemu copies this over the app's domain
+	     before its first launch. -->
+	<key>repos</key>
+	<string>["http://10.0.2.2:8000/repo.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+</dict>
+</plist>

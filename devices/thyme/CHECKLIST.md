@@ -5098,3 +5098,85 @@ scene-side path (mcm_test + helper as root).
 By the way: TrollApps ships `zh-Hans.lproj` and `zh-Hant.lproj`, so with the system language set
 to Chinese its interface is Chinese -- the English screenshots are only because the last boots
 ran in English.
+
+### The queue sheet measured off the source, and a source list without a race (2026-11-18)
+
+The 02:53 run (`logs/025341-run.log`) never reached the taps: `hk_download` waited out the 60 s
+GitHub timeout and the 240 s budget was spent before the `trollapps://add` deliveries, so the
+screen still showed the bundled GitHub sources (`logs/store-2.png`..`-4.png`, no HakiOS Local,
+`/var/mobile/.TrollApps` absent).  Four facts from the app's source make the next scene
+deterministic instead of a race:
+
+- **Where the source list lives.**  `RepositoryManager` declares
+  `@AppStorage("repos") var RepoList: [String]`, and the app adds
+  `extension Array: RawRepresentable where Element: Codable`: the UserDefaults value is one
+  **JSON string** (`["http://..."]`), not an NSArray.  A scene can therefore seed
+  `~/Library/Preferences/org.resonance.store.plist` (501:501, 0644) before first launch; the
+  app's first fetch then has the LAN source and Featured's first row is known.  This also
+  replaces the double `trollapps://add` delivery, which worked only when the Sources view
+  happened to be mounted when the second URL arrived.
+- **No second prompt.**  `confirm` runs `downloadIPA` per item and then, when
+  `userSettings.skipInstallPrompt` is true (its default), calls `processInstalls` directly.
+  **Install Apps** appears only with the setting off.  So the whole flow is GET -> Confirm ->
+  download -> `spawnRoot(trollstorehelper, ["install", ipa])` -> the app removes the IPA.
+- **The buttons' place.**  The queue is a BottomSheet: `absoluteBottom(165)` for two seconds
+  after GET, then `absoluteBottom(105)`; the user drags it to `relativeTop(0.975)`.  The
+  content is laid out bottom-up with `.padding(.bottom, canClose ? 95 : 40)` (canClose is true
+  before Confirm, false after), two `LongButtonStyle` buttons 50 pt tall, 350 pt wide:
+  Confirm first, Clear Queue second.  On a 780 pt screen that puts Confirm near y≈0.73 and
+  Clear Queue near y≈0.80, i.e. **taps must stay above ~0.78** or they clear the queue; the
+  0.87 used in the 02:43 scene was in the sheet's empty bottom padding.
+- **The app's own language.**  `UserSettings.lang` is fed to `.environment(\.locale)` at launch
+  (`TrollAppsApp`), and Settings offers `zh-hans`/`zh-hant`; seeding `lang = zh-hans` gives the
+  Chinese interface without changing the system language.  It takes effect on the next launch,
+  which the scene's launch is.
+
+The prepared scene (`rc.jobs.storeapps`, image `root-storeapps.apfs` `1675f323`) seeds the LAN
+source and the language, drops the GitHub probe, taps GET, drags the sheet up, taps 0.71 and
+0.75 (Confirm is the blue button above Clear Queue), then lists the queue directory and the
+MCM containers, runs `uicache -a` and opens `com.hakios.locprobe` to show the store-installed
+app runs.  Its result belongs in the next paragraph once observed.
+
+### The first half, observed on the phone (2026-11-18, `logs/033530-run.log`)
+
+The scene `rc.jobs.storeapps` (image `root-storeapps.apfs` `8c6b53d1` was the next build; the
+run below used `1675f323`) proved the seeding and the language on the device:
+
+- `/var/mobile/.TrollApps` did not exist before the app ran, and **Featured already showed the
+  LAN source**: `HakiOS Local`, `LocProbe 1.0`, the location icon and a GET button, with no
+  `trollapps://add` and no GitHub fetch (`logs/sb-04.png`).  So the `repos` JSON string in
+  `~/Library/Preferences/org.resonance.store.plist` is read the way the source implies.
+- The UI is **Chinese** (`推荐`/`软件源`/`应用程序`/`搜索`, `安装`) from `lang = zh-hans` alone;
+  the system language was not touched.
+- The GET tap landed (`logs/sb-06.png`): the button turned pink **QUEUED** and the queue sheet
+  appeared at its 105 pt bottom position -- about ten seconds after the tap, the app's first
+  layout pass on this port is slow.
+- The sheet did **not** expand: the 03:35 scene still used a swipe starting at y 0.903, and the
+  sheet's bottom 83 pt are hidden by the tab bar (the sheet ignores the bottom safe area, the
+  tab bar is drawn over it), so the drag began on the tab bar, not the sheet.  The source says
+  why: BottomSheet attaches its drag gesture to the header and the sheet background, and the
+  drag indicator at y≈0.885 is itself a **Button**
+  (`BottomSheetView+DragIndicatorAction.swift`): a tap switches 105 pt -> `.relativeTop(0.975)`,
+  full height.  The scene now taps that point, keeps a slow drag as a fallback, and taps
+  Confirm at 0.75/0.78/0.76 -- inside the button's 0.740..0.804 span with the sheet's 95 pt
+  bottom padding, and above Clear Queue's 0.814..0.878.  That scene's result is next.
+
+### The loader's fastboot endpoint, wedged by an interrupted upload (2026-11-18 ~03:50)
+
+After the 03:35 run the phone was still in the loader, but `xl state` answered "android":
+`emulator-5554` (the QEMU bench emulator) was attached, and xl's `state` falls through to
+`adb get-state` when the fastboot answers are slow.  The 2.5 GB `xl ramdisk` upload was in
+fact running normally; it was killed on that misreading, and the loader's fastboot endpoint
+then enumerated as `xnuloader` but answered nothing:
+
+- `fastboot getvar product` and `fastboot reboot` both fail with
+  `AdbWriteEndpointSync failed: ... (121)`;
+- `xl enter` reports `loader did not come up on USB (state: fastboot)`;
+- `xl reboot` hangs in the same place.
+
+Nothing on this side can reach that endpoint; a USB replug or a power cycle is the way back.
+Lessons for the next sessions: never interrupt `xl ramdisk` (FB_TIMEOUT is 1800 s for a
+reason), and keep `XL_ADB_SERIAL=5290780a` in every `xl state` call while the emulator is
+attached.  Image `root-storeapps.apfs` `4593d249` carries the pill-tap scene and a new
+`persona_spawn_test` (drops to 501 and spawns `id` through persona 99 uid/gid 0, then the
+control without it); its run waits for the phone to come back.

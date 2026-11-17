@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TrollApps (org.resonance.store) stores its source list with @AppStorage("repos") on a
+	     [String]; the app's own `extension Array: RawRepresentable where Element: Codable` shim
+	     means the value in UserDefaults is one JSON array in a string, not an NSArray.  A scene
+	     writes this file before the app's first launch, so Featured already carries the LAN
+	     source and no GitHub round trip (nor a trollapps://add race) stands before the test.
+	     skip_install_prompt is the app's default but is written out: after Confirm downloads
+	     the IPA, the app runs TrollStore's helper itself instead of asking a second time.
+	     lang picks the app's in-app language (SettingsView offers "zh-hans"); it takes effect
+	     at the next launch, which is this one. -->
+	<key>repos</key>
+	<string>["http://192.168.0.104:8000/repo.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+</dict>
+</plist>

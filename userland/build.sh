@@ -310,6 +310,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			  echo "build.sh: no ldid: mcm_test is unsigned, and MobileContainerManager will answer 98"; }
 		# one URL into one file: the payload cannot carry an IPA beside the kernel (src/hk_download.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/hk_download src/hk_download.m
+		# whether a process that dropped to 501 becomes root through a spawn persona, which is
+		# exactly how TrollApps runs TrollStore's helper (src/persona_spawn_test.m)
+		$DYN -fobjc-arc -framework Foundation -o obj/persona_spawn_test src/persona_spawn_test.m &&
+			{ ${LDID:-ldid} -Ssrc/persona_spawn_test.entitlements obj/persona_spawn_test 2>/dev/null ||
+			  echo "build.sh: no ldid: persona_spawn_test is unsigned, and the persona spawn may be refused"; }
 		# the smallest application that can ask for a position: a bundle identifier and a
 		# usage description, which a command line program has not (src/LocProbe.m)
 		mkdir -p obj/LocProbe.app &&
@@ -519,6 +524,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
 	[ -f obj/mcm_test ] && cp obj/mcm_test root/bin/
 	[ -f obj/hk_download ] && cp obj/hk_download root/bin/
+	[ -f obj/persona_spawn_test ] && cp obj/persona_spawn_test root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
 	if [ -d obj/LocProbe.app ]; then
@@ -531,9 +537,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		mkdir -p root/fw/ipa
 		cp obj/LocProbe.ipa root/fw/ipa/
 	fi
-	# TrollStore's preferences: install without asking, so a scene can drive it (see the file)
+	# TrollStore's and TrollApps' preferences: install without asking, and a known source list,
+	# so a scene can drive them (see the files)
 	mkdir -p root/share/trollstore
-	cp trollstore/com.opa334.TrollStore.plist root/share/trollstore/
+	cp trollstore/*.plist root/share/trollstore/
 	# the weather screen travels the same way (src/HakiosWeather.m)
 	if [ -f obj/HakiosWeather.app/HakiosWeather ]; then
 		mkdir -p root/fw/hweather

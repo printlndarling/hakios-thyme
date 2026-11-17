@@ -5,8 +5,14 @@
 # to TrollStore through apple-magnifier://, which the TrollStore.app in /Applications already
 # declares (its Info.plist carries the scheme).  The scene joins Wi-Fi first, sets TrollStore up
 # the proven way (helper + its own MCM container with ldid), installs TrollApps with the helper,
-# and opens it.  The store's default sources live on GitHub, so raw.githubusercontent.com is
-# probed too: that is the difference between a store that works and one that spins in China.
+# and opens it.
+#
+# The store's source list is pre-seeded instead of added through trollapps://add: TrollApps keeps
+# it in UserDefaults under "repos" (a JSON array in a string, see userland/trollstore/
+# org.resonance.store.plist), so the app's first fetch already has the LAN source.  Its bundled
+# GitHub sources stalled for 60 s in the 02:09 run; the LAN source answers in milliseconds and
+# makes the row the GET tap must hit predictable.  The app's own language is set to zh-hans in
+# the same file, so the store draws its Chinese UI without touching the system language.
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network
 /redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
 /redwood/bin/rwtouch wait 25
@@ -16,15 +22,24 @@
 /var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
 /var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
 /var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
+# The persona spawn the store app itself depends on, measured on its own first: the program
+# drops to 501 and asks posix_spawn for persona 99 with uid/gid 0 (TrollApps' spawnRoot), then
+# repeats the spawn without the persona as the control.  Its lines in the run log say whether
+# the helper spawn can work before the UI gets a chance to try it.
+/redwood/bin/persona_spawn_test
+/redwood/bin/rwtouch wait 2
+/redwood/bin/persona_spawn_test uid501
+/redwood/bin/rwtouch wait 2
 # The IPA is not in the payload: the root image beside the kernel tops out near 50 MB (the
 # 5.5 MB IPA made the upload fail).  hk_download fetches it from the machine on the LAN that
-# serves it (python3 -m http.server on the host's own address), which also proves the phone can
-# download bytes over the Wi-Fi this scene joined; the store's GitHub sources are probed below.
+# serves it, which also proves the phone can download bytes over the Wi-Fi this scene joined.
 /redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
 /var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
 /var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
 /redwood/bin/rwtouch wait 20
-/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
 /var/jb/usr/bin/uicache -a
 /var/jb/usr/bin/uiopen --bundleid org.resonance.store
 /redwood/bin/rwtouch wait 15
@@ -32,20 +47,37 @@
 /redwood/bin/rwtouch tap 0.5 0.91
 /redwood/bin/rwtouch wait 10
 /redwood/bin/rwtouch tap 0.5 0.91
-/redwood/bin/rwtouch wait 20
-# The store's default sources live on GitHub; fetch one for a plain answer either way, and let
-# net_test resolve the host too (its line prints the address or the failure).
-/redwood/bin/hk_download https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json /private/var/tmp/repo.json
-/var/jb/usr/bin/net_test resolve raw.githubusercontent.com
-/var/jb/usr/bin/net_test tcp raw.githubusercontent.com 443
-/redwood/bin/rwtouch wait 20
-# One tap on GET (TrollLock, the third row of haxi0's source): TrollApps hands the IPA URL to
-# TrollStore through apple-magnifier://, TrollStore downloads it and, with
-# installAlertConfiguration = 2, installs it without asking.  The container list afterwards says
-# whether the whole one-tap path ran.
-/redwood/bin/rwtouch tap 0.86 0.586
-/redwood/bin/rwtouch wait 40
+/redwood/bin/rwtouch wait 15
+# Featured: the one source is the LAN one, so LocProbe's row is the first row and its GET sits
+# at the same place the first row's button did in the 02:43 screenshot (0.86, 0.273).
+/redwood/bin/rwtouch tap 0.86 0.273
+/redwood/bin/rwtouch wait 15
+# GET leaves the queue sheet collapsed at 105 pt; its bottom 83 pt are hidden by the tab bar
+# (the 03:35 run's swipe started there and the sheet never moved).  The drag indicator at
+# 0.885 is a Button in BottomSheet (BottomSheetView+DragIndicatorAction.swift): a tap switches
+# to the next position, .relativeTop(0.975), full height.  A slow drag from the same point is
+# the fallback, and is harmless once the sheet is up.
+/redwood/bin/rwtouch tap 0.5 0.885
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch drag 0.5 0.885 0.5 0.25 600 400
+/redwood/bin/rwtouch wait 5
+# Confirm is the blue button above Clear Queue: with the sheet's 95 pt bottom padding (canClose
+# is true until Confirm) it spans 0.740..0.804 of the screen, centre 0.772; the three taps are
+# inside that span and stay above Clear Queue (0.814..0.878).  Once one lands, canClose turns
+# false and the buttons move down 55 pt, so the later taps hit the list, not Clear Queue.
+/redwood/bin/rwtouch tap 0.5 0.75
+/redwood/bin/rwtouch wait 2
+/redwood/bin/rwtouch tap 0.5 0.78
+/redwood/bin/rwtouch wait 2
+/redwood/bin/rwtouch tap 0.5 0.76
+/redwood/bin/rwtouch wait 30
+# With skip_install_prompt the app downloads and then spawns TrollStore's helper itself; the
+# queue file is removed by the app after the helper returns.  The container list says whether
+# the helper installed; then the app it installed is started to show that it runs.
+/var/jb/usr/bin/ls -la /var/mobile/.TrollApps/tmp/ >> /private/var/tmp/storeapps.txt
 /var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid com.hakios.locprobe
 /redwood/bin/rwtouch wait 20
 /var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeapps.txt
 /var/jb/usr/bin/cat /private/var/tmp/storeapps.txt
