@@ -27,6 +27,10 @@
 /var/jb/usr/bin/uicache -a
 /var/jb/usr/bin/uiopen --bundleid com.hakios.locprobe
 /redwood/bin/rwtouch wait 30
+# The store's own UI, then the IPA handed to it: with installAlertConfiguration = 2 it installs
+# without asking, and the app list should already carry LocProbe (the helper marked it).
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore
+/redwood/bin/rwtouch wait 25
 /var/jb/usr/bin/uiopen --url file:///private/var/tmp/LocProbe.ipa
 /redwood/bin/rwtouch wait 30
 /var/jb/usr/bin/cat /private/var/tmp/tstore.txt

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- What an Xcode-signed app carries, minus get-task-allow: TrollStore's fallback entitlements
+	     (for a binary with none at all) set get-task-allow, which makes the helper arm developer
+	     mode after the install and return 183 on this port (logs/224550-run.log).  With these the
+	     binary has entitlements of its own, nothing restricted, and the helper returns 0. -->
+	<key>application-identifier</key>
+	<string>TROLLTROLL.com.hakios.locprobe</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TROLLTROLL</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>TROLLTROLL.com.hakios.locprobe</string>
+	</array>
+</dict>
+</plist>

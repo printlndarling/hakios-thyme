@@ -314,7 +314,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			$DYN -fobjc-arc -framework Foundation -framework UIKit -framework CoreLocation \
 				-o obj/LocProbe.app/LocProbe src/LocProbe.m &&
 			cp LocProbe-Info.plist obj/LocProbe.app/Info.plist &&
-			{ ${LDID:-ldid} -S obj/LocProbe.app/LocProbe 2>/dev/null || true; }
+			{ ${LDID:-ldid} -Ssrc/locprobe.entitlements obj/LocProbe.app/LocProbe 2>/dev/null || true; }
 		# the weather screen that does not need WeatherKit (src/HakiosWeather.m)
 		# (separate commands: a failure inside an && chain is exempt from set -e,
 		# and a failed compile once left an empty .app that LaunchServices could
