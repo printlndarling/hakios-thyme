@@ -4610,8 +4610,27 @@ installed only by `tools/make-kernel.sh` (what `make kernel` runs), which also
 syncs `drivers/` into the tree and judges the build by what failed -- the kext
 symbol-set steps always fail on this configuration and are accepted, anything
 else is not. A run started after only `xnu-build.sh` silently ran the old
-kernel.  `vkn=1` remains as an opt-in for anything that does
-enumerate names, but nothing in the cache calls `pipelineNames`.
+kernel.
+
+With the fixed kernel actually loaded (run `144139`, `xl: inputs: kernel=4ce8d7ba31d1`,
+image `59eade14`) the Metal side of Maps came down to the last wall and through
+it: **the canvas textures allocate** (the 69 "driver gave no buffer" that remain
+are all after `--- loader_return_after expired ---`, the run's teardown), Maps
+encodes 80 render passes, **no draw is refused**, and the Clear pipeline links.
+The kernel's own buffer statistics show it: 56 buffers made, 4 kept ones given
+again, 0 MB kept.  The screenshot at the end of the run shows the app's own
+"My Location" card -- address "Ziwei Street and Xuefu Street Road, Koudong
+Wanjing Lizhiwan, Chang'an, Xi'an", Directions / Drop Pin / More -- over a
+canvas that is still black (`logs/ptm2-4.png`): the map view now takes a tap,
+asks locationd and geocodes, and draws its UI, but nothing is on the canvas yet.
+No tile or map-data host appears in the run's connections (only a handful of
+Apple 17.x ones), so what the canvas lacks is content to draw, not a pipeline:
+the next thing to check is the tile/data path (geod, the map style resources,
+and a run long enough after the join for the first tiles to arrive), not the
+GPU.
+
+`vkn=1` remains as an opt-in for anything that does enumerate names, but
+nothing in the cache calls `pipelineNames`.
 
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
