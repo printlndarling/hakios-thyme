@@ -136,6 +136,17 @@ main(int argc, char **argv)
 			       pipeline != nil ? object_getClassName(pipeline) : "NIL",
 			       why != nil ? [[NSString stringWithFormat:@" (%@)", [why localizedDescription]] UTF8String] : "");
 		}
+		/* one name the descriptions do list, so that the plug-in's answer to the library's own lookups is
+		 * exercised even when pipelineNames is empty (HakiosMetalCA.m, hm_vk_new_pipeline) */
+		if ([library respondsToSelector:byName] && [names count] > 0) {
+			NSError *why = nil;
+			id pipeline = ((id (*)(id, SEL, id, NSUInteger, id *, NSError **))objc_msgSend)(library, byName,
+			    names[0], 0, NULL, &why);
+
+			printf("pipelinelib_test:   by description name %s = %s%s\n", [names[0] UTF8String],
+			       pipeline != nil ? object_getClassName(pipeline) : "NIL",
+			       why != nil ? [[NSString stringWithFormat:@" (%@)", [why localizedDescription]] UTF8String] : "");
+		}
 	}
 
 	NSError *libError = nil;

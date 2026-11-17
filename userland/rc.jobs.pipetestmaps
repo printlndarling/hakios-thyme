@@ -1,0 +1,13 @@
+# RC_JOBS=rc.jobs.pipetestmaps: the pipeline question and Maps in one boot.  The probe first
+# (src/pipelinelib_test.m): it opens VectorKit's library through the plug-in, asks one description
+# name by name (the plug-in answers it from the library's own functions), and builds a Grid pipeline
+# by hand.  Then the Maps scene as rc.jobs.maps runs it: Wi-Fi joined in the background, Maps opened
+# and its onboarding and location rows tapped, so the same boot shows whether the app draws through
+# the answered library.
+/redwood/bin/rwtouch wait 25
+/redwood/bin/pipelinelib_test
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
+/redwood/bin/net_test waitaddr en0 90 &
+/redwood/bin/rwtouch wait 60
+/var/jb/usr/bin/uiopen --bundleid com.apple.Maps
+/redwood/bin/rwtouch wait 40 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.918 wait 15 tap 0.5 0.918 wait 25 tap 0.5 0.712 wait 15 tap 0.5 0.712 wait 120

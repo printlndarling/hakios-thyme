@@ -2564,6 +2564,26 @@ hm_vk_function(NSString *base)
 	return [library newFunctionWithName:base];
 }
 
+/* an integer boot argument "name=N", or DEF when it is not there (the pipeline's attachment state below
+ * is chosen with these until pipelines.desc's own is decoded: vkc=<pixel format>, vkd=<depth format>,
+ * vks=<samples>; three short names, because the kernel's line is 607 characters) */
+static int
+hm_boot_arg_int(const char *name, int def)
+{
+	char args[1024] = "";
+	size_t size = sizeof(args) - 1;
+	const char *at;
+
+	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0) {
+		return def;
+	}
+	at = strstr(args, name);
+	if (at == NULL || at[strlen(name)] != '=' || at[strlen(name) + 1] < '0' || at[strlen(name) + 1] > '9') {
+		return def;
+	}
+	return atoi(at + strlen(name) + 1);
+}
+
 static id
 hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *reflection, NSError **error)
 {
@@ -2574,6 +2594,7 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	id vertex, fragment;
 	MTLRenderPipelineDescriptor *descriptor;
 	NSError *why = nil;
+	int depth;
 
 	if (pipeline != nil) {
 		return pipeline;
@@ -2611,7 +2632,16 @@ hm_vk_new_pipeline(id self, SEL _cmd, NSString *name, NSUInteger options, id *re
 	descriptor.label = name;
 	descriptor.vertexFunction = vertex;
 	descriptor.fragmentFunction = fragment;
-	descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+	/* until pipelines.desc's own attachment state is decoded: one colour attachment, no depth, one sample,
+	 * unless the boot changes it (vkc/vkd/vks).  The map canvas itself is BGRA8_sRGB (81) with a 4-sample
+	 * Depth32Float_Stencil8 (260) -- what a run tries once a plain pipeline has drawn */
+	descriptor.colorAttachments[0].pixelFormat = (MTLPixelFormat)hm_boot_arg_int("vkc", 80);
+	depth = hm_boot_arg_int("vkd", 0);
+	if (depth != 0) {
+		descriptor.depthAttachmentPixelFormat = (MTLPixelFormat)depth;
+		descriptor.stencilAttachmentPixelFormat = (MTLPixelFormat)depth;
+	}
+	descriptor.rasterSampleCount = (NSUInteger)MAX(hm_boot_arg_int("vks", 1), 1);
 	[vertex release];
 	[fragment release];
 	pipeline = [hm_vk_device newRenderPipelineStateWithDescriptor:descriptor options:options reflection:reflection error:&why];

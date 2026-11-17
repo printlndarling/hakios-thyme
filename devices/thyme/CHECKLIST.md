@@ -4392,6 +4392,15 @@ loader", `logs/102725-run.log`), before the scene's `uiopen` at rc+90 s.  The
 loader does not charge -- a phone at this level has to go back to Android, or to
 a charger, before the next run.
 
+The description parser was checked against the metallib before the run: all 235
+entries of section 7 hold exactly two "Namespace::name" strings, every one of
+them is vertex first, and all 105 distinct base functions they name exist in
+`default.metallib` (309 functions there in all).  334 names therefore map to a
+pair -- a lookup of any of them can be answered; a name outside that set is
+logged and left nil.  `rc.jobs.pipetestmaps` runs the probe first and Maps after
+in one boot, so the answered library is exercised both by a name the probe asks
+for directly and by whatever names the app itself asks.
+
 ### The boot that stays black: ca_metallib cut by the 607-character command line (2026-11-17)
 
 Three of the last boots (`metal650maps10`, `-12`, `-13`) never reached a drawn
