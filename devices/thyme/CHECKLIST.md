@@ -5628,3 +5628,35 @@ two hashes with a verified run -- not both silently.
 One environment note for the next session: this WSL had no `adb` or `fastboot` on `PATH`
 (the Windows SDK's `adb.exe`/`fastboot.exe` only), so `/home/darling/bin/{adb,fastboot,xl}`
 are wrappers that exec the `.exe`s; `xl` drives the phone again through them.
+
+### The plain desktop boot does not return either (2026-11-18, 23:34)
+
+With the phone recovered, a boot that runs no scene work was tried with the same loader and
+system image: `root-wirelessfull.apfs` `d9119f52` (fresh `build-root.sh`; `check-root.py`
+found GL, Bluetooth, audio and camera), `XL_CMDLINE=` empty, `XL_SECS=180`, system
+`userland/system.apfs` `3b539ee0`, loader `6a57fb6bb147`.  The result is the same message:
+
+    xl: no answer — the kernel hung; waiting for the watchdog to reset the phone
+
+and again **nothing was written under `logs/`**.  So the hang is not the Sileo scene and not
+its root image; it happens on a plain desktop boot.
+
+**The repack path was tried and is not equivalent.**  `xl enter` could not repack because
+`u-boot/` was absent, so `uefi/u-boot/apply.sh redwood` and `build.sh redwood` were run
+(U-Boot `v2026.07`, `aarch64-linux-gnu-`): the build produced a **1,541,120-byte**
+`u-boot.bin`.  The U-Boot inside the working prebuilt image is **3,216,768 bytes**
+(extracted from its gzip stream), so the two are not the same configuration.  The repacked
+images (`961e038f`, then `e380248f`) did not bring the loader up at all — `xl: loader did not
+come up on USB (state: fastboot)` — and that path was dropped rather than iterated on.
+
+**Recovery after the second hang:** the loader endpoint wedged exactly as before
+(`????????????`, `AdbWriteEndpointSync ... (121)`); a replug brought the phone back, but after
+the next `xl enter` attempt `fastboot reboot` left it in fastboot and
+`fastboot continue` answered `Failed to load image from partition: Load Error`, so Android
+came back only with a power cycle.  No partition was written at any point -- `xl enter` only
+does `fastboot boot` of a RAM image (`xl`, `enter()`), and no `fastboot flash` was run.
+
+What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
+14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
+hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
+them yet.
