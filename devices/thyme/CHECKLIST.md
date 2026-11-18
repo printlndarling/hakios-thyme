@@ -5842,6 +5842,10 @@ Scene `rc.jobs.sileolists`, image `root-sileolists.apfs` `e7d33a23`, 300 s, no `
 `logs/031316-run.log`.  This closes the queue problem the Sileo row has carried since
 2026-11-13.
 
+**Reproduced** in a second, independent run of the same scene and image
+(`logs/033909-run.log`, 03:39-03:44): the same `tree_2.0.1_iphoneos-arm64.deb` (43,012 bytes),
+`tree_2.0.1_install ok installed`, and `/var/jb/usr/bin/tree` (109,184 bytes, root:wheel).
+
 ### The full scene runs to the end; the top-edge swipe locks the phone (2026-11-19, 02:17, `logs/021725-run.log`)
 
 A 480 s run lets the scene complete every line: the sheet close (two swipes and the
