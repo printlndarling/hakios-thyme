@@ -5392,6 +5392,14 @@ the attempt, not where the kernel says no).  The port does hand out a Metal devi
 does not provide; an application's exception text is not collected under launchd on this
 port, so that is where this thread rests for now.
 
+**The port's own Metal plan puts the boundary in the same place.**  `docs/metal-plan.md`
+says the Metal work targets the system's own clients (the window server draws through Metal
+on the phone), and `docs/ru/metal.md` §9.4 argues that games are "a firm no": the shader
+compiler reaches the 456 modules the system ships, not an arbitrary app's.  PPSSPP is in the
+second category.  The store can install it; running it is a graphics-project milestone, not
+an install or packaging fix.  The same applies to any 3D app or emulator brought in through
+the store.
+
 ### The sources the store ships with, checked 2026-11-18
 
 TrollApps' bundled default list is three GitHub JSONs.  **haxi0's source is entirely stale**:
