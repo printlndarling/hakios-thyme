@@ -5806,6 +5806,20 @@ at **Deny (0.5 0.835)**, photographs the answer, and only then sends the deep li
 Also worth knowing for every run: the fetched log is always **1,441,823 bytes** -- the loader's
 buffer size -- so an early line survives only if the kernel has not logged past it.
 
+### The package page is reached and queued; the sheet does not close (2026-11-19, 01:56, `logs/015611-run.log`)
+
+With the launch-first fix and **Deny at 0.5 0.835**, Sileo's own page for `tree` is reached
+(`quiet4-23` and `quiet4-26`: **QUEUE** at about 0.854 0.371, Details/Changelog, Repository
+Procursus, the grey `tree (2.0.1)` line at about 0.72).  The QUEUE tap is answered -- Sileo's
+apt simulation runs **twice** in the log -- but the package sheet never closes: `notify
+com.hakios.close-sheet` leaves the page up in `quiet4-24`..`-26`, so the queue popup bar is
+still behind the sheet, the tap at 0.5 0.862 finds nothing, no downloads sheet opens and no
+`dpkg -i` follows (`dpkg-query -W tree`: no packages found matching tree).
+
+Next: close the sheet by a route that works for this presentation (the grabber drag the
+2026-11-13 runs used, or let the app close it), then tap the bar where it actually is, and
+photograph the downloads sheet before the Confirm tap.
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
