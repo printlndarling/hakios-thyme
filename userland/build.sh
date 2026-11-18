@@ -657,6 +657,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the crash report and direct-run dump for PPSSPP's launch abort (rc.jobs.ppssppdiag)
 	cp bin/hk-ppdiag.sh root/bin/hk-ppdiag.sh
 	chmod 755 root/bin/hk-ppdiag.sh
+	# the same for Alpimaps' launch abort (rc.jobs.almapsdiag)
+	cp bin/hk-almapsdiag.sh root/bin/hk-almapsdiag.sh
+	chmod 755 root/bin/hk-almapsdiag.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand

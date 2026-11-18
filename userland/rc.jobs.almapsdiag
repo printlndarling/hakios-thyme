@@ -1,0 +1,22 @@
+# RC_JOBS=rc.jobs.almapsdiag: why Alpimaps aborts at launch.
+#
+# rc.jobs.storemaps proved the install (62 MB IPA from the LAN, helper returning 0) and the
+# launch abort: SIGABRT right after `Successfully spawned`/scene attach, no dyld or MESA line
+# in the kernel log (logs/180739-run.log).  This scene installs it the direct way, starts it
+# once with uiopen, then hk-almapsdiag.sh reads ReportCrash's directory and runs the binary
+# with stderr on the console, which is where an uncaught exception says what it is.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/redwood/bin/hk_download http://192.168.0.104:8000/alpimaps.ipa /private/var/tmp/alpimaps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/alpimaps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/alpimaps.ipa
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid akylas.alpi.maps
+/redwood/bin/rwtouch wait 6
+/var/jb/bin/sh /redwood/bin/hk-almapsdiag.sh >> /private/var/tmp/almaps.txt
+/redwood/bin/rwtouch wait 8
+/var/jb/usr/bin/cat /private/var/tmp/almaps.txt
