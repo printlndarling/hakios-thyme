@@ -1,0 +1,44 @@
+# RC_JOBS=rc.jobs.storebonnie: a real app from a public default source that still works.
+#
+# haxi0's bundled source is all 404s (rc.jobs.storehaxi, logs/133243-run.log).  Bonnie's
+# source answers 200: one app, the tapgame prototype (dev.bonnie.tapgame, 18,248,245-byte
+# IPA).  This is the store's public-source path with live data -- source JSON from GitHub raw,
+# IPA from the source's URL, then GET, queue sheet, Confirm, helper install, launch.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.bonnie.plist /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+/redwood/bin/rwtouch wait 35
+# The single featured row: the tapgame prototype's GET.
+/redwood/bin/rwtouch tap 0.86 0.27
+/redwood/bin/rwtouch wait 22
+/redwood/bin/rwtouch drag 0.9 0.872 0.9 0.42 900 500
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch drag 0.1 0.872 0.1 0.42 900 500
+/redwood/bin/rwtouch wait 8
+/redwood/bin/rwtouch tap 0.5 0.77
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch tap 0.5 0.79
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/ls -la /var/mobile/.TrollApps/tmp/ >> /private/var/tmp/storebonnie.txt
+/redwood/bin/rwtouch wait 35
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storebonnie.txt
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid dev.bonnie.tapgame
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storebonnie.txt
+/var/jb/usr/bin/cat /private/var/tmp/storebonnie.txt

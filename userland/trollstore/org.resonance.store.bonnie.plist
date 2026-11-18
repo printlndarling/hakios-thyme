@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rc.jobs.storebonnie: only Bonnie's default source, whose single app is the tapgame
+	     prototype (dev.bonnie.tapgame, 18,248,245-byte IPA).  haxi0's source turned out to be
+	     all 404s; this one answers 200, so it is the working public-source test. -->
+	<key>repos</key>
+	<string>["https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/BonnieRepo_2.0.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>
