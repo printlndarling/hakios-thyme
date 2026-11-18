@@ -5759,8 +5759,13 @@ twice (00:59:07 and 00:59:46) with the package found, and its `rm -rf`/`mkdir`/`
 `sileolists` is in the log.  So the queue is no longer emptied by a failed recheck.  But
 `dpkg-query -W tree` still answers `no packages found matching tree` and
 `/var/jb/usr/bin/tree` is absent: the flow stops after the simulation, before a download.
-The Wi-Fi join failed during the run (`net_test: joinfile: the kernel refuses ASSOCIATE:
-Device not configured`), which is where the next run should look first.
+**The Wi-Fi was not at fault**: attempt 1 joined in 0.6 s to the access point on channel 149,
+and the link carried 14,290 frames over 276 s; the `net_test: joinfile: the kernel refuses
+ASSOCIATE: Device not configured` line is the scene's *rejoin after* the run's teardown had
+left the network (`lx: the network is left`, 561 s), not a failure during it.  Sileo's spawns
+in the whole run are two `apt-get`, two `dpkg --print-*`, and file operations -- no `dpkg -i`
+and no downloader: Sileo fetches through its own NSURLSession, so the next run needs its
+download task observed (or its queue sheet photographed) rather than a network test.
 
 The `-v` console also shows what the owner saw on screen during these runs: `hakios-gl: frame
 1040: 134 GL calls, 20 draws ...` and the haptic/audio lines -- a running desktop, not a
