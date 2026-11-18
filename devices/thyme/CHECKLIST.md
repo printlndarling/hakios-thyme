@@ -5820,6 +5820,21 @@ Next: close the sheet by a route that works for this presentation (the grabber d
 2026-11-13 runs used, or let the app close it), then tap the bar where it actually is, and
 photograph the downloads sheet before the Confirm tap.
 
+### The full scene runs to the end; the top-edge swipe locks the phone (2026-11-19, 02:17, `logs/021725-run.log`)
+
+A 480 s run lets the scene complete every line: the sheet close (two swipes and the
+notification), the bar taps at 0.885/0.90/0.87, the Confirm taps at 0.93/0.88/0.84, then the
+closing probe and `dpkg-query`.  (The 300 s run ended in the middle of the taps, which is why
+its probe had been missing -- the scene is simply longer than 300 s.)  The result is
+unchanged: `dpkg-query -W tree` answers `no packages found matching tree`.
+
+The frames say why this attempt could not work: **`quiet6-24` is the lock screen** at 2:21.
+The grabber swipe starts at the top edge (`swipe 0.5 0.06 0.5 0.92`), which on this system is
+the Notification Centre / Cover Sheet gesture, and everything after it lands on the lock
+screen instead of the queue bar.  The next run must not swipe from the top edge; if the sheet
+cannot be closed, the queue bar has to be reached another way (a tap outside the sheet, or the
+app closing it after a successful queue).
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes

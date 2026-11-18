@@ -36,6 +36,18 @@
 /var/jb/usr/bin/uiopen sileo://package/tree
 /redwood/bin/rwtouch wait 30 tap 0.86 0.37 wait 10
 /redwood/bin/rwtouch wait 20 tap 0.86 0.37 wait 15
+# The queue is filled by the taps above (both 2026-11-19 runs show Sileo's apt simulation
+# twice), but the scene had no step after them.  The package page is a sheet with no Done
+# button, and the popup bar that opens the downloads sheet sits behind it: close the sheet
+# with the grabber drag the 2026-11-13 runs measured (its top edge is at about 0.06 of the
+# screen), then tap the bar just above the tab bar (0.885, with 0.90/0.87 as the misses
+# either side) and Confirm in the downloads sheet's footer (0.93/0.88/0.84).
+/redwood/bin/rwtouch swipe 0.5 0.06 0.5 0.92 300 wait 5
+/redwood/bin/rwtouch swipe 0.5 0.07 0.5 0.95 200 wait 5
+/redwood/bin/rwtouch notify com.hakios.close-sheet wait 5
+/redwood/bin/rwtouch tap 0.5 0.885 wait 10
+/redwood/bin/rwtouch tap 0.5 0.90 wait 6 tap 0.5 0.87 wait 8
+/redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
 /var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
