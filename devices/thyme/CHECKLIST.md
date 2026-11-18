@@ -5392,6 +5392,19 @@ the attempt, not where the kernel says no).  The port does hand out a Metal devi
 does not provide; an application's exception text is not collected under launchd on this
 port, so that is where this thread rests for now.
 
+### The sources the store ships with, checked 2026-11-18
+
+TrollApps' bundled default list is three GitHub JSONs.  **haxi0's source is entirely stale**:
+it loads, but all six apps' download URLs (Jaility, TrollBoard, Derootifier, DirtyJIT,
+TrollLock, KillMyOTA) answer 404 from GitHub -- the `TrollBoard-Reborn` repository itself is
+gone.  The public-source run (`logs/133243-run.log`) shows the store following it faithfully:
+GET queued, the download wrote the 404 body -- `Not Found`, **nine bytes** -- as
+`/var/mobile/.TrollApps/tmp/090E351A-...ipa`, and no container or launch followed (the file's
+nine bytes are the whole story).  That is source rot, not a store defect; TrollApps does not
+check the HTTP status before handing the file to the helper, which is its own robustness
+point.  The other two sources are alive: Resonance Team's (TrollApps 5,549,018 bytes,
+TrollApps Legacy 3,697,409) and Bonnie's (tapgame prototype 18,248,245), each answering 200.
+
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
 `rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
