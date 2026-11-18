@@ -5200,6 +5200,15 @@ catalog.  The scene now seeds `appVersion = 2.3` (the key the changelog's own Di
 so `showChangelog()` stays quiet and the 15-25 s of sheet-dismiss taps are gone, and it
 waits 22 s after GET and 8 s after the sheet tap (image `d6193c35`); its run is next.
 
+**The 09:31 run** (`logs/093151-run.log`) kept the queue at QUEUED for a reason one level
+down: the sheet was up (`logs/sb-06.png`: the indicator pill at y≈0.873) but the scene tapped
+0.885, the edge of the indicator's 20 pt Button, and missed; the Confirm taps then hit the
+catalog.  Across the three runs the pill's centre measured 0.873..0.885 (the 105 pt sheet's
+top at 0.865 plus 7.5 pt padding), which is exactly the 20 pt hit area's width, so a single
+fixed point is not reliable.  The scene now taps **0.873 and 0.878 three seconds apart**: the
+first expands the sheet, and the second, once it is up, is inside Confirm's 0.832..0.881
+(image `c6b2a9ca`); its run is next.
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
