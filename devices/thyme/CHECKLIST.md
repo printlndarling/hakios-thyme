@@ -5738,6 +5738,34 @@ lines, the Wi-Fi network joined, `--- loader_return_after expired ---`, and
 `XL_CMDLINE="$(tr -d '\n' < devices/thyme/ram.args) -v"`, and keep the total under the
 loader's 607 characters (the log line `cmdline: N of 607 characters` is the check).
 
+### The Sileo queue's working directory was not the problem (2026-11-19, 00:55, `logs/005526-run.log`)
+
+The scene ran with the full `ram.args` and returned cleanly (`result: returned 1441823`).  Its
+one-line test could not be planted: **`/` is read-only in this boot** --
+`ln: failed to create symbolic link '/sileolists': Read-only file system` -- so the row's
+assumption that the RAM boot volume is writable is wrong.
+
+The hypothesis is moot anyway.  apt resolves the relative `-oDir::State::lists=sileolists/`
+against its own `Dir::State`, not against the spawned process's working directory.  The
+probe's three cases -- from `/var/jb/var/lib/apt`, from `/` with no link, and from `/` with
+the link the scene could not make -- answered **the same**: all three `E: Unable to locate
+package tree`, rc 100, before Sileo had rebuilt its index, and all three `The following NEW
+packages will be installed: tree`, rc 0, after it (`sileolists-probe` lines in the log).  No
+chdir is needed and no link is needed.
+
+What the run did establish: Sileo's own spawn is exactly the command the row records
+(`apt-get -sqf ... -oDir::State::lists=sileolists/ ... install --reinstall tree=2.0.1`), it ran
+twice (00:59:07 and 00:59:46) with the package found, and its `rm -rf`/`mkdir`/`chown` of
+`sileolists` is in the log.  So the queue is no longer emptied by a failed recheck.  But
+`dpkg-query -W tree` still answers `no packages found matching tree` and
+`/var/jb/usr/bin/tree` is absent: the flow stops after the simulation, before a download.
+The Wi-Fi join failed during the run (`net_test: joinfile: the kernel refuses ASSOCIATE:
+Device not configured`), which is where the next run should look first.
+
+The `-v` console also shows what the owner saw on screen during these runs: `hakios-gl: frame
+1040: 134 GL calls, 20 draws ...` and the haptic/audio lines -- a running desktop, not a
+broken display.
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
