@@ -42,9 +42,12 @@
 # with the grabber drag the 2026-11-13 runs measured (its top edge is at about 0.06 of the
 # screen), then tap the bar just above the tab bar (0.885, with 0.90/0.87 as the misses
 # either side) and Confirm in the downloads sheet's footer (0.93/0.88/0.84).
-/redwood/bin/rwtouch swipe 0.5 0.06 0.5 0.92 300 wait 5
-/redwood/bin/rwtouch swipe 0.5 0.07 0.5 0.95 200 wait 5
-/redwood/bin/rwtouch notify com.hakios.close-sheet wait 5
+# No swipe from the top edge: on this system the top edge is the Notification Centre / Cover
+# Sheet gesture, and the 2026-11-19 02:17 run's swipe landed the phone on the lock screen
+# (quiet6-24) with every later tap on it.  Ask the app to close what it presented, then tap
+# the dimmed strip above the sheet (its rounded top edge is at about 0.06).
+/redwood/bin/rwtouch notify com.hakios.close-sheet wait 10
+/redwood/bin/rwtouch tap 0.5 0.04 wait 6
 /redwood/bin/rwtouch tap 0.5 0.885 wait 10
 /redwood/bin/rwtouch tap 0.5 0.90 wait 6 tap 0.5 0.87 wait 8
 /redwood/bin/rwtouch tap 0.5 0.93 wait 5 tap 0.5 0.88 wait 5 tap 0.5 0.84 wait 8
