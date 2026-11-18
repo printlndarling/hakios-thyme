@@ -5896,3 +5896,11 @@ loader rebuild an untested variable, not a wrong one, and it is the first thing 
 (three times tonight).  `fastboot set_active a` followed by `fastboot reboot` does, every
 time, with no partition written.  Worth knowing before a long sequence of runs: the phone is
 not broken, and a power cycle is not needed.
+
+### After a run, getting Android back needs set_active (2026-11-19)
+
+ sometimes leaves the phone in its bootloader, and there a plain
+ does not bring Android back even though  reads 
+(three times tonight).   followed by  does, every
+time, with no partition written.  Worth knowing before a long sequence of runs: the phone is
+not broken, and a power cycle is not needed.
