@@ -4,7 +4,9 @@
 <dict>
 	<!-- rc.jobs.storehaxi: only haxi0's default source, whose featured rows are TrollBoard
 	     (first), Derootifier and TrollLock.  The store fetches the source from GitHub and the
-	     app's IPA from its GitHub release -- the public-source path, not the LAN one. -->
+	     app's IPA from its GitHub release: the public-source path, not the LAN one.  (A double
+	     hyphen inside an XML comment is not well formed; plistlib rejects it, and a stricter
+	     reader than CoreFoundation's would drop the whole file.) -->
 	<key>repos</key>
 	<string>["https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/haxi0_2.0.json"]</string>
 	<key>skip_install_prompt</key>

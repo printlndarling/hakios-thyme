@@ -5420,10 +5420,14 @@ Bonnie's page came up empty).
 switching to the 搜索/BROWSE tab with the same source also listed **no apps at all**
 (`logs/sb-11.png` is an empty BROWSE with only its search field), so the app's `ReposData`
 never held Bonnie's repo.  The JSON is schema-complete for the app's decoders (name and
-iconURL on the app, version/date/downloadURL on its one version) and the same source was seen
-loaded in the 02:53 all-sources run, so this is an app-side fetch or decode failure in these
-two runs that is not yet explained.  The LAN source remains the only one that has installed
-everything.
+iconURL on the app, version/date/downloadURL on its one version) and the same source was
+seen loaded in the 02:53 all-sources run, so the favourite explanation is the **network**:
+raw.githubusercontent.com is intermittently unreachable from this Wi-Fi -- `hk_download` to
+the same host timed out after 60 s with retransmits in the 02:09 run, while the app's own
+fetch sometimes succeeds (the 02:53 and daily runs loaded the same Bonnie source).  The app's
+URLSession has no visible retry, so a failed fetch leaves `ReposData` without the repo and
+both Featured and Browse empty, which is what these two runs show; it is not a decode
+failure.  The LAN source remains the only one that has installed everything.
 
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
