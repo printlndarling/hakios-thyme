@@ -30,7 +30,9 @@
 # 0.5 0.90, Deny above it at 0.835).  The 2026-11-19 01:39 frame shows Sileo sitting on that
 # consent screen while the scene tapped where GET would be.
 /redwood/bin/rwtouch tap 0.32 0.59 wait 6
-/redwood/bin/rwtouch tap 0.5 0.90 wait 10
+# Deny, not Accept: 0.90 is close enough to the home indicator that the tap was read as the
+# home gesture and dismissed Sileo (quiet3-13 is the home screen right after it).
+/redwood/bin/rwtouch tap 0.5 0.835 wait 10
 /var/jb/usr/bin/uiopen sileo://package/tree
 /redwood/bin/rwtouch wait 30 tap 0.86 0.37 wait 10
 /redwood/bin/rwtouch wait 20 tap 0.86 0.37 wait 15
