@@ -5440,6 +5440,14 @@ exit or crash (the app's launch at 11:07:41 is its only launchd line; both statu
 sources load over this network even though `hk_download` had timed out against the same host
 in earlier runs; the app's own NSURLSession fetch is the one that matters here.
 
+**The 600 s soak** (`logs/144733-run.log`, same image, `XL_SECS=600`, 14:47-14:57) kept
+TrollApps in front from 14:49:22 to the end with **no exit or crash line at all**; the last
+screenshot (`logs/sb-30.png`, 14:53) still shows HakiOS Local, Resonance Team and haxi0's
+Source in Chinese, with **Bonnie's Repo missing again** -- the same intermittent
+raw.githubusercontent fetch.  Battery went from 43% (Android) to 36% (kernel reading) and the
+SoC sat at 36 C: ten minutes of an idle foreground store costs very little.  That is the
+longest store observation so far.
+
 **The kernel side of that spawn is already there.**  `xnu/hakios.patch` rewrites
 `spawn_validate_persona()` and `spawn_persona_adopt()`: the entitlement and the persona
 lookup are gone, and when no persona exists the requested credential (persona 99, uid/gid 0,
