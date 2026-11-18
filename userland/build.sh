@@ -322,26 +322,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 				-o obj/LocProbe.app/LocProbe src/LocProbe.m &&
 			cp LocProbe-Info.plist obj/LocProbe.app/Info.plist &&
 			{ ${LDID:-ldid} -Ssrc/locprobe.entitlements obj/LocProbe.app/LocProbe 2>/dev/null || true; }
-		# the weather screen that does not need WeatherKit (src/HakiosWeather.m)
-		# (separate commands: a failure inside an && chain is exempt from set -e,
-		# and a failed compile once left an empty .app that LaunchServices could
-		# not start)
-		mkdir -p obj/HakiosWeather.app
-		$DYN -fobjc-arc -framework Foundation -framework UIKit -framework CoreLocation -framework QuartzCore \
-			-o obj/HakiosWeather.app/HakiosWeather src/HakiosWeather.m
-		cp HakiosWeather-Info.plist obj/HakiosWeather.app/Info.plist
-		cp icons/AppIcon60x60@2x.png icons/AppIcon60x60@3x.png obj/HakiosWeather.app/
-		{ ${LDID:-ldid} -S obj/HakiosWeather.app/HakiosWeather 2>/dev/null || true; }
-		# the map screen that does not need VectorKit (src/HakiosMaps.m): WKWebView over the
-		# bundled Leaflet and OpenStreetMap's raster tiles, so Safari's own path draws it
-		mkdir -p obj/HakiosMaps.app
-		$DYN -fobjc-arc -framework Foundation -framework UIKit -framework WebKit -framework CoreLocation \
-			-framework QuartzCore -framework CoreGraphics \
-			-o obj/HakiosMaps.app/HakiosMaps src/HakiosMaps.m src/HakiosMapTileView.m
-		cp HakiosMaps-Info.plist obj/HakiosMaps.app/Info.plist
-		cp maps/index.html maps/leaflet.js maps/leaflet.css maps/LICENSE.leaflet obj/HakiosMaps.app/
-		cp maps/AppIcon60x60@2x.png maps/AppIcon60x60@3x.png obj/HakiosMaps.app/
-		{ ${LDID:-ldid} -S obj/HakiosMaps.app/HakiosMaps 2>/dev/null || true; }
+		# (No self-built weather or map apps: the owner wants existing apps, installed as
+		# IPAs, not replacements written here.  HakiosWeather/HakiosMaps were removed on
+		# 2026-11-18 after they had served their probes.)
 		# a scene that must not be suspended by the system idle sleep (src/sleep_hold.c)
 		# one URL over NSURLSession, for the TLS-stall question (src/https_test.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/https_test src/https_test.m
@@ -548,19 +531,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	mkdir -p root/share/tsldid
 	cp trollstore/tsldid/ldid root/share/tsldid/ldid
 	chmod 755 root/share/tsldid/ldid
-	# the weather screen travels the same way (src/HakiosWeather.m)
-	if [ -f obj/HakiosWeather.app/HakiosWeather ]; then
-		mkdir -p root/fw/hweather
-		cp -R obj/HakiosWeather.app root/fw/hweather/
-	fi
-	# and so does the map screen (src/HakiosMaps.m)
-	if [ -f obj/HakiosMaps.app/HakiosMaps ]; then
-		mkdir -p root/fw/hmaps
-		cp -R obj/HakiosMaps.app root/fw/hmaps/
-		# HakiOS Maps' tile-source file, ready to copy to /var/jb/hmaps/tiles.conf
-		mkdir -p root/share/hmaps
-		cp maps/tiles.conf.example root/share/hmaps/
-	fi
+	# (the self-built weather and map screens were removed on 2026-11-18: the owner
+	# wants existing apps, installed as IPAs, not replacements written here)
 	[ -f obj/https_test ] && cp obj/https_test root/bin/
 	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
