@@ -5644,10 +5644,17 @@ its root image; it happens on a plain desktop boot.
 **The repack path was tried and is not equivalent.**  `xl enter` could not repack because
 `u-boot/` was absent, so `uefi/u-boot/apply.sh redwood` and `build.sh redwood` were run
 (U-Boot `v2026.07`, `aarch64-linux-gnu-`): the build produced a **1,541,120-byte**
-`u-boot.bin`.  The U-Boot inside the working prebuilt image is **3,216,768 bytes**
-(extracted from its gzip stream), so the two are not the same configuration.  The repacked
-images (`961e038f`, then `e380248f`) did not bring the loader up at all — `xl: loader did not
-come up on USB (state: fastboot)` — and that path was dropped rather than iterated on.
+`u-boot.bin`.  The blob inside the working prebuilt image is **not U-Boot at all**: the
+3,216,768 bytes its gzip stream yields carry `_FVH` (an EDK2 firmware volume) and no
+`U-Boot 20...` version string, and `devices/thyme/build-loader.sh` packs it with
+`mkxnuimg.py -d thyme --fd-base 0x9fc00000 --fd-size 0x300000 --payload-base 0xf0000000`,
+the Silicium layout.  `xl enter` fell back to the U-Boot packer only because neither
+`Mu-Silicium/Build/redwoodPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd` nor
+`devices/redwood/prebuilt/SILICIUM_UEFI.fd` exists (only `umiPkg` is built), so the U-Boot
+images it made (`961e038f`, then `e380248f`) were the wrong firmware for this loader and did
+not come up at all (`xl: loader did not come up on USB (state: fastboot)`).  Building U-Boot
+was a wrong turn; the way to make `xl enter` repack for thyme is to restore the Silicium
+`redwoodPkg` firmware, not to replace it with U-Boot.
 
 **Recovery after the second hang:** the loader endpoint wedged exactly as before
 (`????????????`, `AdbWriteEndpointSync ... (121)`); a replug brought the phone back, but after
@@ -5671,9 +5678,11 @@ Adreno, no Wi-Fi, no ADSP and no PCIe, so `gpu=1`, `wifi=1`, `adsp=1`, `cam=...`
 of `ram.args` do nothing there.  The two hangs both happen with the phone's own hardware
 brought up, and the screen the owner saw was the display path itself.
 
-One more lead worth checking before another RAM boot: `axiom`/`u-boot` aside, `xl enter`'s
-`firmware()` picks U-Boot unless `Mu-Silicium/Build/redwoodPkg/.../SILICIUM_UEFI.fd` or
-`devices/redwood/prebuilt/SILICIUM_UEFI.fd` exists; neither does (only `umiPkg` is built), so
-every session tonight entered through the U-Boot prebuilt image.  If earlier successful
-sessions had the Silicium firmware present, they entered through a different loader than
-tonight's runs did -- that would be the variable to restore.
+With that identified, tonight's loader is the canonical one: `XL_BOOT_IMAGE` named
+`devices/thyme/prebuilt/xnu-usb.img`, which is exactly what `devices/thyme/build-loader.sh`
+writes, and it was rebuilt on 17 November 14:20 together with
+`xnuloader/loader-thyme.efi` (`6a57fb6bb147`).  The loader hash earlier sessions reported is
+`615d9a67c677` (14-16 November); no run log carries an `xl: inputs` line with `6a57fb6b`, so
+whether the 17 November loader has ever completed a boot is not recorded.  That makes the
+loader rebuild an untested variable, not a wrong one, and it is the first thing a run with
+`xl: inputs` written down should settle.
