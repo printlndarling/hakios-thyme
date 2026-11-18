@@ -3137,6 +3137,18 @@ station layer is back by then) has to be seen with a hand on the screen, not fro
 `rc.jobs.wifidrop` (join, `net_test leave`, then the address and a name again) is the scene
 that will answer it from a boot an application keeps awake.
 
+**The drop/rejoin answer, 2026-11-18** (`logs/152900-run.log`, image `root-wifidrop.apfs`
+`2387708c`): `sleep_hold 300` kept the system awake, the scene joined (`waitaddr` gave
+192.168.0.105 after 2.5 s), `net_test leave` then dropped the link -- wifid logs `Link went
+down due to None` at 15:30:37 -- and the keepalive printed `the link is gone; joining
+/redwood/fw/network again` twice (its own join bounced the link once and it rejoined again).
+After the sequence en0 still had its address and `resolve apt.procurs.us` answered
+**172.67.138.140 104.21.46.121 in 0.02 s**, so the rejoin path works on hardware.  The first
+resolve in the scene failed (`nodename nor servname provided`) because mDNSResponder was not
+up yet; the final one is the link proof.  Wake-from-sleep is still the one path a scene
+cannot drive: a sleeping system suspends the scene and the daemon with it, so that case needs
+a hand on the screen.
+
 ### The dependency install passes (2026-11-15, later)
 
 The same scene on the current image (`root-sileodep` `5fe04c8f`, with the Wi-Fi keepalive
