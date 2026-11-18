@@ -5320,6 +5320,17 @@ TestFlight builds cannot be extracted, and enterprise builds are not public.  Th
 source/DRM fact, not a store limit: the store installs any unencrypted arm64 IPA, as the
 Zhihu client above shows.
 
+### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
+
+`rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
+front for the rest of the run.  `logs/sb-30.png` (11:11) shows all of them loaded --
+**HakiOS Local**, **Resonance Team** (TrollApps itself as `打开`), **haxi0's Source**
+(TrollBoard/Derootifier/TrollLock) -- in Chinese, after 4.5 minutes in the foreground with no
+exit or crash (the app's launch at 11:07:41 is its only launchd line; both status dumps at
+11:12/11:13 list the two containers).  Image `root-storedaily.apfs` `e38972a2`.  The GitHub
+sources load over this network even though `hk_download` had timed out against the same host
+in earlier runs; the app's own NSURLSession fetch is the one that matters here.
+
 **The kernel side of that spawn is already there.**  `xnu/hakios.patch` rewrites
 `spawn_validate_persona()` and `spawn_persona_adopt()`: the entitlement and the persona
 lookup are gone, and when no persona exists the requested credential (persona 99, uid/gid 0,
