@@ -119,7 +119,7 @@ short_hash() { # short_hash <file>: twelve hex digits identify an uploaded input
 # XL_HOME=fastboot: the other way round, for a session of many runs: the phone is kept in its bootloader, where the next
 # run starts at once, and one that comes up in Android is sent there (the logo is the one place nothing here can help).
 recover_phone() {
-	local i s
+	local i s sent=0
 	for ((i = 0; i < 150; i += 3)); do
 		s=$(state)
 		if [ "${XL_HOME:-android}" = fastboot ]; then
@@ -129,10 +129,21 @@ recover_phone() {
 			loader) echo "xl: the phone is in this loader: restarting it (it comes up in Android, and goes on from there)"; fb reboot >/dev/null ;;
 			esac
 		else
+			# At most three sends: a boot that never reaches Android counts against the slot, and
+			# enough of them make the bootloader mark it unbootable -- then nothing here can boot it
+			# at all (2026-11-18: one hang's retry loop did exactly that).
 			case "$s" in
 			android) echo "xl: phone is back in Android"; return 0 ;;
-			fastboot) echo "xl: the phone stopped in its bootloader: sending it on to Android"; timeout 10 fastboot reboot >/dev/null 2>&1 ;;
-			loader) echo "xl: the phone is in this loader: sending it on to Android"; fb reboot >/dev/null ;;
+			fastboot)
+				[ "$sent" -ge 3 ] && { sleep 3; continue; }
+				echo "xl: the phone stopped in its bootloader: sending it on to Android"
+				timeout 10 fastboot reboot >/dev/null 2>&1
+				sent=$((sent + 1)) ;;
+			loader)
+				[ "$sent" -ge 3 ] && { sleep 3; continue; }
+				echo "xl: the phone is in this loader: sending it on to Android"
+				fb reboot >/dev/null
+				sent=$((sent + 1)) ;;
 			esac
 		fi
 		sleep 3
@@ -140,7 +151,21 @@ recover_phone() {
 	echo "xl: the phone has not come back (state: $(state)): it is on the logo, off, or not on this cable."
 	echo "xl:   hold the power button for about 15 seconds; it restarts into Android."
 	echo "xl:   for the bootloader (fastboot) hold power and volume-down while it restarts."
+	slot_unbootable
 	return 1
+}
+
+# A slot the bootloader marked unbootable refuses Android however often it is restarted, and it
+# looks exactly like a broken phone: logo, then fastboot. The mark is cleared by setting the slot
+# active again; that writes the bootloader's slot metadata and no partition content.
+slot_unbootable() {
+	local s u
+	s=$(fb getvar current-slot 2>/dev/null | sed -n 's/.*current-slot: *//p' | head -1)
+	[ -n "$s" ] || return 0
+	u=$(fb getvar "slot-unbootable:$s" 2>/dev/null | sed -n "s/.*slot-unbootable:$s: *//p" | head -1)
+	[ "$u" = yes ] || return 0
+	echo "xl: slot $s is marked unbootable: that is why Android does not start."
+	echo "xl:   clear it with: fastboot set_active $s   (slot metadata only; no partition is written)"
 }
 
 # What the phone's bootloader starts the loader with: Project Silicium's UEFI (mkxnuimg.py) or HakiOS's U-Boot
