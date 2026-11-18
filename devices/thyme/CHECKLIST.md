@@ -5717,6 +5717,27 @@ Two things to separate next:
 The console tail after the freeze is the evidence to capture: the screen stays on the last
 kernel line, and a photograph names the teardown step that hangs.
 
+### Those runs were started without the hardware arguments (2026-11-19, 00:47)
+
+The four RAM runs between 23:03 and 00:39 that "hung" were started with a bare `./xl run`,
+whose command line is only `-v`: **`xl` does not add `devices/thyme/ram.args`**.  The canonical
+entries do (`devices/thyme/battery-guard.sh`, `ram-regress.sh`):
+`ARGS=$(tr -d '\n' < devices/thyme/ram.args)` and then `XL_CMDLINE="$ARGS ..."`.  Without it
+the kernel came up with no `gpu=`, no `touchscreen=`, no `battery=`, no `wifi=` -- the console
+showed launchd spawning jobs and SpringBoard was spawned, and then the window server hung with
+no GPU: the console froze, the kernel never answered `getvar result` or staged a log, the
+loader's fastboot endpoint wedged, and the recovery loop once left slot a marked unbootable.
+The `-v` console is also what looked like a broken display.
+
+The same loader, kernel and root image with the full arguments pass: `logs/004846-run.log` --
+`cmdline: 567 of 607 characters`, 583 `adreno:` lines with the GPU at 587 MHz, 120 SpringBoard
+lines, the Wi-Fi network joined, `--- loader_return_after expired ---`, and
+`result: returned 1441823`.  `XL_REBOOT_AFTER=1` sent the phone back to Android afterwards.
+
+**A bare `xl run` is not a valid daily-driver boot.**  Use the runners, or pass
+`XL_CMDLINE="$(tr -d '\n' < devices/thyme/ram.args) -v"`, and keep the total under the
+loader's 607 characters (the log line `cmdline: N of 607 characters` is the check).
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
