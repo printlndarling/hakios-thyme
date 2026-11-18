@@ -5354,10 +5354,21 @@ The missing-framework hypothesis is ruled out on the build machine: `tools/dyld-
 reader over `out/thyme-boot/dsc-arm64/dyld_shared_cache_arm64` lists 2710 images, and every
 dylib PPSSPP links is among them -- GLKit, OpenAL, Metal, MetalKit, GameController, PhotosUI,
 MediaPlayer, CoreMotion, UIKit, QuartzCore, OpenGLES, libc++, libiconv all present.  So the
-abort is in the app's own start-up, not in dyld's lookup; the next diagnostic reads its crash
-report (if ReportCrash left one under `/var/mobile/Library/Logs/CrashReporter`) and runs the
-binary with its stderr on the console, which is where a Metal/GL context failure or an
-entitlement refusal would say so.
+abort is in the app's own start-up, not in dyld's lookup.
+
+**The diagnostic run** (`logs/124616-run.log`) then named it: no crash report was written
+(CrashReporter holds only Assistant/DiagnosticLogs/appstored), but the direct exec printed
+`b SceneDelegate class was loaded!` and `ios/main.mm:668 I[SYSTEM]: JIT: ptrace() child spawn
+trick`, and the kernel recorded the launchd abort with its call chain:
+`userabort: PPSSPP[243] aborts, shared cache slide 0x20120000; called from: 0x1add684b8
+0x1f0d38f54 0x1f0d29a4c 0x1a01f2014 0x1f0d38424 0x1f0d383d4 0x1adca7794 0x1adc7f2d0`.  With
+the slide removed the frames resolve to `libsystem_c` (abort) <- `libc++abi` (four frames,
+the uncaught-exception/`std::terminate` path) <- `libobjc` <- `libdispatch`.  The same binary
+exec'd directly prints the JIT line and survives the five seconds the diagnostic gave it.
+PPSSPP's JIT start-up -- its `ptrace()` child-spawn trick -- is what fails under launchd on
+this port; the install and registration are fine (its icon is on the home screen,
+`logs/sb-08.png`).  This is a launch-environment/JIT compatibility limit, not a packaging
+one.
 
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
