@@ -55,10 +55,14 @@
 # stays put -- which is why the 09:31/09:43 runs' taps at 0.873/0.885 did nothing.  The sheet
 # has only two positions, 105 pt and full; a 110 pt drag (09:53 run, 0.873 -> 0.76) is still
 # nearer to 105 and snaps back, so this drag crosses the midpoint: 900 ms from 0.873 to 0.42
-# (the sheet top then sits at ~452 pt from the bottom, past the 432 pt midpoint).  It is slower
-# than the 09:06 drag (600 ms over 0.60) that a system gesture stole.
-/redwood/bin/rwtouch drag 0.5 0.873 0.5 0.42 900 500
-/redwood/bin/rwtouch wait 10
+# (the sheet top then sits at ~452 pt from the bottom, past the 432 pt midpoint).  It starts at
+# x 0.9 / 0.1, on the sheet's background beside the indicator: the indicator's capsule sits
+# inside a Button, and a drag begun on it in the 09:53/10:03 runs moved nothing -- the Button's
+# own tracking swallowed it.  The background carries BottomSheet's dragGesture directly.
+/redwood/bin/rwtouch drag 0.9 0.872 0.9 0.42 900 500
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch drag 0.1 0.872 0.1 0.42 900 500
+/redwood/bin/rwtouch wait 8
 # Confirm, in the expanded sheet *before* it is pressed: canClose is still true, so the content
 # carries the 95 pt bottom padding and Confirm spans 0.740..0.804, with Clear Queue at
 # 0.814..0.878.  The 0.832..0.881 seen in logs/sb-07.png is the layout *after* Confirm (padding
