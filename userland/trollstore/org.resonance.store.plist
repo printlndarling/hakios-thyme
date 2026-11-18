@@ -17,5 +17,10 @@
 	<true/>
 	<key>lang</key>
 	<string>zh-hans</string>
+	<!-- What the changelog sheet writes when it is dismissed: with the current version
+	     already stored, showChangelog() stays quiet and the app opens on Featured, which
+	     removes the 15-25 s of sheet-dismiss taps (and the UI lag they raced). -->
+	<key>appVersion</key>
+	<string>2.3</string>
 </dict>
 </plist>

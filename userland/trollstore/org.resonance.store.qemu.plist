@@ -12,5 +12,7 @@
 	<true/>
 	<key>lang</key>
 	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
 </dict>
 </plist>

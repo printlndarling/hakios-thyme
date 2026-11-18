@@ -42,29 +42,26 @@
 /redwood/bin/rwtouch wait 20
 /var/jb/usr/bin/uicache -a
 /var/jb/usr/bin/uiopen --bundleid org.resonance.store
-/redwood/bin/rwtouch wait 15
-# The first launch shows the "What's New in 2.3" sheet; Next takes it to the catalog.
-/redwood/bin/rwtouch tap 0.5 0.91
-/redwood/bin/rwtouch wait 10
-/redwood/bin/rwtouch tap 0.5 0.91
-/redwood/bin/rwtouch wait 15
-# Featured: the one source is the LAN one, so LocProbe's row is the first row and its GET sits
-# at the same place the first row's button did in the 02:43 screenshot (0.86, 0.273).
+/redwood/bin/rwtouch wait 30
+# appVersion = 2.3 is seeded, so showChangelog() stays quiet and the catalog is the first
+# screen -- no "What's New" taps.  The UI lags the taps by about ten seconds on this port
+# (09:20 run: GET at 09:22:48.9, the QUEUED button first visible at 09:23:02), so every step
+# below waits for the screen, not for the command.
 /redwood/bin/rwtouch tap 0.86 0.273
-/redwood/bin/rwtouch wait 12
+/redwood/bin/rwtouch wait 22
 # GET leaves the queue sheet collapsed at 105 pt; its bottom 83 pt are hidden by the tab bar
 # (the 03:35 run's swipe started there and the sheet never moved).  The drag indicator at
 # 0.885 is a Button in BottomSheet (BottomSheetView+DragIndicatorAction.swift): a tap switches
 # to the next position, .relativeTop(0.975), full height.  A slow drag from the same point was
 # stolen by a system gesture in the 09:06 run, so it is not used any more.
 /redwood/bin/rwtouch tap 0.5 0.885
-/redwood/bin/rwtouch wait 4
+/redwood/bin/rwtouch wait 8
 # Confirm is the blue button above Clear Queue.  The 09:06 run's expanded sheet (logs/sb-07.png)
 # puts it at 0.832..0.881 of the screen, so 0.85 is its centre; the 0.740..0.804 computed from
 # the library's padding was wrong for this screen.  The second tap is harmless while the button
 # is disabled, and lands in the list once the sheet has finished.
 /redwood/bin/rwtouch tap 0.5 0.85
-/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch wait 5
 /redwood/bin/rwtouch tap 0.5 0.85
 # An early look while the download is still on disk: the app deletes the IPA after the helper
 # returns, so the later listing alone cannot tell a download that never started from one that
