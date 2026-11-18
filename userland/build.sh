@@ -310,6 +310,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			  echo "build.sh: no ldid: mcm_test is unsigned, and MobileContainerManager will answer 98"; }
 		# one URL into one file: the payload cannot carry an IPA beside the kernel (src/hk_download.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/hk_download src/hk_download.m
+		# drop to a user and exec a binary with its stderr kept (src/runas.c; rc.jobs.almapsrunas)
+		$DYN -o obj/runas src/runas.c
 		# whether a process that dropped to 501 becomes root through a spawn persona, which is
 		# exactly how TrollApps runs TrollStore's helper (src/persona_spawn_test.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/persona_spawn_test src/persona_spawn_test.m &&
@@ -507,6 +509,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/setup_seed ] && cp obj/setup_seed root/bin/
 	[ -f obj/mcm_test ] && cp obj/mcm_test root/bin/
 	[ -f obj/hk_download ] && cp obj/hk_download root/bin/
+	[ -f obj/runas ] && cp obj/runas root/bin/
 	[ -f obj/persona_spawn_test ] && cp obj/persona_spawn_test root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
@@ -660,6 +663,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the same for Alpimaps' launch abort (rc.jobs.almapsdiag)
 	cp bin/hk-almapsdiag.sh root/bin/hk-almapsdiag.sh
 	chmod 755 root/bin/hk-almapsdiag.sh
+	# and the uid-501 exec outside SpringBoard (rc.jobs.almapsrunas)
+	cp bin/hk-almapsrun.sh root/bin/hk-almapsrun.sh
+	chmod 755 root/bin/hk-almapsrun.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
