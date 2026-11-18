@@ -5589,3 +5589,42 @@ reason), and keep `XL_ADB_SERIAL=5290780a` in every `xl state` call while the em
 attached.  Image `root-storeapps.apfs` `4593d249` carries the pill-tap scene and a new
 `persona_spawn_test` (drops to 501 and spawns `id` through persona 99 uid/gid 0, then the
 control without it); its run waits for the phone to come back.
+
+### The sileolists run: no return, no log, and the loader wedged again (2026-11-18, 23:03)
+
+The one-line test from the Sileo row -- `ln -sfn /var/jb/var/lib/apt/sileolists /sileolists`
+before the GET, plus an A/B/C probe that runs the same relative-lists apt query from
+`/var/jb/var/lib/apt` and from `/` without and with the link -- was built into
+`rc.jobs.sileolists` (`root-sileolists.apfs` `f9533b77`; `check-root.py` found GL, Bluetooth,
+audio and camera in it), with `userland/system.apfs` `3b539ee0` as the resident image and
+`XL_SECS=450`.  `xl run` printed `kernel=4ce8d7ba31d1 loader=6a57fb6bb147`.
+
+**The kernel did not return.**  At the deadline the loader reported
+`no answer — the kernel hung; waiting for the watchdog`, and it stayed in its bootloader.
+Nothing was written under `logs/` at all (the newest file there is `204708-run.log`, 20:53);
+`xl` named `logs/230355-run.log.live`, which is the **5 November** file of the same name, so
+this run left no console output -- the empty-log state already recorded for `xl run`.
+
+**The owner's screen, during the run:** the picture refreshed as garbage, flickered, sat on a
+white background without the wallpaper.  Whether that is the hung kernel's framebuffer, a GPU
+wedge of the kind fixed by the `metal_gmem=1` change, or the window server failing to draw is
+not decidable without a log; it is recorded as observed, not diagnosed.
+
+**The loader endpoint is wedged again.**  `fastboot getvar product` answers
+`FAILED (AdbWriteEndpointSync failed ... (121))` and `fastboot devices` shows
+`????????????	fastboot`; `adb` sees nothing.  This is the same state as the interrupted
+`xl ramdisk` on 2026-11-18 03:50 and only a USB replug or a power cycle clears it.
+
+**Before any rerun, two inputs must be reconciled with `ram-baseline.conf`**: that file
+records `BOOT_IMAGE_SHA256=7c5a2cd8` and `SYSTEM_SHA256=4f0f3f8b`, while this run used
+`devices/thyme/prebuilt/xnu-usb.img` `213ffaae` (17 November 14:20) and
+`userland/system.apfs` `3b539ee0` (17 November 16:26, hard-linked as
+`devices/thyme/prebuilt/system.apfs`).  Both were rebuilt on 17 November and the baseline
+was not updated with them; `xl enter` could not repack the loader because `u-boot/` is not
+present (`mkubootimg.py: no u-boot.bin for redwood`), so the prebuilt image was used
+(`XL_BOOT_IMAGE`).  The next run either rebuilds `u-boot/` and repacks, or rebaselines these
+two hashes with a verified run -- not both silently.
+
+One environment note for the next session: this WSL had no `adb` or `fastboot` on `PATH`
+(the Windows SDK's `adb.exe`/`fastboot.exe` only), so `/home/darling/bin/{adb,fastboot,xl}`
+are wrappers that exec the `.exe`s; `xl` drives the phone again through them.

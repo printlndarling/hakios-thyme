@@ -58,6 +58,7 @@ __pycache__/
 /userland/*
 !/userland/build.sh
 !/userland/sileo-seed.sh
+!/userland/sileolists-probe.sh
 !/userland/*.py
 !/userland/rc.*
 !/userland/com.hakios.*.plist

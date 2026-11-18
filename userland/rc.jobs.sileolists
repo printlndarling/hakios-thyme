@@ -1,0 +1,26 @@
+# RC_JOBS=rc.jobs.sileolists -- Sileo's queue and the working directory apt sees.
+#
+# Sileo empties the queue in reloadData(recheckPackages:)'s catch: recheckTotalOps()
+# runs as root `apt-get -sqf ... -oDir::State::lists=sileolists/ install --reinstall
+# <pkg>=<ver>`.  The lists path is relative and Sileo never chdir()s (spawnAsRoot sets
+# only PATH), so it resolves against whatever directory the root spawn inherits -- "/"
+# if nothing sets one.  The scene plants the one-line answer at "/" and then prints
+# the same apt query from both directories, so the hypothesis is settled even if the
+# queue never takes.
+#
+# The GET is tapped twice at most and then nothing else touches the screen: Sileo's
+# own error alert (if it comes) must survive to a frame instead of being tapped away.
+/redwood/bin/sleep_hold 600 &
+/var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test wait 120 joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 60 resolve apt.procurs.us
+/var/jb/usr/bin/apt-get update
+/var/jb/bin/sh /redwood/bin/sileo-seed.sh
+/var/jb/usr/bin/ln -sfn /var/jb/var/lib/apt/sileolists /sileolists
+/var/jb/bin/sh /redwood/bin/sileolists-probe.sh
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 60 tap 0.32 0.601 wait 4 tap 0.86 0.37 wait 10
+/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.86 0.37 wait 15
+/var/jb/bin/sh /redwood/bin/sileolists-probe.sh
+/var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
+/var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
