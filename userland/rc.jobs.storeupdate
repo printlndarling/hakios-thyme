@@ -1,0 +1,58 @@
+# RC_JOBS=rc.jobs.storeupdate: TrollApps updates an installed app (1.0 -> 1.1).
+#
+# The one-tap install is proven (rc.jobs.storeapps, logs/101423-run.log).  What differs here is
+# the state before the tap: LocProbe 1.0 is installed first through TrollStore's helper (the
+# proven route, rc.jobs.tstore), and the seeded source points at repo-1.1.json, so
+# showUpdateButton() finds the installed 1.0 older than the repo's 1.1 and the row's button is
+# UPDATE instead of GET.  The queue, the sheet drag and Confirm are the same steps, which is
+# the point: the update path is the install path.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.update.plist /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
+/redwood/bin/persona_spawn_test
+/redwood/bin/rwtouch wait 2
+/redwood/bin/persona_spawn_test uid501
+/redwood/bin/rwtouch wait 2
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
+/redwood/bin/rwtouch wait 20
+# The 1.0 the update is measured from, installed the proven way.  uicache then registers it so
+# TrollApps' GetApps() (LSApplicationWorkspace) sees it and its _TrollStore marker.
+/var/jb/usr/bin/cp /redwood/fw/ipa/LocProbe.ipa /private/var/tmp/LocProbe.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/LocProbe.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/LocProbe.ipa
+/redwood/bin/rwtouch wait 10
+/var/jb/bin/sh /redwood/bin/hk-lpver.sh >> /private/var/tmp/storeupdate.txt
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+/redwood/bin/rwtouch wait 30
+# The row's button should read UPDATE (installed 1.0, repo 1.1); same place as GET was.
+/redwood/bin/rwtouch tap 0.86 0.273
+/redwood/bin/rwtouch wait 22
+/redwood/bin/rwtouch drag 0.9 0.872 0.9 0.42 900 500
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch drag 0.1 0.872 0.1 0.42 900 500
+/redwood/bin/rwtouch wait 8
+/redwood/bin/rwtouch tap 0.5 0.77
+/redwood/bin/rwtouch wait 5
+/redwood/bin/rwtouch tap 0.5 0.79
+/redwood/bin/rwtouch wait 8
+/var/jb/usr/bin/ls -la /var/mobile/.TrollApps/tmp/ >> /private/var/tmp/storeupdate.txt
+/redwood/bin/rwtouch wait 22
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storeupdate.txt
+/var/jb/bin/sh /redwood/bin/hk-lpver.sh >> /private/var/tmp/storeupdate.txt
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid com.hakios.locprobe
+/redwood/bin/rwtouch wait 20
+/var/jb/bin/sh /redwood/bin/hk-lpver.sh >> /private/var/tmp/storeupdate.txt
+/var/jb/usr/bin/cat /private/var/tmp/storeupdate.txt

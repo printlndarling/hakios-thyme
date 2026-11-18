@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rc.jobs.storeupdate's variant: the same single-source list points at repo-1.1.json,
+	     whose LocProbe is 1.1, so an installed 1.0 shows UPDATE instead of GET. -->
+	<key>repos</key>
+	<string>["http://192.168.0.104:8000/repo-1.1.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>

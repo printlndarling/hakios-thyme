@@ -672,6 +672,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# ldid into TrollStore's own MCM container bundle (rc.jobs.tstore)
 	cp bin/hk-tsldid.sh root/bin/hk-tsldid.sh
 	chmod 755 root/bin/hk-tsldid.sh
+	# the LocProbe version in each container, for the update run (rc.jobs.storeupdate)
+	cp bin/hk-lpver.sh root/bin/hk-lpver.sh
+	chmod 755 root/bin/hk-lpver.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
