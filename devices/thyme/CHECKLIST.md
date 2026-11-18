@@ -5405,6 +5405,17 @@ check the HTTP status before handing the file to the helper, which is its own ro
 point.  The other two sources are alive: Resonance Team's (TrollApps 5,549,018 bytes,
 TrollApps Legacy 3,697,409) and Bonnie's (tapgame prototype 18,248,245), each answering 200.
 
+**The Bonnie source run** (`logs/134628-run.log`) did not get that far: with only
+BonnieRepo_2.0.json seeded, the Featured page stayed **empty** -- `logs/sb-06.png` shows the
+title and tab bar with no section -- so there was no GET to tap.  The same JSON parses on the
+build machine and its app URL answers 200, and the Resonance Team source was seen loaded in
+the daily run, so the store can fetch public sources; what failed here is the app's fetch or
+decode of this one in that run, not the source's absence.  Observed, not explained yet: the
+empty-Featured case deserves its own look if a public source is to be relied on.  The LAN
+source remains the one that has installed everything (LocProbe, Zhihu client, Aidoku,
+PPSSPP); the public-source install is still unproven with these two (haxi0's URLs are dead,
+Bonnie's page came up empty).
+
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
 `rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
