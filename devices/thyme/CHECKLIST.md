@@ -5888,3 +5888,11 @@ writes, and it was rebuilt on 17 November 14:20 together with
 whether the 17 November loader has ever completed a boot is not recorded.  That makes the
 loader rebuild an untested variable, not a wrong one, and it is the first thing a run with
 `xl: inputs` written down should settle.
+
+### After a run, getting Android back needs set_active (2026-11-19)
+
+`XL_REBOOT_AFTER=1` sometimes leaves the phone in its bootloader, and there a plain
+`fastboot reboot` does not bring Android back even though `slot-unbootable:a` reads `no`
+(three times tonight).  `fastboot set_active a` followed by `fastboot reboot` does, every
+time, with no partition written.  Worth knowing before a long sequence of runs: the phone is
+not broken, and a power cycle is not needed.
