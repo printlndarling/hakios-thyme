@@ -50,12 +50,18 @@
 /redwood/bin/rwtouch tap 0.86 0.273
 /redwood/bin/rwtouch wait 22
 # GET leaves the queue sheet collapsed at 105 pt; its bottom 83 pt are hidden by the tab bar
-# (the 03:35 run's swipe started there and the sheet never moved).  The drag indicator at
-# 0.885 is a Button in BottomSheet (BottomSheetView+DragIndicatorAction.swift): a tap switches
-# to the next position, .relativeTop(0.975), full height.  A slow drag from the same point was
-# stolen by a system gesture in the 09:06 run, so it is not used any more.
-/redwood/bin/rwtouch tap 0.5 0.885
-/redwood/bin/rwtouch wait 8
+# (the 03:35 run's swipe started there and the sheet never moved).  The drag indicator is a
+# Button in BottomSheet (BottomSheetView+DragIndicatorAction.swift): a tap switches to the
+# next position, .relativeTop(0.975), full height.  Its centre measured 0.873..0.885 across
+# runs (105 pt top at 0.865, 7.5 pt padding, a 5 pt capsule), and the button is only 20 pt
+# tall, so one tap at a fixed point missed when the layout sat low (09:31 run).  Two taps
+# 3 s apart: the first expands, and the second, when the sheet is up, is inside Confirm's
+# 0.832..0.881.  A slow drag from the same point was stolen by a system gesture in the 09:06
+# run, so it is not used any more.
+/redwood/bin/rwtouch tap 0.5 0.873
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch tap 0.5 0.878
+/redwood/bin/rwtouch wait 6
 # Confirm is the blue button above Clear Queue.  The 09:06 run's expanded sheet (logs/sb-07.png)
 # puts it at 0.832..0.881 of the screen, so 0.85 is its centre; the 0.740..0.804 computed from
 # the library's padding was wrong for this screen.  The second tap is harmless while the button
