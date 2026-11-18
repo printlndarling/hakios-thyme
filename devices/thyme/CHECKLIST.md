@@ -5226,6 +5226,13 @@ false and the bottom padding is 40 pt; **before** the press the padding is 95 pt
 spans 0.740..0.804, and 0.85 is inside **Clear Queue** (0.814..0.878) -- a tap there would
 wipe the queue.  The scene now taps 0.77 and 0.79 (image `b2d58967`).
 
+**The 10:03 run** dragged 900 ms to 0.42 (past the midpoint) and the sheet still did not
+move: the contact was delivered cleanly (no system steal), so the gesture never reached the
+sheet -- the indicator's capsule sits inside a Button, and the Button's tracking swallowed
+the pan.  The scene now begins the drag on the sheet's background beside the indicator
+(x 0.9 and 0.1 at y 0.872), where BottomSheet's own dragGesture is attached
+(image `9fbe74fb`).
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
