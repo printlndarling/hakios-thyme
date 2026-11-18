@@ -5828,6 +5828,14 @@ closing probe and `dpkg-query`.  (The 300 s run ended in the middle of the taps,
 its probe had been missing -- the scene is simply longer than 300 s.)  The result is
 unchanged: `dpkg-query -W tree` answers `no packages found matching tree`.
 
+Sileo's own source (github.com/Sileo/Sileo, cloned 2026-11-19) settles two things about the
+queue: the Confirm button that starts a download is `confirmQueued`
+(`Sileo/UI/DownloadsViewController/DownloadsTableViewController.swift:336`), so the downloads
+view controller has to be opened first; and the `AutoComplete` UserDefaults key
+(`Sileo/UI/SettingsViewController/Root/SettingsViewController.swift:191`) only auto-taps
+**Done after an install completes** (`DownloadsTableViewController.swift:608`) -- it does not
+start a download, so enabling it would not remove the Confirm step.
+
 The frames say why this attempt could not work: **`quiet6-24` is the lock screen** at 2:21.
 The grabber swipe starts at the top edge (`swipe 0.5 0.06 0.5 0.92`), which on this system is
 the Notification Centre / Cover Sheet gesture, and everything after it lands on the lock
