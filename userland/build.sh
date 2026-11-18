@@ -541,6 +541,13 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# so a scene can drive them (see the files)
 	mkdir -p root/share/trollstore
 	cp trollstore/*.plist root/share/trollstore/
+	# ldid, which the helper spawns from TrollStore's own container bundle: mcm_test puts this
+	# copy there, and without it the helper returns 173 before it ever applies CoreTrust.  It
+	# used to arrive as an EXTRA_SHARE from /tmp, so the first clean `rm -rf root` rebuild
+	# silently dropped it and the store stopped installing (the 16:03 run, 2026-11-18).
+	mkdir -p root/share/tsldid
+	cp trollstore/tsldid/ldid root/share/tsldid/ldid
+	chmod 755 root/share/tsldid/ldid
 	# the weather screen travels the same way (src/HakiosWeather.m)
 	if [ -f obj/HakiosWeather.app/HakiosWeather ]; then
 		mkdir -p root/fw/hweather

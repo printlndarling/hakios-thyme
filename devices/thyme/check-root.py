@@ -69,6 +69,20 @@ if os.path.isfile(os.path.join(root, "LaunchDaemons/com.apple.bluetoothd.plist")
     if "com.hakios.bluetooth" not in env.get("BT_HCI_TRANSPORT", ""):
         missing.append("LaunchDaemons/com.apple.bluetoothd.plist (no H4 transport)")
 
+# The TrollStore install path: the helper and the prefs a store scene seeds, and the ldid
+# binary mcm_test copies into TrollStore's container bundle.  Without ldid the helper
+# returns 173 before applying CoreTrust, so the store install never lands (once lost to a
+# clean rebuild when it still arrived as an EXTRA_SHARE from /tmp).
+for rel in ("share/trollstore/com.opa334.TrollStore.plist",
+            "share/trollstore/org.resonance.store.plist",
+            "share/tsldid/ldid"):
+    need(rel)
+ldid = os.path.join(root, "share/tsldid/ldid")
+if os.path.isfile(ldid):
+    with open(ldid, "rb") as f:
+        if f.read(4) != b"\xcf\xfa\xed\xfe":
+            missing.append("share/tsldid/ldid (not a 64-bit Mach-O)")
+
 # The scenario file must be the one that was asked for.
 jobs = os.path.join(root, "etc/rc.jobs")
 source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "userland", rc_jobs)

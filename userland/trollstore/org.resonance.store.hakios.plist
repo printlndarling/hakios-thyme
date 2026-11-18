@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The curated daily shape: the LAN source carries the three lawfully published apps
+	     already installed and launched on HakiOS, and Resonance Team's own catalog follows it.
+	     Nothing else: the haxi0 source is gone upstream (all 404) and the Bonnie source came
+	     back empty over this network, so neither earns a row in a daily screen. -->
+	<key>repos</key>
+	<string>["http://192.168.0.104:8000/repo-hakios.json","https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>
