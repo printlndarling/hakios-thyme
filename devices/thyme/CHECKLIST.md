@@ -5382,6 +5382,14 @@ does not wait for amfid), so this is a residual instability in the port's AMFI s
 store blocker; it belongs in the stability list for a later look at the XPC request amfid is
 given.
 
+The binary itself (`/usr/libexec/amfid`, 139,280 bytes) is **stripped** -- `llvm-nm` finds
+only `__mh_execute_header` -- so the static read stops at the shape: taking the first frame
+(0x100bda3c0) as the return address after the `_abort` call at `__TEXT+0x23bc` puts amfid's
+runtime base at 0x100bd8000 (page-aligned; the other abort sites do not admit one), and the
+aborting code is the cold path of the function at `__TEXT+0x2114`: an `os_log` through
+0x10000b2e4 and then `abort`, the usual "log a fatal condition" shape.  Reading which
+condition needs dynamic tracing (a breakpoint or a Frida session), not more disassembly.
+
 **The systrace run** (`logs/130120-run.log`, boot-arg `systrace=1`) ruled out a kernel
 refusal: the facility was live -- 923 `systrace:` lines in the run, including other
 processes' failing `sysctl`, `ioctl` and `csops_audittoken` calls -- and **not one came from
