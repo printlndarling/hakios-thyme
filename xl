@@ -267,6 +267,17 @@ run() { # run <oem command> <label>
 		# A run about Wi-Fi is given the radio's own address, which is this phone's and so is kept in a
 		# file that is not in the repository: fw-wifi/mac, one line, six bytes in hexadecimal with colons.
 		local args=${XL_CMDLINE--v}
+		# A daily-driver boot carries the device's hardware arguments (devices/$DEVICE/ram.args:
+		# gpu=, touchscreen=, battery=, wifi= ...).  Without them the kernel comes up with no
+		# GPU and the window server hangs right after SpringBoard, which looks like a kernel
+		# hang and wedges the loader -- the four runs of 2026-11-18 evening went that way.
+		# This is a warning, not a refusal: a deliberate probe may want a bare line.
+		case " $args " in
+		*" gpu="*) ;;
+		*) echo "xl: warning: XL_CMDLINE has no gpu= (and probably none of devices/${DEVICE:-thyme}/ram.args)." \
+		        "A real-device boot wants: XL_CMDLINE=\"\$(tr -d '\\n' < devices/${DEVICE:-thyme}/ram.args) -v\"" \
+		        "-- see devices/thyme/battery-guard.sh" >&2 ;;
+		esac
 		case " $args " in
 		*" wifi="*|*" wifi_step="*) [ -s fw-wifi/mac ] && args="$args wifi_mac=$(tr -d ' \n\r' < fw-wifi/mac)" ;;
 		esac
