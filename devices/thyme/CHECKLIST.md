@@ -5346,11 +5346,18 @@ downloaded the full 31,124,277-byte IPA and the helper installed container
 `B9E8DEDE-C96F-4136-9276-B01D8D3F933B` at 12:22, but `Successfully spawned PPSSPP[274]` at
 12:23:52 was followed **0.17 s later by `exited due to SIGABRT`**.  No dyld or MESA line
 reaches the kernel log (an application's stderr does not), and no GPU fault is recorded, so
-the abort is before any rendering.  The next step is a diagnostic run: read the crash report
-if ReportCrash left one, and run the binary with its stderr on the console to see whether it
-is a missing system framework, an entitlement, or graphics initialisation.  The same install
-repeated the `MobileFileIntegrity` SIGABRT (pid 265) seen with Zhihu; AMFI's userland daemon
-aborts during these helper installs, yet the install completes.
+the abort is before any rendering.  The same install repeated the `MobileFileIntegrity`
+SIGABRT (pid 265) seen with Zhihu; AMFI's userland daemon aborts during these helper installs,
+yet the install completes.
+
+The missing-framework hypothesis is ruled out on the build machine: `tools/dyld-cache-image.py`'s
+reader over `out/thyme-boot/dsc-arm64/dyld_shared_cache_arm64` lists 2710 images, and every
+dylib PPSSPP links is among them -- GLKit, OpenAL, Metal, MetalKit, GameController, PhotosUI,
+MediaPlayer, CoreMotion, UIKit, QuartzCore, OpenGLES, libc++, libiconv all present.  So the
+abort is in the app's own start-up, not in dyld's lookup; the next diagnostic reads its crash
+report (if ReportCrash left one under `/var/mobile/Library/Logs/CrashReporter`) and runs the
+binary with its stderr on the console, which is where a Metal/GL context failure or an
+entitlement refusal would say so.
 
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
