@@ -19,6 +19,15 @@ pending  devices/redwood/uefi/files/Resources/DTBs/redwood.dtb   the same device
 # --- the touch controller's firmware, compiled into a driver ---------------------------------------------
 pending  drivers/input/hakios.focaltech_fw.h   FocalTech's firmware as a C array, from a blob on the phone: the kernel (hakios.goodix.c) includes it, so it cannot simply be removed; owner to decide between a licence from the vendor and loading the blob from the phone at run time like the rest of the firmware
 
+# --- third-party tools shipped as binaries ------------------------------------------------------------
+# (TrollStore's helper spawns ldid from its own container bundle; the copy travels in the image so a
+# clean rebuild cannot drop it -- see build.sh and CHECKLIST 2026-11-18.  Marked pending until the
+# licence of this Procursus build is read and written down, per CONTRIBUTING's "to verify" rule.)
+pending  userland/trollstore/tsldid/ldid   ldid v2.1.5-procursus7, arm64: Jay Freeman's ldid, built by Procursus (apt.procursus.us ldid package); source and licence to verify
+
+# --- preference seeds written by this project ----------------------------------------------------------
+open     userland/var/mobile/Library/Preferences/com.apple.locationd.plist   a one-key seed (LocationServicesEnabledIn8.0 = true) written by this project, not an Apple file
+
 # --- proprietary: Qualcomm's and Xiaomi's, taken out of the phone's own UEFI; not for a public tree ---------
 vendor   devices/redwood/uefi/files/Binaries/redwood/*       UEFI drivers extracted from the vendor's xbl firmware (QcomPkg, MiPkg, RawFiles and the EDK2 modules as the vendor built them)
 vendor   devices/redwood/prebuilt/SILICIUM_UEFI.fd           the built UEFI image: carries those drivers

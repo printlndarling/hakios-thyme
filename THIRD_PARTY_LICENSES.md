@@ -46,6 +46,7 @@ This supersedes the summary in `NOTICE`, which stays as the short, canonical lis
 | Rust's standard library (M2V=1) | the Rust 1.98 toolchain, target `aarch64-apple-ios` | the Rust project | MIT OR Apache-2.0 |
 | QuartzCore's `default.metallib` for the window server's Metal | `tools/ca-metallib.py`, from your own Mac or a later system's IPSW (`CA_QC_METALLIB=`) | Apple | Apple's: user supplies; the result stays on your machine and is never committed |
 | Procursus / Sileo packages | `tools/mk-jb.sh` | Procursus team | their own licenses |
+| ldid (arm64 binary, TrollStore's helper needs it) | `userland/trollstore/tsldid/ldid`, staged by `userland/build.sh` | Jay Freeman's ldid, Procursus build `v2.1.5-procursus7` | **to verify**: ldid is under GPL; the exact version of this Procursus build's licence needs reading and writing down here |
 | Phone firmware (GPU, Wi-Fi, DSP, modem, haptics, cameras) | `devices/redwood/pull-firmware.sh` | Qualcomm / Xiaomi | vendor's — user's own device |
 
 ## A binary built with `M2V=1`: to verify

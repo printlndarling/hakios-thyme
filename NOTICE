@@ -37,6 +37,7 @@ Fetched at build time, never committed:
   user's own phone (devices/redwood/pull-firmware.sh).
 - lzfse (Apple, BSD-3-Clause), built by xnuloader/mkidentity.sh when no LZFSE decoder is installed.
 - Mesa (for GL=1 images; Turnip for TURNIP=1, tools/mk-turnip.sh), Procursus and Sileo packages (tools/mk-jb.sh): their own licenses.
+- ldid (v2.1.5-procursus7, arm64), in userland/trollstore/tsldid/ for TrollStore's helper: Jay Freeman's ldid, a Procursus build; its licence is to verify in THIRD_PARTY_LICENSES.md.
 - hakios-metal (oosexgang, MIT), in hakios-metal/ of this tree with its own LICENSE and NOTICE, built by `make ios` there and
   linked by userland/build.sh METAL_PLUGIN=ca (HAKIOS_METAL= names another copy).
 - for M2V=1, by tools/mk-m2v.sh, at pinned revisions: UniXNU's AdrenoMetal 243d63c (MIT, Copyright (c) 2026 NativeMetal contributors);
