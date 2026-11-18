@@ -5897,14 +5897,9 @@ loader rebuild an untested variable, not a wrong one, and it is the first thing 
 
 `XL_REBOOT_AFTER=1` sometimes leaves the phone in its bootloader, and there a plain
 `fastboot reboot` does not bring Android back even though `slot-unbootable:a` reads `no`
-(three times tonight).  `fastboot set_active a` followed by `fastboot reboot` does, every
-time, with no partition written.  Worth knowing before a long sequence of runs: the phone is
-not broken, and a power cycle is not needed.
-
-### After a run, getting Android back needs set_active (2026-11-19)
-
-`XL_REBOOT_AFTER=1` sometimes leaves the phone in its bootloader, and there a plain
-`fastboot reboot` does not bring Android back even though `slot-unbootable:a` reads `no`
-(three times tonight).  `fastboot set_active a` followed by `fastboot reboot` does, every
-time, with no partition written.  Worth knowing before a long sequence of runs: the phone is
-not broken, and a power cycle is not needed.
+(three times tonight).  `fastboot set_active a` followed by `fastboot reboot` brought it back
+three times, but **not** at 04:00 after the reproducibility run: two attempts left the phone
+in fastboot with `slot-unbootable:a: no`, retry count 6 and 3.83 V at the battery, so the
+setting is not a guarantee.  A reboot that never reaches Android counts against the slot's
+retry count, so after two attempts the thing to do is stop and power-cycle the phone (hold
+power about 15 s) rather than keep rebooting it.
