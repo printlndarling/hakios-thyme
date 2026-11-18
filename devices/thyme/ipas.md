@@ -18,7 +18,13 @@ of download. A scene that installs one trusts the LAN copy; re-check a digest wi
 | 知乎减减 (Zhihu client) | `com.huamu013.ZhihuMinusMinus` | 0.9.10 | `https://github.com/huamurui/zhihu-minus-minus` release, unsigned IPA | not recorded at download time (2026-11-18, earlier session) | to verify (repository licence not recorded) |
 | Aidoku (manga reader) | `app.aidoku.Aidoku` | 0.9 | `https://github.com/Aidoku/Aidoku` release, IPA | not recorded at download time (2026-11-18, earlier session) | to verify (repository licence not recorded) |
 | PPSSPP (PSP emulator) | `org.ppsspp.ppsspp` | 1.20.4 | `https://github.com/hrydgard/ppsspp` iOS release, IPA | not recorded at download time (2026-11-18) | GPL-2.0-or-later (PPSSPP) |
+| iTorrent (torrent client) | `com.xitrix.iTorrent2` | 2.2.0 | `https://github.com/XITRIX/iTorrent/releases/download/v2.2.0-1/iTorrent.ipa` | `50457a89299bd62836ca1eb1ae0a5adbe097454c58ce67605bbe6710c37193d7` | MIT (repository) |
 | LocProbe (this project's probe) | `dev.hakios.LocProbe` | 1.1 | built here (`tools/ipa.py`) | not recorded (rebuilt each time) | MIT (this project) |
+
+**One app was rejected before staging**: Yattee 2.0.0 beta 278 (`stream.yattee.app`, the open-source
+YouTube frontend, GitHub IPA) declares `minOSVersion` **18.0**; this port's system is iOS 16.x, so it
+cannot be installed or started here, and it was not put on the LAN. It is a candidate again only if the
+port moves to a newer system image.
 
 Two facts about the store itself:
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rc.jobs.storeitorrent: one source, repo-itorrent.json, whose featured app is the
+	     developer-published unsigned IPA of iTorrent 2.2.0 (minOS 16.0, cryptid 0). -->
+	<key>repos</key>
+	<string>["http://192.168.0.104:8000/repo-itorrent.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>
