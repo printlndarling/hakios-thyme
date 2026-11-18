@@ -5695,6 +5695,28 @@ and the night before the 20:47 run the phone had been in the loader for hours.  
 test of that difference is a cold entry: power the phone off, start it into fastboot with
 power + volume-down, and run without touching Android first.
 
+### The kernel boots to userland and hangs on the way back (2026-11-19, 00:28)
+
+A clean `fastboot reboot-bootloader` and then the prebuilt loader gave the same `no answer`,
+but the owner photographed the phone's console and it settles what happened: **the system
+boots**.  From 00:28:37 to 00:29:27 launchd is spawning powerd, passwordsd, nanoappsync,
+PassbookUIService, BTServer's responder and the rest, and the scene's own
+`net_test: waitaddr en0: NO address after 25.2 s` is at the bottom -- the demo job was running
+when the 60 s deadline arrived.  So the kernel and userland are healthy for the whole minute,
+and the failure is in the **return to the loader** (`loader_return_after`), not in the boot.
+What the owner saw earlier as a broken display -- garbage refresh, flicker, white -- is this
+`-v` console stream, not the display driver.
+
+Two things to separate next:
+
+- **the Wi-Fi radio never joined** (`NO address after 25.2 s`), where the 20:47 run had
+  joined, and a teardown of a half-started radio is a candidate for the hang;
+- **the loader's fastboot endpoint was already unresponsive during the run**: `XL_FOLLOW=5`
+  wrote not one byte, so the loader's own log could not be fetched either.
+
+The console tail after the freeze is the evidence to capture: the screen stays on the last
+kernel line, and a photograph names the teardown step that hangs.
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
