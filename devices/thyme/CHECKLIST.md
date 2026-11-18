@@ -5209,6 +5209,14 @@ fixed point is not reliable.  The scene now taps **0.873 and 0.878 three seconds
 first expands the sheet, and the second, once it is up, is inside Confirm's 0.832..0.881
 (image `c6b2a9ca`); its run is next.
 
+**The 09:43 run** tapped the indicator at its measured centre 0.873 and still nothing moved:
+the Button's label Capsule carries the sheet's own DragGesture
+(`BottomSheetView+HelperViews.swift`), and that gesture consumes the tap while a
+zero-translation drag stays put -- so the indicator is not a tap target at all.  The sheet
+switches only on a real drag; the 09:06 run's 600 ms drag over 0.60 was stolen by a system
+gesture, so the scene now drags 500 ms over about 90 pt (0.873 -> 0.76) and keeps the
+Confirm taps at 0.85 (image `439cfbd3`).
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
