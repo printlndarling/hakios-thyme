@@ -5370,6 +5370,16 @@ this port; the install and registration are fine (its icon is on the home screen
 `logs/sb-08.png`).  This is a launch-environment/JIT compatibility limit, not a packaging
 one.
 
+**The systrace run** (`logs/130120-run.log`, boot-arg `systrace=1`) ruled out a kernel
+refusal: the facility was live -- 923 `systrace:` lines in the run, including other
+processes' failing `sysctl`, `ioctl` and `csops_audittoken` calls -- and **not one came from
+PPSSPP**.  So no syscall was refused; the C++ exception is the app's own response to
+something in its start-up (the `JIT: ptrace() child spawn trick` line is where it announces
+the attempt, not where the kernel says no).  The port does hand out a Metal device
+(`metal_test`'s row in the GPU table), so the remaining suspect is a Metal feature the shim
+does not provide; an application's exception text is not collected under launchd on this
+port, so that is where this thread rests for now.
+
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
 `rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
