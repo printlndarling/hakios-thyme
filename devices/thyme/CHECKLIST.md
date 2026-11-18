@@ -5788,6 +5788,24 @@ launching app, while the scene believes it is tapping GET and Confirm.  The queu
 So the next Sileo run taps from positions measured on these frames, photographs each step, and
 keeps `-v` off whenever the screen is the evidence.
 
+### Sileo's analytics consent, and a tap that goes home (2026-11-19, 01:45, `logs/014551-run.log`)
+
+The scene now launches Sileo first (`uiopen sileo://`, wait, then the package deep link) and
+answers both screens it puts up: the notification alert (`Don't Allow` at 0.32 0.59) and the
+"Download Analytics" consent (`Provided by Canister`, a full-width **Accept** at about
+0.5 0.90 with **Deny** above it at 0.835).  The frames show Sileo drawing both normally
+(`quiet3-12`), and then the **home screen** (`quiet3-13`: wallpaper, both widgets, every icon,
+the dock) -- the 0.5 0.90 tap dismissed Sileo instead of answering the consent, most likely
+because 0.90 is close enough to the home indicator to be read as the home gesture.
+
+The run returned cleanly, the scene's last tap line is in the log (`$ /redwood/bin/rwtouch
+wait 20 tap 0.86 0.37 wait 15`), but the second probe never printed and no `dpkg -i` followed:
+whatever the taps did, they did not leave Sileo in front.  The next attempt answers the consent
+at **Deny (0.5 0.835)**, photographs the answer, and only then sends the deep link.
+
+Also worth knowing for every run: the fetched log is always **1,441,823 bytes** -- the loader's
+buffer size -- so an early line survives only if the kernel has not logged past it.
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes

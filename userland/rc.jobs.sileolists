@@ -18,9 +18,22 @@
 /var/jb/bin/sh /redwood/bin/sileo-seed.sh
 /var/jb/usr/bin/ln -sfn /var/jb/var/lib/apt/sileolists /sileolists
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
+# A sileo:// URL that starts Sileo from cold only opens the Featured page (the same way a
+# prefs: URL lands on the Settings root): launch it first, let it settle, then send the deep
+# link to the package page.  The 2026-11-19 01:22 frames show Sileo on Featured and the taps
+# that followed landing in TrollStore instead.
+/var/jb/usr/bin/uiopen sileo://
+/redwood/bin/rwtouch wait 30
+# Two things stand between the launch and the package page, and neither was answered before:
+# the notification alert (Don't Allow at 0.32 0.59) and Sileo's own analytics consent
+# ("Download Analytics", Provided by Canister: Accept is the full-width button at about
+# 0.5 0.90, Deny above it at 0.835).  The 2026-11-19 01:39 frame shows Sileo sitting on that
+# consent screen while the scene tapped where GET would be.
+/redwood/bin/rwtouch tap 0.32 0.59 wait 6
+/redwood/bin/rwtouch tap 0.5 0.90 wait 10
 /var/jb/usr/bin/uiopen sileo://package/tree
-/redwood/bin/rwtouch wait 60 tap 0.32 0.601 wait 4 tap 0.86 0.37 wait 10
-/redwood/bin/rwtouch wait 25 tap 0.32 0.601 wait 4 tap 0.86 0.37 wait 15
+/redwood/bin/rwtouch wait 30 tap 0.86 0.37 wait 10
+/redwood/bin/rwtouch wait 20 tap 0.86 0.37 wait 15
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
 /var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
