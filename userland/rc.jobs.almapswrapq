@@ -1,0 +1,22 @@
+# RC_JOBS=rc.jobs.almapswrapq: Alpimaps under the QEMU bench, with the Metal device on.
+#
+# The bench has no Wi-Fi: en0 is virtio with QEMU's user network, so the scene asks for DHCP
+# and talks to 10.0.2.2 (the machine running QEMU).  Booted with boot-arg metal=2 -- the
+# plug-in's numbering: 1 is metal_test only, 2 all but backboardd, 3 all -- so the app's
+# process should get HakiosMetalDevice while the window server stays on its GL path.  The
+# same execwrap capture as rc.jobs.almapswrap then keeps whatever NativeScript/ANGLE says.
+/redwood/bin/sleep_hold 500 &
+/redwood/bin/rwtouch wait 35
+/redwood/bin/net_test dhcp en0
+/redwood/bin/net_test show dhcp en0 waitaddr en0 20 store wait 15
+/redwood/bin/net_test tcp 10.0.2.2 8000
+/redwood/bin/rwtouch wait 10
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/redwood/bin/hk_download http://10.0.2.2:8000/alpimaps.ipa /private/var/tmp/alpimaps.ipa 566c5f522d92c4e6ef8df053ae53aa6f5d436f01f9290bbcb8daa1a9232c4f94
+/var/jb/usr/bin/chmod 644 /private/var/tmp/alpimaps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/alpimaps.ipa
+/redwood/bin/rwtouch wait 15
+/var/jb/bin/sh /redwood/bin/hk-execwrap.sh alpimaps >> /private/var/tmp/almapswrapq.txt
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/cat /private/var/tmp/almapswrapq.txt
