@@ -5327,6 +5327,7 @@ Zhihu client above shows.
 | LocProbe (this project's test app) | built here | cryptid 0 | store GET -> Confirm | PASS, locationd activity |
 | zhihu-minus-minus 0.9.10 (open-source Zhihu client) | developer's GitHub release, unsigned IPA + SHA256SUMS | cryptid 0 | store GET -> Confirm | PASS: live feed, images, 11:22:05 |
 | Aidoku 0.9 (open-source manga reader) | developer's GitHub release, IPA | cryptid 0 | store GET -> Confirm | PASS: Library UI, 11:51:17, no crash (`logs/114738-run.log`, `logs/sb-16.png`) |
+| PPSSPP 1.20.4 (open-source PSP emulator, GL/3D) | developer's GitHub release, IPA | cryptid 0 | store GET -> Confirm | install PASS (container `B9E8DEDE-...`); launch **FAIL**: SIGABRT 0.17 s after spawn, cause open (`logs/121955-run.log`) |
 | iSH (Linux shell) | built from its open-source tree | n/a | helper | PASS earlier (keyboard, switcher) |
 | TrollStore / TrollApps | official releases | n/a | helper | PASS |
 | WeChat, QQ, Alipay, Douyin, Xiaohongshu, Bilibili | App Store only; third-party IPAs are decrypted copies; TestFlight not extractable; enterprise not public | cryptid 1 (App Store) | -- | not testable: the port has no FairPlay path; an encrypted image cannot start |
@@ -5339,6 +5340,17 @@ Aidoku's run (`logs/114738-run.log`) added the second data point: container
 11:51:17, `logs/sb-16.png` its Library screen -- no crash or exit line in the whole run.
 Both real apps were installed by the store's own queue (GET -> drag -> Confirm), not by the
 helper directly.
+
+PPSSPP's run (`logs/121955-run.log`) is the first install that does not launch: the store
+downloaded the full 31,124,277-byte IPA and the helper installed container
+`B9E8DEDE-C96F-4136-9276-B01D8D3F933B` at 12:22, but `Successfully spawned PPSSPP[274]` at
+12:23:52 was followed **0.17 s later by `exited due to SIGABRT`**.  No dyld or MESA line
+reaches the kernel log (an application's stderr does not), and no GPU fault is recorded, so
+the abort is before any rendering.  The next step is a diagnostic run: read the crash report
+if ReportCrash left one, and run the binary with its stderr on the console to see whether it
+is a missing system framework, an entitlement, or graphics initialisation.  The same install
+repeated the `MobileFileIntegrity` SIGABRT (pid 265) seen with Zhihu; AMFI's userland daemon
+aborts during these helper installs, yet the install completes.
 
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
