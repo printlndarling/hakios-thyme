@@ -52,19 +52,22 @@
 # GET leaves the queue sheet collapsed at 105 pt; its bottom 83 pt are hidden by the tab bar.
 # The drag indicator is a Button whose label Capsule carries the sheet's own DragGesture
 # (BottomSheetView+HelperViews.swift): the gesture consumes a tap, and a zero-translation drag
-# stays put -- which is why the 09:31/09:43 runs' taps at 0.873/0.885 did nothing.  A drag
-# switches positions; the 09:06 run's 600 ms drag over 0.60 was stolen by a system gesture
-# ("cancel clients due to system gesture stealing the touches"), so this one is 500 ms over
-# about 90 pt, from the indicator's measured centre 0.873 to 0.76.
-/redwood/bin/rwtouch drag 0.5 0.873 0.5 0.76 500 300
-/redwood/bin/rwtouch wait 6
-# Confirm is the blue button above Clear Queue.  The 09:06 run's expanded sheet (logs/sb-07.png)
-# puts it at 0.832..0.881 of the screen, so 0.85 is its centre; the 0.740..0.804 computed from
-# the library's padding was wrong for this screen.  The second tap is harmless while the button
-# is disabled, and lands in the list once the sheet has finished.
-/redwood/bin/rwtouch tap 0.5 0.85
+# stays put -- which is why the 09:31/09:43 runs' taps at 0.873/0.885 did nothing.  The sheet
+# has only two positions, 105 pt and full; a 110 pt drag (09:53 run, 0.873 -> 0.76) is still
+# nearer to 105 and snaps back, so this drag crosses the midpoint: 900 ms from 0.873 to 0.42
+# (the sheet top then sits at ~452 pt from the bottom, past the 432 pt midpoint).  It is slower
+# than the 09:06 drag (600 ms over 0.60) that a system gesture stole.
+/redwood/bin/rwtouch drag 0.5 0.873 0.5 0.42 900 500
+/redwood/bin/rwtouch wait 10
+# Confirm, in the expanded sheet *before* it is pressed: canClose is still true, so the content
+# carries the 95 pt bottom padding and Confirm spans 0.740..0.804, with Clear Queue at
+# 0.814..0.878.  The 0.832..0.881 seen in logs/sb-07.png is the layout *after* Confirm (padding
+# 40) -- tapping there beforehand would hit Clear Queue.  0.77 is the centre, 0.79 a second
+# chance; once the button has been pressed, the layout moves down 55 pt and both points land in
+# the list above the disabled buttons.
+/redwood/bin/rwtouch tap 0.5 0.77
 /redwood/bin/rwtouch wait 5
-/redwood/bin/rwtouch tap 0.5 0.85
+/redwood/bin/rwtouch tap 0.5 0.79
 # An early look while the download is still on disk: the app deletes the IPA after the helper
 # returns, so the later listing alone cannot tell a download that never started from one that
 # installed cleanly.
