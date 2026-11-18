@@ -1,4 +1,4 @@
-# RC_JOBS=rc.jobs.apptest3: third-party apps installed the way HakiosWeather is -- copied into the
+# RC_JOBS=rc.jobs.apptest3: third-party apps installed the way LocProbe is -- copied into the
 # package manager's Applications dir and registered with uicache -- then opened in turn.  The app
 # bundles ride in the system image (/Applications, from the package manager's prefix at build time);
 # the RAM payload is too small for them beside the kernel (a 56 MB root image failed to upload).

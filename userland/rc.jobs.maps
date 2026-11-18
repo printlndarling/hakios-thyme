@@ -1,12 +1,12 @@
 # RC_JOBS=rc.jobs.maps: join the Wi-Fi network, then open Maps and leave it on screen.
 # The boot arguments put metal_all=1 first (the command line is 607 characters; the last
 # arguments are cut), so SpringBoard, Maps and the window server all take the Metal device.
-# The jailbreak prefix's uiopen asks LaunchServices for the bundle, as it does for HakiOS's
-# weather app.  A first launch shows "What's New in Maps" (Continue) and the notification
+# The jailbreak prefix's uiopen asks LaunchServices for the bundle, as it does for the
+# store's apps.  A first launch shows "What's New in Maps" (Continue) and the notification
 # screen (Not Now), both at about 0.92 of the screen's height; the location alert's
 # "Allow While Using App" is at 0.712 (its rows are 0.655, 0.712 and 0.770).  The join is
-# started in the background so the taps keep their times; the earlier scenes join this way
-# (rc.jobs.dailycheck, rc.jobs.hweather).
+# started in the background so the taps keep their times; the store scenes join this way
+# (rc.jobs.storeweather, rc.jobs.storemaps).
 /redwood/bin/sleep_hold 450 &
 /redwood/bin/net_test wait 20 joinfile /redwood/fw/network &
 /redwood/bin/net_test waitaddr en0 90 &
