@@ -1,0 +1,20 @@
+# RC_JOBS=rc.jobs.almapswrap: the app's stderr on the SpringBoard launch.
+#
+# The binary runs as uid 501 outside SpringBoard but aborts under the App launch
+# (logs/185005-run.log vs logs/180739-run.log).  This scene installs the IPA, replaces the
+# bundle's executable with execwrap (signed with the app's own entitlements, the real binary
+# kept as alpimaps.real) and opens it from SpringBoard; the wrapper appends what the app says
+# to /private/var/tmp/execwrap.err before exec'ing it, so the exception that launchd's /dev/null
+# swallowed is on the console.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/redwood/bin/hk_download http://192.168.0.104:8000/alpimaps.ipa /private/var/tmp/alpimaps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/alpimaps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/alpimaps.ipa
+/redwood/bin/rwtouch wait 15
+/var/jb/bin/sh /redwood/bin/hk-execwrap.sh alpimaps >> /private/var/tmp/almapswrap.txt
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/cat /private/var/tmp/almapswrap.txt

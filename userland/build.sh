@@ -312,6 +312,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -framework Foundation -o obj/hk_download src/hk_download.m
 		# drop to a user and exec a binary with its stderr kept (src/runas.c; rc.jobs.almapsrunas)
 		$DYN -o obj/runas src/runas.c
+		# stand in for an app's executable and keep its stderr (src/execwrap.c; rc.jobs.almapswrap)
+		$DYN -o obj/execwrap src/execwrap.c
 		# whether a process that dropped to 501 becomes root through a spawn persona, which is
 		# exactly how TrollApps runs TrollStore's helper (src/persona_spawn_test.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/persona_spawn_test src/persona_spawn_test.m &&
@@ -510,6 +512,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/mcm_test ] && cp obj/mcm_test root/bin/
 	[ -f obj/hk_download ] && cp obj/hk_download root/bin/
 	[ -f obj/runas ] && cp obj/runas root/bin/
+	[ -f obj/execwrap ] && cp obj/execwrap root/bin/
 	[ -f obj/persona_spawn_test ] && cp obj/persona_spawn_test root/bin/
 	# the probe application travels in the root image; a scene copies it into /var/jb/Applications,
 	# runs uicache, and opens it (the system volume itself is read only)
@@ -666,6 +669,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# and the uid-501 exec outside SpringBoard (rc.jobs.almapsrunas)
 	cp bin/hk-almapsrun.sh root/bin/hk-almapsrun.sh
 	chmod 755 root/bin/hk-almapsrun.sh
+	# the wrapper that keeps an app's own words under the SpringBoard launch (rc.jobs.almapswrap)
+	cp bin/hk-execwrap.sh root/bin/hk-execwrap.sh
+	chmod 755 root/bin/hk-execwrap.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
