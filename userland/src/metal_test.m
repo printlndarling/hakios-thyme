@@ -609,6 +609,22 @@ blits(void)
 	printf("metal_test:   blits %s\n", cb.status == MTLCommandBufferStatusCompleted && handled == 1 && same && filled && edges ? "WORK" : "FAILED");
 }
 
+/*
+ * The three in-process questions below are not wrapped by in_a_new_process(), and one of them
+ * can hang (metal_test made no line at all in logs/194934-run.log: MTLCompilerService came and
+ * went while it sat).  A hang keeps the scene from ever cat'ing its file, so a watchdog says
+ * which stage was stuck and leaves the rest of the output behind.
+ */
+static volatile const char *metal_stage = "start";
+
+static void
+stage_timeout(int signal_number)
+{
+	(void)signal_number;
+	dprintf(1, "metal_test: TIMED OUT in \"%s\" (in-process question; see the lines above)\n", metal_stage);
+	_exit(4);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -651,12 +667,18 @@ main(int argc, char **argv)
 		return 0;
 	}
 
+	signal(SIGALRM, stage_timeout);
+	alarm(25);
 	printf("metal_test: the services Metal looks for (IOAcceleratorES)\n");
+	metal_stage = "accelerators()";
 	accelerators();
 	printf("metal_test: what the registry has that is a GPU\n");
+	metal_stage = "gpu_services()";
 	gpu_services();
 	printf("metal_test: the device a program gets\n");
+	metal_stage = "the_device()";
 	the_device();
+	alarm(0);
 	in_a_new_process("what the device makes: buffers, a library", "objects", 60);
 	in_a_new_process("blits through Metal: copy and fill, done by the GPU", "blits", 60);
 	printf("metal_test: what Darwin publishes about graphics (artwork, not rendering)\n");

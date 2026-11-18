@@ -31,6 +31,7 @@ Two facts about the store itself:
 ## What a scene cannot check yet
 
 The scenes download from the LAN and hand the file to TrollStore's helper; they do not
-compare a digest before installing. The digests above are the record to compare by hand
-until a checksum step is added to the bootstrap (the prefix's `sha256sum` has not been
-exercised on the phone yet).
+compare a digest before installing. The digests above are the record to compare by hand.
+A checksum step needs a tool first: the Procursus bootstrap in `jb/debs/bootstrap.tar.zst`
+carries no `sha256sum`/`sha1sum`/`shasum` (checked in the archive), so a small hasher would
+have to be built (or the IPA's own helper used) before a scene can verify one.
