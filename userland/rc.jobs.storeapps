@@ -36,7 +36,7 @@
 # The IPA is not in the payload: the root image beside the kernel tops out near 50 MB (the
 # 5.5 MB IPA made the upload fail).  hk_download fetches it from the machine on the LAN that
 # serves it, which also proves the phone can download bytes over the Wi-Fi this scene joined.
-/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa 8eb32fb3b21034d417e81c1455ddbfc79bb4abcdf860e8f37417c53ce042c01e
 /var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
 /var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
 /redwood/bin/rwtouch wait 20

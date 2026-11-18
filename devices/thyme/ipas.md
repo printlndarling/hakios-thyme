@@ -30,8 +30,12 @@ Two facts about the store itself:
 
 ## What a scene cannot check yet
 
-The scenes download from the LAN and hand the file to TrollStore's helper; they do not
-compare a digest before installing. The digests above are the record to compare by hand.
-A checksum step needs a tool first: the Procursus bootstrap in `jb/debs/bootstrap.tar.zst`
-carries no `sha256sum`/`sha1sum`/`shasum` (checked in the archive), so a small hasher would
-have to be built (or the IPA's own helper used) before a scene can verify one.
+`hk_download` now takes the expected digest as an optional third word: it hashes what it
+fetched, prints the comparison, and returns 4 on a mismatch, so a scene stops before handing
+a wrong or truncated file to TrollStore's helper. The store scenes pass TrollApps' digest
+(`8eb32fb3…c01e`) and the Alpimaps scenes pass Alpimaps' (`566c5f52…4f94`). The two apps the
+store downloads itself (贵州天气, the rest of the catalog) are not covered: TrollApps fetches
+those, so their digests above are compared by an operator, or by a scene that downloads a
+copy of its own first. A shell-level check is not possible on the phone -- the Procursus
+bootstrap in `jb/debs/bootstrap.tar.zst` carries no `sha256sum`/`sha1sum`/`shasum` (checked
+in the archive).

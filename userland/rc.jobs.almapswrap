@@ -11,7 +11,7 @@
 /redwood/bin/rwtouch wait 25
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
 /redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
-/redwood/bin/hk_download http://192.168.0.104:8000/alpimaps.ipa /private/var/tmp/alpimaps.ipa
+/redwood/bin/hk_download http://192.168.0.104:8000/alpimaps.ipa /private/var/tmp/alpimaps.ipa 566c5f522d92c4e6ef8df053ae53aa6f5d436f01f9290bbcb8daa1a9232c4f94
 /var/jb/usr/bin/chmod 644 /private/var/tmp/alpimaps.ipa
 /var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/alpimaps.ipa
 /redwood/bin/rwtouch wait 15

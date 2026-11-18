@@ -17,7 +17,7 @@
 /var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.hakios.plist /var/mobile/Library/Preferences/org.resonance.store.plist
 /var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
 /var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
-/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa 8eb32fb3b21034d417e81c1455ddbfc79bb4abcdf860e8f37417c53ce042c01e
 /var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
 /var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
 /redwood/bin/rwtouch wait 20
