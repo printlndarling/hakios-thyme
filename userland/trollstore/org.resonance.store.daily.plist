@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The daily screen: the three sources TrollApps ships with (Resonance Team's default
+	     list) and the LAN source, so the store is useful out of the box rather than being one
+	     test entry.  The store reads this list once at launch; a run that wants a fixed layout
+	     for a tap keeps using org.resonance.store.plist's single LAN source instead. -->
+	<key>repos</key>
+	<string>["https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/haxi0_2.0.json","https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/BonnieRepo_2.0.json","https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json","http://192.168.0.104:8000/repo.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>

@@ -1,0 +1,32 @@
+# RC_JOBS=rc.jobs.storedaily: the store as a daily screen, with the sources it ships with.
+#
+# The install/update scenes answer questions with a fixed single-source layout.  This one is
+# the other shape: TrollApps opens with Resonance Team's three default sources plus the LAN
+# one, the way a person would use it, and the run then simply stays there -- a soak with the
+# store in the foreground.  Whether the GitHub catalogs load over this network is itself the
+# observation; the screenshots taken beside the run show what arrived.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/usr/bin/mkdir -p /var/mobile/Library/Preferences
+/var/jb/usr/bin/cp /redwood/share/trollstore/com.opa334.TrollStore.plist /var/mobile/Library/Preferences/
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/com.opa334.TrollStore.plist
+/var/jb/usr/bin/cp /redwood/share/trollstore/org.resonance.store.daily.plist /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chown 501:501 /var/mobile/Library/Preferences/org.resonance.store.plist
+/var/jb/usr/bin/chmod 644 /var/mobile/Library/Preferences/org.resonance.store.plist
+/redwood/bin/hk_download http://192.168.0.104:8000/TrollApps.ipa /private/var/tmp/TrollApps.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/TrollApps.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/TrollApps.ipa
+/redwood/bin/rwtouch wait 20
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+# The store fetches the four sources in parallel; this is the soak, with the app in front.
+/redwood/bin/rwtouch wait 200
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/storedaily.txt
+/var/jb/usr/bin/ls -la /var/mobile/.TrollApps >> /private/var/tmp/storedaily.txt
+/var/jb/usr/bin/cat /private/var/tmp/storedaily.txt
+/redwood/bin/rwtouch wait 60
+/var/jb/usr/bin/cat /private/var/tmp/storedaily.txt
