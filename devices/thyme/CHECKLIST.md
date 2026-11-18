@@ -5320,6 +5320,20 @@ TestFlight builds cannot be extracted, and enterprise builds are not public.  Th
 source/DRM fact, not a store limit: the store installs any unencrypted arm64 IPA, as the
 Zhihu client above shows.
 
+### Compatibility matrix for real IPAs (2026-11-18)
+
+| App | Channel and lawfulness | Encryption | Installed by | Launch / UI |
+| --- | --- | --- | --- | --- |
+| LocProbe (this project's test app) | built here | cryptid 0 | store GET -> Confirm | PASS, locationd activity |
+| zhihu-minus-minus 0.9.10 (open-source Zhihu client) | developer's GitHub release, unsigned IPA + SHA256SUMS | cryptid 0 | store GET -> Confirm | PASS: live feed, images, 11:22:05 |
+| Aidoku 0.9 (open-source manga reader) | developer's GitHub release, IPA | cryptid 0 | store GET -> Confirm | run staged |
+| iSH (Linux shell) | built from its open-source tree | n/a | helper | PASS earlier (keyboard, switcher) |
+| TrollStore / TrollApps | official releases | n/a | helper | PASS |
+| WeChat, QQ, Alipay, Douyin, Xiaohongshu, Bilibili | App Store only; third-party IPAs are decrypted copies; TestFlight not extractable; enterprise not public | cryptid 1 (App Store) | -- | not testable: the port has no FairPlay path; an encrypted image cannot start |
+
+The six mainstream apps are therefore **"no lawful installable IPA"**, not "the store cannot
+install them": the same store installs any unencrypted arm64 IPA, as the Zhihu row shows.
+
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
 `rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
