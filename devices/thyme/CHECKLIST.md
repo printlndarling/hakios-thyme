@@ -5370,6 +5370,18 @@ this port; the install and registration are fine (its icon is on the home screen
 `logs/sb-08.png`).  This is a launch-environment/JIT compatibility limit, not a packaging
 one.
 
+**amfid's own abort, seen beside these installs.**  `com.apple.MobileFileIntegrity` (amfid)
+crashes with SIGABRT during some helper installs -- Zhihu's (`userabort: amfid[266] aborts`
+at 11:21:27, `logs/111826-run.log`) and the PPSSPP diagnostic's (`amfid[237]` at 12:47:47,
+`logs/124616-run.log`) -- but not Aidoku's.  The chain
+`0x1add684b8 0x100bda3c0 0x100bddb78 0x100bddacc 0x1f0e48788 0x1f0e48b68 0x1adca7834 ...`
+resolves to `libsystem_c`(abort) <- amfid's own binary (three frames) <- `libxpc` (an XPC
+message handler) <- `libdispatch`: amfid aborts inside the signature-request handling it is
+started for.  The installs complete and the apps launch anyway (TrollStore's CoreTrust bypass
+does not wait for amfid), so this is a residual instability in the port's AMFI stand-in, not a
+store blocker; it belongs in the stability list for a later look at the XPC request amfid is
+given.
+
 **The systrace run** (`logs/130120-run.log`, boot-arg `systrace=1`) ruled out a kernel
 refusal: the facility was live -- 923 `systrace:` lines in the run, including other
 processes' failing `sysctl`, `ioctl` and `csops_audittoken` calls -- and **not one came from
