@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rc.jobs.storehaxi: only haxi0's default source, whose featured rows are TrollBoard
+	     (first), Derootifier and TrollLock.  The store fetches the source from GitHub and the
+	     app's IPA from its GitHub release -- the public-source path, not the LAN one. -->
+	<key>repos</key>
+	<string>["https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/haxi0_2.0.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>
