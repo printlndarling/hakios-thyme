@@ -5,8 +5,14 @@ name=${1:?app name}
 app=$(ls -d /var/containers/Bundle/Application/*/"$name".app 2>/dev/null | head -1)
 [ -n "$app" ] || { echo "no $name.app"; exit 1; }
 info=/redwood/bin/plistcat
-exe=$($info "$app/Info.plist" 2>/dev/null | awk -F'"' '/"CFBundleExecutable"/{print $4; exit}')
-bid=$($info "$app/Info.plist" 2>/dev/null | awk -F'"' '/"CFBundleIdentifier"/{print $4; exit}')
+# plistcat prints the Info.plist as XML (one <key> line, the <string> value next), the shape
+# hk-lpver.sh already reads.  ($4 of an awk quote split would never match an XML plist.)
+plist_value() {
+	$info "$1" 2>/dev/null | grep -A1 "<key>$2</key>" |
+		sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p' | head -1
+}
+exe=$(plist_value "$app/Info.plist" CFBundleExecutable)
+bid=$(plist_value "$app/Info.plist" CFBundleIdentifier)
 [ -n "$exe" ] || exe=$name
 [ -n "$bid" ] || bid=akylas.alpi.maps
 echo "== app: $app exe: $exe id: $bid"

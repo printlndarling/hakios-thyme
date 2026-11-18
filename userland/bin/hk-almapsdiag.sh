@@ -15,7 +15,7 @@ for f in /var/mobile/Library/Logs/CrashReporter/*alpi* /private/var/mobile/Libra
 done
 [ -n "$app" ] || exit 0
 echo "== Info.plist capabilities:"
-/var/jb/usr/bin/plistcat "$app/Info.plist" 2>/dev/null | grep -A6 -i 'UIRequiredDeviceCapabilities' | head -12
+/redwood/bin/plistcat "$app/Info.plist" 2>/dev/null | grep -A6 -i 'UIRequiredDeviceCapabilities' | head -12
 echo "== direct run with stderr, 6 s:"
 "$app/alpimaps" 2>&1 &
 pid=$!

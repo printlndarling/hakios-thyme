@@ -670,8 +670,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	cp bin/hk-almapsdiag.sh root/bin/hk-almapsdiag.sh
 	chmod 755 root/bin/hk-almapsdiag.sh
 	# and the uid-501 exec outside SpringBoard (rc.jobs.almapsrunas)
-	cp bin/hk-almapsrun.sh root/bin/hk-almapsrun.sh
-	chmod 755 root/bin/hk-almapsrun.sh
+	cp bin/hk-almapsrunas.sh root/bin/hk-almapsrunas.sh
+	chmod 755 root/bin/hk-almapsrunas.sh
 	# the wrapper that keeps an app's own words under the SpringBoard launch (rc.jobs.almapswrap)
 	cp bin/hk-execwrap.sh root/bin/hk-execwrap.sh
 	chmod 755 root/bin/hk-execwrap.sh

@@ -14,6 +14,6 @@
 /var/jb/usr/bin/chmod 644 /private/var/tmp/alpimaps.ipa
 /var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/alpimaps.ipa
 /redwood/bin/rwtouch wait 15
-/var/jb/bin/sh /redwood/bin/hk-almapsrun.sh >> /private/var/tmp/almapsrun.txt
+/var/jb/bin/sh /redwood/bin/hk-almapsrunas.sh >> /private/var/tmp/almapsrun.txt
 /redwood/bin/rwtouch wait 5
 /var/jb/usr/bin/cat /private/var/tmp/almapsrun.txt
