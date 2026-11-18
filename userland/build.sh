@@ -675,6 +675,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the LocProbe version in each container, for the update run (rc.jobs.storeupdate)
 	cp bin/hk-lpver.sh root/bin/hk-lpver.sh
 	chmod 755 root/bin/hk-lpver.sh
+	# the crash report and direct-run dump for PPSSPP's launch abort (rc.jobs.ppssppdiag)
+	cp bin/hk-ppdiag.sh root/bin/hk-ppdiag.sh
+	chmod 755 root/bin/hk-ppdiag.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand

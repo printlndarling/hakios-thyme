@@ -1,0 +1,22 @@
+# RC_JOBS=rc.jobs.ppssppdiag: why PPSSPP aborts at launch.
+#
+# rc.jobs.storeppsspp proved the install (31,124,277 bytes, container, spawn) and the launch
+# abort: SIGABRT 0.17 s after `Successfully spawned PPSSPP[274]`, with no dyld or MESA line in
+# the kernel log.  Every dylib the app links is in the dyld cache, so the reason is inside the
+# app's start-up.  This scene installs it the direct way, starts it once with uiopen, then
+# hk-ppdiag.sh looks for ReportCrash's report and runs the binary with stderr on the console.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/redwood/bin/hk_download http://192.168.0.104:8000/PPSSPP-iOS-v1.20.4.ipa /private/var/tmp/PPSSPP.ipa
+/var/jb/usr/bin/chmod 644 /private/var/tmp/PPSSPP.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/PPSSPP.ipa
+/redwood/bin/rwtouch wait 15
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid org.ppsspp.ppsspp
+/redwood/bin/rwtouch wait 6
+/var/jb/bin/sh /redwood/bin/hk-ppdiag.sh >> /private/var/tmp/ppdiag.txt
+/redwood/bin/rwtouch wait 6
+/var/jb/usr/bin/cat /private/var/tmp/ppdiag.txt
