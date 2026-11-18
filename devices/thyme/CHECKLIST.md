@@ -5673,7 +5673,27 @@ any point -- `xl enter` only does `fastboot boot` of a RAM image (`xl`, `enter()
 
 Lesson for the next hang: kill `xl` before it starts looping `fastboot reboot`, check
 `fastboot getvar slot-unbootable:a`, and clear it with `fastboot set_active a` rather than
-power-cycling repeatedly.
+power-cycling repeatedly.  `xl`'s `recover_phone()` now sends at most three times and asks
+`getvar` about the slot when it gives up (`fix(xl): stop the recovery loop ...`, commit
+`9d86525e`); in the run below it stopped after exactly three sends and left the slot alone.
+
+### The image that worked at 20:47 hangs too (2026-11-19, 00:15)
+
+The controlled run kept everything from the 20:47 success except the environment: root image
+`root-storeweather.apfs` `de7bc060` (20:35, the 48,840,704-byte image whose size matches the
+payload `ramdisk` size `2e94000` in `logs/204708-run.log`), the same kernel `4ce8d7ba` and
+loader `6a57fb6b`, `XL_SECS=60` and `XL_FOLLOW=5`.  The result is the third hang in a row:
+`no answer — the kernel hung`, nothing written under `logs/` (so the follow never got a byte),
+and the endpoint wedged again (`????????????`, `AdbWriteEndpointSync ... (121)`).  The freshly
+built root image is therefore **not** the variable, and neither is lack of a full driver set:
+`check-root.py` passed on every image used tonight.
+
+What still differs between the 20:47 success and every hang since is how the loader was
+entered and when.  Tonight each attempt began in Android and went through
+`adb reboot bootloader`; earlier runs today started from a phone already sitting in fastboot,
+and the night before the 20:47 run the phone had been in the loader for hours.  The cheapest
+test of that difference is a cold entry: power the phone off, start it into fastboot with
+power + volume-down, and run without touching Android first.
 
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
