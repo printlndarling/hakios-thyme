@@ -5189,6 +5189,17 @@ Two cautions belong with that PASS:
   `setgid(501)`, which answers EPERM once the process is no longer root.  It now calls
   `setgroups(0, NULL)`, `setgid`, `setuid` in that order (image `92b830cb`).
 
+**The 09:20 rerun** (`logs/092007-run.log`) cleared the persona question and measured the UI
+lag that broke the automation: `persona_spawn_test` prints `running as uid 501`,
+`attributes set: 0`, `posix_spawn ok (0)`, `child exit 0` -- with persona 99/uid 0 and again
+with the control -- so the kernel does not refuse the spawn TrollApps uses.  The queue,
+however, stayed **QUEUED** and `/var/mobile/.TrollApps` never appeared: the GET tap at
+09:22:48.9 produced the QUEUED button only at 09:23:02, so the scene's sheet tap at
+~09:23:00.9 came before the sheet existed, and the Confirm taps at 09:23:05/08 landed on the
+catalog.  The scene now seeds `appVersion = 2.3` (the key the changelog's own Dismiss writes)
+so `showChangelog()` stays quiet and the 15-25 s of sheet-dismiss taps are gone, and it
+waits 22 s after GET and 8 s after the sheet tap (image `d6193c35`); its run is next.
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
