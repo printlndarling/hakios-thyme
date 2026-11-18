@@ -5656,12 +5656,24 @@ not come up at all (`xl: loader did not come up on USB (state: fastboot)`).  Bui
 was a wrong turn; the way to make `xl enter` repack for thyme is to restore the Silicium
 `redwoodPkg` firmware, not to replace it with U-Boot.
 
-**Recovery after the second hang:** the loader endpoint wedged exactly as before
+**Recovery after the second hang, and the slot that was marked unbootable:** the loader
+endpoint wedged exactly as before
 (`????????????`, `AdbWriteEndpointSync ... (121)`); a replug brought the phone back, but after
 the next `xl enter` attempt `fastboot reboot` left it in fastboot and
-`fastboot continue` answered `Failed to load image from partition: Load Error`, so Android
-came back only with a power cycle.  No partition was written at any point -- `xl enter` only
-does `fastboot boot` of a RAM image (`xl`, `enter()`), and no `fastboot flash` was run.
+`fastboot continue` answered `Failed to load image from partition: Load Error`, and a power
+cycle still went logo -> fastboot.  `fastboot getvar all` then showed
+`slot-unbootable:a: yes` with `slot-successful:a: yes` and `slot-retry-count:a: 6`: the
+current slot had been marked unbootable, which is why ABL refused Android every time.  The
+likely author is the `xl` failure path, which repeats `fastboot reboot` while the endpoint
+is down; each attempt that does not reach Android counts against the slot.
+`fastboot set_active a` cleared the flag (`slot-unbootable:a: no`, retry count 7) and the
+next `fastboot reboot` brought Android up with its data intact.  No partition was written at
+any point -- `xl enter` only does `fastboot boot` of a RAM image (`xl`, `enter()`), and no
+`fastboot flash` was run.
+
+Lesson for the next hang: kill `xl` before it starts looping `fastboot reboot`, check
+`fastboot getvar slot-unbootable:a`, and clear it with `fastboot set_active a` rather than
+power-cycling repeatedly.
 
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
