@@ -5896,10 +5896,13 @@ loader rebuild an untested variable, not a wrong one, and it is the first thing 
 ### After a run, getting Android back needs set_active (2026-11-19)
 
 `XL_REBOOT_AFTER=1` sometimes leaves the phone in its bootloader, and there a plain
-`fastboot reboot` does not bring Android back even though `slot-unbootable:a` reads `no`
-(three times tonight).  `fastboot set_active a` followed by `fastboot reboot` brought it back
-three times, but **not** at 04:00 after the reproducibility run: two attempts left the phone
-in fastboot with `slot-unbootable:a: no`, retry count 6 and 3.83 V at the battery, so the
-setting is not a guarantee.  A reboot that never reaches Android counts against the slot's
-retry count, so after two attempts the thing to do is stop and power-cycle the phone (hold
-power about 15 s) rather than keep rebooting it.
+`fastboot reboot` does not bring Android back.  What happens on such a failed boot is that the
+bootloader sets **`slot-unbootable:a: yes`** -- and the retry count does not have to move for
+it to do so.  With the flag set, no reboot reaches Android; `fastboot set_active a` clears it
+(`slot-unbootable:a: no`) and the next `fastboot reboot` boots Android, which is what happened
+at 04:00 (two attempts, flag cleared, booted) and again at 07:12 (one attempt set the flag,
+cleared, booted).
+
+So the check after any failed `fastboot reboot` is `fastboot getvar slot-unbootable:a`, and the
+fix is `fastboot set_active a` -- not another reboot, and not a power cycle.  The retry count
+(6 here) is not the thing that changes.
