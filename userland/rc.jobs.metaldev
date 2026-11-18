@@ -1,0 +1,16 @@
+# RC_JOBS=rc.jobs.metaldev: is there a Metal device in an app's process?
+#
+# Alpimaps dies at eglInitialize(): ANGLE's Metal backend starts with
+# MTLCreateSystemDefaultDevice().  metal_test prints that whole chain (IOAcceleratorES, the
+# plugin bundle, the _MTLDevice subclass, the device itself) and a CoreImage filter result.
+# Run as root and as uid 501 through runas -- an App runs as the latter, outside SpringBoard.
+#
+# First run (logs/194934-run.log, image 81a5ed92): metal_test started and produced no line,
+# and the scene never reached the runas/cat lines -- the tool hung (MTLCompilerService
+# processes came and went around it).  The tool needs a timeout wrapper before this scene
+# can answer the question; the redirection itself is fine.
+/redwood/bin/metal_test >> /private/var/tmp/metalroot.txt
+/redwood/bin/runas 501 /private/var/tmp/metal501.txt /redwood/bin/metal_test
+/redwood/bin/rwtouch wait 5
+/var/jb/usr/bin/cat /private/var/tmp/metalroot.txt
+/var/jb/usr/bin/cat /private/var/tmp/metal501.txt
