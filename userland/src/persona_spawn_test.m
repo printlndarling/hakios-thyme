@@ -17,6 +17,7 @@
 #include <dlfcn.h>
 #include <string.h>
 #include <errno.h>
+#include <grp.h>
 
 typedef int (*PersonaFn)(posix_spawnattr_t *, uint32_t, int);
 typedef int (*PersonaIdFn)(posix_spawnattr_t *, unsigned int);
@@ -36,7 +37,10 @@ main(int argc, char *argv[])
 
 		printf("persona_spawn_test: persona %s, set_persona_np %s\n", withPersona ? "on" : "off",
 		    setPersona != NULL ? "present" : "missing");
-		if (setuid(501) != 0 || setgid(501) != 0) {
+		/* groups, then gid, then uid: after setuid the process is no longer root and
+		 * setgid answers EPERM, which is what the first version tripped over
+		 * ("cannot become 501" although setuid itself had succeeded). */
+		if (setgroups(0, NULL) != 0 || setgid(501) != 0 || setuid(501) != 0) {
 			printf("persona_spawn_test: cannot become 501: %s\n", strerror(errno));
 			return 1;
 		}

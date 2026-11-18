@@ -5162,6 +5162,33 @@ run below used `1675f323`) proved the seeding and the language on the device:
   Confirm at 0.75/0.78/0.76 -- inside the button's 0.740..0.804 span with the sheet's 95 pt
   bottom padding, and above Clear Queue's 0.814..0.878.  That scene's result is next.
 
+### The store installs an app through its own UI (2026-11-18, `logs/090617-run.log`)
+
+The 09:06 run went past the queue: `/var/mobile/.TrollApps/tmp/` was created (the app deletes
+the IPA after the helper returns, so both listings show it empty), a **third MCM container**
+`/private/var/containers/Bundle/Application/2ECB4BE0-F8C6-48A4-93F0-C2BB298E44D1/LocProbe.app`
+appeared at 09:09, and LocProbe was launched **twice**: `Successfully spawned LocProbe[269]`
+at 09:09:10 (right after the install; SpringBoard took it down with `0xdeadfa11` at 09:09:17)
+and `LocProbe[285]` at 09:09:56 from the scene's own `uiopen`; `locationd` shows the
+CoreLocation activity of both.  No scene command ran TrollStore's helper for LocProbe in this
+boot (the only direct `trollstorehelper` run is TrollApps' own custom install at 09:07:53), so
+the install came from **TrollApps' `spawnRoot` path** -- the persona 99/uid 0 spawn the kernel
+patch supports.  The expanded sheet is photographed in `logs/sb-07.png`: `1 Apps Queued`,
+`LocProbe -- Queued Install`, **Confirm** at y 0.832..0.881 and **Clear Queue** below it.
+
+Two cautions belong with that PASS:
+
+- Which touch pressed Confirm is not settled.  `logs/sb-07.png` (09:09:06) shows the sheet
+  already expanded with the item downloaded but still queued, and the log has six touch pairs
+  between 09:09:00 and 09:09:08 that this scene did not send (its next tap was 0.5/0.885 at
+  09:09:09.79, and that point is the *gap* between Confirm and Clear Queue in the expanded
+  sheet).  Someone or something pressed Confirm first -- a person tapping the phone, or touch
+  noise while the sheet animated; the log cannot tell.  The 09:2x rerun taps Confirm at 0.85
+  (the measured centre) and is the clean automation check.
+- `persona_spawn_test` failed before its spawn: as root it called `setuid(501)` first and then
+  `setgid(501)`, which answers EPERM once the process is no longer root.  It now calls
+  `setgroups(0, NULL)`, `setgid`, `setuid` in that order (image `92b830cb`).
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:

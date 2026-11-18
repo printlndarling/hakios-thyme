@@ -51,25 +51,21 @@
 # Featured: the one source is the LAN one, so LocProbe's row is the first row and its GET sits
 # at the same place the first row's button did in the 02:43 screenshot (0.86, 0.273).
 /redwood/bin/rwtouch tap 0.86 0.273
-/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch wait 12
 # GET leaves the queue sheet collapsed at 105 pt; its bottom 83 pt are hidden by the tab bar
 # (the 03:35 run's swipe started there and the sheet never moved).  The drag indicator at
 # 0.885 is a Button in BottomSheet (BottomSheetView+DragIndicatorAction.swift): a tap switches
-# to the next position, .relativeTop(0.975), full height.  A slow drag from the same point is
-# the fallback, and is harmless once the sheet is up.
+# to the next position, .relativeTop(0.975), full height.  A slow drag from the same point was
+# stolen by a system gesture in the 09:06 run, so it is not used any more.
 /redwood/bin/rwtouch tap 0.5 0.885
-/redwood/bin/rwtouch wait 5
-/redwood/bin/rwtouch drag 0.5 0.885 0.5 0.25 600 400
-/redwood/bin/rwtouch wait 5
-# Confirm is the blue button above Clear Queue: with the sheet's 95 pt bottom padding (canClose
-# is true until Confirm) it spans 0.740..0.804 of the screen, centre 0.772; the three taps are
-# inside that span and stay above Clear Queue (0.814..0.878).  Once one lands, canClose turns
-# false and the buttons move down 55 pt, so the later taps hit the list, not Clear Queue.
-/redwood/bin/rwtouch tap 0.5 0.75
-/redwood/bin/rwtouch wait 2
-/redwood/bin/rwtouch tap 0.5 0.78
-/redwood/bin/rwtouch wait 2
-/redwood/bin/rwtouch tap 0.5 0.76
+/redwood/bin/rwtouch wait 4
+# Confirm is the blue button above Clear Queue.  The 09:06 run's expanded sheet (logs/sb-07.png)
+# puts it at 0.832..0.881 of the screen, so 0.85 is its centre; the 0.740..0.804 computed from
+# the library's padding was wrong for this screen.  The second tap is harmless while the button
+# is disabled, and lands in the list once the sheet has finished.
+/redwood/bin/rwtouch tap 0.5 0.85
+/redwood/bin/rwtouch wait 3
+/redwood/bin/rwtouch tap 0.5 0.85
 # An early look while the download is still on disk: the app deletes the IPA after the helper
 # returns, so the later listing alone cannot tell a download that never started from one that
 # installed cleanly.
