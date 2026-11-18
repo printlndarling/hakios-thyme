@@ -5771,6 +5771,23 @@ The `-v` console also shows what the owner saw on screen during these runs: `hak
 1040: 134 GL calls, 20 draws ...` and the haptic/audio lines -- a running desktop, not a
 broken display.
 
+### The Sileo page is drawn; the taps are what miss (2026-11-19, 01:22, `logs/012148-run.log`)
+
+A run with the same scene and `ram.args` but **no `-v`**, with `xl screenshot` every 10 s
+(`logs/quiet-NN.png`), shows the UI unobstructed and settles the display question: `quiet-07`
+is Sileo's Featured page with its notification alert ("Sileo Would Like to Send You
+Notifications", Don't Allow / Allow), the five-tab bar and the GET rows -- it renders normally.
+The package page (`quiet-13`/`sileo-13` from the `-v` run) carries **QUEUE** at about
+(0.815, 0.368) of the screen and the queue bar with `tree (2.0.1)` at about 0.76 of the height.
+
+What the frames also show is that the old coordinates land on the wrong things: `quiet-14` is
+**TrollStore's Settings** with `Error 1 -- Failed to enable developer mode`, and `quiet-19` is a
+launching app, while the scene believes it is tapping GET and Confirm.  The queue was entered
+(the bar shows `tree (2.0.1)`), but no `dpkg -i` follows and `dpkg-query` still finds no tree.
+
+So the next Sileo run taps from positions measured on these frames, photographs each step, and
+keeps `-v` off whenever the screen is the evidence.
+
 What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17 November
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
