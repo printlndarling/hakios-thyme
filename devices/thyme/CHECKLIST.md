@@ -5660,3 +5660,20 @@ What is left to separate, offline, is the kernel (`hakios-kernel` `4ce8d7ba`, 17
 14:18; `xnu-build.log` from 14:34 ends in `make[1]: *** Error 2`) from the loader: the two
 hangs share the prebuilt loader image and the kernel, and nothing in the runs distinguishes
 them yet.
+
+**QEMU boots the same inputs without hanging.**  `qemu/run-darwin.sh` with
+`ROOT=out/thyme-boot/root-wirelessfull.apfs`, `IMG=userland/system.apfs` and 120 s of guest
+time ran the same `hakios-kernel` `4ce8d7ba` and the same root filesystem to SpringBoard:
+74 SpringBoard lines, launchd spawning jobs, no panic, and the log ends at 124 s with
+`== END OF LOG ==` (`/tmp/qemu-display.log` of that session).  What this separates is the
+root filesystem from the phone's hardware init, not the kernel from the loader: QEMU has no
+Adreno, no Wi-Fi, no ADSP and no PCIe, so `gpu=1`, `wifi=1`, `adsp=1`, `cam=...` and the rest
+of `ram.args` do nothing there.  The two hangs both happen with the phone's own hardware
+brought up, and the screen the owner saw was the display path itself.
+
+One more lead worth checking before another RAM boot: `axiom`/`u-boot` aside, `xl enter`'s
+`firmware()` picks U-Boot unless `Mu-Silicium/Build/redwoodPkg/.../SILICIUM_UEFI.fd` or
+`devices/redwood/prebuilt/SILICIUM_UEFI.fd` exists; neither does (only `umiPkg` is built), so
+every session tonight entered through the U-Boot prebuilt image.  If earlier successful
+sessions had the Silicium firmware present, they entered through a different loader than
+tonight's runs did -- that would be the variable to restore.
