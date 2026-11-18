@@ -51,8 +51,10 @@
 # the item's position is not known yet.
 /redwood/bin/rwtouch notify com.hakios.close-sheet wait 10
 /redwood/bin/rwtouch tap 0.908 0.09 wait 12
-# (The bar tap at 0.5 0.885 and the Confirm taps at 0.93/0.88/0.84 follow once the menu item's
-# position is measured: tapping them into an open menu could hit anything in it.)
+# menu-26 (2026-11-19 03:07) is the queue sheet this leads to: "Install", the row
+# tree -- Queued, then a full-width **Confirm** at about 0.5 0.833 and **Clear Queue**
+# under it at about 0.93 (never tap that one).  Confirm is the tap that starts the download.
+/redwood/bin/rwtouch tap 0.5 0.833 wait 15
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
 /var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/ls -la /var/jb/usr/bin/tree

@@ -5820,6 +5820,28 @@ Next: close the sheet by a route that works for this presentation (the grabber d
 2026-11-13 runs used, or let the app close it), then tap the bar where it actually is, and
 photograph the downloads sheet before the Confirm tap.
 
+### Sileo installs a package through its own UI (2026-11-19, 03:13, `logs/031316-run.log`)
+
+**The chain works end to end.**  The log carries the download and the install:
+
+    -rw-r--r-- 1 0 0 43012 Nov 19 03:18 tree_2.0.1_iphoneos-arm64.deb
+    Filename: pool/main/iphoneos-arm64-rootless/1800/tree/tree_2.0.1_iphoneos-arm64.deb
+    tree_2.0.1_install ok installed
+    -rwxr-xr-x 1 root wheel 109184 Dec 25 2022 /var/jb/usr/bin/tree
+
+What had to be true, in this order: Sileo launched first and the deep link sent second (a
+`sileo://package/...` URL on a cold start only opens Featured); the notification alert
+answered (Don't Allow at 0.32 0.59); the "Download Analytics" consent answered at **Deny
+(0.5 0.835)** -- Accept at 0.90 is read as the home gesture and dismisses Sileo; the package
+page's **QUEUE** tapped at (0.854, 0.371); `notify com.hakios.close-sheet` dismissing the page
+(the log says `close-sheet: the page on top was dismissed`, so the Darwin notification does
+work); a tap at (0.908, 0.09) bringing the queue sheet up (`menu-26`: "Install", the row
+`tree -- Queued`); and **Confirm at (0.5 0.833)** -- never 0.93, which is Clear Queue.
+
+Scene `rc.jobs.sileolists`, image `root-sileolists.apfs` `e7d33a23`, 300 s, no `-v`, in
+`logs/031316-run.log`.  This closes the queue problem the Sileo row has carried since
+2026-11-13.
+
 ### The full scene runs to the end; the top-edge swipe locks the phone (2026-11-19, 02:17, `logs/021725-run.log`)
 
 A 480 s run lets the scene complete every line: the sheet close (two swipes and the
