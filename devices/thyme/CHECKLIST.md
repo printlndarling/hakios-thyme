@@ -5217,6 +5217,15 @@ switches only on a real drag; the 09:06 run's 600 ms drag over 0.60 was stolen b
 gesture, so the scene now drags 500 ms over about 90 pt (0.873 -> 0.76) and keeps the
 Confirm taps at 0.85 (image `439cfbd3`).
 
+**The 09:53 run** dragged 0.873 -> 0.76 (about 110 pt) and the sheet snapped back: it has
+only two positions, 105 pt and full height (760 pt), and the release was still nearer to
+105.  A drag must cross the midpoint (~432 pt from the bottom, i.e. the finger past y≈0.45),
+so the scene drags 900 ms to 0.42.  The same run also exposed the Confirm geometry: the
+0.832..0.881 measured in `logs/sb-07.png` is the layout **after** Confirm, when canClose is
+false and the bottom padding is 40 pt; **before** the press the padding is 95 pt, Confirm
+spans 0.740..0.804, and 0.85 is inside **Clear Queue** (0.814..0.878) -- a tap there would
+wipe the queue.  The scene now taps 0.77 and 0.79 (image `b2d58967`).
+
 **Update-path assets, ready for after the install.**  An UPDATE needs an older version
 installed and a newer one in the source, so a 1.1 build of LocProbe (same binary,
 `CFBundleShortVersionString` 1.1) is packed and served beside the 1.0 IPA:
