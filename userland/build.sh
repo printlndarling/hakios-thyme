@@ -333,6 +333,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# one URL over NSURLSession, for the TLS-stall question (src/https_test.m)
 		$DYN -fobjc-arc -framework Foundation -o obj/https_test src/https_test.m
 		$DYN -framework IOKit -o obj/sleep_hold src/sleep_hold.c
+		# a scheduled wake plus a real sleep, for the wake-from-sleep Wi-Fi path (src/pm_wake.c)
+		$DYN -framework IOKit -framework CoreFoundation -o obj/pm_wake src/pm_wake.c
 		# (with an entitlement for "battery_test open URL", if ldid is there: src/battery_test.c)
 		$DYN -framework CoreFoundation -framework IOKit -lsqlite3 -o obj/battery_test src/battery_test.c &&
 			{ ${LDID:-ldid} -Ssrc/battery_test.entitlements obj/battery_test 2>/dev/null ||
@@ -541,6 +543,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# wants existing apps, installed as IPAs, not replacements written here)
 	[ -f obj/https_test ] && cp obj/https_test root/bin/
 	[ -f obj/sleep_hold ] && cp obj/sleep_hold root/bin/
+	[ -f obj/pm_wake ] && cp obj/pm_wake root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
 	[ -f obj/keychain_test ] && cp obj/keychain_test root/bin/
 	[ -f obj/wifipw_test ] && cp obj/wifipw_test root/bin/

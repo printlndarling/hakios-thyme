@@ -1,0 +1,23 @@
+# RC_JOBS=rc.jobs.pmwake: a real sleep and the kernel's own scheduled wake, then Wi-Fi.
+#
+# The one Wi-Fi path a scene could not drive is wake-from-sleep: idle sleep suspends the
+# scene and the keepalive, so a person's touch was needed. pm_wake asks IOPM for an RTC wake
+# 40 s ahead and sleeps the system at once; the demo job is suspended and resumes when that
+# wake fires.  The lines after pm_wake therefore run on the far side of a real sleep: the
+# address, a resolve, and the keepalive's own rejoin in the console log are the evidence.
+#
+# No sleep_hold here: this scene wants the sleep.  The phone must be charged first.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/net_test show en0
+/redwood/bin/net_test resolve apt.procurs.us
+/redwood/bin/rwtouch wait 10
+/redwood/bin/pm_wake 40 sleep
+/var/jb/usr/bin/date
+/redwood/bin/net_test show en0
+/redwood/bin/net_test resolve apt.procurs.us
+/redwood/bin/rwtouch wait 20
+/redwood/bin/net_test show en0
+/redwood/bin/net_test resolve apt.procurs.us
+sleep 10
+/var/jb/usr/bin/date
