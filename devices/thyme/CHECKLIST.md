@@ -5416,6 +5416,15 @@ source remains the one that has installed everything (LocProbe, Zhihu client, Ai
 PPSSPP); the public-source install is still unproven with these two (haxi0's URLs are dead,
 Bonnie's page came up empty).
 
+**The Browse run** (`logs/140158-run.log`) then ruled out the featured-only explanation:
+switching to the 搜索/BROWSE tab with the same source also listed **no apps at all**
+(`logs/sb-11.png` is an empty BROWSE with only its search field), so the app's `ReposData`
+never held Bonnie's repo.  The JSON is schema-complete for the app's decoders (name and
+iconURL on the app, version/date/downloadURL on its one version) and the same source was seen
+loaded in the 02:53 all-sources run, so this is an app-side fetch or decode failure in these
+two runs that is not yet explained.  The LAN source remains the only one that has installed
+everything.
+
 ### The store as a daily screen, on the phone (2026-11-18, `logs/110554-run.log`)
 
 `rc.jobs.storedaily` seeds the three default sources plus the LAN one and leaves TrollApps in
