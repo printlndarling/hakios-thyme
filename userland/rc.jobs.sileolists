@@ -58,3 +58,6 @@
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
 /var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
+# and it runs: the install is not just files on disk
+/var/jb/usr/bin/tree --version
+/var/jb/usr/bin/tree -L 1 /var/jb/usr/bin | head -12
