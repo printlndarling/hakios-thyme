@@ -54,11 +54,11 @@
 # menu-26 (2026-11-19 03:07) is the queue sheet this leads to: "Install", the row
 # tree -- Queued, then a full-width **Confirm** at about 0.5 0.833 and **Clear Queue**
 # under it at about 0.93 (never tap that one).  Confirm is the tap that starts the download.
-/redwood/bin/rwtouch tap 0.5 0.833 wait 15
-# Confirm is grey until Sileo's resolver finishes (menu-26 is grey, tree-26 is teal); a tap on
-# the grey button does nothing, and the 2026-11-19 07:37 run installed nothing that way.  A
-# second tap ten seconds later covers it.
-/redwood/bin/rwtouch tap 0.5 0.833 wait 12
+/redwood/bin/rwtouch tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10 tap 0.5 0.833 wait 10
+# Confirm is grey until Sileo's resolver finishes (menu-26 and final-24 are grey, tree-26 is
+# teal); a tap on the grey button does nothing, and the 07:37 and 07:52 runs installed nothing
+# that way.  Twelve taps at ten-second intervals cover the resolver's whole window instead of
+# guessing one moment.
 /var/jb/bin/sh /redwood/bin/sileolists-probe.sh
 /var/jb/usr/bin/dpkg-query -W -f=${binary:Package}_${Version}_${Status}\n tree
 /var/jb/usr/bin/ls -la /var/jb/usr/bin/tree
