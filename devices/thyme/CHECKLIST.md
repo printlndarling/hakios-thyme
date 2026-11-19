@@ -5846,6 +5846,18 @@ Scene `rc.jobs.sileolists`, image `root-sileolists.apfs` `e7d33a23`, 300 s, no `
 (`logs/033909-run.log`, 03:39-03:44): the same `tree_2.0.1_iphoneos-arm64.deb` (43,012 bytes),
 `tree_2.0.1_install ok installed`, and `/var/jb/usr/bin/tree` (109,184 bytes, root:wheel).
 
+**The Confirm tap has to wait for the resolver.**  Confirm is grey until Sileo finishes
+resolving (`menu-26` and `final-24` are grey, `tree-26` is teal), and a tap on the grey button
+does nothing -- the 07:37 and 07:52 runs installed nothing for exactly that reason, five
+minutes in and still grey.  The scene now taps Confirm **twelve times at ten-second
+intervals**, which covers the window instead of guessing one moment.  With that,
+`logs/080705-run.log` (08:07-08:14, image `4d9698ca`) has the whole chain: the .deb, `tree_2.0.1_install
+ok installed`, `/var/jb/usr/bin/tree` (109,184 bytes, root:wheel), and
+`tree v2.0.1 (c) 1996 - 2022 by Steve Baker, Thomas Moore, Francesc Rocher, Florian Sesser,
+Kyosuke Tokoro` from `tree --version` -- **the installed program runs**.  Note that a scene line
+is not a shell: `tree -L 1 ... | head` passes `|`, `head` and `-12` to tree as arguments
+(`tree: Invalid argument`), so pipes must not appear in a scene.
+
 ### The full scene runs to the end; the top-edge swipe locks the phone (2026-11-19, 02:17, `logs/021725-run.log`)
 
 A 480 s run lets the scene complete every line: the sheet close (two swipes and the
