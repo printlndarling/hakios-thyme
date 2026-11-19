@@ -84,6 +84,10 @@ constexpr FormatInfo kFormats[] = {
     // Z32_FLOAT is FMT6_32_FLOAT to the TP and the 2D engine (fd6_format_table.c:330 VT(Z32_FLOAT, 32_FLOAT, WZYX)) and
     // DEPTH6_32 to the RB (fd6_pipe2depth)
     {PixelFormat::kDepth32Float, FMT6_32_FLOAT, 4, WZYX, false, false, kElemFloat, "Depth32Float", true},
+    // Metal's Stencil8 (253): the S8 plane alone, laid out as the stencil plane of a Depth32Float_Stencil8 texture is
+    // (TILE6_3, pitch to 128 bytes, rows to 32: s8Pitch/s8Bytes); "depth" too, since the RB takes it in the depth
+    // pipeline's stencil buffer and the usage rule of a depth texture is its own (a render target, sampled too)
+    {PixelFormat::kStencil8, FMT6_8_UINT, 1, WZYX, false, false, kElemUint, "Stencil8", true, true, false, 1, 1, a6xx::FMT6_NONE, 0, true},
     // the S8 plane read as its own image (fdl6_view_init over a stencil layout): FMT6_8_UINT, tiled as the plane is laid
     // out (TILE6_3, its rows to 32, its pitch to 128) -- "depth" here for the tiling, which a stencil view shares
     {PixelFormat::kX32Stencil8, FMT6_8_UINT, 1, WZYX, false, false, kElemUint, "X32_Stencil8", true},
@@ -244,6 +248,9 @@ uint64_t s8Bytes(uint32_t width, uint32_t height) { return ((uint64_t(height) + 
 }  // namespace
 
 uint64_t textureBytes(const FormatInfo& format, uint32_t width, uint32_t height, uint32_t levels) {
+    if (format.stencilOnly) {
+        return s8Bytes(width, height);   // the S8 plane alone: no depth plane before it
+    }
     if (format.depth && levels > 1) {
         const TextureLevel last = depthLevel(format, width, height, levels - 1);
         return last.offset + depthBytes(format, last.width, last.height);
@@ -378,11 +385,15 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
     const uint32_t sliceUsage = desc.type == TextureType::kCube || desc.type == TextureType::kCubeArray
                                     ? kTextureUsageRead | kTextureUsageRenderTarget
                                                                : kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;
+    // (Metal's usage is a promise about how the texture will be used, not a capability of its own: a cube's shader-write
+    // bit promises a kernel's store, and the store itself is refused at the cube's dispatch -- so the bit is taken on a
+    // cube and changes nothing here; ANGLE asks for it on the 1 x 1 cube its Metal backend keeps)
+    const uint32_t usageServed = desc.type == TextureType::kCube || desc.type == TextureType::kCubeArray ? desc.usage & ~kTextureUsageWrite : desc.usage;
     // (a depth 2D array -- a shadow map's cascades -- is each layer a tiled depth plane, drawn into and sampled: one level,
     // no stencil plane; what the depth check above already asked of its usage)
     const bool depthArray = info->depth && !info->stencil && desc.type == TextureType::k2DArray && desc.mipLevels == 1 && desc.samples == 1;
-    if (slices && !depthArray && (info->depth || info->twoPlane || info->blockW > 1 || (desc.usage & (kTextureUsageRead | kTextureUsageWrite)) == 0 ||
-                   (desc.usage & ~sliceUsage) != 0)) {
+    if (slices && !depthArray && (info->depth || info->twoPlane || info->blockW > 1 || (usageServed & (kTextureUsageRead | kTextureUsageWrite)) == 0 ||
+                   (usageServed & ~sliceUsage) != 0)) {
         refuse(why, std::string("a ") + (desc.type == TextureType::k3D ? "3D " : desc.type == TextureType::kCube ? "cube " : "2D array ") + info->name + " texture with usage " + n(desc.usage) +
                         ": one of an uncompressed colour format, sampled (1)" + (desc.type == TextureType::kCube ? "" : " or stored by a kernel (2)") +
                         ", and drawn into a slice at a time too (4), is served");
@@ -390,6 +401,9 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
     }
     const uint32_t memoryWidth = desc.width * desc.samples;   // the width of its memory: a multisample texture's samples side by side
     uint64_t pitch = texturePitch(*info, memoryWidth);
+    if (info->stencilOnly) {
+        pitch = s8Pitch(desc.width);   // the S8 plane's rows: 128-byte, as stencilClearStream and the RB take them
+    }
     const uint64_t layer = depthArray            ? depthBytes(*info, desc.width, desc.height)
                            : desc.mipLevels > 1 ? textureBytes(*info, desc.width, desc.height, desc.mipLevels)
                                                 : (uint64_t(blocksDown(*info, desc.height)) * pitch + 4095) / 4096 * 4096;
@@ -542,7 +556,7 @@ uint64_t Texture::depthPlaneBytes() const {
     }
     return depthBytes(*info_, desc_.width, desc_.height);
 }
-uint64_t Texture::stencilOffset() const { return info_->stencil ? depthPlaneBytes() : 0; }
+uint64_t Texture::stencilOffset() const { return info_->stencil && !info_->stencilOnly ? depthPlaneBytes() : 0; }
 // the S8 plane's memory: as wide as the pixels' samples side by side (a multisample plane's, one byte a sample)
 uint64_t Texture::stencilPitch() const { return info_->stencil ? s8Pitch(desc_.samples > 1 ? desc_.width * desc_.samples : desc_.width) : 0; }
 uint64_t Texture::stencilPlaneBytes() const {

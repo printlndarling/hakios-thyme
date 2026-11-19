@@ -614,6 +614,11 @@ std::pair<uint32_t, uint32_t> windowOf(const RenderPass& pass) {
         w = std::min(w, pass.depth->level(pass.depthLevel).width);
         h = std::min(h, pass.depth->level(pass.depthLevel).height);
     }
+    // ...and a pass with a stencil attachment of its own (Stencil8) is that one's size when no depth names it
+    if (pass.depth == nullptr && pass.stencil != nullptr) {
+        w = std::min(w, pass.stencil->width());
+        h = std::min(h, pass.stencil->height());
+    }
     return {w, h};
 }
 
@@ -1093,8 +1098,12 @@ bool checkTarget(const RenderPass& pass, std::string* why) {
         }
     }
     if (pass.stencil != nullptr) {
-        if (pass.stencil != pass.depth || !pass.stencil->info().stencil) {
-            return refuse(why, "a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture: the S8 plane of that one texture is what is served");
+        // the stencil attachment is either the depth attachment's own S8 plane (Depth32Float_Stencil8) or a Stencil8
+        // texture of its own beside no depth attachment: Metal's Stencil8 is that same TILE6_3 plane, based at 0
+        if (pass.depth == nullptr ? !pass.stencil->info().stencilOnly : (pass.stencil != pass.depth || !pass.stencil->info().stencil)) {
+            return refuse(why, pass.depth == nullptr
+                                   ? "a stencil attachment beside no depth attachment that is not a Stencil8 texture: an S8 plane of its own is what is served"
+                                   : "a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture: the S8 plane of that one texture is what is served");
         }
         if (pass.stencilLoad != LoadAction::kLoad && pass.stencilLoad != LoadAction::kDontCare && pass.stencilLoad != LoadAction::kClear) {
             return refuse(why, "stencil load action " + n(uint32_t(pass.stencilLoad)) + ": MTLLoadAction is DontCare (0), Load (1) or Clear (2)");
@@ -1646,6 +1655,13 @@ bool encodeDraw(pm4::Stream& stream, const Program& program, const RenderPass& p
         } else {
             reg(stream, REG_A6XX_RB_STENCIL_INFO, 0);
         }
+    } else if (pass.stencil != nullptr) {
+        // a stencil attachment of its own (Metal's Stencil8): the same SEPARATE_STENCIL plane, with no depth plane beside
+        // it (RB_DEPTH_BUFFER_INFO stays DEPTH6_NONE from step 4 above)
+        const Texture& s = *pass.stencil;
+        const uint64_t sb = s.gpuAddress() + s.stencilOffset();
+        regs(stream, REG_A6XX_RB_STENCIL_INFO, {A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL, uint32_t(s.stencilPitch() >> 6), uint32_t(s.stencilPlaneBytes() >> 6),
+                                                uint32_t(sb), uint32_t(sb >> 32), 0});
     }
     // 5. the colour target (tu6_emit_mrt, tu_cmd_buffer.cc:482-576; r3d_dst, tu_clear_blit.cc:1380-1408; fd6 emit_mrt,
     // fd6_gmem.cc:60-147): RB_MRT[0]'s six registers as one pkt4 (BUF_INFO, PITCH, ARRAY_PITCH, BASE lo/hi, BASE_GMEM;
@@ -2122,7 +2138,7 @@ bool encodeDraw(pm4::Stream& stream, const Program& program, const RenderPass& p
         stream.packet(pm4::kWaitMemWrites, nullptr, 0);
     }
     if (whole) {
-        passTail(stream, table, o, pass.depth != nullptr);
+        passTail(stream, table, o, pass.depth != nullptr || pass.stencil != nullptr);
     }
     return true;
 }
@@ -2155,7 +2171,7 @@ bool encodeBegin(pm4::Stream& stream, const RenderPass& pass, uint64_t table, ui
     return true;
 }
 
-void encodeEnd(pm4::Stream& stream, const RenderPass& pass, uint64_t table, const Options& o) { passTail(stream, table, o, pass.depth != nullptr); }
+void encodeEnd(pm4::Stream& stream, const RenderPass& pass, uint64_t table, const Options& o) { passTail(stream, table, o, pass.depth != nullptr || pass.stencil != nullptr); }
 
 namespace {
 uint32_t alignUp(uint32_t v, uint32_t a) { return (v + a - 1) / a * a; }
@@ -2541,7 +2557,7 @@ bool encodeClear(pm4::Stream& stream, const RenderPass& pass, uint64_t table, ui
     passStart(stream, windowOf(pass).first, windowOf(pass).second, table, o);
     clearAll(stream, pass, clears, table);
     zsClears(stream, pass, table);
-    passTail(stream, table, o, pass.depth != nullptr);
+    passTail(stream, table, o, pass.depth != nullptr || pass.stencil != nullptr);
     return true;
 }
 

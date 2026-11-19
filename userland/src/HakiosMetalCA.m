@@ -3680,10 +3680,11 @@ hm_set_vertex_descriptor(hakios_metal_program *program, MTLVertexDescriptor *vd)
 						  "(260) are the depth formats served", (unsigned long)[d depthAttachmentPixelFormat]];
 	}
 	/* the stencil is the S8 plane of a Depth32Float_Stencil8 texture, so a stencil format is that one, alone or with the
-	 * same depth format beside it */
-	if ([d stencilAttachmentPixelFormat] != MTLPixelFormatInvalid && [d stencilAttachmentPixelFormat] != MTLPixelFormatDepth32Float_Stencil8) {
-		return [NSString stringWithFormat:@"a stencil attachment pixel format of %lu; Depth32Float_Stencil8 (260) is the stencil "
-						  "format served", (unsigned long)[d stencilAttachmentPixelFormat]];
+	 * same depth format beside it; Stencil8 (253) is a plane of its own, with no depth plane beside it */
+	if ([d stencilAttachmentPixelFormat] != MTLPixelFormatInvalid && [d stencilAttachmentPixelFormat] != MTLPixelFormatDepth32Float_Stencil8 &&
+	    [d stencilAttachmentPixelFormat] != MTLPixelFormatStencil8) {
+		return [NSString stringWithFormat:@"a stencil attachment pixel format of %lu; Depth32Float_Stencil8 (260) and Stencil8 (253) "
+						  "are the stencil formats served", (unsigned long)[d stencilAttachmentPixelFormat]];
 	}
 	if ([d rasterSampleCount] != 1 && [d rasterSampleCount] != 2 && [d rasterSampleCount] != 4) {
 		return [NSString stringWithFormat:@"rasterSampleCount %lu; 1, 2 and 4 samples are served", (unsigned long)[d rasterSampleCount]];
@@ -6172,9 +6173,13 @@ hm_read_render_pass(MTLRenderPassDescriptor *d, struct hakios_metal_render_pass 
 	}
 	depth = [[d depthAttachment] texture];
 	stencil = [[d stencilAttachment] texture];
-	if (stencil != nil && stencil != depth) {
-		snprintf(why, size, "a stencil attachment (%s) that is not the depth attachment's texture; the stencil served is the S8 "
-			 "plane of the one Depth32Float_Stencil8 texture both name", class_getName(object_getClass(stencil)));
+	/* one texture can be both -- a Depth32Float_Stencil8 texture's S8 plane is the stencil -- or the stencil can be a
+	 * Stencil8 texture of its own, which is that same plane alone (hakios-metal serves it with no depth buffer beside) */
+	if (stencil != nil && stencil != depth &&
+	    (![stencil isKindOfClass:[HakiosMetalTexture class]] || [stencil pixelFormat] != MTLPixelFormatStencil8)) {
+		snprintf(why, size, "a stencil attachment (%s) that is neither the depth attachment's texture nor a Stencil8 (253) texture "
+			 "of its own; the stencil served is an S8 plane, of a Depth32Float_Stencil8 texture or of a Stencil8 one alone",
+			 class_getName(object_getClass(stencil)));
 		return NO;
 	}
 	if (depth != nil && ![depth isKindOfClass:[HakiosMetalTexture class]]) {
@@ -6209,9 +6214,10 @@ hm_read_render_pass(MTLRenderPassDescriptor *d, struct hakios_metal_render_pass 
 	}
 	/* Unknown (4) is Metal's "decided later by -setColorStoreAction:"; until then it is a store, which is what sysmem does
 	 * anyway: the RB writes the memory as it draws, there is no tile to store from */
-	if (t0 == nil && depth == nil && pass->more[0].texture == NULL && pass->more[1].texture == NULL && pass->more[2].texture == NULL &&
-	    pass->more[3].texture == NULL && pass->more[4].texture == NULL && pass->more[5].texture == NULL && pass->more[6].texture == NULL) {
-		snprintf(why, size, "the pass has no attachment at all (no colour texture, no depth); nothing to draw into");
+	if (t0 == nil && depth == nil && stencil == nil && pass->more[0].texture == NULL && pass->more[1].texture == NULL &&
+	    pass->more[2].texture == NULL && pass->more[3].texture == NULL && pass->more[4].texture == NULL && pass->more[5].texture == NULL &&
+	    pass->more[6].texture == NULL) {
+		snprintf(why, size, "the pass has no attachment at all (no colour texture, no depth, no stencil); nothing to draw into");
 		return NO;
 	}
 	pass->color0 = t0 != nil ? [(HakiosMetalTexture *)t0 hakiosTexture] : NULL;

@@ -1705,7 +1705,7 @@ TEST(the_fake_refuses_a_draw_whose_fragment_output_path_is_broken) {
         Twin w;
         w.at(REG_A6XX_RB_STENCIL_CONTROL) = A6XX_RB_STENCIL_CONTROL_STENCIL_ENABLE;
         w.at(REG_A6XX_GRAS_SU_STENCIL_CNTL) = A6XX_GRAS_SU_STENCIL_CNTL_STENCIL_ENABLE;   // both, and no stencil buffer
-        CHECK(has(w.fault(), "stencil state with no separate stencil buffer beside a depth buffer"));
+        CHECK(has(w.fault(), "stencil state with no separate stencil buffer"));
     }
     {
         // a depth format with nothing behind it: GRAS_SU's copy still says none
@@ -4620,6 +4620,62 @@ TEST(a_stencil_attachment_is_the_s8_plane_and_its_test_the_draws_state) {
     Encoded e3(r, flatProgram(), other, d);
     CHECK(!e3.ok);
     expectRefusal(e3.error, "a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture: the S8 plane of that one texture is what is served");
+    CHECK_EQ(r.fake->stats().faults, 0u);
+}
+
+// A Stencil8 attachment of its own (Metal's 253, no depth plane beside it -- what ANGLE asks for its default
+// framebuffer): the same SEPARATE_STENCIL plane based at the texture's own address, RB_DEPTH_BUFFER_INFO left
+// DEPTH6_NONE, the Clear a tiled fill of the plane, and a stencil attachment of that shape and nothing else refused.
+TEST(a_stencil8_attachment_of_its_own_is_the_plane_alone) {
+    using namespace a6xx;
+    Rig r;
+    auto t = target(r);
+    TextureDesc sd;
+    sd.format = PixelFormat::kStencil8;
+    sd.width = sd.height = 64;
+    sd.usage = kTextureUsageRenderTarget;
+    std::string why;
+    auto s = Texture::make(*r.gpu, sd, &why);
+    CHECK(s != nullptr);
+    if (s == nullptr) {
+        std::printf("       %s\n", why.c_str());
+        return;
+    }
+    CHECK_EQ(s->stencilOffset(), 0u);
+    CHECK_EQ(s->stencilPitch(), 128u);
+    CHECK_EQ(s->stencilPlaneBytes(), 8192u);
+    RenderPass pass;
+    pass.color0 = t.get();
+    pass.stencil = s.get();
+    pass.stencilLoad = LoadAction::kClear;
+    pass.clearStencil = 0x5a;
+    Draw d = wholeDraw(6);
+    d.stencil.enabled = true;
+    d.stencil.front = StencilFace{3, 0, 0, 2, 0xff, 0x0f};   // LessEqual, Keep / Keep / Replace, write mask 0x0f
+    d.stencil.back = d.stencil.front;
+    d.stencil.frontReference = 7;
+    d.stencil.backReference = 7;
+    Encoded e(r, flatProgram(), pass, d);
+    CHECK(e.ok);
+    if (!e.ok) std::printf("       %s\n", e.error.c_str());
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO), A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL);
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO + 1), 128u >> 6);
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO + 2), 8192u >> 6);
+    CHECK_EQ(uint64_t(e.reg(REG_A6XX_RB_STENCIL_INFO + 3)) | uint64_t(e.reg(REG_A6XX_RB_STENCIL_INFO + 4)) << 32, s->gpuAddress());
+    // no depth plane: RB_DEPTH_BUFFER_INFO stays DEPTH6_NONE
+    CHECK_EQ((e.reg(REG_A6XX_RB_DEPTH_BUFFER_INFO) & A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK) >> A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT,
+             uint32_t(DEPTH6_NONE));
+    const uint32_t tiledBefore = r.fake->stats().tiledFills;
+    auto cb = drawOnce(r, flatProgram(), pass, d);
+    CHECK(cb->status() == CommandBuffer::kCompleted);
+    if (cb->status() != CommandBuffer::kCompleted) std::printf("       %s | %s\n", cb->error().c_str(), r.fake->stats().lastFault.c_str());
+    CHECK_EQ(r.fake->stats().tiledFills - tiledBefore, 1u);
+    // a stencil attachment beside no depth attachment that is not a Stencil8 texture is refused
+    RenderPass wrong = pass;
+    wrong.stencil = t.get();
+    Encoded e2(r, flatProgram(), wrong, d);
+    CHECK(!e2.ok);
+    expectRefusal(e2.error, "a stencil attachment beside no depth attachment that is not a Stencil8 texture: an S8 plane of its own is what is served");
     CHECK_EQ(r.fake->stats().faults, 0u);
 }
 

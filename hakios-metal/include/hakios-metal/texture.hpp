@@ -80,6 +80,7 @@ enum class PixelFormat : uint32_t {
     kRGBA32Uint = 123,
     kRGBA32Float = 125,
     kDepth32Float = 252,   // a depth attachment only: tiled (TILE6_3), since the hardware has no linear depth buffer
+    kStencil8 = 253,       // a stencil attachment of its own: the TILE6_3 S8 plane, with no depth plane beside it
     kDepth32FloatStencil8 = 260,
     kX32Stencil8 = 261,    // a view of a Depth32Float_Stencil8 texture's S8 plane, sampled as a uint: Texture::view alone   // the same depth plane and a separate S8 plane after it (turnip's D32_SFLOAT_S8_UINT)
     // Metal's private 500, the format CoreAnimation asks for over a '420f' or '420v' IOSurface (a decoded photo): both
@@ -185,6 +186,9 @@ struct FormatInfo {
     // PVRTC1 at 2 or 4 bits a texel: stored as the RGBA8 it decodes to, the processor decoding a whole level when it is
     // written (decodePvrtc), since no A6xx unit reads it; 0 for every other format
     uint32_t pvrtcBpp = 0;
+    // Stencil8: the S8 plane alone (stencil too, for the plane's layout and the RB's stencil buffer), no depth plane
+    // before it -- Stencil8's memory is s8Bytes, and stencilOffset is 0
+    bool stencilOnly = false;
 };
 // PVRTC1 data of a W x H level (BPP 2 or 4) into W x H RGBA8 texels, row after row
 void decodePvrtc(const uint8_t* data, uint32_t w, uint32_t h, uint32_t bpp, uint8_t* rgba);

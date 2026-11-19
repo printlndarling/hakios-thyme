@@ -1666,18 +1666,19 @@ bool FakeGpu::execDraw(const uint32_t* p, uint32_t count) {
         const uint32_t depthFormat = fieldOf(reg(REG_A6XX_RB_DEPTH_BUFFER_INFO), A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK, A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT);
         const uint32_t depthCntl = reg(REG_A6XX_RB_DEPTH_CNTL);
         const bool test = (depthCntl & A6XX_RB_DEPTH_CNTL_Z_TEST_ENABLE) != 0, write = (depthCntl & A6XX_RB_DEPTH_CNTL_Z_WRITE_ENABLE) != 0;
-        // stencil: a test only with a separate S8 buffer (RB_STENCIL_INFO SEPARATE_STENCIL, beside a depth buffer), laid out
-        // as texture.cpp lays the plane out (4096-aligned, the pitch a multiple of 128 bytes holding the width, the
-        // window's rows counted to 32 inside a buffer), the enable the same in RB_STENCIL_CONTROL and GRAS_SU_STENCIL_CNTL;
-        // what is written goes into the depth CCU as depth does
+        // stencil: a test only with a separate S8 buffer (RB_STENCIL_INFO SEPARATE_STENCIL -- the plane of a
+        // Depth32Float_Stencil8 texture, or a Stencil8 texture alone beside DEPTH6_NONE), laid out as texture.cpp lays
+        // the plane out (4096-aligned, the pitch a multiple of 128 bytes holding the width, the window's rows counted
+        // to 32 inside a buffer), the enable the same in RB_STENCIL_CONTROL and GRAS_SU_STENCIL_CNTL; what is written
+        // goes into the depth CCU as depth does
         const uint32_t stencilControl = reg(REG_A6XX_RB_STENCIL_CONTROL), stencilInfo = reg(REG_A6XX_RB_STENCIL_INFO);
         const bool stencilTest = (stencilControl & A6XX_RB_STENCIL_CONTROL_STENCIL_ENABLE) != 0;
         if (stencilTest != ((reg(REG_A6XX_GRAS_SU_STENCIL_CNTL) & A6XX_GRAS_SU_STENCIL_CNTL_STENCIL_ENABLE) != 0)) {
             fault(text("RB_STENCIL_CONTROL %#llx and GRAS_SU_STENCIL_CNTL %#llx: the stencil enable must agree", stencilControl, reg(REG_A6XX_GRAS_SU_STENCIL_CNTL)));
             return false;
         }
-        if (stencilControl != 0 && ((stencilInfo & A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL) == 0 || depthFormat == DEPTH6_NONE)) {
-            fault("stencil state with no separate stencil buffer beside a depth buffer: what this GPU model runs is the S8 plane of a Depth32Float_Stencil8 texture");
+        if (stencilControl != 0 && (stencilInfo & A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL) == 0) {
+            fault("stencil state with no separate stencil buffer: what this GPU model runs is the S8 plane, of a Depth32Float_Stencil8 texture or of a Stencil8 one alone");
             return false;
         }
         if ((stencilInfo & A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL) != 0) {

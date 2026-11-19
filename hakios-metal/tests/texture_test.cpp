@@ -709,6 +709,11 @@ TEST(a_cube_is_six_faces_under_the_cube_type) {
     d.height = 8;
     CHECK(Texture::make(r.gpu, d, &why) == nullptr);
     CHECK(has(why, "square faces, 6 of them"));
+    // Metal's usage is a promise about use, not a capability: the shader-write bit is taken on a cube (ANGLE asks for
+    // it on the 1 x 1 cube its Metal backend keeps) -- a kernel's store into a cube is refused at its dispatch
+    d.height = 4;
+    d.usage = kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;
+    CHECK(Texture::make(r.gpu, d, &why) != nullptr);
 }
 
 // A multisample texture is the memory of a texture SAMPLES times as wide (fdl6_layout's cpp times the count), its
@@ -1290,4 +1295,41 @@ TEST(a_stencil_view_reads_the_s8_plane) {
     z.format = PixelFormat::kDepth32Float;
     auto depthOnly = Texture::make(r.gpu, z, &why);
     CHECK(depthOnly != nullptr && Texture::view(depthOnly, PixelFormat::kX32Stencil8, TextureType::k2D, 0, 1, 0, 1, &why) == nullptr);
+}
+
+// Metal's Stencil8 (253): the S8 plane alone -- s8Bytes of memory (rows to 32, the plane 4096-aligned), its pitch the
+// 128-byte s8Pitch, the stencil at offset 0 (no depth plane before it); a render target, sampled too, and stored into
+// refused as a depth texture is. What ANGLE asks for its default framebuffer's stencil attachment.
+TEST(a_stencil8_texture_is_the_s8_plane_alone) {
+    using namespace a6xx;
+    Rig r;
+    std::string why;
+    TextureDesc d;
+    d.format = PixelFormat::kStencil8;
+    d.width = 100;
+    d.height = 40;
+    d.usage = kTextureUsageRenderTarget;
+    const FormatInfo* info = nullptr;
+    uint64_t pitch = 0, bytes = 0;
+    CHECK(Texture::plan(d, &info, &pitch, &bytes, &why));
+    CHECK(info != nullptr);
+    if (info == nullptr) return;
+    CHECK_EQ(info->fmt6, FMT6_8_UINT);
+    CHECK_EQ(pitch, uint64_t(128));
+    CHECK_EQ(bytes, ((uint64_t(40) + 31) / 32 * 32 * 128 + 4095) / 4096 * 4096);
+    auto t = Texture::make(r.gpu, d, &why);
+    CHECK(t != nullptr);
+    if (t == nullptr) {
+        std::printf("       %s\n", why.c_str());
+        return;
+    }
+    CHECK_EQ(t->stencilOffset(), uint64_t(0));
+    CHECK_EQ(t->stencilPitch(), uint64_t(128));
+    CHECK_EQ(t->stencilPlaneBytes(), bytes);
+    CHECK_EQ(t->buffer()->length(), bytes);
+    d.usage = kTextureUsageRead | kTextureUsageRenderTarget;   // sampled beside drawn into, as a depth texture is
+    CHECK(Texture::make(r.gpu, d, &why) != nullptr);
+    d.usage = kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;   // not stored
+    CHECK(Texture::make(r.gpu, d, &why) == nullptr);
+    CHECK(has(why, "a depth texture is tiled"));
 }
