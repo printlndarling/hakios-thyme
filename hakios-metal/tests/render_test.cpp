@@ -3337,9 +3337,13 @@ TEST(a_depth32float_texture_is_tiled_and_an_attachment_only) {
     TextureDesc td;
     td.format = PixelFormat::kDepth32Float;
     td.width = td.height = 16;
+    // Metal's shader-write bit on a depth texture is a promise about a kernel's store, not a layout: creation takes it
+    // (the store itself is refused where a kernel addresses the texture as an image), as Baidu Maps' map renderer asks
+    // for usage 7 on its depth texture every frame
     td.usage = kTextureUsageRenderTarget | kTextureUsageWrite;
-    CHECK(Texture::make(*r.gpu, td, &why) == nullptr);
-    CHECK(has(why, "a Depth32Float texture with usage 6: a depth texture is tiled (TILE6_3) and is served as a render target (4), sampled too (5), not stored"));
+    auto promised = Texture::make(*r.gpu, td, &why);
+    CHECK(promised != nullptr);
+    if (promised == nullptr) std::printf("       %s\n", why.c_str());
     // sampled too: its view is the tiled layout, TILE6_3 with TILE_ALL, FMT6_32_FLOAT, at the texture's own address
     {
         using namespace a6xx;

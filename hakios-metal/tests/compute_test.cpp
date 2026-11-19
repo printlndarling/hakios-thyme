@@ -791,6 +791,24 @@ TEST(an_image_kernel_stores_into_a_2d_array_or_a_3d_texture_through_a_layered_de
     CHECK(has(refused(r, texFillLike(), bind({}, {arr.get()})), "tex_fill addresses texture 0 as 2D image; texture 0 is of type 3"));
 }
 
+TEST(an_image_into_a_depth_texture_is_refused_by_name) {
+    // Metal's shader-write bit on a depth texture is a promise, taken at creation (texture.cpp); a kernel that then
+    // addresses the texture as an image is refused here: an image's IBO descriptor is linear, and a depth plane is tiled
+    Rig r;
+    TextureDesc d;
+    d.format = PixelFormat::kDepth32Float;
+    d.width = 32;
+    d.height = 32;
+    d.usage = kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;
+    std::string why;
+    auto depth = Texture::make(*r.gpu, d, &why);
+    CHECK(depth != nullptr);
+    if (depth == nullptr) std::fprintf(stderr, "       %s\n", why.c_str());
+    CHECK(has(refused(r, texFillLike(), bind({}, {depth.get()})),
+              "texture 0 is a Depth32Float texture addressed as an image: a depth texture's tiled plane is not an image's "
+              "linear layout; sample it through the texture table instead"));
+}
+
 TEST(a_dispatch_of_tex_copy_loads_the_texture_table_with_a_zero_slot_0_and_one_zero_sampler) {
     // in at [[texture(1)]]: TEX_CONST slot 1, slot 0 Gallium's zero dummy; out at [[texture(0)]]: IBO slot 0; no
     // sampler named, one zero TEX_SAMP loaded all the same for the isaml's s#0; NTEX = NSAMP = 3 > TEX_COUNT 2

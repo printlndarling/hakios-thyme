@@ -360,11 +360,14 @@ bool Texture::plan(const TextureDesc& desc, const FormatInfo** infoOut, uint64_t
                         "samples are not served");
         return false;
     }
-    if (info->depth && (desc.usage & ~kTextureUsageRead) != kTextureUsageRenderTarget) {
+    if (info->depth && (desc.usage & ~(kTextureUsageRead | kTextureUsageWrite)) != kTextureUsageRenderTarget) {
         // a depth texture is an attachment the RB writes, and may be sampled (a shadow map): the TP reads the tiled layout
-        // as fdl6_view_init describes it (sampledDescriptor); a store into it would need the tiled IBO, which is not here
+        // as fdl6_view_init describes it (sampledDescriptor). Metal's shader-write bit is a promise about a kernel's store,
+        // and the store itself is refused where the kernel addresses the texture as an image (compute.cpp's boundTexture:
+        // the IBO's linear layout is not this tiled plane), so the bit is taken here and changes nothing -- Baidu Maps'
+        // map renderer asks for 7 (read, write, render target) on its 1125x2436 depth texture and draws into it alone
         refuse(why, std::string("a ") + info->name + " texture with usage " + n(desc.usage) +
-                        ": a depth texture is tiled (TILE6_3) and is served as a render target (4), sampled too (5), not stored");
+                        ": a depth texture is tiled (TILE6_3) and is served as a render target (4), sampled too (5)");
         return false;
     }
     // (shader read is taken beside render target -- sokol asks for both on every attachment; a shader sampling one as a

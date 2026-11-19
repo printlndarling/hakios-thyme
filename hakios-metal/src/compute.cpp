@@ -224,6 +224,13 @@ bool encodeAny(pm4::Stream& stream, const Kernel& k, const uint32_t groups[3], u
                                    "; texture " + n(i) + " is of type " + n(uint32_t(tex->type())) +
                                    ": a kernel stores into 2D, 2D-array and 3D textures and samples every type, each as itself");
         }
+        // a depth texture is tiled (TILE6_3): an image's descriptor is the IBO's linear layout (storageDescriptor), which
+        // does not describe it, so addressing one as an image -- storing or loading -- is refused here; sampled through
+        // the texture table, the TP reads the tiled plane as fdl6_view_init lays it out, and that path is served
+        if (t.kind == kTexImage && tex->info().depth) {
+            return refuse(why, "texture " + n(i) + " is a " + tex->info().name + " texture addressed as an image: a depth texture's tiled plane is "
+                                   "not an image's linear layout; sample it through the texture table instead");
+        }
         if (t.element != tex->info().element) {
             return refuse(why, "texture " + n(i) + " is " + tex->info().name + " (" + elementName(tex->info().element) + "); " + k.name +
                                    (t.kind == kTexImage ? " stores through it as texture2d<" : " reads it as texture2d<") + elementName(t.element) + ">");

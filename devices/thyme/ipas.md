@@ -66,8 +66,18 @@ whatever the operator stages:
 - The LAN server runs on the Windows side (`tools/ipas-server.ps1`), because the phone
   reaches `192.168.0.104` and not WSL2's `172.x` address.
 
-This is the path 高德地图 (`com.autonavi.amap`) and 百度地图 (`com.baidu.map`) would take.
-Neither is on the LAN: both are App Store-only, their store images are FairPlay-encrypted,
-and no decrypted copy is downloaded here. A decrypted IPA the operator lawfully has is what
-`tools/map-run.sh` needs; without one there is nothing installable to test, and the record
-must say so rather than claim a run.
+This is the path 高德地图 (`com.autonavi.amap`) and 百度地图 (`com.baidu.map`) take.
+Neither is on the LAN as a download: both are App Store-only, their store images are
+FairPlay-encrypted, and no decrypted copy is downloaded here.
+
+**百度地图 was staged from the operator on 2026-11-20** ("百度地图-路线规划出行必备.ipa",
+22.2.20, `com.baidu.map`, app directory `IphoneCom.app`, 207,202,418 bytes, SHA-256
+`299ea64e50d1841499b64822eae236ea0fed7323fea88010fe7a6ea20363ac43`, `cryptid 0` -- the
+operator's own copy, lawfully decrypted; this project neither downloaded it from a
+distribution site nor asks for an Apple ID). It installs, registers and launches on the port
+(image `65abdfef`): the screen shows its full UI -- search bar, layer and feedback buttons,
+tab bar, ads, the location dot -- with the map canvas black and flickering. The log shows one
+refusal repeated, its 1125x2436 `Depth32Float` depth texture asking for usage `0x7`
+(read, write, render target) and being turned down ("not stored"); the map renderer treats
+the failed attachment as the frame's, so the map never draws. 高德地图 remains untested:
+no lawfully decrypted copy of it was provided.

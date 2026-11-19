@@ -793,8 +793,8 @@ TEST(a_multisample_depth_is_tiled_at_its_samples_cpp) {
         CHECK_EQ(d->stencilPlaneBytes(), 32u * 512);
     }
     TextureDesc bad = four;
-    bad.usage = kTextureUsageRenderTarget | kTextureUsageWrite;   // (read beside render target is taken, as sokol asks)
-    CHECK(has(refusedMake(r, bad), "sampled too (5), not stored"));
+    bad.usage = kTextureUsageRenderTarget | kTextureUsageWrite;   // (a single-sample depth takes the write bit; a multisample one does not)
+    CHECK(has(refusedMake(r, bad), "with usage 6: one level of an uncompressed colour format or a depth format, a render target (4) alone, is served"));
     TextureDesc readToo = four;
     readToo.usage = kTextureUsageRenderTarget | kTextureUsageRead;
     CHECK(Texture::make(r.gpu, readToo, &why) != nullptr);
@@ -1298,8 +1298,9 @@ TEST(a_stencil_view_reads_the_s8_plane) {
 }
 
 // Metal's Stencil8 (253): the S8 plane alone -- s8Bytes of memory (rows to 32, the plane 4096-aligned), its pitch the
-// 128-byte s8Pitch, the stencil at offset 0 (no depth plane before it); a render target, sampled too, and stored into
-// refused as a depth texture is. What ANGLE asks for its default framebuffer's stencil attachment.
+// 128-byte s8Pitch, the stencil at offset 0 (no depth plane before it); a render target, sampled too, and its store
+// promised as a depth texture's is (refused where a kernel addresses it as an image). What ANGLE asks for its default
+// framebuffer's stencil attachment.
 TEST(a_stencil8_texture_is_the_s8_plane_alone) {
     using namespace a6xx;
     Rig r;
@@ -1329,7 +1330,6 @@ TEST(a_stencil8_texture_is_the_s8_plane_alone) {
     CHECK_EQ(t->buffer()->length(), bytes);
     d.usage = kTextureUsageRead | kTextureUsageRenderTarget;   // sampled beside drawn into, as a depth texture is
     CHECK(Texture::make(r.gpu, d, &why) != nullptr);
-    d.usage = kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;   // not stored
-    CHECK(Texture::make(r.gpu, d, &why) == nullptr);
-    CHECK(has(why, "a depth texture is tiled"));
+    d.usage = kTextureUsageRead | kTextureUsageWrite | kTextureUsageRenderTarget;   // the write bit is a promise, taken
+    CHECK(Texture::make(r.gpu, d, &why) != nullptr);
 }
