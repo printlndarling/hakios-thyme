@@ -1099,11 +1099,13 @@ bool checkTarget(const RenderPass& pass, std::string* why) {
     }
     if (pass.stencil != nullptr) {
         // the stencil attachment is either the depth attachment's own S8 plane (Depth32Float_Stencil8) or a Stencil8
-        // texture of its own beside no depth attachment: Metal's Stencil8 is that same TILE6_3 plane, based at 0
-        if (pass.depth == nullptr ? !pass.stencil->info().stencilOnly : (pass.stencil != pass.depth || !pass.stencil->info().stencil)) {
+        // texture of its own, beside a depth attachment or alone: Metal's Stencil8 is that same TILE6_3 plane, based at 0
+        const bool own = pass.stencil != pass.depth && pass.stencil->info().stencilOnly;
+        const bool shared = pass.stencil == pass.depth && pass.stencil->info().stencil;
+        if (!own && !shared) {
             return refuse(why, pass.depth == nullptr
                                    ? "a stencil attachment beside no depth attachment that is not a Stencil8 texture: an S8 plane of its own is what is served"
-                                   : "a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture: the S8 plane of that one texture is what is served");
+                                   : "a stencil attachment that is neither the depth attachment's own Depth32Float_Stencil8 texture nor a Stencil8 texture of its own: an S8 plane is what is served");
         }
         if (pass.stencilLoad != LoadAction::kLoad && pass.stencilLoad != LoadAction::kDontCare && pass.stencilLoad != LoadAction::kClear) {
             return refuse(why, "stencil load action " + n(uint32_t(pass.stencilLoad)) + ": MTLLoadAction is DontCare (0), Load (1) or Clear (2)");
@@ -1649,8 +1651,10 @@ bool encodeDraw(pm4::Stream& stream, const Program& program, const RenderPass& p
         if (pass.stencil != nullptr) {
             // the S8 plane as a separate stencil buffer (tu6_emit_zs's D32_SFLOAT_S8_UINT branch): SEPARATE_STENCIL, its
             // pitch and layer, its base, BASE_GMEM 0; A6XX's RB_STENCIL_INFO has no tile field -- stencil is TILE6_3, as laid out
-            const uint64_t sb = d.gpuAddress() + d.stencilOffset();
-            regs(stream, REG_A6XX_RB_STENCIL_INFO, {A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL, uint32_t(d.stencilPitch() >> 6), uint32_t(d.stencilPlaneBytes() >> 6),
+            // (the plane is the depth texture's own when the two name one texture, or a Stencil8 texture's beside it)
+            const Texture& st = *pass.stencil;
+            const uint64_t sb = st.gpuAddress() + st.stencilOffset();
+            regs(stream, REG_A6XX_RB_STENCIL_INFO, {A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL, uint32_t(st.stencilPitch() >> 6), uint32_t(st.stencilPlaneBytes() >> 6),
                                                     uint32_t(sb), uint32_t(sb >> 32), 0});
         } else {
             reg(stream, REG_A6XX_RB_STENCIL_INFO, 0);

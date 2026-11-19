@@ -4619,7 +4619,8 @@ TEST(a_stencil_attachment_is_the_s8_plane_and_its_test_the_draws_state) {
     other.depth = plain.get();
     Encoded e3(r, flatProgram(), other, d);
     CHECK(!e3.ok);
-    expectRefusal(e3.error, "a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture: the S8 plane of that one texture is what is served");
+    expectRefusal(e3.error, "a stencil attachment that is neither the depth attachment's own Depth32Float_Stencil8 texture nor a Stencil8 "
+                            "texture of its own: an S8 plane is what is served");
     CHECK_EQ(r.fake->stats().faults, 0u);
 }
 
@@ -4676,6 +4677,69 @@ TEST(a_stencil8_attachment_of_its_own_is_the_plane_alone) {
     Encoded e2(r, flatProgram(), wrong, d);
     CHECK(!e2.ok);
     expectRefusal(e2.error, "a stencil attachment beside no depth attachment that is not a Stencil8 texture: an S8 plane of its own is what is served");
+    CHECK_EQ(r.fake->stats().faults, 0u);
+}
+
+// A Depth32Float depth attachment with a Stencil8 attachment of its own beside it (ANGLE's default framebuffer: D32_FLOAT
+// and S8_UINT as two textures): RB_DEPTH_BUFFER_INFO is DEPTH6_32 at the depth texture's base, RB_STENCIL_INFO is
+// SEPARATE_STENCIL at the Stencil8 texture's own -- not the depth's -- and the draw completes.
+TEST(a_separate_stencil8_beside_a_depth32float_attachment_is_the_plane_beside_it) {
+    using namespace a6xx;
+    Rig r;
+    auto t = target(r);
+    auto d = depthTarget(r);
+    TextureDesc sd;
+    sd.format = PixelFormat::kStencil8;
+    sd.width = sd.height = 64;
+    sd.usage = kTextureUsageRenderTarget;
+    std::string why;
+    auto s = Texture::make(*r.gpu, sd, &why);
+    CHECK(s != nullptr);
+    CHECK(d != nullptr);
+    if (s == nullptr || d == nullptr) {
+        std::printf("       %s\n", why.c_str());
+        return;
+    }
+    RenderPass pass;
+    pass.color0 = t.get();
+    pass.depth = d.get();
+    pass.depthLoad = LoadAction::kDontCare;
+    pass.depthStore = StoreAction::kStore;
+    pass.stencil = s.get();
+    pass.stencilLoad = LoadAction::kClear;
+    pass.clearStencil = 0x5a;
+    Draw dr = wholeDraw(6);
+    dr.stencil.enabled = true;
+    dr.stencil.front = StencilFace{3, 0, 0, 2, 0xff, 0x0f};
+    dr.stencil.back = dr.stencil.front;
+    dr.stencil.frontReference = 7;
+    dr.stencil.backReference = 7;
+    Encoded e(r, flatProgram(), pass, dr);
+    CHECK(e.ok);
+    if (!e.ok) std::printf("       %s\n", e.error.c_str());
+    // the depth plane: DEPTH6_32 at the depth texture's own address
+    CHECK_EQ((e.reg(REG_A6XX_RB_DEPTH_BUFFER_INFO) & A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK) >> A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT,
+             uint32_t(DEPTH6_32));
+    CHECK_EQ(uint64_t(e.reg(REG_A6XX_RB_DEPTH_BUFFER_INFO + 3)) | uint64_t(e.reg(REG_A6XX_RB_DEPTH_BUFFER_INFO + 4)) << 32, d->gpuAddress());
+    CHECK_EQ(e.reg(REG_A6XX_RB_DEPTH_BUFFER_INFO + 1), A6XX_RB_DEPTH_BUFFER_PITCH(uint32_t(d->level(0).pitch)));
+    // the stencil plane: the Stencil8 texture's own, not the depth's
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO), A6XX_RB_STENCIL_INFO_SEPARATE_STENCIL);
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO + 1), 128u >> 6);
+    CHECK_EQ(e.reg(REG_A6XX_RB_STENCIL_INFO + 2), 8192u >> 6);
+    CHECK_EQ(uint64_t(e.reg(REG_A6XX_RB_STENCIL_INFO + 3)) | uint64_t(e.reg(REG_A6XX_RB_STENCIL_INFO + 4)) << 32, s->gpuAddress());
+    CHECK(s->gpuAddress() != d->gpuAddress());
+    const uint32_t tiledBefore = r.fake->stats().tiledFills;
+    auto cb = drawOnce(r, flatProgram(), pass, dr);
+    CHECK(cb->status() == CommandBuffer::kCompleted);
+    if (cb->status() != CommandBuffer::kCompleted) std::printf("       %s | %s\n", cb->error().c_str(), r.fake->stats().lastFault.c_str());
+    CHECK_EQ(r.fake->stats().tiledFills - tiledBefore, 1u);   // the stencil Clear alone
+    // a depth attachment beside a stencil texture that is neither its own S8 plane nor a Stencil8 one is refused
+    RenderPass wrong = pass;
+    wrong.stencil = t.get();
+    Encoded e2(r, flatProgram(), wrong, dr);
+    CHECK(!e2.ok);
+    expectRefusal(e2.error, "a stencil attachment that is neither the depth attachment's own Depth32Float_Stencil8 texture nor a Stencil8 "
+                            "texture of its own: an S8 plane is what is served");
     CHECK_EQ(r.fake->stats().faults, 0u);
 }
 
