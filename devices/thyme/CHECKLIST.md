@@ -6110,8 +6110,12 @@ through the intake, and the log shows each step in order:
     Successfully spawned LocProbe[251] because launch job demand
 
 No crash report was written for it (the CrashReporter directory carries only the Assistant,
-DiagnosticLogs and appstored subdirectories).  The 420-second run ended before a screenshot
-could be taken and the phone returned to Android; the chain this section is about -- stage,
-digest, install, container registration, SpringBoard launch -- is what the log records.  The
-intake is therefore the route the next real application takes; the app it installs is chosen
-by `tools/map-run.sh APP.ipa`, not by the image.
+DiagnosticLogs and appstored subdirectories).  The app did reach its own code: SpringBoard
+took its launch snapshot (`XBApplicationSnapshot`, referenceSize 375x812), the app logged
+`launched: services 1, authorization 0`, and the one failure it reported was CoreLocation's --
+`LocProbe: failed: kCLErrorDomain 1` (denied), the port's location service being absent, not
+an install or launch fault.  The 420-second run ended before a screenshot could be taken and
+the phone returned to Android; the chain this section is about -- stage, digest, install,
+container registration, SpringBoard launch, the app's first frame -- is what the log records.
+The intake is therefore the route the next real application takes; the app it installs is
+chosen by `tools/map-run.sh APP.ipa`, not by the image.
