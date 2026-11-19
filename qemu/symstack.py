@@ -17,10 +17,20 @@ import sys
 
 BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'sysimage')
 CACHE = os.path.join(BASE, '20F66__iPhone10,3_6/dyld_shared_cache_arm64')
+# The cache as it was built for the boot root, with the addr-to-symbol cache "ipsw dyld a2s" takes
+# as --cache.  Without that sidecar ipsw looks for a ".symbols" file next to the cache and stops.
+BUILT_CACHE = os.path.join(os.path.dirname(BASE), 'out/thyme-boot/dsc-arm64/dyld_shared_cache_arm64')
 KNOWN = os.path.join(BASE, 'a2s.json')
 CACHE_LOW, CACHE_HIGH = 0x180000000, 0x280000000        # unslid addresses of the shared cache
 
 known = json.load(open(KNOWN)) if os.path.exists(KNOWN) else {}
+
+
+def cache_arguments():
+    for cache in (CACHE, BUILT_CACHE):
+        if os.path.exists(cache + '.a2s'):
+            return [cache, '--cache', cache + '.a2s']
+    return [CACHE]
 
 
 def name(address, slide):
@@ -29,9 +39,12 @@ def name(address, slide):
         return f'{address:#x} (not in the shared cache)'
     key = f'{unslid:#x}'
     if key not in known:
-        out = subprocess.run(['ipsw', 'dyld', 'a2s', CACHE, key], capture_output=True, text=True).stdout
-        lines = [line for line in out.splitlines() if key in line]
-        known[key] = re.sub(r'^\S+:\s*', '', lines[-1]).strip() if lines else '?'
+        result = subprocess.run(['ipsw', 'dyld', 'a2s'] + cache_arguments() + [key], capture_output=True, text=True)
+        lines = [line for line in result.stdout.splitlines() if key in line]
+        if lines:
+            known[key] = re.sub(r'^\S+:\s*', '', lines[-1]).strip()
+        else:
+            known[key] = '?' if result.returncode == 0 else f'? (ipsw: {result.stderr.strip().splitlines()[-1]})'
         json.dump(known, open(KNOWN, 'w'), indent=0)
     return known[key]
 
