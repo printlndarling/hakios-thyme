@@ -35,7 +35,8 @@ ipa, lan, source = sys.argv[1], sys.argv[2], sys.argv[3]
 sha = hashlib.sha256(open(ipa, 'rb').read()).hexdigest()
 
 with zipfile.ZipFile(ipa) as z:
-    infos = [n for n in z.namelist() if n.startswith('Payload/') and n.endswith('.app/Info.plist')]
+    infos = [n for n in z.namelist()
+             if n.startswith('Payload/') and n.endswith('.app/Info.plist') and n.count('/') == 2]
     if len(infos) != 1:
         sys.exit(f'map-run: expected one Payload/*.app/Info.plist, found {len(infos)}')
     appdir = infos[0].split('/')[1]

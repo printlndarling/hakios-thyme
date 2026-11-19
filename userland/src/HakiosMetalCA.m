@@ -1766,6 +1766,14 @@ hm_ensure_spi(Class cls)
 
 HM_REFUSES_OUT_LOUD
 
+/* What the library serves: one sample, or the 2 and 4 of a 2D multisample texture (texture.cpp's plan()).  ANGLE asks
+ * this while it sizes its default framebuffer; a forwarded zero answers "no" without saying why and costs it
+ * multisampling on a GPU that has it. */
+- (BOOL)supportsSampleCount:(NSUInteger)samples
+{
+	return samples == 1 || samples == 2 || samples == 4;
+}
+
 /* An argument encoder for buffer INDEX of FUNCTION, from what the function's AIR says the set holds; nil, said, when it has
  * no set there or the front end refused it. */
 static id

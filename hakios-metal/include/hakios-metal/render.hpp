@@ -198,7 +198,7 @@ enum class VertexFormat : uint32_t {   // MTLVertexFormat (MTLVertexDescriptor.h
     kShortNormalized = 52,
     kHalf = 53,
 };
-enum class VertexStep : uint32_t { kConstant = 0, kPerVertex = 1, kPerInstance = 2 };   // MTLVertexStepFunction; per vertex is served
+enum class VertexStep : uint32_t { kConstant = 0, kPerVertex = 1, kPerInstance = 2 };   // MTLVertexStepFunction; all three are served
 
 constexpr uint32_t kMaxVertexAttributes = 31;   // MTLVertexDescriptor's attributes[0..30]
 constexpr uint32_t kMaxVertexBuffers = 31;      // its layouts[0..30], one per [[buffer(n)]] index

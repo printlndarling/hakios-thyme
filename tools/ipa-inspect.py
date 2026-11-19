@@ -88,7 +88,8 @@ def inspect(path):
     sha = hashlib.sha256(data).hexdigest()
     print(f'== {os.path.basename(path)} ({len(data)} bytes, sha256 {sha})')
     with zipfile.ZipFile(path) as z:
-        infos = [n for n in z.namelist() if n.startswith('Payload/') and n.endswith('.app/Info.plist')]
+        infos = [n for n in z.namelist()
+                 if n.startswith('Payload/') and n.endswith('.app/Info.plist') and n.count('/') == 2]
         if len(infos) != 1:
             print(f'   Payload/*.app/Info.plist: {len(infos)} found; not a single-app IPA')
             return

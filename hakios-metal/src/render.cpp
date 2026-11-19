@@ -357,8 +357,9 @@ struct VertexFetch {
 
 // The VS's attributes against the descriptor and the VS's own [[buffer(n)]] table. Refused by name: an attribute the
 // descriptor does not describe, a format not served, an offset or stride past the 12-bit fields (a6xx.xml:4620-4634),
-// a step other than per vertex, a stride of 0, no buffer bound at the layout's index, and a fetch that reads past the
-// bound length for the draw's last vertex (Metal requires the bytes to be there; the GPU would read whatever follows).
+// a stride of 0 on a stepped layout, no buffer bound at the layout's index, and a fetch that reads past the bound
+// length (Metal requires the bytes to be there; the GPU would read whatever follows). All three step functions are
+// served: constant by VFD_FETCH_STRIDE 0, which drops the vertex id's term from the address.
 bool vertexFetch(const Stage& vs, const VertexDescriptor& vd, const Draw& draw, const Bindings& b, VertexFetch* f, std::string* why) {
     const std::string name = stageName(vs);
     for (uint32_t i = 0; i < vs.numInputs; i++) {
@@ -385,14 +386,14 @@ bool vertexFetch(const Stage& vs, const VertexDescriptor& vd, const Draw& draw, 
         }
         const VertexLayout& l = vd.layouts[a.bufferIndex];
         const bool perInstance = l.step == VertexStep::kPerInstance;
-        if (l.step != VertexStep::kPerVertex && !perInstance) {
-            return refuse(why, name + ": buffer " + n(a.bufferIndex) + " steps " + (l.step == VertexStep::kConstant ? "constantly" : "in an unknown way") +
-                                   ": per-vertex and per-instance fetch are served");
-        }
+        // constant: every vertex reads the one element at the attribute's offset -- Metal's "the same data for every
+        // vertex". Its stride is not stepped, so it is neither validated nor emitted; VFD_FETCH_STRIDE 0 leaves the
+        // vertex id's term out of the fetch address, which is the constant address.
+        const bool constant = l.step == VertexStep::kConstant;
         if (perInstance && l.stepRate == 0) {
             return refuse(why, name + ": buffer " + n(a.bufferIndex) + " steps per instance at a rate of 0: Metal's step rate is 1 or more");
         }
-        if (l.stride == 0 || l.stride > 0xfff) {
+        if (!constant && (l.stride == 0 || l.stride > 0xfff)) {
             return refuse(why, name + ": buffer " + n(a.bufferIndex) + "'s stride of " + n(l.stride) + ": 1 to 4095 bytes (VFD_FETCH_STRIDE holds 12 bits)");
         }
         if (a.bufferIndex >= b.buffers.size() || b.buffers[a.bufferIndex].buffer == nullptr) {
@@ -407,8 +408,17 @@ bool vertexFetch(const Stage& vs, const VertexDescriptor& vd, const Draw& draw, 
         // (VFD_INSTANCE_START_OFFSET is added after the divisor, as Vulkan's firstInstance is); for a per-vertex
         // one the last vertex, which an indexed draw names only in its index buffer -- there the check is the GPU's own
         // (VFD_FETCH_SIZE bounds the fetch: an index past it reads zeros, robust-buffer style, not what follows)
-        // (an indirect draw's counts are the GPU's to read: every attribute is bounded by the fetch size alone, as above)
-        if ((!perInstance && draw.indexBuffer != nullptr) || draw.indirect != nullptr) {
+        // (an indirect draw's counts are the GPU's to read: every attribute is bounded by the fetch size alone, as above).
+        // A constant-step attribute is the one element at its offset in every case: its bytes are all the draw reads.
+        if (constant) {
+            const uint64_t need = uint64_t(a.offset) + fi->bytes;
+            if (need > bytes) {
+                return refuse(why, name + ": [[attribute(" + n(loc) + ")]] of constant step ends at byte " + n(need) + " of buffer " + n(a.bufferIndex) + "; " +
+                                       n(bytes) + " are bound");
+            }
+            f->decode[loc] = vfdDecodeInstr(a.bufferIndex, a.offset, false, fi->fmt6, fi->swap, fi->isFloat);
+            f->stepRate[loc] = 0;
+        } else if ((!perInstance && draw.indexBuffer != nullptr) || draw.indirect != nullptr) {
             f->decode[loc] = vfdDecodeInstr(a.bufferIndex, a.offset, perInstance, fi->fmt6, fi->swap, fi->isFloat);
             f->stepRate[loc] = perInstance ? l.stepRate : 0;
         } else {
@@ -429,7 +439,7 @@ bool vertexFetch(const Stage& vs, const VertexDescriptor& vd, const Draw& draw, 
         f->used[a.bufferIndex] = true;
         f->base[a.bufferIndex] = x.buffer->gpuAddress() + x.offset;
         f->size[a.bufferIndex] = uint32_t(std::min<uint64_t>(bytes, 0xffffffffu));
-        f->stride[a.bufferIndex] = l.stride;
+        f->stride[a.bufferIndex] = constant ? 0 : l.stride;
     }
     // the unused decode entries below the count: VFD_DEST_CNTL_INSTR writes no register (turnip :1606-1610)
     for (uint32_t loc = 0; loc < f->count; loc++) {

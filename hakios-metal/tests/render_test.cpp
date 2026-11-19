@@ -2273,6 +2273,48 @@ TEST(a_draw_fetches_two_attributes_through_the_vertex_descriptor) {
     CHECK(has(faultOf(r, fmt), "vertex attribute 0: VFD_DECODE_INSTR.FORMAT is not a vertex format this model knows"));
 }
 
+// MTLVertexStepFunctionConstant: the attribute is the one element at its offset for every vertex. The fetch goes out
+// with VFD_FETCH_STRIDE 0, which drops the vertex id's term from the address, and only the element's own bytes must be
+// bound -- a 16-byte buffer serves both attributes (position at 0, colour at 8) for six vertices, where per-vertex
+// fetch needs all 72.
+TEST(a_constant_step_attribute_is_fetched_from_one_address) {
+    using namespace a6xx;
+    Rig r;
+    auto t = target(r);
+    RenderPass pass;
+    pass.color0 = t.get();
+    Program p = attrProgram();
+    p.vertexDescriptor.layouts[0].step = VertexStep::kConstant;
+    std::string why;
+    auto vb = newBuffer(*r.gpu, 16, &why);
+    CHECK(vb != nullptr);
+    Bindings vsb;
+    vsb.buffers = {Binding{vb.get(), 0}};
+    Encoded e(r, p, pass, wholeDraw(6), render::Options{}, vsb, Bindings{});
+    CHECK(e.ok);
+    if (!e.ok) std::printf("       %s\n", e.error.c_str());
+    const auto& w = e.stream.words();
+    auto value = [&](uint32_t reg) { size_t i = e.findLastReg(reg); CHECK(i != size_t(-1)); return i == size_t(-1) ? 0u : w[i]; };
+    // one fetch, stepped by nothing, holding the 16 bytes both elements live in
+    CHECK_EQ(value(regVfdFetchStride(0)), 0u);
+    CHECK_EQ(value(vfdFetchSize(0)), 16u);
+    CHECK_EQ(value(regVfdDecodeInstr(0)), vfdDecodeInstr(0, 0, false, FMT6_32_32_FLOAT, WZYX, true));
+    CHECK_EQ(value(regVfdDecodeInstr(1)), vfdDecodeInstr(0, 8, false, FMT6_8_8_8_8_UNORM, WZYX, true));
+    auto cb = drawOnce(r, p, pass, wholeDraw(6), render::Options{}, vsb, Bindings{});
+    CHECK(cb->error().empty());
+    if (!cb->error().empty()) std::printf("       %s\n", cb->error().c_str());
+    CHECK(cb->status() == CommandBuffer::kCompleted);
+    CHECK_EQ(r.fake->stats().faults, 0u);
+    // the colour's four bytes must still be there: 11 bytes bound refuse at 8 + 4 = 12
+    auto small = newBuffer(*r.gpu, 11, &why);
+    Bindings sb;
+    sb.buffers = {Binding{small.get(), 0}};
+    Encoded s(r, p, pass, wholeDraw(6), render::Options{}, sb, Bindings{});
+    CHECK(!s.ok);
+    expectRefusal(s.error, "tri_attr_vs_air: [[attribute(1)]] of constant step ends at byte 12 of buffer 0; 11 are bound");
+    CHECK_EQ(r.fake->stats().submits, 1u);
+}
+
 // The colour attribute in each family of formats: the decode word's FORMAT, SWAP and FLOAT bit as MTLVertexDescriptor.h
 // and fd6_format_table.c name them, written out here rather than read from render.cpp's table. A format whose element
 // does not fit is refused by the driver's own size: an 8-byte element at offset 8 of a 12-byte vertex runs the sixth
@@ -2346,9 +2388,6 @@ TEST(a_draw_refuses_a_vertex_fetch_it_cannot_serve_by_name) {
     p = attrProgram();
     p.vertexDescriptor.attributes[1].format = VertexFormat(41);   // UInt1010102Normalized
     refusedWith(p, vsb, 6, "tri_attr_vs_air: [[attribute(1)]] is MTLVertexFormat 41: the 1010102, RG11B10 and RGB9E5 formats are not served");
-    p = attrProgram();
-    p.vertexDescriptor.layouts[0].step = VertexStep::kConstant;
-    refusedWith(p, vsb, 6, "tri_attr_vs_air: buffer 0 steps constantly: per-vertex and per-instance fetch are served");
     p = attrProgram();
     p.vertexDescriptor.layouts[0].step = VertexStep::kPerInstance;
     p.vertexDescriptor.layouts[0].stepRate = 0;
