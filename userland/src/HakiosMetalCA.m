@@ -2,7 +2,8 @@
  * (hakios) This is vcvkk's plug-in (github.com/vcvkk/darwin-redwood, branch hakios-workspace, userland/src/HakiosMetal.m
  * at eb9fdf5), the one that serves CoreAnimation's window server, with what this tree adds for it: CoreAnimation's
  * shaders chosen by pipeline (hm_bitcode_for()), QuartzCore's pipeline library given a default.metallib, stand-ins for
- * functions the library lacks (hm_stand_ins), and the device shown to the window server alone (metal_all=1: all).
+ * functions the library lacks (hm_stand_ins), and the device shown to the window server alone (metal_all=1: all;
+ * metal_apps=1: the applications under /var/containers/Bundle/Application only).
  * Built instead of hakios-metal's plug-in with METAL_PLUGIN=ca (userland/build.sh); the library it needs comes from
  * tools/ca-metallib.py.
  */
@@ -2093,18 +2094,43 @@ hm_boot_arg_set(const char *what)
 {
 	/* (hakios) the window server alone is shown the device: every other client of this image's Metal (SpringBoard
 	 * through SiriUICore, mediaserverd, ...) finds pipeline libraries made for Apple's GPUs with no default.metallib
-	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all. */
+	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all;
+	 * metal_apps=1: applications only, the programs installed under /var/containers/Bundle/Application -- an app
+	 * that asks Metal for a device, as Carto's ANGLE does at eglInitialize(), and nothing of the system's own. */
 	{
-		static int all = -1;
+		static int all = -1, apps = -1;
 		char args[1024] = "";
 		size_t size = sizeof(args) - 1;
 		const char *name = getprogname();
+		int window_server = name != NULL && strcmp(name, "backboardd") == 0;
+		int application = 0;
 
-		if (all < 0) {
-			all = sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "metal_all=1") != NULL;
+		if (all < 0 || apps < 0) {
+			if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0) {
+				args[0] = 0;
+			}
+			all = strstr(args, "metal_all=1") != NULL;
+			apps = strstr(args, "metal_apps=1") != NULL;
 		}
-		if (!all && (name == NULL || strcmp(name, "backboardd") != 0)) {
-			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process)\n", name ? name : "?");
+		if (apps && !all) {
+			char path[1024] = "";
+			uint32_t length = sizeof(path);
+			const char *at;
+
+			application = _NSGetExecutablePath(path, &length) == 0;
+			at = application ? path : "";
+			if (strncmp(at, "/private", 8) == 0) {
+				at += 8;        /* dyld reports /private/var/... : /var is a link to /private/var */
+			}
+			application = application && strncmp(at, "/var/containers/Bundle/Application/", 35) == 0;
+			if (!application) {
+				HM_ONCE("%s (%s) is not an application: it keeps the road it has (metal_apps=1: /var/containers/Bundle/Application)\n",
+				    name ? name : "?", path);
+				return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
+			}
+		}
+		if (!all && !apps && !window_server) {
+			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process, metal_apps=1: every application)\n", name ? name : "?");
 			return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 		}
 	}

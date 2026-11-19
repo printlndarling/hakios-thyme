@@ -199,6 +199,7 @@ MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp
 MEMBENCH	arg	membench	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	run the memory benchmark after CPU probing (2 runs it on a background thread)
 METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp,inject_sb.c	only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 METAL_ALL	arg	metal_all	User space	u	HakiosMetalCA.m	
+METAL_APPS	arg	metal_apps	User space	u	HakiosMetalCA.m	applications only, the programs installed under /var/containers/Bundle/Application -- an app
 METAL_DEFER	arg	metal_defer	User space	u	HakiosMetalCA.m	this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window server's render thread does not wait
 METAL_DUMP	arg	metal_dump	User space	u	HakiosMetalCA.m	
 METAL_FPS	arg	metal_fps	User space	u	HakiosMetalCA.m	each draw of a sysmem pass timed alone, by program (only sysmem passes are: without metal_gmem=1)

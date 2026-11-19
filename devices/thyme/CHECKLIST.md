@@ -5965,3 +5965,79 @@ program's standard error to the console, and `applog_name=NAME` limits that to p
 executable path *begins with* NAME -- so every app wants `/var/cont`, not `alpimaps`, which no
 path begins with.  A run with `applog=1 applog_name=/var/cont` on top of the full `ram.args` plus
 `metal_all=1` is 600 of the loader's 607 characters.
+
+### The exception is Carto's ANGLE: `eglInitialize()` (2026-11-19, 22:10, `logs/220821-run.log`)
+
+That run was made (the same full `ram.args`, `metal_all=1 applog=1 applog_name=/var/cont`), and
+the app's standard error names the exception:
+
+    *** Terminating app due to uncaught exception 'NativeScript encountered a fatal error:
+    Uncaught Error: Failed To call eglInitialize()
+     at createNativeView(file:///.../alpimaps.app/app/vendor.js:2741:360)
+    ... at _setupUI ... at layoutView ...
+
+The line it is thrown from says who does it: `class CartoMap extends X ... createNativeView(){
+return AKMapView.alloc().init() }`.  Alpimaps draws its map with the **CARTO Mobile SDK**
+(`AKMapView`, `AKMapEventListener`, ...), whose iOS build embeds a whole **ANGLE**: the app's
+26 MB binary carries the `*ContextANGLE` symbols, `eglGetPlatformDisplay`, `eglInitialize`, the
+exception `MGLSurfaceException`, and both of ANGLE's Apple backends, `DisplayEAGL` (with
+`PbufferSurfaceEAGL`/`WindowSurfaceEAGL`) and `DisplayMtl`; no other file of the IPA contains
+`eglInitialize`.  `eglGetPlatformDisplay()` itself succeeded (its failure message
+`Failed To call eglGetPlatformDisplay()` is in the binary and never printed), so the backend
+display is what cannot come up.  Both Apple routes explain that without the port: **Metal** has
+no device to give (nil in every process until `metal=1`), and the **EAGL fallback** has no
+driver behind it in an app -- the Mesa stand-in `libhakios.gl.dylib` is loaded only into the
+window server (`inject.c`'s `opengl_es()` is called in the `backboardd` branch alone), and the
+app's process prints no `hakios-gl:` line at all.
+
+The 08:55 run had been given `metal_all=1` but not `metal=1`, and that is the kernel's half of
+the device: `MiniIOMobileFramebuffer.cpp` publishes `MetalPluginName`/`MetalPluginClassName` only
+for `PE_parse_boot_argn("metal", ...)`, so the accelerator named no plug-in, `MTLCreateSystem-
+DefaultDevice()` answered nil, and `metal_all` had nobody to tell.  The CA plug-in
+(`src/HakiosMetalCA.m`) now reads **`metal_apps=1`** as well: the device goes to the programs
+whose executable path begins with `/var/containers/Bundle/Application/` and to nothing else --
+not the window server (a device it cannot draw with takes the screen down), not SpringBoard or
+mediaserverd (the comment above the gate records what they do with pipeline libraries made for
+Apple's GPUs).  A run with `metal=1 metal_apps=1` on top of the full `ram.args` plus
+`applog=1 applog_name=/var/c` is 605 of the loader's 607 characters (image `c93f05ca`).
+
+### The device reaches the app, and the app reaches its map (2026-11-19, 23:09, `logs/230949-run.log.live`)
+
+The gate above refused the app it was written for: `_NSGetExecutablePath` reports the real path,
+`/private/var/containers/Bundle/Application/...` (`/var` is a link to `/private/var` on Darwin),
+and the comparison was against `/var/containers/...` alone.  The plug-in now steps over a
+leading `/private` before the comparison and prints the path it saw in the refusal.  With that
+(image `c45ddcbc`), the same run (full `ram.args` + `metal=1 metal_apps=1 applog=1
+applog_name=/var/c`) shows, in order:
+
+- the window server and the system's services still refused, as intended -- e.g.
+  `HakiosMetal[backboardd 18]: backboardd (/usr/libexec/backboardd) is not an application: it
+  keeps the road it has`, likewise PosterBoard, CollectionsPoster and MapKit's snapshot service;
+- the app given a device:
+  `HakiosMetal[alpimaps 244]: device: Adreno (hakios-metal, chip 0x6050002) on IOAcceleratorES
+  service 0x8a03; the compiler is in this build; feature profile 1 (Apple1, Apple2 and Common1)`;
+- **no `eglInitialize()` failure and no `Terminating app`**: ANGLE comes up on its `DisplayMtl`
+  backend (the glslang frames, Metal textures and command buffers in the log are ANGLE's);
+- the app's own road: `MapView::appDidBecomeActive`, `onMainMapReady {"lat":45.2012,"lon":5.7222}`,
+  a Sentry session (`akylas.alpi.maps@ios@3.0.4+242`) and its network requests;
+- `logs/screen-alpimaps2.png`: the status bar, the Search field, the app's own dialog ("The true
+  power of Alpi Maps lies in using offline generated data..." with OPEN GITHUB / CANCEL) and the
+  map's controls all drawn -- **the first third-party app on this port to reach a usable UIKit
+  screen**.  The map view itself is black.
+
+What the black map is, the same log says in three refusals:
+
+    refused: a texture: 1125x2436, pixel format 253, usage 0x4: pixel format 253: not one of the
+    formats served (texture.hpp: PixelFormat)
+    refused: a texture: 1x1, pixel format 70, usage 0x7: a cube RGBA8Unorm texture with usage 7: ...
+    refused: -[HakiosMetalDevice supportsSampleCount:] is not implemented in this plug-in; it
+    returns zeros
+
+Pixel format 253 is Metal's `Stencil8`: ANGLE gives its default framebuffer a stencil
+attachment (the screen's size, a render target) and hakios-metal does not serve the format, so
+the attachment is nil -- the app's GL then reads `GL_OUT_OF_MEMORY` (0x505) at `Texture::create`
+and `GL_INVALID_OPERATION` (0x502), and `BackgroundRenderer::onDrawFrame` reports 0x505 every
+frame.  The 1x1 cube asked for with usage 7 (shader write beside read and render target) is the
+second: the plug-in serves a cube as read + render target only, since a kernel cannot store into
+one.  Both are general holes, not Alpimaps': any GL app that asks ANGLE for a stencil buffer
+meets the first, and ANGLE's Metal backend asks for the cube itself.

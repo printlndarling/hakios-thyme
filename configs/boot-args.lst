@@ -213,6 +213,7 @@ machine_name	k
 membench	k
 metal	ku
 metal_all	u
+metal_apps	u
 metal_defer	u
 metal_dump	u
 metal_fps	u
