@@ -6095,6 +6095,23 @@ and no decrypted copy is downloaded here; the intake waits for a decrypted IPA t
 lawfully has.  Without one there is nothing installable to test, and this record says so rather
 than claim a run.
 
-The path itself is validated with the project's own LocProbe (self-built, cryptid 0, 72,672
-bytes, SHA-256 `706dbae2…7f927`): the phone run is `logs/mapdiag-run.out`, and its log is the
-next section.
+### The intake's first run: LocProbe installs, registers and starts (2026-11-20, 00:32, `logs/003257-run.log.live`)
+
+The first phone run of image `3fec58ef` carries the project's own LocProbe (self-built,
+cryptid 0, 72,672 bytes, SHA-256 `706dbae288574fd3637934e17b93dc0554223c5dc0ff1bef460d51a8cd87f927`)
+through the intake, and the log shows each step in order:
+
+    == hk-mapipa Fri Nov 20 00:34:22 CST 2026
+    == download rc=0                     (the digest hk_download compared matched)
+    [installApp] created app container: com.hakios.locprobe UUID: 4BD6298B-...
+    [installApp] new app path: /private/var/containers/Bundle/Application/B0299FA5-.../LocProbe.app
+    == install rc=0
+    == uiopen rc=0
+    Successfully spawned LocProbe[251] because launch job demand
+
+No crash report was written for it (the CrashReporter directory carries only the Assistant,
+DiagnosticLogs and appstored subdirectories).  The 420-second run ended before a screenshot
+could be taken and the phone returned to Android; the chain this section is about -- stage,
+digest, install, container registration, SpringBoard launch -- is what the log records.  The
+intake is therefore the route the next real application takes; the app it installs is chosen
+by `tools/map-run.sh APP.ipa`, not by the image.
