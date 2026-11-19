@@ -5918,3 +5918,19 @@ cleared, booted).
 So the check after any failed `fastboot reboot` is `fastboot getvar slot-unbootable:a`, and the
 fix is `fastboot set_active a` -- not another reboot, and not a power cycle.  The retry count
 (6 here) is not the thing that changes.
+
+### Alpimaps still aborts with metal_all=1 (2026-11-19, 08:55, `logs/085529-run.log`)
+
+The map app was downloaded again from the developer's own release (Akylas/alpimaps 3.0.4
+build 242, 62,303,169 bytes, SHA-256 `566c5f52...4f94`, verified), served from the LAN and
+installed with the TrollStore helper (`rc.jobs.almapsdiag`, image `218c5b5e`).  The kernel
+command line carried the full `ram.args` plus **`metal_all=1`** (568 of 607 characters, so
+nothing was cut).  It still aborts: `Successfully spawned alpimaps[266]` at 09:00:46,
+`exited due to SIGABRT` at 09:00:49.
+
+So the Metal device was not what it lacked.  Its own output (the scene's direct run,
+`cat /private/var/tmp/almaps.txt`) says what kind of app it is: `Runtime initialization took
+6ms (version 8.9.6, V8 version 10.3.22)` -- a React Native app on V8, with Sentry started
+before it dies and breadcrumbs reading only `in_app_failure`.  That is the same shape as
+PPSSPP's abort: a runtime that wants JIT/ptrace, which this port does not give an app.  The
+next look goes there, not to another boot argument.
