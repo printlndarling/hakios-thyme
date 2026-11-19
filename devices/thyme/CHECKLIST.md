@@ -5934,3 +5934,34 @@ So the Metal device was not what it lacked.  Its own output (the scene's direct 
 before it dies and breadcrumbs reading only `in_app_failure`.  That is the same shape as
 PPSSPP's abort: a runtime that wants JIT/ptrace, which this port does not give an app.  The
 next look goes there, not to another boot argument.
+
+### The Alpimaps abort is an exception nobody caught (2026-11-19, 22:00)
+
+The `userabort:` line of the 08:55 run carries the whole return-address chain, and it can be read
+now.  `qemu/symstack.py` resolves it once `ipsw` is installed (v3.1.749; the Linux release
+tarball's SHA-256 checked against the published `checksums.txt`).  The chain, innermost first:
+
+    _abort + 124                                    libsystem_c
+    libc++abi   (abort_message, its terminate path)
+    libobjc.A   func_1800d1f98 + 124
+    0x104106e28                                     the app's own image
+    libc++abi
+    __ZSt9terminatev + 52                           std::terminate
+    libdispatch                                     the main-queue block callout
+    _CFRunLoopRunSpecific + 584, _UIApplicationMain
+
+`std::terminate` is in it, with libobjc and libc++abi around the application's one frame: this
+SIGABRT is an exception nobody caught, not a process that was refused executable memory.  The
+JIT/ptrace reading of the entry above does not hold for this app (it may still hold for PPSSPP,
+whose abort has not been symbolized).
+
+Two tooling facts this needed: `ipsw dyld a2s` refuses a cache that has no `.symbols` file beside
+it, and the copy under `out/thyme-boot/dsc-arm64/` has the `--cache` address-to-symbol file that
+works instead (its cache is byte-identical to `sysimage/20F66__iPhone10,3_6/`, sha256
+`f0cbc6aa...`), so `symstack.py` now prefers a cache that has the sidecar.
+
+What the exception *is* comes next: `applog=1` (implemented in `xnu/hakios.patch`) sends a
+program's standard error to the console, and `applog_name=NAME` limits that to programs whose
+executable path *begins with* NAME -- so every app wants `/var/cont`, not `alpimaps`, which no
+path begins with.  A run with `applog=1 applog_name=/var/cont` on top of the full `ram.args` plus
+`metal_all=1` is 600 of the loader's 607 characters.
