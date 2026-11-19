@@ -1,0 +1,14 @@
+# RC_JOBS=rc.jobs.mapdiag: install the map IPA staged by tools/map-run.sh and start it.
+#
+# The host stages target.ipa and target.txt in the LAN directory it serves; this
+# scene puts TrollStore's helper where it runs from, then hk-mapipa.sh verifies the
+# digest, installs, launches by bundle id and collects the crash reports.  No app is
+# baked into the image: what runs here is whatever the operator staged, and a
+# FairPlay-encrypted IPA is refused on the host before the image is even built.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/bin/sh /redwood/bin/hk-mapipa.sh http://192.168.0.104:8000
+/var/jb/usr/bin/cat /private/var/tmp/mapipa.txt

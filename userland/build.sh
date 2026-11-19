@@ -666,13 +666,10 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the crash report and direct-run dump for PPSSPP's launch abort (rc.jobs.ppssppdiag)
 	cp bin/hk-ppdiag.sh root/bin/hk-ppdiag.sh
 	chmod 755 root/bin/hk-ppdiag.sh
-	# the same for Alpimaps' launch abort (rc.jobs.almapsdiag)
-	cp bin/hk-almapsdiag.sh root/bin/hk-almapsdiag.sh
-	chmod 755 root/bin/hk-almapsdiag.sh
-	# and the uid-501 exec outside SpringBoard (rc.jobs.almapsrunas)
-	cp bin/hk-almapsrunas.sh root/bin/hk-almapsrunas.sh
-	chmod 755 root/bin/hk-almapsrunas.sh
-	# the wrapper that keeps an app's own words under the SpringBoard launch (rc.jobs.almapswrap)
+	# the map IPA intake (rc.jobs.mapdiag): install the IPA the host staged and start it
+	cp bin/hk-mapipa.sh root/bin/hk-mapipa.sh
+	chmod 755 root/bin/hk-mapipa.sh
+	# the wrapper that keeps an app's own words under the SpringBoard launch
 	cp bin/hk-execwrap.sh root/bin/hk-execwrap.sh
 	chmod 755 root/bin/hk-execwrap.sh
 	cp ${RC:-rc.launchd} root/etc/rc

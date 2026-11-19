@@ -14,7 +14,7 @@ plist_value() {
 exe=$(plist_value "$app/Info.plist" CFBundleExecutable)
 bid=$(plist_value "$app/Info.plist" CFBundleIdentifier)
 [ -n "$exe" ] || exe=$name
-[ -n "$bid" ] || bid=akylas.alpi.maps
+[ -n "$bid" ] || { echo "no CFBundleIdentifier in $app/Info.plist"; exit 1; }
 echo "== app: $app exe: $exe id: $bid"
 [ -f "$app/$exe.real" ] || mv "$app/$exe" "$app/$exe.real"
 cp /redwood/bin/execwrap "$app/$exe"

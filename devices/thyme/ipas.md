@@ -14,7 +14,6 @@ of download. A scene that installs one trusts the LAN copy; re-check a digest wi
 | App | Bundle id | Version | Source (developer's release) | SHA-256 of the IPA | Licence |
 | --- | --- | --- | --- | --- | --- |
 | 贵州天气 (weather) | `cn.guizhou.weathergz` | 3.2 | `https://github.com/wangvizi/WeatherGZ/releases/download/v3.2/WeatherGZ.ipa` | `e3777b8288f165e8843437087177b5187b971c373e22ea0bf8ba163000e71c25` | none declared in the repository (source published, no licence file) |
-| Alpimaps (map) | `akylas.alpi.maps` | 3.0.4 build 242 | `https://github.com/Akylas/alpimaps/releases/download/ios/alpha/3.0.4/242/alpimaps.ipa` | `566c5f522d92c4e6ef8df053ae53aa6f5d436f01f9290bbcb8daa1a9232c4f94` | MIT (repository licence; the IPA's dependencies carry their own) |
 | 知乎减减 (Zhihu client) | `com.huamu013.ZhihuMinusMinus` | 0.9.10 | `https://github.com/huamurui/zhihu-minus-minus` release, unsigned IPA | not recorded at download time (2026-11-18, earlier session) | to verify (repository licence not recorded) |
 | Aidoku (manga reader) | `app.aidoku.Aidoku` | 0.9 | `https://github.com/Aidoku/Aidoku` release, IPA | not recorded at download time (2026-11-18, earlier session) | to verify (repository licence not recorded) |
 | PPSSPP (PSP emulator) | `org.ppsspp.ppsspp` | 1.20.4 | `https://github.com/hrydgard/ppsspp` iOS release, IPA | not recorded at download time (2026-11-18) | GPL-2.0-or-later (PPSSPP) |
@@ -31,17 +30,44 @@ Two facts about the store itself:
 - TrollApps (the client) is installed from `TrollApps.ipa` on the same LAN directory,
   itself the official release (`TheResonanceTeam/TrollApps`); TrollStore's helper is
   installed from the app the port ships in `/Applications` (TrollStore 2.1.1).
-- `repo-hakios.json` lists the five current apps with the row order the scenes tap:
-  贵州天气, Alpimaps, 知乎减减, Aidoku, LocProbe.
+- `repo-hakios.json` lists the four current apps with the row order the scenes tap:
+  贵州天气, 知乎减减, Aidoku, LocProbe.
 
 ## What a scene cannot check yet
 
 `hk_download` now takes the expected digest as an optional third word: it hashes what it
 fetched, prints the comparison, and returns 4 on a mismatch, so a scene stops before handing
 a wrong or truncated file to TrollStore's helper. The store scenes pass TrollApps' digest
-(`8eb32fb3…c01e`) and the Alpimaps scenes pass Alpimaps' (`566c5f52…4f94`). The two apps the
+(`8eb32fb3…c01e`). The two apps the
 store downloads itself (贵州天气, the rest of the catalog) are not covered: TrollApps fetches
 those, so their digests above are compared by an operator, or by a scene that downloads a
 copy of its own first. A shell-level check is not possible on the phone -- the Procursus
 bootstrap in `jb/debs/bootstrap.tar.zst` carries no `sha256sum`/`sha1sum`/`shasum` (checked
 in the archive).
+
+## The map intake (`rc.jobs.mapdiag`, 2026-11-20)
+
+Alpimaps was removed from the image, the LAN directory and the scene set at the operator's
+request on 2026-11-20; its evidence stays in `CHECKLIST.md` as the port's record, but no
+build or run installs it any more. In its place the map slot is an intake that installs
+whatever the operator stages:
+
+- `tools/map-run.sh APP.ipa` reads `Payload/*.app/Info.plist` and the executable's
+  `LC_ENCRYPTION_INFO` itself. A **cryptid 1** executable is refused on the host: it is a
+  FairPlay App Store image, and this port has no Apple key to decrypt it (an installation of
+  one would prove only that the helper copies files). A **cryptid 0** IPA -- self-built,
+  unsigned or lawfully decrypted by its owner -- is staged as `target.ipa`, with
+  `target.txt` carrying name, bundle id, version, the .app directory name, SHA-256 and the
+  source note.
+- `rc.jobs.mapdiag` + `userland/bin/hk-mapipa.sh` fetch both over the LAN, verify the digest
+  with `hk_download` (mismatch returns 4 and nothing is installed), install through
+  TrollStore's helper, `uicache -a`, `uiopen --bundleid`, then print the new container and
+  the crash-report directory to `/private/var/tmp/mapipa.txt`.
+- The LAN server runs on the Windows side (`tools/ipas-server.ps1`), because the phone
+  reaches `192.168.0.104` and not WSL2's `172.x` address.
+
+This is the path 高德地图 (`com.autonavi.amap`) and 百度地图 (`com.baidu.map`) would take.
+Neither is on the LAN: both are App Store-only, their store images are FairPlay-encrypted,
+and no decrypted copy is downloaded here. A decrypted IPA the operator lawfully has is what
+`tools/map-run.sh` needs; without one there is nothing installable to test, and the record
+must say so rather than claim a run.

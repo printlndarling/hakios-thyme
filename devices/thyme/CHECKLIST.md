@@ -6041,3 +6041,60 @@ frame.  The 1x1 cube asked for with usage 7 (shader write beside read and render
 second: the plug-in serves a cube as read + render target only, since a kernel cannot store into
 one.  Both are general holes, not Alpimaps': any GL app that asks ANGLE for a stencil buffer
 meets the first, and ANGLE's Metal backend asks for the cube itself.
+
+### Stencil8 alone is served; what still refuses a map draw (2026-11-20, 00:08, `logs/000810-run.log.live`)
+
+The 23:09 section's first refusal was Stencil8 (253) itself.  It is now in the format table and in
+the CA plug-in's own gates: a 1125x2436 texture of format 253 is created, the 1x1 cube asked for
+with usage 7 is served, and run 5 (`logs/235037-run.log.live`, image `5d9b6d64`) is the first in
+which the app's dialog and controls draw with **no `GL_OUT_OF_MEMORY`/`GL_INVALID_OPERATION` at
+all**.  ANGLE does not use one Depth32Float_Stencil8 texture, though: it gives its default
+framebuffer a D32_FLOAT texture and an S8_UINT texture of its own.  Run 5 refused each such clear
+("a stencil attachment that is not the depth attachment's own Depth32Float_Stencil8 texture", 4
+times) and the draws behind them, with six `0xe00002d8` from the GL side.
+
+Run 6 (image `855dcd3b`) is the first with the separate plane served: `RB_STENCIL_INFO` carries
+SEPARATE_STENCIL with the stencil texture's own base, pitch and byte count, the depth plane stays
+DEPTH6_32, and the same log has **no stencil refusal, no `0xe00002d8`, no GL error** (and
+`onMainMapReady` twice).  What remains is three general gaps, named by the log itself:
+
+- `-[HakiosMetalDevice supportsSampleCount:]` is not implemented and returns zeros (8 times):
+  ANGLE asks it while choosing render targets; a wrong answer here costs multisampling, not
+  correctness, but the method should answer what the GPU serves.
+- 9 draws refuse `main0: buffer 16 steps constantly: per-vertex and per-instance fetch are
+  served` -- a buffer argument bound with a constant step function, which Metal uses for
+  draw-wide constants.  Serving it is the next general vertex-stage fix.
+- the 1x1 cube copy still refuses slices 1-5 ("one slice and depth 1 are served", 5 times).
+
+None is specific to one app; every one is a hole any ANGLE/Metal application meets.
+
+### Alpimaps is gone; the map slot takes the IPA the operator stages (2026-11-20, 00:25)
+
+At the operator's request Alpimaps, its four scenes (`rc.jobs.almapsdiag`, `almapsrunas`,
+`almapswrap`, `almapswrapq`), its two helpers and the LAN copy are removed.  `hk-execwrap.sh`
+stays as a generic wrapper with no default bundle id.  The new scene is `mapdiag`
+(`SCENE=mapdiag`, image `3fec58ef`): `check-root` reports `rc.jobs=rc.jobs.mapdiag`, the image
+carries `root/bin/hk-mapipa.sh`, and the generated `rc.jobs` has no `almaps` line at all.
+
+What it installs is whatever the host staged, not an app baked into the image:
+`tools/map-run.sh APP.ipa` reads the bundle's `Info.plist` and the executable's
+`LC_ENCRYPTION_INFO`, writes `target.ipa` and `target.txt` (name, bundle id, version, .app
+directory, SHA-256, source) into the LAN directory, and boots the phone.  On the phone
+`hk-mapipa.sh` fetches both, hands the digest to `hk_download` (a mismatch returns 4 and nothing
+is installed), installs through TrollStore's helper, runs `uicache -a` and
+`uiopen --bundleid`, then prints the container and crash-report directory to
+`/private/var/tmp/mapipa.txt`.  The LAN server runs on the Windows side
+(`tools/ipas-server.ps1`, `--directory \\wsl.localhost\Ubuntu\home\darling\ipas-lan`) because
+the phone reaches `192.168.0.104` and not WSL2's `172.24.x` address.
+
+**The FairPlay line is enforced before the image is built.**  `tools/map-run.sh` refuses an
+executable whose `cryptid` is not 0: an App Store IPA is FairPlay-encrypted, this port has no
+Apple key to decrypt it on a Snapdragon, and installing one would prove only that the helper
+copies files.  高德地图 (`com.autonavi.amap`) and 百度地图 (`com.baidu.map`) are App Store-only
+and no decrypted copy is downloaded here; the intake waits for a decrypted IPA the operator
+lawfully has.  Without one there is nothing installable to test, and this record says so rather
+than claim a run.
+
+The path itself is validated with the project's own LocProbe (self-built, cryptid 0, 72,672
+bytes, SHA-256 `706dbae2…7f927`): the phone run is `logs/mapdiag-run.out`, and its log is the
+next section.
