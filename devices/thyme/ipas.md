@@ -74,10 +74,18 @@ FairPlay-encrypted, and no decrypted copy is downloaded here.
 22.2.20, `com.baidu.map`, app directory `IphoneCom.app`, 207,202,418 bytes, SHA-256
 `299ea64e50d1841499b64822eae236ea0fed7323fea88010fe7a6ea20363ac43`, `cryptid 0` -- the
 operator's own copy, lawfully decrypted; this project neither downloaded it from a
-distribution site nor asks for an Apple ID). It installs, registers and launches on the port
-(image `65abdfef`): the screen shows its full UI -- search bar, layer and feedback buttons,
-tab bar, ads, the location dot -- with the map canvas black and flickering. The log shows one
-refusal repeated, its 1125x2436 `Depth32Float` depth texture asking for usage `0x7`
-(read, write, render target) and being turned down ("not stored"); the map renderer treats
-the failed attachment as the frame's, so the map never draws. 高德地图 remains untested:
-no lawfully decrypted copy of it was provided.
+distribution site nor asks for an Apple ID). It installs, registers and launches on the
+intake, and since the kernel's compositing fix of 2026-11-20 it draws its whole UI *and* its
+map canvas on the panel (`CHECKLIST.md`, 09:03 run; `screen-black-80.png`, `-100.png`).
+
+The black map canvas earlier runs showed was not the app's MetaL refusal: the log does carry
+one 1125x2436 `Depth32Float` depth texture with usage `0x7` (read, write, render target)
+being turned down, and it was taken for the cause at the time, but the app's drawables hold
+the map all along (`hm_draw` means 219,234,199 to 234,236,224 at alpha 254, `glcopy=1`
+included) and the kernel's layer drawing was erasing it -- the window server's composite,
+clear over the app's directly displayed surface, was copied to the panel as black. The
+kernel now composites premultiplied source-over, and draws the frame into a cached shadow
+that it copies to the panel's own memory once per frame: the median frame went from 74.5 ms
+to 3.7 ms and the swipes of the test scene measure 3.3 ms, well inside the panel's 11.1 ms
+scan (`CHECKLIST.md`, runs 24 and 25). About one frame in ten is at or over a scan and can
+still tear. 高德地图 remains untested: no lawfully decrypted copy of it was provided.

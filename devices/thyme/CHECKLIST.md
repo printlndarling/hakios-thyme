@@ -6119,3 +6119,146 @@ the phone returned to Android; the chain this section is about -- stage, digest,
 container registration, SpringBoard launch, the app's first frame -- is what the log records.
 The intake is therefore the route the next real application takes; the app it installs is
 chosen by `tools/map-run.sh APP.ipa`, not by the image.
+
+### 百度地图 22.2.20 goes through the intake and launches (2026-11-20, 00:53 -- 01:48, `logs/005327-run.log`, `logs/011513-run.log`, `logs/013254-run.log`)
+
+The operator staged 百度地图 22.2.20 (`com.baidu.map`, app directory `IphoneCom.app`,
+207,202,418 bytes, SHA-256 `299ea64e50d1841499b64822eae236ea0fed7323fea88010fe7a6ea20363ac43`,
+`cryptid 0` -- the operator's own lawfully decrypted copy; see `ipas.md`).  The intake
+installed it, `uicache -a` registered it and `uiopen` launched it in all three runs -- the
+process `IphoneCom` (pid 265 in the first) starts, runs its WebKit and AppTrackingTransparency
+services, opens its sockets and is shut down by the end of the run, not by a crash.
+
+Its screen is the app's own UI: search bar, layer and feedback buttons, the tab bar, ads and
+the location dot are all drawn (`screen-baidu.png` at 00:56, `screen-baidu3.png` at 01:19,
+`screen-baidu4.png`/`-5.png` at 01:35 and 01:37, `screen-baidu6.png` at 01:41), while the map
+canvas itself is black and flickers.  The log of the first run carries one MetaL refusal
+repeatedly -- a 1125x2436 depth texture, `Depth32Float`, usage `0x7` (read, write, render
+target), turned down because the port serves depth textures as render targets only -- and
+that was taken for the cause of the black canvas at the time.  It is not: later runs draw
+the map with the same refusal in the log, and the section below finds what actually kept it
+off the screen.
+
+### The black canvas is the driver's own drawing, not the app's (2026-11-20, 08:01 -- 08:42, `logs/080159-run.log`, `logs/081738-run.log`, `logs/084224-run.log`)
+
+The scene `rc.jobs.mapblack` answers the app's launch dialogs in the order the two runs
+before it raised them (the 隐私保护指引 promo's 一键开启, the 欢迎使用百度地图 consent's 同意,
+the location prompt's Allow While Using App, the notification prompt's Don't Allow and the
+ATT prompt's Ask App Not to Track), then leaves the map alone 45 seconds and pans it.  Its own
+comments record what the earlier runs showed: behind the welcome consent, before the app's
+Metal engine had drawn a frame, the map was drawn (Chengdu, its districts and highways) -- a
+CoreAnimation picture; from the engine's first frame on, every frame with a system alert over
+the app had the map area black while the app's own bars stayed bright.
+
+With every prompt answered (`logs/081738-run.log`) the picture is the same: the app's Metal
+drawables hold the map -- `hm_draw: surface 359 (1125x2436): 10863 of 10863 samples not zero
+(1.000), mean 219,234,199, alpha 254`, the same for surfaces 371 and 417 -- drawn at 3 to 10
+frames a second, and the panel shows black where that picture is.  `glcopy=1`, the run of
+08:42 which turns off shared surfaces so that every drawable is copied by the CPU, changes
+nothing: the drawables then hold mean 221,235,201 at alpha 254 (`logs/084224-run.log`), the
+panel is still black.  So the surfaces are the app's picture and are not what the panel gets.
+
+What the panel gets is the window server's composite, drawn after it: the `fbshow` sample of
+swap 9600 (`logs/081738-run.log`) has layer 1 (sid 1) with `source mean 96,97,100 ... alpha
+101 clear 74/144`, and the panel over the map rectangle `was 96,97,100 ... is 96,97,100` --
+the panel is showing the composite, and the composite is clear over most of it.  The kernel's
+`drawRows()` put every layer's pixels on the panel as they were: a pixel of a layer meant to
+be seen through was written as it stood, black, over the picture under it.  That is one
+general fault, not Baidu's: any application whose CAMetalLayer is displayed directly (swap
+layer 0) under the window server's composite (layer 1, premultiplied, alpha 0 where the
+direct layer is to be seen) had its picture erased by the clear pixels.
+
+### The compositing run: the map is drawn, and the picture tears (2026-11-20, 09:03 -- 09:07, `logs/090328-run.log`)
+
+The kernel now composites: a layer above the bottom one is drawn with premultiplied
+source-over (`over()`, the colour of the layer plus what opacity the panel's pixel has left),
+while the bottom layer is copied as before.  The change is in
+`xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp` (and the build tree it is exported to)
+only.
+
+On the phone the map appears.  `screen-black-80.png` (09:06) shows 百度地图's 景点 list drawn
+whole -- the search field with its blue focus ring, the category icons, three POI cards with
+their photos, ratings and quotes -- and `screen-black-100.png` (09:07) the POI page of
+雁南公园 with its photo strip and the bottom 导航/到这去 buttons.  The app's whole UI, not
+only its text bars, is on the panel for the first time.  The operator, watching the phone,
+reported that the picture now refreshes from top to bottom -- the display still is not right.
+
+The log says why.  `181 frames in 5303 ms (34 a second), 20863 us each in the driver` and,
+in the next window, `15 frames in 5066 ms (2 a second), 337476 us each in the driver` -- 20.9
+and 337 ms a frame, against the 11.1 ms one scan of the panel takes at 90 Hz.  THYME's panel
+is command-mode DSI with no usable frame counter (`fb_beam`, whose comment already described
+the moving bands of 3 November), so the panel scans the same memory the driver writes: a
+frame that takes longer than a scan is shown part old, part new, and the boundary moves down
+the screen -- the refresh the operator saw.  The cost is the compositing itself: `over()`
+takes the panel's pixel (`to[x]`) for every pixel of the blended layer even where the layer
+is clear, and the panel's memory is slow to read.  The run ended at 09:07 not by a fault but
+by the battery guard, `the charge is 24%, at or below battery_stop=25 three looks in a row:
+back to the loader`.
+
+### Run 24: the row-classified kernel measured, and 74 ms a frame (2026-11-20, 09:51 -- 10:02, `logs/095107-run.log`)
+
+The kernel of this run (build `3f31370783c0`: the compositing run's kernel plus rows looked
+at before they are mixed -- a row of the window server's layer whose source pixels are all
+clear skipped before the blending -- and clear source pixels not read from the panel) puts
+the map on the panel as correctly as the run before: `screen-black-460.png` (10:00) and
+`screen-black-520.png` (10:01) show 百度地图 whole -- `洒金桥早市` in the search field, the
+map's building numbers and roads around 渭河, the 图层/加行程/消息 column, the category chips,
+the POI sheet of 韦曲街道 with its 导航 and 到这去 buttons, the status bar's clock and charge.
+
+The frame times are worse, not better.  The run's 1378 frames: `shown->done` min 30.3 ms,
+median 74.5 ms, p90 82.3 ms, p99 151.7 ms, max 320.9 ms (the `tl: v` lines, tools/latency.py's
+method), and the five-second stats agree: `12 frames in 5521 ms (2 a second), 76363 us each
+in the driver`.  Against the 11.1 ms of one scan that is six and a half panels a frame: what
+the operator saw as the picture refreshing from top to bottom is unchanged, because the
+frames are still written into the panel's own memory (mapped non-cached) pixel by pixel.
+The pre-mixing row scans made the blending slower, not the panel faster: the fix is not in
+the scanning but in where the frame is made.
+
+The run ended as run 23 did, by the battery guard at 25% (kernel time 730 s); the scene's
+screenshots at 560, 620 and 680 s failed for want of a loader, the phone having gone back to
+the loader at the stop.
+
+Run 24's end left the phone in fastboot, as run 23's had.  `fastboot set_active a`,
+`fastboot reboot-bootloader`, `fastboot reboot` reached Android this time
+(`sys.boot_completed=1`, kernel `4.19.157-HyperOS3-A16-OurSky-Developers+`), and the phone
+charges over USB there (29%, `charging` in Android's `dumpsys battery`).  The earlier failures
+to reach Android after the same steps are not explained; the flag is the first thing to look
+at when it recurs.
+
+### Run 25: the frame made in a shadow and copied to the panel, 3.7 ms a frame (2026-11-20, 10:22 -- 10:33, `logs/102255-run.log`)
+
+The kernel of this run (build `1df34a4ca6a1223d`) takes the frames out of the panel's
+memory.  The panel's memory -- the boot framebuffer -- is mapped write-combining and not
+cached (`video_console.c`: VM_WIMG_WCOMB), so every pixel the blending read and wrote of it
+was two trips to the memory, some 8 ns each: 2.6 million of them a frame, 74 ms (run 24).
+Now every layer is drawn into a shadow of the panel, 1080 x 2340 pixels of the kernel's own,
+cached memory (`IOMallocZero`, 10.1 MB, in `start()`), and the finished frame is copied to
+the panel's memory in one pass, row after row, before the next scan reads it
+(`blitShadow()`, `show()`, `settle()`; the black-fill and the samples follow the shadow too).
+The pre-mixing source-row scan run 24 measured has been taken out again: it was the blending's
+slow part, not the panel's.  If the shadow cannot be had the driver logs it and goes on as
+before.
+
+The frame times say it works: 2039 frames of the run, `shown->done` min 3.08 ms, **median
+3.66 ms, p90 10.0 ms**, p99 13.4 ms, max 20.4 ms, mean 4.9 ms, against run 24's median 74.5
+and run 23's average 20.9.  One scan of the panel is 11.1 ms: the median frame is a third of
+one, and the p90 is just inside.  The swipes of the scene -- the operator's tearing gesture,
+at t+235 and t+255 s (10:28:46 and 10:29:06) -- measured in windows of 300 frames: median
+3.3 and 3.4 ms, p90 3.7 and 4.9 ms.  The five-second stats line: `45 frames in 5515 ms (8 a
+second), 5993 us each in the driver` -- the driver now costs a tenth of a scan per frame,
+against `12 frames in 5521 ms (2 a second), 76363 us each` in run 24; the application's own
+rate went from 2 to 8 frames a second, so it was the driver that had been holding it back.
+
+The scene's screenshots are whole frames: `screen-black-245.png` (10:28:59, just after the
+vertical swipe) is the map at its new place and zoom -- 万景·荔知湾, the 灞河, the chip row
+充电站/厕所/酒店/公交站 and the tab bar -- and `screen-black-330.png` (10:30:24, after the
+horizontal swipe and the tap) the POI sheet of 韦曲街道 at 315 m.  The samples agree:
+`sid 3, source mean 95,97,100 ... alpha 101 clear 74/144; panel ... was 211,230,230 ... is
+211,230,230`, the app's drawables `mean 221,235,202, alpha 254`.
+
+What is left of the tear: about one frame in ten is at or over a scan (p90 10.0, p99 13.4),
+and those frames can still show a band; the copy to the panel is a single thread's (~2 ms of
+the frame), and the filtered redraw of a still screen is the slowest kind of frame.  If the
+operator still sees bands, the next step is to share the copy out among the drawer threads
+and shorten the filtered redraw.  The run ended at kernel time 623 s by the battery guard at
+25%, with the swipes long drawn.
