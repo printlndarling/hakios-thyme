@@ -465,6 +465,7 @@ public:
 	IOLock *        fLock;
 	uint8_t *       fBase;                  /* the boot framebuffer: the panel */
 	uint32_t *      fShadow;                /* frames are drawn into this, of this processor's own memory, and copied to fBase in one go: see blitShadow() */
+	uint32_t *      fBacking;               /* the bottom layer's pixels alone, where a layer above is transparent: see drawRows() */
 	uint32_t        fPanelWidth, fPanelHeight, fRowBytes;
 	uint32_t        fWidth, fHeight;        /* the display as user space sees it */
 	MiniIOSurface * fDefaultSurface;
@@ -805,6 +806,16 @@ IOMobileFramebuffer::start(IOService * provider)
 	if (fShadow == NULL) {
 		IOLog("MiniIOMobileFramebuffer: no memory for a shadow of the panel (%u x %u): frames go into the panel's own, slowly\n",
 		    fPanelWidth, fPanelHeight);
+	}
+	/*
+	 * The bottom layer's pixels by themselves, kept beside the frame: a layer above is mixed into these, once a
+	 * swap, and not into the frame it is already in (a search bar's shadow, blended into the same pixels frame
+	 * after frame, went from a haze to a thick navy edge: 20 November, 百度地图).
+	 */
+	fBacking = fShadow != NULL ?
+	    (uint32_t *) IOMallocZero((vm_size_t) fPanelWidth * (vm_size_t) fPanelHeight * sizeof(uint32_t)) : NULL;
+	if (fShadow != NULL && fBacking == NULL) {
+		IOLog("MiniIOMobileFramebuffer: no memory for the bottom layer's pixels: layers above are blended into the frame again and again\n");
 	}
 	fColumn = IONewZero(uint32_t, fPanelWidth);
 	fColumnWeight = IONewZero(uint16_t, fPanelWidth);
@@ -1220,6 +1231,13 @@ samplePixels(const uint8_t * base, uint32_t stride, int32_t x0, int32_t y0, int3
  * The rows of one layer, from `y0` to `y1` (panel rows), as drawLayer() has worked them out:
  * scaling a whole frame takes one processor some 9 ms, so with boot-arg fb_threads=N it is shared
  * out between N of them, each with rows of its own and a row of blending of its own.
+ * The bottom layer is kept as it is drawn (fBacking), and a layer above it is blended from those pixels:
+ * once a swap, whatever the frame already holds there. Blended into the frame again and again, a layer's
+ * translucent pixels (a search bar's shadow, alpha 4 of 255) darkened by a little each frame until they
+ * were a thick navy edge (百度地图, 20 November; run 33 of the 20th showed the window server's surface
+ * byte-identical at 186, 190 and 194 s while the frame at the same row went #013434, #333666, #797f9b).
+ * A clear row or pixel of a layer above shows the bottom layer's own pixels, not what an earlier frame
+ * left there.
  */
 /* A layer's rectangle on the panel, in pixels, further out than this is not drawn (the panel is a few thousand wide). */
 #define DST_LIMIT       (1 << 24)
@@ -1242,15 +1260,19 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 	int32_t sx = job->sx, sy = job->sy, sw = job->sw, sh = job->sh;
 	int32_t px0 = job->px0, py0 = job->py0, px1 = job->px1, py1 = job->py1, cx0 = job->cx0, cx1 = job->cx1;
 	bool filter = job->filter;
+	/* (this layer is the bottom one: what it draws is what the panel shows under every layer above it) */
+	bool bottom = !job->blend;
 
 	for (int32_t y = y0; y < y1; y++) {
 		const uint32_t * from;
 		uint32_t * to;
+		uint32_t * under;               /* (the bottom layer's row, where a layer above blends: see fBacking) */
 
 		if (y < 0 || (uint32_t) y >= fPanelHeight) {
 			continue;
 		}
 		to = fShadow != NULL ? fShadow + (size_t) y * fPanelWidth : (uint32_t *) (fBase + (size_t) y * fRowBytes);
+		under = fShadow != NULL && fBacking != NULL ? fBacking + (size_t) y * fPanelWidth : NULL;
 		if (job->unscaled) {
 			/* not scaled at all: a row of the panel is a row of the source */
 			from = (const uint32_t *) (pixels + (size_t) (sy + y - py0) * stride) + sx;
@@ -1259,7 +1281,11 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 
 				row_alphas(from, 0, sw - 1, &least, &most);
 				if (most == 0) {
-					continue;               /* (a clear row: the panel keeps everything) */
+					/* (a clear row: the bottom layer's pixels alone show) */
+					if (under != NULL) {
+						memcpy(to + px0, under + px0, (size_t) sw * 4);
+					}
+					continue;
 				}
 				if (least >= OPAQUE_ENOUGH) {
 					memcpy(to + px0, from, (size_t) sw * 4);
@@ -1267,14 +1293,20 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 				}
 				for (int32_t x = 0; x < sw; x++) {
 					uint32_t s = from[x];
+					uint32_t d = under != NULL ? under[px0 + x] : to[px0 + x];
 
 					if (s >> 24) {
-						to[px0 + x] = over(s, to[px0 + x]);
+						to[px0 + x] = over(s, d);
+					} else if (under != NULL) {
+						to[px0 + x] = d;
 					}
 				}
 				continue;
 			}
 			memcpy(to + px0, from, (size_t) sw * 4);
+			if (bottom && under != NULL) {
+				memcpy(under + px0, from, (size_t) sw * 4);
+			}
 			continue;
 		}
 		if (filter) {
@@ -1312,7 +1344,11 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 				}
 				row_alphas(from, (int32_t) fColumn[cx0], (int32_t) last, &least, &most);
 				if (most == 0) {
-					continue;           /* (a clear row: the panel keeps everything) */
+					/* (a clear row: the bottom layer's pixels alone show) */
+					if (under != NULL) {
+						memcpy(to + cx0, under + cx0, (size_t) (cx1 - cx0) * 4);
+					}
+					continue;
 				}
 				blend_row = least < OPAQUE_ENOUGH;
 			}
@@ -1340,30 +1376,45 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 				if (!blend_row) {
 					for (uint32_t i = 0; i < n; i++) {
 						uint32_t c = column[i], w = weights[i], a = from[c];
+						uint32_t v = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
 
-						out[i] = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+						out[i] = v;
+						if (bottom && under != NULL) {
+							under[cx0 + i] = v;
+						}
 					}
 				} else {
 					for (uint32_t i = 0; i < n; i++) {
 						uint32_t c = column[i], w = weights[i], a = from[c];
 						uint32_t v = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+						uint32_t d = under != NULL ? under[cx0 + i] : out[i];
 
 						if (v >> 24) {
-							/* (clear, the panel keeps its pixel: not even read, it is slow) */
-							out[i] = over(v, out[i]);
+							/* (clear, the bottom layer's pixel alone shows) */
+							out[i] = over(v, d);
+						} else if (under != NULL) {
+							out[i] = d;
 						}
 					}
 				}
 			} else if (!blend_row) {
 				for (int32_t x = cx0; x < cx1; x++) {
-					to[x] = from[fColumn[x]];
+					uint32_t v = from[fColumn[x]];
+
+					to[x] = v;
+					if (bottom && under != NULL) {
+						under[x] = v;
+					}
 				}
 			} else {
 				for (int32_t x = cx0; x < cx1; x++) {
 					uint32_t s = from[fColumn[x]];
+					uint32_t d = under != NULL ? under[x] : to[x];
 
 					if (s >> 24) {
-						to[x] = over(s, to[x]);
+						to[x] = over(s, d);
+					} else if (under != NULL) {
+						to[x] = d;
 					}
 				}
 			}
@@ -2131,6 +2182,9 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 					bzero(fBase + (size_t) y * fRowBytes, (size_t) fPanelWidth * 4);
 					if (fShadow != NULL) {
 						bzero(fShadow + (size_t) y * fPanelWidth, (size_t) fPanelWidth * 4);
+					}
+					if (fBacking != NULL) {
+						bzero(fBacking + (size_t) y * fPanelWidth, (size_t) fPanelWidth * 4);
 					}
 				}
 				if (gClean) {
