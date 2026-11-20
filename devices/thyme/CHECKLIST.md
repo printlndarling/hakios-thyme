@@ -6262,3 +6262,34 @@ the frame), and the filtered redraw of a still screen is the slowest kind of fra
 operator still sees bands, the next step is to share the copy out among the drawer threads
 and shorten the filtered redraw.  The run ended at kernel time 623 s by the battery guard at
 25%, with the swipes long drawn.
+
+### Run 26: the copy shared out, 3.2 ms a frame and a p90 of 3.6 (2026-11-20, 10:55 -- 11:08, `logs/105725-run.log`)
+
+The kernel of this run (build `0742b242870f`) gives the copy to the panel to the same threads
+that draw the frame: `blitPanel()` wakes the `fb_threads - 1` helpers for their share of the
+rows, copies its own share, and each helper copies and cleans its own rows with its own
+`dc civac` pass (`blitPanel()`, `helperMain()`); with no helper up yet it copies alone, as
+before.  The five-second stats line now reports the copy: how many frames, the us each, the
+longest.
+
+The tail run 25 left is gone.  2462 frames: `shown->done` min 3.05 ms, **median 3.21 ms, p90
+3.57 ms**, p99 9.78 ms, max 20.7 ms, mean 3.44 ms -- the p90 was 10.0 ms in run 25.  Nine
+frames in ten are now finished in a third of the 11.1 ms scan, and 99 in 100 inside it.  The
+copy itself: 993 to 1202 us each for the ten megabytes of a whole frame, the longest of a
+window 1.1 to 4.2 ms -- a third of what it cost one thread.  The driver's lines:
+`3610 us each in the driver ... 48 frames copied to the panel in 1202 us each (the longest
+1794); 0 of 0 too late for the next scan`.  The application still draws at 8 a second at
+rest and 27 in the busiest window.
+
+The screenshots are whole frames: `screen-black-330.png` (11:04:59) and `screen-black-460.png`
+(11:07:10) show the 灞河 with 云不知·私宴·湖滨餐厅 and 麻绳湖畔音乐荟, the chip row and the tab
+bar, and the search field's suggestion has changed between the two, so the app is live
+between the shots.  The samples agree: `panel ... was 193,222,216 ... is 193,222,216`, layer
+1 `mean 51,50,50 alpha 51 clear 101/144` over the app's own surface.  (The scene's swipes at
+t+235 and t+255 s moved the map less than in run 25's shots -- the tap at t+275 s re-centres
+it; the draw times above are the same gesture windows either way.)
+
+The one wild frame is still there (max 20.7 ms), but it is one frame of two and a half
+thousand, and no window's line counts a frame late for the scan it aimed at.  The run ended
+at kernel time 732 s by the battery guard at 25%; the phone went back to Android to charge
+(`XL_REBOOT_AFTER`).

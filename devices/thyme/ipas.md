@@ -85,7 +85,7 @@ the map all along (`hm_draw` means 219,234,199 to 234,236,224 at alpha 254, `glc
 included) and the kernel's layer drawing was erasing it -- the window server's composite,
 clear over the app's directly displayed surface, was copied to the panel as black. The
 kernel now composites premultiplied source-over, and draws the frame into a cached shadow
-that it copies to the panel's own memory once per frame: the median frame went from 74.5 ms
-to 3.7 ms and the swipes of the test scene measure 3.3 ms, well inside the panel's 11.1 ms
-scan (`CHECKLIST.md`, runs 24 and 25). About one frame in ten is at or over a scan and can
-still tear. 高德地图 remains untested: no lawfully decrypted copy of it was provided.
+that it copies to the panel's own memory once per frame, the copy shared out among the
+threads that drew the frame: the median frame went from 74.5 ms to 3.2 ms and the p90 to
+3.6 ms, a third of the panel's 11.1 ms scan, with 99 frames in 100 inside it (`CHECKLIST.md`,
+runs 24 -- 26). 高德地图 remains untested: no lawfully decrypted copy of it was provided.
