@@ -168,6 +168,19 @@ static TUNABLE(uint32_t, gRecRing, "rec_ring", 0);
 static TUNABLE(uint32_t, gRecStep, "rec_step", 3);
 static TUNABLE(uint32_t, gDiff, "fb_diff", 0);
 /*
+ * Boot-arg fb_dump=S: once, S seconds after the first frame was shown, the pixels of a layer above
+ * the bottom one around three places of the screen are logged, in the layer's own memory -- what the
+ * window server's composite holds there before this driver draws it. A debug for the picture: a
+ * band the screen shows and the composite does not, or the other way about, is told apart here.
+ */
+static TUNABLE(uint32_t, gDumpSeconds, "fb_dump", 0);
+/*
+ * Boot-arg fb_dump_every=E: after the first, another sample every E seconds -- a band that comes and goes
+ * is followed frame after frame. fb_dump_times=N: N samples in all (0: one, as without fb_dump_every).
+ */
+static TUNABLE(uint32_t, gDumpEvery, "fb_dump_every", 0);
+static TUNABLE(uint32_t, gDumpTimes, "fb_dump_times", 0);
+/*
  * Boot-arg fb_filter=0: the picture is scaled to the panel nearest neighbour, as it once was. The
  * iPhone's 1125 x 2436 on this panel's 1080 x 2400 is 45 columns and 36 rows fewer: nearest
  * neighbour leaves out every 25th column and every 67th row, and where one of them goes through a
@@ -532,6 +545,15 @@ public:
 	uint8_t *       fRecBase;
 	uint64_t        fRecSize, fRecUsed;
 	uint64_t        fFirstFrame, fRecFirst; /* when the first frame was shown, and the first recorded */
+	uint64_t        fDumpFirst;             /* fb_dump: when the first frame above the bottom layer was shown */
+	uint32_t        fDumpNext, fDumpCount;  /* ... the second the next sample is due, and how many were taken */
+	uint32_t        fProbeLast[16];         /* ... the pixels last said of the two places a band is followed at */
+	uint32_t        fProbeSaid;
+	uint64_t        fProbeWhen;             /* ... and when the last line was (lines are at most four a second) */
+	uint32_t        fProbeLast0[16];        /* ... the same of the bottom layer (the application's own drawable) */
+	uint32_t        fProbeSaid0;
+	uint64_t        fProbeWhen0;
+	bool            fDumped;                /* ... and the pixels of it logged already */
 	bool            fRecDone;
 	bool            fRecWrapped;            /* (rec_ring) the memory has been full once: frames go over the oldest */
 	uint64_t        fRecCost, fRecCostMax;  /* what copying the recorded frames took (mach_absolute_time), and the worst */
@@ -553,6 +575,10 @@ public:
 	void drawRows(const struct RowJob * job, int32_t y0, int32_t y1, uint32_t * blendRow);
 	void blitShadow(int32_t y0, int32_t y1);
 	void blitPanel(int32_t y0, int32_t y1);
+	void dumpPixels(MiniIOSurface * s, const char * what, int32_t py, int32_t px0, int32_t n);
+	void dumpColumn(MiniIOSurface * s, const char * what, int32_t px, int32_t py0, int32_t n);
+	void dumpFramePixels(const uint8_t * buf, uint32_t stride, const char * what, int32_t py, int32_t px0, int32_t n);
+	void dumpFrameColumn(const uint8_t * buf, uint32_t stride, const char * what, int32_t px, int32_t py0, int32_t n);
 	static void helperMain(void * self, wait_result_t result);
 	static void beamProbeMain(void * self, wait_result_t result);
 	void beamProbe(void);
@@ -709,6 +735,9 @@ IOMobileFramebuffer::start(IOService * provider)
 		    vinfo.v_depth);
 		return false;
 	}
+	/* (what the boot arguments became, said plainly: an argument the kernel line lost is the difference) */
+	fbLine("fb: boot tunables: fb_dump=%u fb_dump_every=%u fb_dump_times=%u\n",
+	    gDumpSeconds, gDumpEvery, gDumpTimes);
 	if (gBeam != 0 && kernel_thread_start(beamProbeMain, this, &thread) == KERN_SUCCESS) {
 		thread_set_thread_name(thread, "the panel's scan: looked at");
 		thread_deallocate(thread);
@@ -915,6 +944,144 @@ IOMobileFramebuffer::record(MiniIOSurface * s)
 		}
 		loader_recording[1] = sizeof(*header) + (uint64_t) header->frames * frame_size;
 	}
+}
+
+/*
+ * fb_dump: the pixels of one row of a layer, as the layer's memory holds them (a pixel is 0xAARRGGBB
+ * in these words, BGRA in the memory), `n` of them from panel column `px0` on panel row `py`. The
+ * layer's own coordinates are logged too: the source row and column the panel's are made from.
+ */
+void
+IOMobileFramebuffer::dumpPixels(MiniIOSurface * s, const char * what, int32_t py, int32_t px0, int32_t n)
+{
+	char line[1024];
+	int at;
+
+	if (s == NULL || s->pixels() == NULL || n <= 0) {
+		return;
+	}
+	int32_t sy = (int32_t) ((int64_t) py * s->info.height / fPanelHeight);
+	int32_t sx = (int32_t) ((int64_t) px0 * s->info.width / fPanelWidth);
+
+	if (sy < 0 || sy >= (int32_t) s->info.height) {
+		return;
+	}
+	at = snprintf(line, sizeof(line), "fbdump: %s row %d x %d: src %d,%d:", what, py, px0, sx, sy);
+	for (int32_t i = 0; i < n && sx + i < (int32_t) s->info.width; i++) {
+		const uint32_t * row = (const uint32_t *) (s->pixels() + (size_t) sy * s->info.bytesPerRow);
+
+		if (at > (int) sizeof(line) - 12) {
+			break;
+		}
+		at += snprintf(line + at, sizeof(line) - at, " %08x", row[sx + i]);
+	}
+	/* (loader_log_line, not IOLog: the kernel's own lines do not reach the console ring the run keeps) */
+	if (at > (int) sizeof(line) - 2) {
+		at = (int) sizeof(line) - 2;
+	}
+	line[at++] = '\n';
+	line[at] = '\0';
+	loader_log_line(line);
+}
+
+/* fb_dump: the pixels of one column of a layer, the same way, `n` of them from panel row `py0` on panel column `px`. */
+void
+IOMobileFramebuffer::dumpColumn(MiniIOSurface * s, const char * what, int32_t px, int32_t py0, int32_t n)
+{
+	char line[1024];
+	int at;
+
+	if (s == NULL || s->pixels() == NULL || n <= 0) {
+		return;
+	}
+	int32_t sx = (int32_t) ((int64_t) px * s->info.width / fPanelWidth);
+	int32_t sy0 = (int32_t) ((int64_t) py0 * s->info.height / fPanelHeight);
+
+	if (sx < 0 || sx >= (int32_t) s->info.width) {
+		return;
+	}
+	at = snprintf(line, sizeof(line), "fbdump: %s col %d y %d: src %d,%d:", what, px, py0, sx, sy0);
+	for (int32_t i = 0; i < n && sy0 + i < (int32_t) s->info.height; i++) {
+		const uint32_t * row = (const uint32_t *) (s->pixels() + (size_t) (sy0 + i) * s->info.bytesPerRow);
+
+		if (at > (int) sizeof(line) - 12) {
+			break;
+		}
+		at += snprintf(line + at, sizeof(line) - at, " %08x", row[sx]);
+	}
+	if (at > (int) sizeof(line) - 2) {
+		at = (int) sizeof(line) - 2;
+	}
+	line[at++] = '\n';
+	line[at] = '\0';
+	loader_log_line(line);
+}
+
+/*
+ * fb_dump: the same for what the frame is drawn into -- the panel's own memory, or the shadow on its way
+ * there -- that is, what the screen will show, where dumpPixels says what the layer above the bottom one
+ * holds. The coordinates are the panel's: no surface, no scaling between.
+ */
+void
+IOMobileFramebuffer::dumpFramePixels(const uint8_t * buf, uint32_t stride, const char * what, int32_t py,
+    int32_t px0, int32_t n)
+{
+	char line[1024];
+	int at;
+
+	if (buf == NULL || stride == 0 || n <= 0 || py < 0 || py >= (int32_t) fPanelHeight) {
+		return;
+	}
+	if (px0 < 0) {
+		n += px0;
+		px0 = 0;
+	}
+	if (n <= 0) {
+		return;
+	}
+	at = snprintf(line, sizeof(line), "fbdump: %s row %d x %d: at %d,%d:", what, py, px0, px0, py);
+	for (int32_t i = 0; i < n && px0 + i < (int32_t) fPanelWidth; i++) {
+		const uint32_t * row = (const uint32_t *) (buf + (size_t) py * stride);
+
+		if (at > (int) sizeof(line) - 12) {
+			break;
+		}
+		at += snprintf(line + at, sizeof(line) - at, " %08x", row[px0 + i]);
+	}
+	if (at > (int) sizeof(line) - 2) {
+		at = (int) sizeof(line) - 2;
+	}
+	line[at++] = '\n';
+	line[at] = '\0';
+	loader_log_line(line);
+}
+
+/* fb_dump: a column of the frame drawn into, the same way. */
+void
+IOMobileFramebuffer::dumpFrameColumn(const uint8_t * buf, uint32_t stride, const char * what, int32_t px,
+    int32_t py0, int32_t n)
+{
+	char line[1024];
+	int at;
+
+	if (buf == NULL || stride == 0 || n <= 0 || px < 0 || px >= (int32_t) fPanelWidth) {
+		return;
+	}
+	at = snprintf(line, sizeof(line), "fbdump: %s col %d y %d: at %d,%d:", what, px, py0, px, py0);
+	for (int32_t i = 0; i < n && py0 + i < (int32_t) fPanelHeight; i++) {
+		const uint32_t * row = (const uint32_t *) (buf + (size_t) (py0 + i) * stride);
+
+		if (at > (int) sizeof(line) - 12) {
+			break;
+		}
+		at += snprintf(line + at, sizeof(line) - at, " %08x", row[px]);
+	}
+	if (at > (int) sizeof(line) - 2) {
+		at = (int) sizeof(line) - 2;
+	}
+	line[at++] = '\n';
+	line[at] = '\0';
+	loader_log_line(line);
 }
 
 MiniIOSurface *
@@ -2072,7 +2239,131 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 				fGraphics = true;
 				PE_initialize_console(NULL, kPEGraphicsMode);
 			}
+			bool dumpNow = false, dumpFirst = false, dumpWide = false;
+			char dumpWhat[40];
+
+			/*
+			 * (any layer with pixels, not only those above the bottom one: on this panel the window
+			 * server presents its composite as the one surface on layer 0 -- run 30's log has no
+			 * swap on any other layer for the whole run -- so a `layer > 0` gate samples nothing.
+			 * Every line names its layer, so a second layer, where there is one, is told apart.)
+			 */
+			if (gDumpSeconds != 0 && !fDumped && s->pixels() != NULL) {
+				if (fDumpFirst == 0) {
+					fDumpFirst = mach_absolute_time();
+					fDumpNext = gDumpSeconds;
+					fDumpCount = 0;
+				} else {
+					uint64_t since;
+
+					/* (mach_absolute_time's ticks are not nanoseconds: the timebase turns them into them) */
+					absolutetime_to_nanoseconds(mach_absolute_time() - fDumpFirst, &since);
+					if (since >= (uint64_t) fDumpNext * NSEC_PER_SEC) {
+						/*
+						 * (a sample of two places, the layer's own memory and the frame's: the side panel's edge,
+						 * and the row the search bar's shadow falls on. The first is the wide one, around the
+						 * search bar, the side panels and the tab bar; the rest are narrow enough to take one
+						 * frame after another, which is what a band that comes and goes is followed with)
+						 */
+						dumpNow = true;
+						dumpFirst = fDumpCount == 0;
+						/* (the wide set every tenth sample: the first is at boot, and what the run is
+						 * about is minutes later -- once was not enough to see the app's own window) */
+						dumpWide = (fDumpCount % 10) == 0;
+						fDumpCount++;
+						snprintf(dumpWhat, sizeof(dumpWhat), "ui@%llus",
+						    (unsigned long long) (since / NSEC_PER_SEC));
+						if (dumpWide) {
+							dumpPixels(s, "searchbar", 150, 0, 64);
+							dumpColumn(s, "searchbar", 25, 110, 90);
+							dumpPixels(s, "panel", 700, 896, 80);
+							dumpColumn(s, "panel", 925, 650, 90);
+							dumpPixels(s, "zoom", 1300, 896, 80);
+							dumpPixels(s, "map", 1000, 896, 80);
+							dumpPixels(s, "tabbar", 2210, 60, 64);
+						}
+						/* (the search bar's rim every sample: it is where the thick edge is seen) */
+						dumpPixels(s, dumpWhat, 150, 0, 64);
+						dumpPixels(s, dumpWhat, 700, 912, 32);
+						dumpColumn(s, dumpWhat, 925, 680, 32);
+						if (gDumpEvery != 0 && (gDumpTimes == 0 || fDumpCount < gDumpTimes)) {
+							fDumpNext = (uint32_t) (since / NSEC_PER_SEC) + gDumpEvery;
+						} else {
+							fDumped = true;
+						}
+					}
+				}
+			}
 			drawLayer(s, src, dst, layer > 0);
+			if (dumpNow && drawn_into != NULL) {
+				/* (what the layer was drawn into: the panel's own pixels, at the same places) */
+				if (dumpWide) {
+					dumpFramePixels(drawn_into, drawn_stride, "psearchbar", 150, 0, 64);
+					dumpFramePixels(drawn_into, drawn_stride, "ppanel", 700, 896, 80);
+					dumpFrameColumn(drawn_into, drawn_stride, "ppanel", 925, 650, 90);
+				}
+				dumpFramePixels(drawn_into, drawn_stride, dumpWhat, 150, 0, 64);
+				dumpFramePixels(drawn_into, drawn_stride, dumpWhat, 700, 912, 32);
+				dumpFrameColumn(drawn_into, drawn_stride, dumpWhat, 925, 680, 32);
+			}
+			if (gDumpSeconds != 0 && layer <= 1 && s->pixels() != NULL && drawn_into != NULL) {
+				/*
+				 * (every frame, two short runs of pixels at the edges a band has been seen on -- the layer's own,
+				 * and the frame's after the kernel drew it -- said again whenever they change, and at most four
+				 * times a second: a band that comes and goes is timed here, and told whether the window server's
+				 * overlay holds it before the kernel blends it, or the application's own drawable does, or the
+				 * blending makes it)
+				 */
+				int32_t ay = (int32_t) ((int64_t) 700 * s->info.height / fPanelHeight);
+				int32_t ax = (int32_t) ((int64_t) 920 * s->info.width / fPanelWidth);
+				int32_t by = (int32_t) ((int64_t) 115 * s->info.height / fPanelHeight);
+				int32_t bx = (int32_t) ((int64_t) 536 * s->info.width / fPanelWidth);
+
+				if (ax >= 0 && bx >= 0 && ay >= 0 && by >= 0 &&
+				    ax + 4 <= (int32_t) s->info.width && bx + 4 <= (int32_t) s->info.width &&
+				    ay < (int32_t) s->info.height && by < (int32_t) s->info.height) {
+					uint32_t now[16];
+					uint32_t * last = layer == 0 ? &fProbeLast0[0] : &fProbeLast[0];
+					uint32_t * said = layer == 0 ? &fProbeSaid0 : &fProbeSaid;
+					uint64_t * when = layer == 0 ? &fProbeWhen0 : &fProbeWhen;
+					const uint32_t * r;
+
+					r = (const uint32_t *) (s->pixels() + (size_t) ay * s->info.bytesPerRow);
+					now[0] = r[ax]; now[1] = r[ax + 1]; now[2] = r[ax + 2]; now[3] = r[ax + 3];
+					r = (const uint32_t *) (s->pixels() + (size_t) by * s->info.bytesPerRow);
+					now[4] = r[bx]; now[5] = r[bx + 1]; now[6] = r[bx + 2]; now[7] = r[bx + 3];
+					r = (const uint32_t *) (drawn_into + (size_t) 700 * drawn_stride);
+					now[8] = r[920]; now[9] = r[921]; now[10] = r[922]; now[11] = r[923];
+					r = (const uint32_t *) (drawn_into + (size_t) 115 * drawn_stride);
+					now[12] = r[536]; now[13] = r[537]; now[14] = r[538]; now[15] = r[539];
+
+					if (memcmp(now, last, sizeof(now)) != 0 && *said < (layer == 0 ? 80u : 240u)) {
+						uint64_t t = mach_absolute_time(), waited = 0, since = 0;
+
+						if (*when != 0) {
+							absolutetime_to_nanoseconds(t - *when, &waited);
+						}
+						if (*when == 0 || waited >= (uint64_t) 250 * 1000 * 1000) {
+							char probe[1024];
+
+							if (fDumpFirst != 0) {
+								absolutetime_to_nanoseconds(t - fDumpFirst, &since);
+							}
+							snprintf(probe, sizeof(probe),
+							    "fbdump: ui@%llus layer %u frame %u: row700 x920 src %08x %08x %08x %08x "
+							    "at %08x %08x %08x %08x; row115 x536 src %08x %08x %08x %08x "
+							    "at %08x %08x %08x %08x\n",
+							    (unsigned long long) (since / NSEC_PER_SEC), layer, swapWord(swap, SWAP_ID),
+							    now[0], now[1], now[2], now[3], now[8], now[9], now[10], now[11],
+							    now[4], now[5], now[6], now[7], now[12], now[13], now[14], now[15]);
+							loader_log_line(probe);
+							(*said)++;
+							*when = t;
+							memcpy(last, now, sizeof(now));
+						}
+					}
+				}
+			}
 			if (fShadow != NULL) {
 				/* (drawn into the shadow: on the panel once every layer of the frame has been) */
 				blit0 = (int32_t) qy0 < blit0 ? (int32_t) qy0 : blit0;
