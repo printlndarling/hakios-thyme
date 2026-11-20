@@ -6396,3 +6396,63 @@ Two smaller observations.  The last fps line of the run reads `GPU busy -854175 
 hakios-metal's busy-time accounting wraps; it wants a look, it does not affect drawing.  The
 run ended by the battery guard at 25% (kernel time 731 s, `battguard: charge 26% ...` then the
 three looks; last line 862.9 s) and the phone went back to the loader.
+
+### Run 33: the rim's own row is the same at 186, 190 and 194 s; the frame at it is not (2026-11-20, 15:27 -- 15:41, `logs/152711-run.log`)
+
+Run 33 took the same image (`67c75777b65ffa4b016d7faaeeb21f8ae332fffdb1ff443ff4f3204f7b44f852`)
+and loader (`xnu-usb.img`, `213ffaaeb820`) as run 32, and the kernel built at 15:14 with the
+layer and surface names in every dump line, `30e252040044`.  The dumps were
+`fb: boot tunables: fb_dump=55 fb_dump_every=4 fb_dump_times=140`, 385 characters of cmdline.
+`XL_FOLLOW_KEEP=1` copied the console every follow interval to `.live.N`: the log's own ring
+keeps only the tail, and that tail begins at 610 s, long after the search bar's row had left
+the dumps.  The snapshots are where this run's evidence survives.  The permission dialogs were
+answered before the map page was looked at, as asked.
+
+The rim was there to see.  `screen-r33-100.png` is the main map page with the search field's
+thick indigo border; `screen-r33-300.png` is the 永辉超市 reviews page, its avatars, stars and
+text drawn normally.  The canvas under the search field was black and `正在加载`.
+
+The three samples of the window server's own row are the evidence.  For `L1/s3 row 150`,
+`src 0,156` is byte-identical at 186, 190 and 194 s: fifteen `00000000`, then
+
+    04010102 04010202 04010102 04010202 04010202 06010203 06010203 07020203 08020304
+    08020304 09020304 0a020305 09020304 ...
+
+-- a premultiplied shadow of alpha 4 to 12, which unpremultiplied is about `#404080` -- then
+`c25086c0`, the cyan line `ff66b2ff` four times, `ffdef2ff`, and white from x 36.  The frame
+at the same panel row, at the same three seconds:
+
+    186 s: ff013434 ff013434 ff01254a ff212141 ff1d3956 ff1a344d ff182f5e ...
+    190 s: ff333366 ff336666 ff24496d ff404060 ff385571 ff334c66 ff2e4574 ...
+    194 s: ff797f9b ff79949b ff5b7690 ff65697f ff587089 ff4d647b ff465a7f ...
+
+-- opaque navy at pixels whose only layer content is a shadow of alpha 4.
+
+At each sample the `pre@` line (the frame just before layer 1 is drawn) equals the `at` line
+after it: exactly at 186 and 190 s, and at 194 s by about two levels (`ff7b819d` before,
+`ff797f9b` after, at x 15).  One pass of the layer moves the row by what a 4/255 shadow is
+worth; the row already stands at `ff333366` or `ff797f9b` before the layer is drawn, and the
+layer's own row never changed.  The frame's shadow pixels are therefore not this swap's
+product: they carry what earlier swaps of the same static row left, one blend at a time.
+
+That is the path `drawRows()` writes.  The frame is persistent (`fShadow`); the bottom layer
+repaints only the rectangle it swapped, and a layer above was blended into whatever pixel the
+frame already held there -- for a clear source pixel, nothing at all.  A search bar's shadow,
+alpha 4 against the bottom layer, applied again every swap, moves the pixel toward the
+shadow's own unpremultiplied colour and its alpha toward 255: from black at 186 s
+(`ff013434`), from the white page at 194 s (`ff797f9b`).  The row's x 3-14 pixels went
+`ff000000` to `ffeaf6fb` between 186 and 190 s, so some layer did repaint the row then; the
+dumps of this run do not name which.  Either way the shadow pixels hold the shadow once per
+swap, and it is the same alpha-4 shadow, opaque: the thick navy edge.
+
+The change this evidence asks for, built after the run and not yet flown: kernel
+`f34461dbb059e988` keeps the bottom layer's pixels by themselves in `fBacking`, mirrored as
+the bottom layer draws; a layer above reads its destination there, one blend per swap whatever
+the frame holds, and a clear row or pixel shows the bottom layer's pixel again instead of a
+stale frame.  The black-screen branch clears it too.  Run 34's dumps and screenshots decide
+whether the rim is gone; the cost to watch is one more copy of the bottom layer per swap.
+
+The run ended as written: the battery guard at kernel 730 s (`charge 25%`, then `24%`, three
+looks), shutdown at 802 s, `returned 1441823 0`, and the phone went back to Android to charge.
+The fps busy-time counter still wraps (`GPU busy -854175 ms (-2845%)`); it wants its own look,
+it does not affect drawing.
