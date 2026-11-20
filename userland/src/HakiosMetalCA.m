@@ -381,6 +381,22 @@ hm_now(void)
 	return (double)mach_absolute_time() * timebase.numer / timebase.denom / 1e9;
 }
 
+/*
+ * (hakios) hm_draw: what the memory of this process's large surfaces holds, said every five seconds.  A map canvas
+ * that is black on the screen leaves one question its own log cannot answer: did the application draw black, or did
+ * it draw and none of it reach the compositor?  The answer is in the drawable's surface, and this is a sample of it:
+ * every sixteenth pixel across, how many of them are not zero and the means of their bytes.  Set for an application
+ * shown the device (-initWithAcceleratorPort, metal_apps=1), so the window server's own surfaces stay its business.
+ */
+#define HM_DRAW_SLOTS 4
+static struct {
+	unsigned id;
+	int width, height;
+	double next;
+	unsigned samples;
+} hm_draw_slots[HM_DRAW_SLOTS];
+static int hm_draw_on;
+
 /* --- the private base classes, by name only ---------------------------------------------------------------- */
 
 /* The designated initialisers are the ones Apple's own driver sends to super (IOGPUMetalCommandQueue,
@@ -1327,6 +1343,7 @@ HM_REFUSES_OUT_LOUD
 	NSMutableArray *_scratch;                   /* the buffers -setVertexBytes:/-setFragmentBytes: made */
 	MTLWinding _frontFacingWinding;             /* -setFrontFacingWinding:'s, also in _pass.winding for the draws */
 	char _refused[160];                         /* a binding or state this encoder could not take: the next draw is failed by it */
+	unsigned _pipelineSets;                     /* how many -setRenderPipelineState: this encoder took (a diagnostic) */
 	NSMutableIndexSet *_visibilityCounted;      /* the result words (offset / 8) a draw of this encoder has counted into */
 }
 - (instancetype)initWithHakiosCommandBuffer:(HakiosMetalCommandBuffer *)commandBuffer pass:(const struct hakios_metal_render_pass *)pass
@@ -2136,6 +2153,7 @@ hm_boot_arg_set(const char *what)
 				    name ? name : "?", path);
 				return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 			}
+			hm_draw_on = 1;     /* (hakios) an application: its large surfaces are sampled, see hm_draw_slots */
 		}
 		if (!all && !apps && !window_server) {
 			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process, metal_apps=1: every application)\n", name ? name : "?");
@@ -2411,6 +2429,10 @@ hm_boot_arg_set(const char *what)
 }
 
 - (NSString *)name { return _name != nil ? _name : @"Adreno (hakios-metal; no GPU)"; }
+
+/* the render pipeline states this process has made: a draw refused for having none of its own, with none made anywhere,
+ * is a pipeline that never existed rather than an encoder that was not told of it (Baidu Maps' map, 2026-11-20) */
+static unsigned long hm_pipelines_made;
 
 /* what, then the images and offsets of the calls that led here: for finding whose object a refusal or a free is */
 static void
@@ -3781,6 +3803,16 @@ hm_describe_function(id f)
 - (id)newRenderPipelineStateWithDescriptor:(MTLRenderPipelineDescriptor *)descriptor error:(NSError **)error
 {
 	SEL bitcode = sel_getUid("bitcodeData");
+	{
+		static int told;
+
+		if (told++ < 8) {
+			NSString *lbl = [descriptor label];
+
+			hm_print("a render pipeline was asked for (%s): vertex function %p, fragment function %p\n",
+				 lbl != nil ? [lbl UTF8String] : "no label", (void *)[descriptor vertexFunction], (void *)[descriptor fragmentFunction]);
+		}
+	}
 	NSString *why = [self hakiosRenderPipelineWhy:descriptor];
 	id vs, fs;
 	NSData *vsAir, *fsAir;
@@ -3972,6 +4004,7 @@ hm_describe_function(id f)
 		hakios_metal_constant fc[64];
 		unsigned count = fs != nil ? hm_function_constants(fs, fc, 64) : 0;
 
+		if (state != nil) hm_pipelines_made++;
 		if (state != nil && fsAir != nil) [state hakiosKeepFragment:fsAir constants:fc count:count];
 		return state;
 	}
@@ -4095,6 +4128,27 @@ hm_describe_function(id f)
 	}
 }
 
+/* The application's own bundle library: Baidu Maps comes with default.metallib and metallib.metallib, asks for the
+ * default one, and a nil here leaves its map drawing with no pipeline state and nothing else in the log to say why
+ * (2026-11-20).  Said once each road. */
+- (id)newDefaultLibrary
+{
+	static unsigned said;
+	id library = [super newDefaultLibrary];
+
+	if (said++ < 8) hm_print("the default library: %p\n", (void *)library);
+	return library;
+}
+
+- (id)newDefaultLibraryWithBundle:(id)bundle error:(NSError **)error
+{
+	static unsigned said;
+	id library = [super newDefaultLibraryWithBundle:bundle error:error];
+
+	if (said++ < 8) hm_print("the default library of a bundle: %p\n", (void *)library);
+	return library;
+}
+
 /* A framework's default.metallib is left out of the system image by sysimage/select-system.py's rule; the same file is
  * carried under /redwood/share/ca-metallibs, at the same path below it (the MPS frameworks', SiriUICore's, ...).  A URL
  * to a path the framework asks for that the image has not got is answered with the carried copy.  A nil URL -- what a
@@ -4129,7 +4183,13 @@ hm_describe_function(id f)
 			url = [NSURL fileURLWithPath:carried];
 		}
 	}
-	return [super newLibraryWithURL:url error:error];
+	{
+		static unsigned said;
+		id library = [super newLibraryWithURL:url error:error];
+
+		if (said++ < 8) hm_print("library at %s: %p\n", [url isFileURL] ? [[url path] UTF8String] : "a non-file URL", (void *)library);
+		return library;
+	}
 }
 
 /* VectorKit's road to a shader: GeoGL/MetalRenderer.mm asks -[MTLDevice newFunctionWithName:constantValues:
@@ -4200,7 +4260,13 @@ hm_describe_function(id f)
 	if (said++ < 12) {
 		hm_vk_log("a library was asked for at %s\n", path != nil ? [path UTF8String] : "(nil)");
 	}
-	return [super newLibraryWithFile:path error:error];
+	{
+		static unsigned told;
+		id library = [super newLibraryWithFile:path error:error];
+
+		if (told++ < 8) hm_print("library at %s: %p\n", path != nil ? [path UTF8String] : "(nil path)", (void *)library);
+		return library;
+	}
 }
 
 - (id)newLibraryWithData:(id)data error:(NSError **)error
@@ -4222,7 +4288,13 @@ hm_describe_function(id f)
 			return [library retain];
 		}
 	}
-	return [super newLibraryWithData:data error:error];
+	{
+		static unsigned told;
+		id library = [super newLibraryWithData:data error:error];
+
+		if (told++ < 8) hm_print("library from %lu bytes of data: %p\n", (unsigned long)length, (void *)library);
+		return library;
+	}
 }
 
 /* Metal source needs Metal's own compiler service, which this device has not got; what it compiles is AIR out of a
@@ -4454,6 +4526,135 @@ hm_compress(MTLTextureDescriptor *descriptor, MTLTextureUsage usage)
 	return [[HakiosMetalTexture alloc] initWithHakiosDevice:self texture:texture descriptor:descriptor usage:usage];
 }
 
+/* (hakios) Remember a surface to sample, by ID: -newTextureWithDescriptor:iosurface: is where a drawable's surface
+ * passes, and the sampling is done where its content is known to be finished, at present.  Four slots, the largest
+ * surfaces there are (a drawable of a full-screen layer is above 500000 pixels; map tiles are not). */
+static void
+hm_draw_note_surface(IOSurfaceRef surface, unsigned long width, unsigned long height)
+{
+	unsigned slot = 0;
+
+	if (!hm_draw_on || surface == NULL || width * height < 500000) {
+		return;
+	}
+	for (unsigned i = 0; i < HM_DRAW_SLOTS; i++) {
+		if (hm_draw_slots[i].id == IOSurfaceGetID(surface)) {
+			hm_draw_slots[i].width = (int)width;
+			hm_draw_slots[i].height = (int)height;
+			return;
+		}
+	}
+	for (unsigned i = 0; i < HM_DRAW_SLOTS; i++) {
+		if (hm_draw_slots[i].id == 0) {
+			slot = i;
+			break;
+		}
+		if (hm_draw_slots[i].next < hm_draw_slots[slot].next) {
+			slot = i;       /* (due soonest: the one least recently made) */
+		}
+	}
+	hm_draw_slots[slot].id = IOSurfaceGetID(surface);
+	hm_draw_slots[slot].width = (int)width;
+	hm_draw_slots[slot].height = (int)height;
+	hm_draw_slots[slot].next = hm_now();
+}
+
+/* (hakios) Every five seconds a surface: how many of the sampled pixels are not zero, and the means of their bytes
+ * (a drawable's are blue-first).  All zero is a surface nothing has drawn into; any other answer is in the means. */
+static void
+hm_draw_sample(void)
+{
+	double now = hm_now();
+
+	for (unsigned i = 0; i < HM_DRAW_SLOTS; i++) {
+		unsigned long seen = 0, lit = 0, blue = 0, green = 0, red = 0, alpha = 0, opaque = 0;
+		IOSurfaceRef surface;
+		uint8_t *base;
+		size_t row, sw, sh, bpe;
+
+		if (hm_draw_slots[i].id == 0 || now < hm_draw_slots[i].next) {
+			continue;
+		}
+		hm_draw_slots[i].next = now + 5.0;
+		surface = IOSurfaceLookup(hm_draw_slots[i].id);
+		if (surface == NULL) {
+			hm_print("hm_draw: surface %u is gone\n", hm_draw_slots[i].id);
+			hm_draw_slots[i].id = 0;
+			continue;
+		}
+		row = IOSurfaceGetBytesPerRow(surface);
+		sw = IOSurfaceGetWidth(surface);
+		sh = IOSurfaceGetHeight(surface);
+		bpe = sw != 0 ? row / sw : 0;   /* (the surface's own, padding included: never past a row) */
+		if (bpe > 4) {
+			bpe = 4;
+		}
+		if (bpe < 1) {
+			bpe = 1;
+		}
+		base = IOSurfaceLock(surface, kIOSurfaceLockReadOnly, NULL) == 0 ? IOSurfaceGetBaseAddress(surface) : NULL;
+		if (base != NULL) {
+			for (size_t y = 0; y < sh; y += 16) {
+				for (size_t x = 0; x < sw; x += 16) {
+					const uint8_t *p = base + row * y + bpe * x;
+					unsigned long any = 0;
+
+					for (size_t b = 0; b < bpe; b++) {
+						any |= p[b];
+					}
+					seen++;
+					if (any != 0) {
+						lit++;
+					}
+					blue += p[0];
+					green += bpe > 1 ? p[1] : 0;
+					red += bpe > 2 ? p[2] : 0;
+					alpha += bpe > 3 ? p[3] : 255;
+					opaque += (bpe > 3 ? p[3] : 255) == 255;
+				}
+			}
+			/* (hakios) Once a half minute, the surface as a small picture: 36 columns by 24 rows of
+			 * mean luminance in hex (0 darkest, f brightest), so a map canvas that is on the surface
+			 * but not on the screen can be told from one the application never drew.  The mean below
+			 * says how bright the whole surface is; this says where its light is, which is what a
+			 * map's roads and labels make.  Twenty samples' worth (ten minutes at 30 s apart) covers
+			 * a run.  Taken under the lock, since it reads the rows. */
+			if ((hm_draw_slots[i].samples++ % 6) == 0 && hm_draw_slots[i].samples <= 121) {
+				char line[40];
+
+				for (int ty = 0; ty < 24; ty++) {
+					size_t y0 = sh * (size_t)ty / 24, y1 = sh * (size_t)(ty + 1) / 24;
+
+					for (int tx = 0; tx < 36; tx++) {
+						size_t x0 = sw * (size_t)tx / 36, x1 = sw * (size_t)(tx + 1) / 36;
+						unsigned long long sum = 0;
+						unsigned long count = 0;
+
+						for (size_t y = y0; y < y1; y += 3) {
+							for (size_t x = x0; x < x1; x += 3) {
+								const uint8_t *p = base + row * y + bpe * x;
+								unsigned long lum = bpe > 2 ? (299UL * p[2] + 587UL * p[1] + 114UL * p[0]) / 1000 : p[0];
+
+								sum += lum;
+								count++;
+							}
+						}
+						line[tx] = "0123456789abcdef"[count != 0 ? (unsigned)(sum / count) >> 4 : 0];
+					}
+					line[36] = 0;
+					hm_print("hm_draw %u: %s\n", hm_draw_slots[i].id, line);
+				}
+			}
+			IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
+		}
+		hm_print("hm_draw: surface %u (%zux%zu): %lu of %lu samples not zero (%.3f), mean %lu,%lu,%lu, alpha %lu (%lu of %lu opaque)\n",
+			 hm_draw_slots[i].id, sw, sh, lit, seen, seen != 0 ? (double)lit / (double)seen : 0.0,
+			 seen != 0 ? blue / seen : 0, seen != 0 ? green / seen : 0, seen != 0 ? red / seen : 0,
+			 seen != 0 ? alpha / seen : 0, opaque, seen);
+		CFRelease(surface);
+	}
+}
+
 /* An IOSurface is the window server's memory, and what CAMetalLayer makes its drawables of: the texture is the
  * surface's own pixels (hakios-metal asks the kernel for the surface's memory as a GPU buffer), so drawing into it is
  * drawing into what the compositor reads. A refusal here is LOUD and named, never a quiet nil: the earlier plug-in's
@@ -4482,6 +4683,8 @@ hm_compress(MTLTextureDescriptor *descriptor, MTLTextureUsage usage)
 							    (unsigned long)[descriptor mipmapLevelCount], (unsigned long)[descriptor sampleCount],
 							    (unsigned long)[descriptor arrayLength]]);
 	}
+	/* (hakios) a surface large enough to be the drawable of a full-screen layer is sampled after each present */
+	hm_draw_note_surface(surface, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface));
 	usage = [descriptor usage];
 	if (usage == MTLTextureUsageUnknown) {
 		usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
@@ -7301,6 +7504,7 @@ hm_completed(hakios_metal_cb *cb, void *context)
 		[drawable present];
 		[drawable release];
 		hm_fps_note(YES, 0, 0, NULL);
+		hm_draw_sample();       /* (hakios) the surface as it was presented, see hm_draw_slots */
 	}];
 }
 
@@ -8437,6 +8641,11 @@ hm_spec_off(void)
 
 - (void)setRenderPipelineState:(id)state
 {
+	if (state == nil) {
+		static int told;
+
+		if (told++ < 3) hm_print_callers("a nil render pipeline state was set");
+	}
 	if (state != nil && ![state isKindOfClass:[HakiosMetalRenderPipelineState class]]) {
 		static int told;
 		char what[160];
@@ -8450,6 +8659,7 @@ hm_spec_off(void)
 	[state retain];
 	[_pipeline release];
 	_pipeline = state;
+	if (state != nil) _pipelineSets++;
 }
 
 /* --- viewport and scissor: stored, handed to the draw; unset means the whole attachment (znear 0, zfar 1) --- */
@@ -9110,7 +9320,17 @@ hm_trace_draw(const void *which, const char *program, const struct hakios_metal_
 	hakios_metal_sampler *fsSamp[HM_MAX_SAMPLERS], *vsSamp[HM_MAX_SAMPLERS];
 
 	if (_pipeline == nil) {
-		hm_print("refused: a draw with no render pipeline state; the command buffer is failed\n");
+		static int told;
+		if (told++ < 3) {
+			char what[200];
+
+			snprintf(what, sizeof(what),
+				 "refused: a draw with no render pipeline state (encoder %s, %u set on it, %lu made in this process); the command buffer is failed:",
+				 class_getName(object_getClass(self)), _pipelineSets, hm_pipelines_made);
+			hm_print_callers(what);
+		} else {
+			hm_print("refused: a draw with no render pipeline state; the command buffer is failed\n");
+		}
 		hakios_metal_cb_refuse(cb, "a draw with no render pipeline state");
 		return;
 	}

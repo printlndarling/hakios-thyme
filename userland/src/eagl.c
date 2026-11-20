@@ -242,7 +242,9 @@ struct image {
 	unsigned unchanged;             /* ... and how many looks in a row found it the same (surface_changed()) */
 	unsigned uploaded;              /* how many times its texture was filled (surface_to_texture()) */
 	unsigned used;                  /* the frame it was last bound for drawing in (surface_audit()) */
+	unsigned binds;                 /* times bound since the audit last said it (surface_audit()) */
 	unsigned audit_said;            /* how many times the audit has said it adds up to nothing */
+	char origin;                    /* 'T': -texImageIOSurface: (a picture to show); 'A': -attachImage: (drawn into or a picture to show) */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -1248,6 +1250,78 @@ surface_audit(struct eagl *e)
 			}
 		}
 	}
+	/*
+	 * (hakios) The large surfaces this context holds, and what is in them: a window's map layer that the
+	 * application draws (hm_draw, in HakiosMetalCA.m) can be absent here, black here, or present and not
+	 * drawn, and each of the three is a different fault -- the map is black on the screen while the
+	 * application's own drawables are not (run of 042702). Two an audit, round robin, so that every large
+	 * surface is said again every few audits for the whole run.
+	 *
+	 * A surface drawn into (a target, an EAGL drawable) is said too: the map view's own surface is one, and
+	 * leaving targets out is how the audit looked at everything except the surface in question. And the mean
+	 * of the whole surface says a surface is black, not which rows are not: beside it now a profile of 48
+	 * bands of rows, a hex digit each -- 0 black, f white -- and the same for opacity. A picture that shows
+	 * on the screen in bands of rows must be in bands here if this side of the compositor is where it went
+	 * wrong, and whole here if it is not.
+	 */
+	{
+		static unsigned big_next;
+		unsigned said = 0;
+
+		for (unsigned n = 0; n < e->image_count && said < 2; n++) {
+			unsigned i = (big_next + n) % e->image_count;
+			struct image *image = &e->images[i];
+			const uint8_t *base;
+			size_t row;
+			unsigned pixel, b = 0, g = 0, r = 0, a = 0, colours = 0;
+			char bands[49], opacity[49];
+
+			if (image->surface == NULL) {
+				continue;
+			}
+			if ((size_t)image->width * (size_t)image->height < 1000000 ||
+			    (base = IOSurfaceGetBaseAddress(image->surface)) == NULL) {
+				continue;
+			}
+			row = IOSurfaceGetBytesPerRow(image->surface);
+			pixel = bytes_a_pixel(image->format, image->type);
+			pixel = pixel < 3 || pixel > 4 ? 4 : pixel;
+			for (unsigned band = 0; band < 48; band++) {
+				const uint8_t *line = base + row * ((size_t)band * (size_t)image->height / 48);
+				unsigned band_b = 0, band_g = 0, band_r = 0, band_a = 0, at = 0;
+
+				for (unsigned sx = 0; sx < 4; sx++) {
+					const uint8_t *p = line + (size_t)pixel * ((size_t)sx * (size_t)image->width / 4);
+
+					band_b += p[0];
+					band_g += p[1];
+					band_r += p[2];
+					band_a += pixel == 4 ? p[3] : 255;
+					at++;
+				}
+				b += band_b;
+				g += band_g;
+				r += band_r;
+				a += band_a;
+				colours += at;
+				bands[band] = "0123456789abcdef"[(band_b / at + band_g / at + band_r / at) * 15 / 765];
+				opacity[band] = "0123456789abcdef"[(band_a / at) * 15 / 255];
+			}
+			bands[48] = 0;
+			opacity[48] = 0;
+			big_next = (i + 1) % e->image_count;
+			said++;
+			say("hakios-gl: pid %d: frame %u: big surface %u (texture %u): %d x %d, %s%s%s, %u fills, %s, bound %u times since "
+			    "last said, from %s; mean %u,%u,%u a %u; rows %s; alpha %s\n",
+			    (int)getpid(), e->frames + 1, IOSurfaceGetID(image->surface), image->texture, image->width, image->height,
+			    image->target ? "drawn into" : image->shared ? "its memory" : "copied",
+			    image->wrapped ? ", wrapped" : "", image->target && !image->painted ? ", in name only" : "",
+			    image->uploaded, image->used == e->frames + 1 ? "drawn this frame" : "not drawn this frame",
+			    image->binds, image->origin == 'T' ? "-texImageIOSurface:" : image->origin == 'A' ? "-attachImage:" : "?",
+			    b / colours, g / colours, r / colours, a / colours, bands, opacity);
+			image->binds = 0;
+		}
+	}
 	{
 		/*
 		 * The display's own surface, which everything drawn ends up in: if it adds up to
@@ -1499,6 +1573,7 @@ my_glBindTexture(void *context, GLenum target, GLuint texture)
 	}
 	if (texture != 0 && e->image_count != 0 && (image = image_of(e, texture)) != NULL) {
 		image->used = e->frames + 1;
+		image->binds++;
 		if (!image->shared &&
 		    (!image->target ? IOSurfaceGetSeed(image->surface) != image->seed || surface_changed(e, image) :
 		    image->wrapped && !image->painted && surface_changed(e, image))) {
@@ -4220,16 +4295,11 @@ my_texImageIOSurface(id self, SEL selector, IOSurfaceRef surface, unsigned long 
 	image->type = (GLenum)type;
 	image->plane = plane;
 	image->invert = invert;
+	image->origin = 'T';
 	image->width = width;
 	image->height = height;
 	note_format(invert ? "IOSurface shown, inverted" : "IOSurface shown", image->internal, image->format, image->type, width,
 	    height);
-	if (shown++ < 24) {
-		say("hakios-gl: -texImageIOSurface: surface %u ('%.4s' %zu x %zu, %zu planes) as texture %d: %d x %d, plane %u%s\n",
-		    IOSurfaceGetID(surface), (const char *)&(uint32_t){ __builtin_bswap32(IOSurfaceGetPixelFormat(surface)) },
-		    IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), IOSurfaceGetPlaneCount(surface), texture, width,
-		    height, plane, invert ? ", inverted" : "");
-	}
 	image->wrapped = IOSurfaceGetPixelFormat(surface) == 0;
 	began = now_us();
 	if (!surface_shared(e, image)) {
@@ -4237,6 +4307,14 @@ my_texImageIOSurface(id self, SEL selector, IOSurfaceRef surface, unsigned long 
 		surface_to_texture(e, image);
 	}
 	e->attaching += now_us() - began;
+	if (shown++ < 24) {
+		say("hakios-gl: frame %u: -texImageIOSurface: surface %u ('%.4s' %zu x %zu, %zu planes) as texture %d: %d x %d, "
+		    "plane %u%s, %s\n",
+		    e->frames + 1, IOSurfaceGetID(surface),
+		    (const char *)&(uint32_t){ __builtin_bswap32(IOSurfaceGetPixelFormat(surface)) }, IOSurfaceGetWidth(surface),
+		    IOSurfaceGetHeight(surface), IOSurfaceGetPlaneCount(surface), texture, width, height, plane,
+		    invert ? ", inverted" : "", image->shared ? "its memory" : "a copy");
+	}
 	eagl_leave(e, 0x970);
 	return YES;
 }
@@ -4268,6 +4346,7 @@ my_attachImage(id self, SEL selector, unsigned long target, IOSurfaceRef surface
 		return NO;
 	}
 	image->target = true;
+	image->origin = 'A';
 	image->to = GL_TEXTURE_2D;
 	image->invert = inverted;
 	image->width = (GLsizei)IOSurfaceGetWidth(surface);
@@ -4298,7 +4377,8 @@ my_attachImage(id self, SEL selector, unsigned long target, IOSurfaceRef surface
 	}
 	e->attaching += now_us() - began;
 	if (attached++ < 24) {
-		say("hakios-gl: -attachImage: texture %d is IOSurface %u ('%.4s' %d x %d, %zu bytes a row)%s%s\n", texture,
+		say("hakios-gl: frame %u: -attachImage: texture %d is IOSurface %u ('%.4s' %d x %d, %zu bytes a row)%s%s\n",
+		    e->frames + 1, texture,
 		    IOSurfaceGetID(surface), (const char *)&(uint32_t){ __builtin_bswap32(pixels) }, image->width, image->height,
 		    IOSurfaceGetBytesPerRow(surface), inverted ? ", drawn inverted" : "", image->shared ? ": its memory" :
 		    image->mirror != 0 ? ": a texture, copied into its memory by the GPU" : ": a copy");
