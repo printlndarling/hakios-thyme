@@ -6293,3 +6293,47 @@ The one wild frame is still there (max 20.7 ms), but it is one frame of two and 
 thousand, and no window's line counts a frame late for the scan it aimed at.  The run ended
 at kernel time 732 s by the battery guard at 25%; the phone went back to Android to charge
 (`XL_REBOOT_AFTER`).
+
+### Run 31: the blank canvas was my own rebuild -- the image lost its Metal plug-in (2026-11-20, 13:41 -- 13:47, `logs/134128-run.log`)
+
+The run set out to watch the dialogs answered and the map left alone, on the image rebuilt at
+13:33.  It came back with a white canvas on every frame after the consent, and the question was
+whether a kernel change had done it.  It had not: the rebuild ran `devices/thyme/build-root.sh`
+without `METAL_PLUGIN=ca`, and that build ships `src/HakiosMetal.m`, the plug-in that refuses
+every application, instead of `src/HakiosMetalCA.m`, the one that grants the device to
+executables under `/var/containers/Bundle/Application` when `metal_apps=1`.  Not one boot
+argument differed from run 26's.
+
+The log says it plainly.  There is no `HakiosMetal[` line in it at all, no `hm_draw`, no
+`layer 1`; the only device refusals are backboardd at 13:41:41 and com.apple.WebKit.GPU at
+13:45:09, both in the non-CA wording, `is not shown the device (metal=1; 1 is metal_test only,
+2 all but backboardd, 3 all)`.  Run 26, with the CA image, logged
+`HakiosMetal[IphoneCom 358 ...]: device: Adreno (hakios-metal, chip 0x6050002) on
+IOAcceleratorES service` and drew `hm_draw: surface 358 (1125x2436): ... mean 219,235,198`.
+So the app had no renderer to draw its engine into, and the canvas stayed what the app's own
+views The search field's cyan-to-violet ring is in these frames and in the pre-engine picture
+(`screen-r31-40.png`, drawn by the app's CA views before any Metal frame exists), so it comes
+with the app's own drawing.  Whether it is the focused-search style the app uses on real
+hardware cannot be settled from this tree; what run 32 can settle is whether restoring the
+app's device changes it.
+
+The screenshots follow the same line.  `screen-r31-40.png` is the 欢迎使用百度地图 consent
+over Chengdu -- the CoreAnimation picture the app draws before its engine begins.
+`screen-r31-100.png` has the consent answered: every UI element is drawn and live (the
+左安门桥 house-price sheet, the map buttons, the search field with 回民街必吃十大美食 typed
+into it) over a canvas with no map in it.  `screen-r31-160.png` is the 停车场 list the search
+opened.  The search field's cyan-to-violet ring in these frames is the focused-search style
+the app itself draws -- it is there in the pre-engine picture too, drawn by the app's CA views.
+
+The pixel dumps put the blank canvas on the guest's side of the panel.  At the map page the
+`fbdump: searchbar row 150 x 0` samples hold `fff4f5fc`-type near-white pixels in `src` and the
+drawn frame holds the same run -- the panel presents what the layer has.  The layer itself was
+near-white because nothing above the app's views ever drew into it.
+
+The scene itself went as written: three rounds of dialog taps answered everything, a fourth
+round of taps (this scene had four then) fell past the last prompt and opened a POI page, and
+the battery guard ended the run at kernel 431 s (`battguard: charge 25% ... battery_stop=25`,
+three looks) with the shutdown at 461 s.  The image was rebuilt with `METAL_PLUGIN=ca`; its
+build log has `build.sh: HakiosMetal for CoreAnimation (src/HakiosMetalCA.m)`, the staged
+bundle (8,731,336 bytes) holds `keeps the road it has` and not `metal_test only`, and the image
+is `67c75777b65ffa4b016d7faaeeb21f8ae332fffdb1ff443ff4f3204f7b44f852`.  Run 32 uses it.
