@@ -63,6 +63,15 @@ struct air_ptr {
    bool is_image;                    /* a texture the shader writes: an image, not a view */
    nir_def *offset;                  /* bytes, 32-bit; NULL means zero */
    const struct air_type *pointee;   /* for sizes, and for loads without a type */
+   /* A texture or sampler ARRAY parameter: `array<depth2d<float, sample>, 3>`
+    * arrives as `ptr byval([3 x ptr addrspace(1)])`, and its elements are read
+    * back with a getelementptr and a pointer load. The elements are Metal
+    * bindings base..base+count-1 (the metadata's location_index carries the
+    * base and the count: `!"air.location_index", i32 0, i32 3`), so the
+    * pointer to element k has binding base+k. array_len is that count, 0 for
+    * a parameter that is not an array.
+    */
+   unsigned array_len;
 };
 
 enum air_val_kind {

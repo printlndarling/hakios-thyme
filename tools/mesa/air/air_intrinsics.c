@@ -2281,20 +2281,6 @@ texture_op(struct air_ctx *c, const struct air_inst *in, const struct air_name *
       arg++;
    }
 
-   /* A depth texture takes a plane or aspect selector before the coordinate,
-    * and every call in the corpus passes 1. What else it can be is not known
-    * from the data, so anything else is refused rather than assumed.
-    */
-   if (t.depth) {
-      uint64_t plane;
-      if (!tex_flag(c, in, arg, &plane))
-         return false;
-      if (plane != 1)
-         return air_error(c, "intrinsic: air.%s with aspect %u (only 1 is understood)",
-                          n->part[0], (unsigned)plane);
-      arg++;
-   }
-
    unsigned ncoord = coord_components_of(&t);
    nir_alu_type dest_type = tex_dest_type(c, in->base.type, n);
    unsigned dest_bits = nir_alu_type_get_type_size(dest_type);
@@ -2328,6 +2314,33 @@ texture_op(struct air_ctx *c, const struct air_inst *in, const struct air_name *
       }
       air_set(c, &in->base, air_val_ssa(c, nir_u2uN(&c->b, res, dest_bits)));
       return true;
+   }
+
+   /* A depth texture takes a plane or aspect selector before the coordinate,
+    * and every call in the corpus passes 1. What else it can be is not known
+    * from the data, so anything else is refused rather than assumed.
+    *
+    * NO ASPECT ON A QUERY, and reading one there was a defect, not a reading.
+    * The `get` forms take a single i32 after the texture and it is the LOD:
+    * Apple's own header says so (`get_width(uint lod)`, and the private
+    * `__metal_get_width_depth_2d_t(t, lod)` has exactly that one argument),
+    * and every one of the 88 depth queries in the 59 modules of the corpus
+    * that ask one passes 0 -- a level, not a plane. Read as an aspect it was
+    * refused ("aspect 0"), which cost 30 of Baidu Maps' fragment pipelines
+    * (what kept its map off the screen turned out to be the kernel's layer
+    * drawing; see devices/thyme/CHECKLIST.md). The block therefore sits BELOW the query branch,
+    * where the operand really is an aspect: the 107 sample_compare calls in
+    * the same corpus all pass 1 there, which is why this one keeps refusing
+    * anything else rather than guessing what a second plane would be.
+    */
+   if (t.depth) {
+      uint64_t plane;
+      if (!tex_flag(c, in, arg, &plane))
+         return false;
+      if (plane != 1)
+         return air_error(c, "intrinsic: air.%s with aspect %u (only 1 is understood)",
+                          n->part[0], (unsigned)plane);
+      arg++;
    }
 
    if (!strcmp(t.op, "write")) {

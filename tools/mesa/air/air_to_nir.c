@@ -2225,19 +2225,32 @@ translate_input(struct air_ctx *c, const struct air_md *node, unsigned *next_var
    if (md_key(node, "air.texture") >= 0) {
       uint64_t index = 0;
       md_key_int(node, "air.location_index", &index);
+      /* The count after the base: `!"air.location_index", i32 0, i32 3` is
+       * `array<depth2d<float, sample>, 3>` at bindings 0..2, and the next
+       * texture parameter's location_index starts at 3. Each element is its
+       * own Metal binding, so each is registered as its own resource here;
+       * the parameter's pointer keeps the count so a pointer loaded out of
+       * the array (byval [N x ptr]) can resolve to one of them.
+       */
+      uint64_t count = 1;
+      int li = md_key(node, "air.location_index");
+      if (li < 0 || !md_int(node, li + 2, &count))
+         count = 1;
       bool sample = md_key(node, "air.sample") >= 0;
       bool read = md_key(node, "air.read") >= 0;
       bool write = md_key(node, "air.write") >= 0 || md_key(node, "air.read_write") >= 0;
       /* A texture the shader writes is an image to Gallium, with its own
        * binding space; one it only samples or reads is a sampler view.
        */
+      for (uint64_t i = 0; i < count; i++)
+         add_resource(c, write ? AIR_RESOURCE_IMAGE : AIR_RESOURCE_TEXTURE,
+                      index + i, 0, sample || read, write, param, node);
       struct air_ptr p = {
          .class = AIR_PTR_TEXTURE,
          .binding = index,
          .is_image = write,
+         .array_len = count > 1 ? (unsigned)count : 0,
       };
-      add_resource(c, write ? AIR_RESOURCE_IMAGE : AIR_RESOURCE_TEXTURE, index, 0,
-                   sample || read, write, param, node);
       c->params[param] = air_val_ptr(c, p);
       return true;
    }
@@ -2245,8 +2258,17 @@ translate_input(struct air_ctx *c, const struct air_md *node, unsigned *next_var
    if (md_key(node, "air.sampler") >= 0) {
       uint64_t index = 0;
       md_key_int(node, "air.location_index", &index);
-      struct air_ptr p = { .class = AIR_PTR_SAMPLER, .binding = index };
-      add_resource(c, AIR_RESOURCE_SAMPLER, index, 0, true, false, param, node);
+      uint64_t count = 1;
+      int li = md_key(node, "air.location_index");
+      if (li < 0 || !md_int(node, li + 2, &count))
+         count = 1;
+      for (uint64_t i = 0; i < count; i++)
+         add_resource(c, AIR_RESOURCE_SAMPLER, index + i, 0, true, false, param, node);
+      struct air_ptr p = {
+         .class = AIR_PTR_SAMPLER,
+         .binding = index,
+         .array_len = count > 1 ? (unsigned)count : 0,
+      };
       c->params[param] = air_val_ptr(c, p);
       return true;
    }
@@ -3166,6 +3188,46 @@ narrow_int_gate(struct air_ctx *c, const struct air_inst *in)
    return true;
 }
 
+/* A pointer read back out of a texture or sampler ARRAY parameter.
+ *
+ * `array<depth2d<float, sample>, 3> shadowMaps` arrives as
+ * `ptr nocapture readonly byval([3 x ptr addrspace(1)])`, and its elements
+ * are fetched with `getelementptr [3 x ptr], ptr %14, i64 0, i64 k` and
+ * `load ptr`. In this frontend a pointer is a resolution -- a binding and a
+ * byte offset decided while translating -- so the load resolves here: the
+ * metadata gave the parameter's base and count (`!"air.location_index",
+ * i32 0, i32 3`), the GEP has already turned the element index into a
+ * constant byte offset (8 bytes per element), and element k is the binding
+ * base + k. Each of those bindings was registered as its own resource, and
+ * the next texture parameter of the same module starts at base + count,
+ * which is what confirms the arithmetic (in Baidu Maps' shadow-mapping
+ * modules the array is 0..2 and the next parameter is 3).
+ *
+ * A run-time index has no resolution and is refused by name. Every one of
+ * the corpus's 30 array-taking modules indexes with a constant.
+ */
+static struct air_val *
+texture_array_element(struct air_ctx *c, struct air_ptr p)
+{
+   nir_src off = nir_src_for_ssa(ptr_offset(c, p));
+   if (!nir_src_is_const(off))
+      return air_error(c, "instruction: an element of a texture array (bindings %u..%u) "
+                          "chosen at run time", p.binding,
+                       p.binding + p.array_len - 1), NULL;
+   uint64_t bytes = nir_src_as_uint(off);
+   if (bytes % 8)
+      return air_error(c, "instruction: a pointer load at byte %u of a texture array, "
+                          "which is not an element boundary", (unsigned)bytes), NULL;
+   uint64_t k = bytes / 8;
+   if (k >= p.array_len)
+      return air_error(c, "instruction: element %u of a texture array of %u",
+                       (unsigned)k, p.array_len), NULL;
+   p.binding += (unsigned)k;
+   p.array_len = 0;
+   p.offset = NULL;
+   return air_val_ptr(c, p);
+}
+
 static bool
 translate_instruction(struct air_ctx *c, const struct air_inst *in)
 {
@@ -3514,6 +3576,17 @@ translate_instruction(struct air_ctx *c, const struct air_inst *in)
       }
       if (p->kind != AIR_VAL_PTR)
          return air_error(c, "instruction: a load from something that is not a pointer");
+      /* A pointer read back out of a texture or sampler ARRAY parameter: a
+       * resolution, made here, because that is what a pointer is in this
+       * frontend (texture_array_element).
+       */
+      if (p->ptr.array_len && in->base.type->kind == AIR_TYPE_POINTER) {
+         struct air_val *res = texture_array_element(c, p->ptr);
+         if (!res)
+            return false;
+         air_set(c, &in->base, res);
+         return true;
+      }
       /* An argument buffer resolves before it loads: the byte offset names a
        * member and the member's descriptor names a binding, so this load
        * becomes a pointer and not an instruction.
