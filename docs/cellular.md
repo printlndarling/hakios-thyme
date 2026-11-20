@@ -1280,3 +1280,36 @@ reaches that decision.  The warm-handover side door does not exist either:
 the modem reaches AMSS only under Android's kernel, and the fastboot/loader
 path the port boots through resets it back to the PBL before the probe's
 first read (`execenv 0` with no PON of ours, `logs/211817-run.log`).
+
+### External evidence: the same modem boots under another XNU port (2026-11-20)
+
+The register surface above is closed; the modem is not.  An independent HakiOS
+port for the Xiaomi Mi 10 (umi) -- `github.com/xm6661885/hakios-xnu-kernel-umi-fixes`,
+pushed 2026-11-16 -- carries a complete host-loaded SDX55M stack in
+`devices/xiaomi-mi-10/overlays/xnu/files/bsd/dev/umi_modem.c` and its
+`umi_modem_{pcie,phy,mhi,power,dma,data,net,fat,selftest}.inc`: BHI upload of
+the 548,056-byte `sdx55m/sbl1.mbn`, SBL's Sahara over MHI channels 2/3 serving
+the 17-image map (`tools/modem-sahara.map`: apps 6, qdsp6sw 8, EFS 16/17/20,
+sbl1 21, aop 23, tz 25, acdb 29, hyp 33, mdmddr 34, multi_image 36/37,
+xbl_cfg 38, apdp 40, devcfg 41, sec 42; 114,843,743 bytes staged), then AMSS,
+IPCR/QRTR node 3, mission EFS/TFTP and IP_HW0/QMAP.  Its `MODEM-MAINLINE.md`
+records the recipe verified first on mainline Linux (Debian 13, ModemManager
+1.24): registration, IPv4 and SMS send/receive.  `COMMCENTER-umi.md` (v25)
+records the XNU run: LTE registered, data on `pdp_ip0` (tx 867 / rx 1079 in
+91 s) and an MT SMS delivered to imagent; the SMS banner is a separate
+userland issue (`MessagesBlastDoorService`, `NOTIFICATIONS-umi.md`).  None of
+this is reproduced here, and the umi endpoint is the same `17cb:0306` with
+BAR0 `0x64300000`.
+
+Consequences for this phone.  The PBL accepts an SBL from a non-Apple host on
+this modem family, so `0xef0e0003` is a fault in what our transfer delivered
+or in its mapping, not a modem-wide refusal -- the "closed by evidence"
+conclusion above holds for the register surface only.  Thyme's own constants
+are in `github.com/yuweiyuan8/linux-xiaomi-thyme-mainline` (Linux 7.2):
+`sm8250-xiaomi-thyme-modem.dtsi` gives `qcom,ext-sdx55m` with GPIOs 1/3/56/57
+and the MHI iommu group (`qcom,iommu-dma-addr-pool = <0x20000000 0x1fffffff>`,
+`"fastmap"`, coherent pagetable), and `drivers/bus/mhi/host/sahara.c` plus
+`mhi_qcom_sdx55_fusion_info` (`fw sdx55m/sbl1.mbn`, `amss_image`) implement
+the same BHI->Sahara flow for this device tree.  The next read is
+`umi_modem_mhi.inc`'s BHI upload and SMMU setup against
+`devices/thyme/drivers/modem/hakios.thyme_pcie2.c`.
