@@ -1,0 +1,48 @@
+# RC_JOBS=rc.jobs.mapblack: install the staged map IPA, answer every first-launch dialog it can
+# raise, then let the settled map stand alone and pan it, so the run shows whether the live map
+# is on the screen when nothing is over it.
+#
+# The run of 072937 had the map fully drawn behind the 欢迎 consent at +50 and +120 s (Beijing,
+# its districts and highways), the home canvas black behind the 隐私保护指引 promo at +90 and
+# +140, a POI sheet over a black canvas at +210, and a fully drawn 房源 page at +260 through
+# +500 -- with the clock live, so those frames are the app's own.  The run of 074615 settled the
+# first dialogs: 暂不开启 at (0.336, 0.592) cleared the promo, the 同意 of 欢迎使用百度地图 sits
+# at (0.662, 0.673) -- 0.659 is above the button and misses -- the location prompt's Allow While
+# Using App is (0.5, 0.694), and a "Would Like to Send You Notifications" prompt follows at
+# (0.349, 0.575); left up, it eats every later gesture on the map.  That run had the app online
+# (WebSocket 101 to 180.97.107.91:443, BNNetworkConfigurationManager success) and the engine
+# drawing all along (2.7-9.6 frames/s, 70-100 draws per buffer).
+#
+# The run of 080159 settled the prompt list: 欢迎使用百度地图's 同意 at (0.662, 0.673), the
+# location prompt's Allow While Using App at (0.5, 0.694), "Would Like to Send You Notifications"
+# (Don't Allow, 0.309, 0.592) and, after it, the ATT prompt "Allow 百度地图 to track your activity
+# across other companies' apps and websites" (Ask App Not to Track is the whole row at 0.602, so
+# 0.45, 0.602 lands on it).  That run never answered ATT, so it stood to the end, and every frame
+# with a system alert over the app had the map area black while the app's own bars stayed bright.
+# Behind the 欢迎 consent, before the app's Metal engine began (first Metal frame 08:05:07 with
+# spawn 08:03:54; the consent accepted at about 08:05:00), the map was drawn -- Chengdu, its
+# districts and highways -- with no Metal frame at all: a CoreAnimation picture, not the engine's.
+# The engine's drawable, sampled while the screen showed black, holds a near-white image (mean
+# 234,236,224) and keeps being drawn at 3-10 frames a second.  So this run answers every prompt
+# in turn -- a tap at 0.309,0.592 is Don't Allow, at 0.45,0.602 Ask App Not to Track, at
+# 0.661,0.594 一键开启 -- then leaves the map alone and pans it: if the canvas is drawn with
+# nothing over it, the black was the alert's doing; if it is still black, the engine's own frames
+# are what the compositor drops, and that is the bug to chase.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/var/jb/bin/sh /redwood/bin/hk-mapipa.sh http://192.168.0.104:8000
+# The launch dialogs, in the order the last two runs raised them: 一键开启 on the 隐私保护指引
+# promo, 同意 on the welcome consent, then a sweep that answers whichever permission alert is up,
+# repeated so a prompt that comes late is still answered.
+/redwood/bin/rwtouch wait 40 tap 0.661 0.594 wait 15 tap 0.662 0.673 wait 15 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.5 0.694 wait 12 tap 0.662 0.673 wait 12 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.661 0.594 wait 12 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.309 0.592
+# Nothing should be over the map now: half a minute to settle, then one pan up and one to the
+# right, so the engine has to draw tiles it did not have, and a tap on the canvas.
+/redwood/bin/rwtouch wait 45 swipe 0.5 0.55 0.5 0.30 600 wait 20 swipe 0.65 0.5 0.35 0.5 600 wait 20 tap 0.5 0.45 wait 150
+# The guest's own DNS and TCP, in the same boot and while the app is up, so the app's network
+# and the system's are the same fact and not two.
+/redwood/bin/net_test resolve www.baidu.com
+/redwood/bin/net_test tcp www.baidu.com 443
+/var/jb/usr/bin/cat /private/var/tmp/mapipa.txt

@@ -11,4 +11,35 @@
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
 /redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
 /var/jb/bin/sh /redwood/bin/hk-mapipa.sh http://192.168.0.104:8000
+# The app opens on its 欢迎使用百度地图 privacy dialog, and its map stays behind it
+# until it is answered.  hk-mapipa.sh has slept twelve seconds after the launch by
+# here; give the dialog another twelve to be up and tap 同意, the right-hand pill
+# (x 0.665, y 0.677 of 1080x2340, measured from the run of 021640 whose screenshot
+# is screen-baidu7.png).  A touch through /dev/hakios-touch is what the app's own
+# hit testing wants; nothing about the app is pre-seeded into the image.
+/redwood/bin/rwtouch wait 48 tap 0.665 0.677
+# The app answers 同意 with a second dialog of its own, 隐私保护指引 (a guide to
+# the historical-use data it wants to collect), and system alerts follow in an
+# order that is not fixed -- location, tracking (ATT), notifications; 030028 had
+# location first, 024552 notifications first.  Each dismissal uncovers the next,
+# and a tap meant for the guide can land on an alert that came up over it (the
+# run of 032424: the single guide tap went to an alert, and the guide was still
+# up at +440 s).  So every answer of every layer is tapped in turn, three rounds:
+#   暂不开启 (the guide's left button):                      x 0.336, y 0.594 of 1080x2340
+#   一键开启 (its right; whichever of the two is up answers): x 0.661, y 0.594
+#   Allow While Using App (location, its middle line):       x 0.5,   y 0.694
+#   Ask App Not to Track (ATT, its first line):              x 0.5,   y 0.590
+#   Allow (notifications, right of Don't Allow):             x 0.672, y 0.565
+# A tap that finds nothing lands on the map behind it: in the run of 035008 the
+# first round cleared every dialog and the later ones walked the map into a 房源
+# page; the run of 042702 added the 问一问AI page, and showed why not to go
+# further -- a restart meets an interstitial again, and the circle under its card
+# (x 0.5, y 0.776) is the AI bubble of the map's own bottom bar.  The guide's
+# buttons are measured from screen-map-140.png of the run of 033552.
+/redwood/bin/rwtouch wait 10 tap 0.336 0.594 wait 5 tap 0.661 0.594 wait 5 tap 0.5 0.694 wait 5 tap 0.5 0.590 wait 5 tap 0.672 0.565 wait 5 tap 0.336 0.594 wait 5 tap 0.661 0.594 wait 5 tap 0.5 0.694 wait 5 tap 0.5 0.590 wait 5 tap 0.672 0.565 wait 5 tap 0.336 0.594 wait 5 tap 0.661 0.594 wait 5 tap 0.5 0.694 wait 5 tap 0.5 0.590 wait 5 tap 0.672 0.565 wait 20
+# No kill and second launch (the run of 042702: a restart brings an interstitial and ATT
+# again, and the sweep's taps on the map walked it into a 房源 page and then the 问一问AI
+# page -- the tap meant for the interstitial's close button, x 0.5 y 0.776, is the AI bubble
+# there).  The sweep stops here: a tap that finds no dialog lands on the map, whose POI card
+# is over the bottom of it, not over the map.
 /var/jb/usr/bin/cat /private/var/tmp/mapipa.txt
