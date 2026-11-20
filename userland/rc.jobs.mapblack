@@ -34,13 +34,26 @@
 /var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
 /redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
 /var/jb/bin/sh /redwood/bin/hk-mapipa.sh http://192.168.0.104:8000
-# The launch dialogs, in the order the last two runs raised them: 一键开启 on the 隐私保护指引
-# promo, 同意 on the welcome consent, then a sweep that answers whichever permission alert is up,
-# repeated so a prompt that comes late is still answered.
-/redwood/bin/rwtouch wait 40 tap 0.661 0.594 wait 15 tap 0.662 0.673 wait 15 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.5 0.694 wait 12 tap 0.662 0.673 wait 12 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.661 0.594 wait 12 tap 0.309 0.592 wait 12 tap 0.45 0.602 wait 12 tap 0.309 0.592
-# Nothing should be over the map now: half a minute to settle, then one pan up and one to the
-# right, so the engine has to draw tiles it did not have, and a tap on the canvas.
-/redwood/bin/rwtouch wait 45 swipe 0.5 0.55 0.5 0.30 600 wait 20 swipe 0.65 0.5 0.35 0.5 600 wait 20 tap 0.5 0.45 wait 150
+# The launch dialogs: 一键开启 on the 隐私保护指引 promo (0.661,0.594), 同意 on the welcome
+# consent (0.662,0.673), Allow While Using App on the location prompt (0.5,0.694), Don't Allow
+# on the notifications prompt (0.309,0.592), Ask App Not to Track on ATT (0.45,0.602).
+#
+# The run of 123813 showed why every prompt has to be in every round.  Its sweep spent its only
+# 0.5,0.694 tap at 12:41:41; the 欢迎 consent was still up at 12:41:48 and accepted by the next
+# tap, and the location prompt appeared at once -- after the one tap that could answer it.  The
+# eleven taps that followed all fell elsewhere, and the alert stood to the end of the run.  So
+# the whole set repeats, eight seconds apart: whichever prompt is up at a tap, its own button is
+# in that round.  Three rounds, not four: run 31's fourth round of taps landed after the last
+# prompt and opened a POI page (地点详情), which is not what this scene is here to watch.
+/redwood/bin/rwtouch wait 45 tap 0.661 0.594 wait 8 tap 0.662 0.673 wait 8 tap 0.5 0.694 wait 8 tap 0.309 0.592 wait 8 tap 0.45 0.602 wait 8 tap 0.661 0.594 wait 8 tap 0.662 0.673 wait 8 tap 0.5 0.694 wait 8 tap 0.309 0.592 wait 8 tap 0.45 0.602 wait 8 tap 0.661 0.594 wait 8 tap 0.662 0.673 wait 8 tap 0.5 0.694 wait 8 tap 0.309 0.592 wait 8 tap 0.45 0.602
+# The sweep answers every prompt, but a tap that lands after the last prompt falls on the map, and
+# a tap on a POI opens its page: run 30 was on 酒金桥早市's page by +110 s and stayed on place pages.
+# Left-edge swipes are the iOS back gesture -- whatever a tap opened, the map is what is left when
+# they are done -- and nothing taps the canvas after them.
+/redwood/bin/rwtouch wait 5 swipe 0.005 0.5 0.75 0.5 400 wait 4 swipe 0.005 0.5 0.75 0.5 400
+# Nothing should be over the map now: settle, then one pan up and one to the right, so the engine
+# has to draw tiles it did not have; no tap after them, so the last screenshots are the map alone.
+/redwood/bin/rwtouch wait 40 swipe 0.5 0.55 0.5 0.30 600 wait 20 swipe 0.65 0.5 0.35 0.5 600 wait 150
 # The guest's own DNS and TCP, in the same boot and while the app is up, so the app's network
 # and the system's are the same fact and not two.
 /redwood/bin/net_test resolve www.baidu.com
