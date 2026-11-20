@@ -514,6 +514,9 @@ public:
 	/* how the display is doing: frames and time spent drawing them here since fStatSince */
 	uint32_t        fStatFrames;
 	uint64_t        fStatSince, fStatDrawing;
+	/* ... and the frame's copy from the shadow to the panel's memory (blitPanel()): how many, their time, the longest */
+	uint32_t        fStatCopies;
+	uint64_t        fStatCopyTime, fStatCopyLongest;
 	/* ... and how evenly: the time from each frame to the next, counted by the millisecond (the last count: longer) */
 	uint64_t        fLastFrame;
 	uint32_t        fFrameTimes[FRAME_TIMES + 1], fFramePauses, fFrameLongest;
@@ -549,6 +552,7 @@ public:
 	void drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst, bool blend);
 	void drawRows(const struct RowJob * job, int32_t y0, int32_t y1, uint32_t * blendRow);
 	void blitShadow(int32_t y0, int32_t y1);
+	void blitPanel(int32_t y0, int32_t y1);
 	static void helperMain(void * self, wait_result_t result);
 	static void beamProbeMain(void * self, wait_result_t result);
 	void beamProbe(void);
@@ -1059,6 +1063,7 @@ struct RowJob {
 	int32_t         sx, sy, sw, sh, px0, py0, px1, py1, cx0, cx1;
 	int32_t         ry0, ry1;       /* the rows of the rectangle that are on the panel: all that is looked at, whatever its size */
 	bool            filter, unscaled, blend;
+	bool            copy;           /* not drawn: these rows are copied, shadow to panel (blitPanel()) */
 	uint64_t        scan;           /* fb_beam: when the scan that is to show the frame begins (0: write at once) */
 };
 
@@ -1235,6 +1240,70 @@ IOMobileFramebuffer::blitShadow(int32_t y0, int32_t y1)
 	}
 }
 
+/*
+ * The frame to the panel, rows y0 to y1: the copy blitShadow() makes of each share of them, and the clean of the
+ * panel's memory that follows it, shared out between the threads that drew the frame (fb_threads; one machine, one
+ * copy, when they are not there). The copy and the clean are the same ten megabytes of a whole frame, and a copy
+ * that outlasts the space a thread has before the scan reaches its rows is a band on the panel: shared out, each
+ * thread has between a third and a half of the time it took when it was one thread's work.
+ */
+void
+IOMobileFramebuffer::blitPanel(int32_t y0, int32_t y1)
+{
+	uint64_t began;
+
+	if (fShadow == NULL) {
+		return;
+	}
+	if (y0 < 0) {
+		y0 = 0;
+	}
+	if (y1 > (int32_t) fPanelHeight) {
+		y1 = (int32_t) fPanelHeight;
+	}
+	if (y1 <= y0) {
+		return;
+	}
+	began = mach_absolute_time();
+	if (fThreads <= 1 || fHelpersStarted + 1 < fThreads) {
+		blitShadow(y0, y1);
+		if (gClean) {
+			panelToMemory(fBase, fRowBytes, 0, y0, (int32_t) fPanelWidth, y1, fPanelWidth, fPanelHeight);
+		}
+	} else {
+		RowJob job;
+		int32_t last;
+
+		bzero(&job, sizeof(job));
+		job.copy = true;
+		job.ry0 = y0;
+		job.ry1 = y1;
+		IOLockLock(fHelperLock);
+		fHelperJob = &job;
+		fHelpersBusy = fThreads - 1;
+		fHelperGeneration++;
+		IOLockWakeup(fHelperLock, &fHelperGeneration, false);
+		IOLockUnlock(fHelperLock);
+		last = y0 + (int32_t) ((int64_t) (y1 - y0) / fThreads);
+		blitShadow(y0, last);
+		if (gClean) {
+			panelToMemory(fBase, fRowBytes, 0, y0, (int32_t) fPanelWidth, last, fPanelWidth, fPanelHeight);
+		}
+		IOLockLock(fHelperLock);
+		while (fHelpersBusy != 0) {
+			IOLockSleep(fHelperLock, &fHelpersBusy, THREAD_UNINT);
+		}
+		IOLockUnlock(fHelperLock);
+	}
+	{
+		uint64_t took = mach_absolute_time() - began;
+
+		fStatCopies++;
+		fStatCopyTime += took;
+		fStatCopyLongest = took > fStatCopyLongest ? took : fStatCopyLongest;
+	}
+}
+
 /* A helper of the scaling (fb_threads): waits for rows to do, does them, says so. */
 void
 IOMobileFramebuffer::helperMain(void * self, wait_result_t result __unused)
@@ -1263,12 +1332,21 @@ IOMobileFramebuffer::helperMain(void * self, wait_result_t result __unused)
 		y0 = job->ry0 + (int32_t) ((int64_t) rows * (index + 1) / fb->fThreads);
 		y1 = job->ry0 + (int32_t) ((int64_t) rows * (index + 2) / fb->fThreads);
 		blend = fb->fHelperBlend[index];
-		fb->beamWait(job, y1);
-		{
-			uint64_t began = mach_absolute_time();
+		if (job->copy) {
+			/* (the frame's rows to the panel: this thread's share of the copy, and of the clean after it) */
+			fb->blitShadow(y0, y1);
+			if (gClean) {
+				panelToMemory(fb->fBase, fb->fRowBytes, 0, y0, (int32_t) fb->fPanelWidth, y1,
+				    fb->fPanelWidth, fb->fPanelHeight);
+			}
+		} else {
+			fb->beamWait(job, y1);
+			{
+				uint64_t began = mach_absolute_time();
 
-			fb->drawRows(job, y0, y1, blend);
-			fb->beamShareDone(job, index + 1, y0, y1, began);
+				fb->drawRows(job, y0, y1, blend);
+				fb->beamShareDone(job, index + 1, y0, y1, began);
+			}
 		}
 		IOLockLock(fb->fHelperLock);
 		fb->fHelpersBusy--;
@@ -1529,6 +1607,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	job.ry1 = py1 > (int32_t) fPanelHeight ? (int32_t) fPanelHeight : py1;
 	job.filter = filter;
 	job.blend = blend;
+	job.copy = false;
 	job.unscaled = px1 - px0 == sw && py1 - py0 == sh && px0 >= 0 && (uint32_t) px1 <= fPanelWidth;
 	job.scan = fSettling ? 0 : fBeamScan;
 	if (fThreads <= 1 || fDiff || fHelpersStarted + 1 < fThreads) {
@@ -1769,12 +1848,8 @@ IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 	}
 	fSettling = false;
 	if (drew) {
-		blitShadow(0, (int32_t) fPanelHeight);
-		if (gClean) {
-			/* the last frame of a still screen goes to the controller's memory too */
-			panelToMemory(fBase, fRowBytes, 0, 0, (int32_t) fPanelWidth, (int32_t) fPanelHeight,
-			    fPanelWidth, fPanelHeight);
-		}
+		/* the last frame of a still screen goes to the controller's memory too (blitPanel()) */
+		blitPanel(0, (int32_t) fPanelHeight);
 	}
 	fStatSettled++;
 }
@@ -2034,11 +2109,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 	}
 	if (blit1 > blit0) {
-		/* the frame whole, to the panel's memory: some 2 ms, inside the 11.1 ms of a scan (blitShadow()) */
-		blitShadow(blit0, blit1);
-		if (gClean) {
-			panelToMemory(fBase, fRowBytes, 0, blit0, (int32_t) fPanelWidth, blit1, fPanelWidth, fPanelHeight);
-		}
+		/* the frame whole, to the panel's memory, shared out between the threads that drew it (blitPanel()) */
+		blitPanel(blit0, blit1);
 	}
 	drawn = mach_absolute_time();
 	if (recorded != NULL) {
@@ -2065,19 +2137,23 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 	}
 	absolutetime_to_nanoseconds(mach_absolute_time() - fStatSince, &nanos);
 	if (nanos >= 5 * NSEC_PER_SEC) {
-		uint64_t drawing, waiting, beat;
+		uint64_t drawing, waiting, beat, copying, longest;
 		unsigned different;
 
 		absolutetime_to_nanoseconds(fStatDrawing, &drawing);
 		absolutetime_to_nanoseconds(fStatWaiting, &waiting);
 		absolutetime_to_nanoseconds(fStatBeatWait, &beat);
+		absolutetime_to_nanoseconds(fStatCopyTime, &copying);
+		absolutetime_to_nanoseconds(fStatCopyLongest, &longest);
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "
-		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered; %u of %u too late for the next scan; "
+		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered; %u frames copied to "
+		    "the panel in %llu us each (the longest %llu); %u of %u too late for the next scan; "
 		    "%u frames to layer 0, %u swaps with no bottom layer (%u of them set, %u cleared), %u whose surface was not here\n", fStatFrames, nanos / NSEC_PER_MSEC,
 		    fStatFrames * NSEC_PER_SEC / nanos, drawing / fStatFrames / NSEC_PER_USEC,
 		    waiting / fStatFrames / NSEC_PER_USEC, fStatOnBeat, fStatOnBeat ? beat / fStatOnBeat / NSEC_PER_USEC : 0,
-		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, fStatScansMissed, fStatScans,
+		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, fStatCopies,
+		    fStatCopies ? copying / fStatCopies / NSEC_PER_USEC : 0, longest / NSEC_PER_USEC, fStatScansMissed, fStatScans,
 		    fStatDrawn, fStatEmptySet + fStatEmptyPlain, fStatEmptySet, fStatEmptyCleared, fStatMissing);
 		fStatScans = fStatScansMissed = 0;
 		if (fBeamIntf != 0) {
@@ -2124,6 +2200,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 		fStatHeld = fStatLost = fStatOnBeat = fStatSettled = 0;
 		fStatWaiting = fStatBeatWait = 0;
+		fStatCopies = 0;
+		fStatCopyTime = fStatCopyLongest = 0;
 		fStatDrawn = fStatEmptySet = fStatEmptyPlain = fStatEmptyCleared = fStatMissing = 0;
 		reportFrameTimes();
 		if (fDiff) {
