@@ -2273,24 +2273,24 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 						 * about is minutes later -- once was not enough to see the app's own window) */
 						dumpWide = (fDumpCount % 10) == 0;
 						fDumpCount++;
-						snprintf(dumpWhat, sizeof(dumpWhat), "ui@%llus/L%u",
-						    (unsigned long long) (since / NSEC_PER_SEC), layer);
+						snprintf(dumpWhat, sizeof(dumpWhat), "ui@%llus/L%u/s%u",
+						    (unsigned long long) (since / NSEC_PER_SEC), layer, s->sid);
 						if (dumpWide) {
 							/* (every line names its layer: the wide set is taken on each layer that
 							 * swaps, and run 32's lines named none -- a sample of the application's
 							 * drawable and one of the window server's surface read alike, and the
 							 * two are exactly what is being told apart) */
-							snprintf(wideWhat, sizeof(wideWhat), "L%u.searchbar", layer);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.searchbar", layer, s->sid);
 							dumpPixels(s, wideWhat, 150, 0, 64);
 							dumpColumn(s, wideWhat, 25, 110, 90);
-							snprintf(wideWhat, sizeof(wideWhat), "L%u.panel", layer);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.panel", layer, s->sid);
 							dumpPixels(s, wideWhat, 700, 896, 80);
 							dumpColumn(s, wideWhat, 925, 650, 90);
-							snprintf(wideWhat, sizeof(wideWhat), "L%u.zoom", layer);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.zoom", layer, s->sid);
 							dumpPixels(s, wideWhat, 1300, 896, 80);
-							snprintf(wideWhat, sizeof(wideWhat), "L%u.map", layer);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.map", layer, s->sid);
 							dumpPixels(s, wideWhat, 1000, 896, 80);
-							snprintf(wideWhat, sizeof(wideWhat), "L%u.tabbar", layer);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.tabbar", layer, s->sid);
 							dumpPixels(s, wideWhat, 2210, 60, 64);
 						}
 						/* (the search bar's rim every sample: it is where the thick edge is seen) */
@@ -2303,8 +2303,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 						 * once this layer's own pixels have been blended in, so the three lines say
 						 * which stage a band appears at) */
 						if (drawn_into != NULL) {
-							snprintf(preWhat, sizeof(preWhat), "pre@%llus/L%u",
-							    (unsigned long long) (since / NSEC_PER_SEC), layer);
+							snprintf(preWhat, sizeof(preWhat), "pre@%llus/L%u/s%u",
+							    (unsigned long long) (since / NSEC_PER_SEC), layer, s->sid);
 							dumpFramePixels(drawn_into, drawn_stride, preWhat, 150, 0, 64);
 							dumpFramePixels(drawn_into, drawn_stride, preWhat, 700, 912, 32);
 						}
@@ -2320,11 +2320,11 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			if (dumpNow && drawn_into != NULL) {
 				/* (what the layer was drawn into: the panel's own pixels, at the same places) */
 				if (dumpWide) {
-					snprintf(wideWhat, sizeof(wideWhat), "L%u.psearchbar", layer);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.psearchbar", layer, s->sid);
 						dumpFramePixels(drawn_into, drawn_stride, wideWhat, 150, 0, 64);
-					snprintf(wideWhat, sizeof(wideWhat), "L%u.ppanel", layer);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.ppanel", layer, s->sid);
 						dumpFramePixels(drawn_into, drawn_stride, wideWhat, 700, 896, 80);
-					snprintf(wideWhat, sizeof(wideWhat), "L%u.ppanel", layer);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u/s%u.ppanel", layer, s->sid);
 						dumpFrameColumn(drawn_into, drawn_stride, wideWhat, 925, 650, 90);
 				}
 				dumpFramePixels(drawn_into, drawn_stride, dumpWhat, 150, 0, 64);
@@ -2375,10 +2375,10 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 								absolutetime_to_nanoseconds(t - fDumpFirst, &since);
 							}
 							snprintf(probe, sizeof(probe),
-							    "fbdump: ui@%llus layer %u frame %u: row700 x920 src %08x %08x %08x %08x "
+							    "fbdump: ui@%llus layer %u surface %u frame %u: row700 x920 src %08x %08x %08x %08x "
 							    "at %08x %08x %08x %08x; row115 x536 src %08x %08x %08x %08x "
 							    "at %08x %08x %08x %08x\n",
-							    (unsigned long long) (since / NSEC_PER_SEC), layer, swapWord(swap, SWAP_ID),
+							    (unsigned long long) (since / NSEC_PER_SEC), layer, s->sid, swapWord(swap, SWAP_ID),
 							    now[0], now[1], now[2], now[3], now[8], now[9], now[10], now[11],
 							    now[4], now[5], now[6], now[7], now[12], now[13], now[14], now[15]);
 							loader_log_line(probe);
