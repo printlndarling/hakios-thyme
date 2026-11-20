@@ -1255,3 +1255,28 @@ the refusal lies beyond them -- in the secure world the phone's own esoc
 stack shares with TZ, or inside the SBL's start, neither of which this kernel
 can observe. Picking it up again would mean reverse-engineering the secure
 side of the modem's boot, a project of its own.
+
+### The last unread function, and the closed surface (2026-11-20)
+
+`mdm_subsys_powerup`, which the 2026-11-10 notes left as "what the next read
+should cover", is orchestration only (0xffffff801119f640): it fetches the
+clink data, calls the esoc ops' function pointer with the power-on state
+(w0 = 1) -- the same `mdm4x_do_first_power_on` / `qpnp_pon_modem_pwr_off(1)`
+sequence already replicated -- stores the ESOC state, and waits on
+completions with retries.  Its sibling `mdm_cmd_exe` handles the clink
+requests: cmd 3 selects the `mdm_active` pinctrl state, cmd 5 raises the
+status line (struct +0x14) and sleeps, cmd 7 drops it; no code path there
+writes any register, strap or line beyond the four DT GPIOs, their pinctrl
+states and the PON block the port already drives.
+
+With that, the AP-visible surface is closed by evidence on every side: the
+stock kernel's only pre-doorbell register writes are the five BHI writes
+(`mhi_init_mmio` runs only from `mhi_ready_state_transition`, i.e. after
+READY; `mhi_init_dev_ctxt` allocates host rings only), the probe sends
+exactly those (`logs/171914-run.log`) and the answer stays `0xef0e0003` in
+30 ms.  The remaining judgement is the modem's own: its PBL authenticates
+the phone's own `sbl1.mbn` and refuses the ELF placement, and no host state
+reaches that decision.  The warm-handover side door does not exist either:
+the modem reaches AMSS only under Android's kernel, and the fastboot/loader
+path the port boots through resets it back to the PBL before the probe's
+first read (`execenv 0` with no PON of ours, `logs/211817-run.log`).
