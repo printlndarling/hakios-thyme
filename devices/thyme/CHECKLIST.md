@@ -6337,3 +6337,62 @@ three looks) with the shutdown at 461 s.  The image was rebuilt with `METAL_PLUG
 build log has `build.sh: HakiosMetal for CoreAnimation (src/HakiosMetalCA.m)`, the staged
 bundle (8,731,336 bytes) holds `keeps the road it has` and not `metal_test only`, and the image
 is `67c75777b65ffa4b016d7faaeeb21f8ae332fffdb1ff443ff4f3204f7b44f852`.  Run 32 uses it.
+
+### Run 32: the app draws the map again on the CA image; the thick rim is not in the app's own drawable (2026-11-20, 14:37 -- 14:49, `logs/143707-run.log`)
+
+The run took the image rebuilt at 13:33 with `METAL_PLUGIN=ca` (`67c75777`, the one run 31
+should have used), the prebuilt loader image (`213ffaaeb820` -- a kernel built for this tree is
+refused by this bootloader, `Failed to load/authenticate boot image: Load Error`), and run 31's
+scene and boot arguments plus `glcensus=1` and the framebuffer dumps:
+`fb: boot tunables: fb_dump=10 fb_dump_every=3 fb_dump_times=190`, 607 characters of cmdline.
+Kernel `57b424508267`.
+
+The app got its renderer.  The log has `HakiosMetal[IphoneCom 265]` device and fps lines all
+run long, `hm_draw: surface 375 (1125x2436): 10863 of 10863 samples not zero (1.000), mean
+244,240,228, alpha 251` (and surfaces 387 and 442 the same), and `fbshow: swap 6000: layer 1
+sid 3, source mean 217,216,216 ... alpha 233; panel 0,0 to 1080,2340`.  Layer 0 is the app's
+1125x2436 drawable, layer 1 the window server's 1080x2340 surface.  The screenshots agree:
+`screen-r32-100.png` is the map of 西安 长安区 with its POIs (鲁家湾小区, 万景荔知湾, 李想大虾),
+the search field and the side panel; `screen-r32-300/520/580.png` are the 超市 result list with
+photos, ratings, hours and distances loaded over the network.  The canvas, the app's views and
+the network all work in this run.
+
+The thick rim is measurable and reproducible on this image.  At column x=540, the search
+field's top edge in `screen-r32-100.png` is 3 px of background, then 16 px of dark navy
+(`#303060 #204860 #204868 #385070 #304860 #284068 #204860 #204858 #304060`), then 5 px of cyan
+(`#28a8e0 #28c0f8 #68d0f8`), then the white field.  In `screen-r32-520.png` the same edge has
+the same 19 px of band but light (`#d0d0e0` to `#687088`) -- the band is a gradient that moves.
+The side panel's left edge at row y=450 in `screen-r32-100.png` is 17 px of navy
+(`#303060 #202048 #182048 #001858 #183060 #103060 #002850 #002058 #002060`) before the
+`#f8f8f8` interior; run 31's picture of the same panel at the same row has only light grays
+(`#f0f0f8 #e8e8f0`) there.
+
+The dumps say where that navy is not.  Every retained `ui@` sample's source line is `src 0,156`
+-- the 1125-wide application drawable, panel row 150 read from its own row 156.  At that row
+its pixels are `00000000` from x 0 to 14, then `04010102 04010202 06010203 08020304 0a020305
+0b020305 0c030406` -- premultiplied near-transparent dark, which unpremultiplied is about
+`#404080` at alpha 4-12 (a colored shadow, faint), then `c25086c0` at x 30, the 4 px cyan line
+`ff66b2ff` at x 31-34, and white from x 36.  The drawn frame at the same panel row holds
+light pixels at x 0-13 (`d6f7fdfb ... d7ffffff`), then *opaque* navy at x 14-29
+(`ff333366 ff336666 ff24496d ff404060 ff385571 ff334c66 ...`), `ff599cdd` at x 30 where the
+drawable is `c25086c0`, and then the drawable's own values again (`ff66b0fd ff65b2ff`,
+`ffffffff`).  Where the drawable is opaque the frame carries it through; where the drawable
+holds a faint shadow the frame holds an opaque navy band of the same extent.
+
+The frame is live, not stale: the first navy pixel at x 14 changes every 3 s sample from
+`ff78789f` (687 s) through `ff5e5e92` (691 s), `ff4c4c85` (694 s), `ff3a3a73` (697 s),
+`ff2b2b64` (701 s) to `ff1e1e57` (704 s) -- a slow animation of the ring itself.  The wide
+`searchbar`/`psearchbar` pair at row 150 (four samples) shows the same thing: faint source,
+navy frame.
+
+What this does not settle: the retained window holds no `src 0,150` line, so none of the
+window server's own surface is in evidence, and the dump labels carry no layer number -- the
+lines could be read as either layer's.  The next kernel names the layer in every line and adds
+a `pre@Ns/L%u` sample of the frame *before* each layer is drawn into it, which separates what
+the last frame left (the window server's layer 1, or a stale panel) from what the blend
+produces.  Run 33 carries it.
+
+Two smaller observations.  The last fps line of the run reads `GPU busy -854175 ms (-2845%)`:
+hakios-metal's busy-time accounting wraps; it wants a look, it does not affect drawing.  The
+run ended by the battery guard at 25% (kernel time 731 s, `battguard: charge 26% ...` then the
+three looks; last line 862.9 s) and the phone went back to the loader.
