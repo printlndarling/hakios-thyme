@@ -199,6 +199,21 @@ static TUNABLE(uint32_t, gRefreshHz, "fb_hz", kFBRefreshHz);
 static TUNABLE(uint32_t, gCARefreshHz, "fb_ca_hz", 0);
 static TUNABLE(uint32_t, gOnTheBeat, "fb_beat", 1);
 /*
+ * Boot-arg fb_clean=0: leave what is drawn into the panel's memory in this processor's cache, as this driver did
+ * before. The panel's controller reads the memory, not the cache: it then goes on showing whatever the lines
+ * evicted in their own time last carried -- an old frame of the app, bands of newer ones -- while every read this
+ * processor makes of the panel sees the frame just drawn. On by default: each frame's rows are cleaned out to the
+ * memory the controller reads as soon as they are drawn.
+ */
+static TUNABLE(uint32_t, gClean, "fb_clean", 1);
+/*
+ * (There was a boot-arg fb_slow: the panel's memory mapped a second time, uncached, to read the sampled frames
+ * through both mappings. The boot framebuffer that vinfo.v_baseaddr names is already a Normal-Non-Cacheable
+ * mapping -- makeMapping is true for it in video_console.c, so ml_io_map_unmappable gave it VM_WIMG_WCOMB -- so
+ * a second mapping showed nothing new; and handing that virtual address back to ml_io_map as though it were
+ * physical (it is not: vinfo.v_physaddr is) took a data abort at the first sample. Gone.)
+ */
+/*
  * Boot-arg fb_threads=N (1 to 8): so many processors scale a frame onto the panel together (see
  * drawRows()). Three by default: a frame is in the panel's memory 3 ms after its turn instead of 9
  * to 10 (the phone, 15 October; fb_threads=1 is how it was).
@@ -249,6 +264,41 @@ micros(uint64_t absolute)
 
 	absolutetime_to_nanoseconds(absolute, &ns);
 	return ns / 1000;
+}
+
+/*
+ * The rows just drawn, cleaned out of this processor's cache to the memory the panel's controller reads. Without
+ * it the controller shows what memory held before (the last lines to be evicted, in bands, however long ago),
+ * while this processor reads the frames it drew straight out of its own cache and sees nothing wrong.
+ */
+static void
+panelToMemory(const uint8_t * base, uint32_t rowBytes, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+    uint32_t width, uint32_t height)
+{
+	if (x0 < 0) {
+		x0 = 0;
+	}
+	if (y0 < 0) {
+		y0 = 0;
+	}
+	if (x1 > (int32_t) width) {
+		x1 = (int32_t) width;
+	}
+	if (y1 > (int32_t) height) {
+		y1 = (int32_t) height;
+	}
+	if (x1 <= x0 || y1 <= y0) {
+		return;
+	}
+	for (int32_t y = y0; y < y1; y++) {
+		vm_offset_t start = ((vm_offset_t) base + (size_t) y * rowBytes + (size_t) x0 * 4) & ~(vm_offset_t) 63;
+		vm_offset_t end = (vm_offset_t) base + (size_t) y * rowBytes + (size_t) x1 * 4;
+
+		for (vm_offset_t line = start; line < end; line += 64) {
+			__asm__ volatile ("dc civac, %0" : : "r" (line) : "memory");
+		}
+	}
+	__asm__ volatile ("dsb sy" : : : "memory");
 }
 
 /*
@@ -401,6 +451,7 @@ class IOMobileFramebuffer : public IOService
 public:
 	IOLock *        fLock;
 	uint8_t *       fBase;                  /* the boot framebuffer: the panel */
+	uint32_t *      fShadow;                /* frames are drawn into this, of this processor's own memory, and copied to fBase in one go: see blitShadow() */
 	uint32_t        fPanelWidth, fPanelHeight, fRowBytes;
 	uint32_t        fWidth, fHeight;        /* the display as user space sees it */
 	MiniIOSurface * fDefaultSurface;
@@ -452,6 +503,11 @@ public:
 	uint64_t        fStatBeatWait;
 	uint32_t        fStatSurfaces[8];       /* the first different surfaces the bottom layer was given */
 	uint32_t        fStatHeld, fStatLost;   /* swaps that waited for the one before; that gave up waiting */
+	/* what the swaps had for the panel: a bottom layer or none, and whether that layer's surface was here */
+	uint32_t        fStatDrawn;             /* frames drawn to layer 0 */
+	uint32_t        fStatEmptySet, fStatEmptyPlain; /* swaps with no bottom layer: its bit set in the swap, or not */
+	uint32_t        fStatEmptyCleared;      /* ... with the bottom layer's bit in SWAP_LAYERS_CLEARED */
+	uint32_t        fStatMissing;           /* layer 0 named a surface that was not here */
 	uint64_t        fSwapTime;              /* when the last swap was handed over */
 	uint32_t        fStatSwapsLate;         /* swaps that came more than a refresh and a quarter after the one before (and no pause) */
 	uint64_t        fStatWaiting;           /* how long frames waited for the GPU here */
@@ -490,8 +546,9 @@ public:
 	void presenter(void);
 	static void presenterMain(void * self, wait_result_t result);
 	void reportFrameTimes(void);
-	void drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst);
+	void drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst, bool blend);
 	void drawRows(const struct RowJob * job, int32_t y0, int32_t y1, uint32_t * blendRow);
+	void blitShadow(int32_t y0, int32_t y1);
 	static void helperMain(void * self, wait_result_t result);
 	static void beamProbeMain(void * self, wait_result_t result);
 	void beamProbe(void);
@@ -705,12 +762,24 @@ IOMobileFramebuffer::start(IOService * provider)
 			}
 		}
 	}
+	/*
+	 * The frame is made in this processor's memory, where every read and write of it is quick, and the finished one is
+	 * copied to the panel's in one go (blitShadow()). Drawn into the panel's memory directly, a frame of two layers
+	 * took 74 ms on the phone (20 November, the map of 百度地图): most of that its blending -- the reads and writes of
+	 * a pixel of memory that is not cached, some 8 ns each, 2.6 million of them.
+	 */
+	fShadow = (uint32_t *) IOMallocZero((vm_size_t) fPanelWidth * (vm_size_t) fPanelHeight * sizeof(uint32_t));
+	if (fShadow == NULL) {
+		IOLog("MiniIOMobileFramebuffer: no memory for a shadow of the panel (%u x %u): frames go into the panel's own, slowly\n",
+		    fPanelWidth, fPanelHeight);
+	}
 	fColumn = IONewZero(uint32_t, fPanelWidth);
 	fColumnWeight = IONewZero(uint16_t, fPanelWidth);
 	fDiff = gDiff != 0;
 	fDiffLeft = fDiffTop = ~0u;
-	IOLog("MiniIOMobileFramebuffer: display %ux%u on a panel of %ux%u (%u bytes per row)\n", fWidth, fHeight,
-	    fPanelWidth, fPanelHeight, fRowBytes);
+	IOLog("MiniIOMobileFramebuffer: display %ux%u on a panel of %ux%u (%u bytes per row), boot framebuffer at %p "
+	    "(physical %#llx)\n", fWidth, fHeight, fPanelWidth, fPanelHeight, fRowBytes, fBase,
+	    (unsigned long long) vinfo.v_physaddr);
 
 	if (gRecSeconds != 0) {
 		/* one piece of physical memory: the loader will send it over USB as it lies */
@@ -868,6 +937,59 @@ blend(uint32_t a, uint32_t b, uint32_t w)
 }
 
 /*
+ * A pixel of a layer over one already on the panel. A layer's colours are premultiplied -- the
+ * window server draws its layer tree into them with the blending that keeps them so -- and a swap's
+ * layer above the bottom one is meant to be seen through where it is clear: the map of an
+ * application whose content is displayed in the bottom layer sits under a composite that is clear
+ * over it. `s` goes in whole and `d` keeps what opacity is left; the panel shows no transparency
+ * of its own, so what comes out of the two is opaque.
+ */
+static inline uint32_t
+over(uint32_t s, uint32_t d)
+{
+	uint32_t a = s >> 24;
+
+	if (a == 0) {
+		return d;
+	}
+	if (a == 255) {
+		return s;
+	}
+	/* (two channels in a word, 8 bits apart: no carry from one into the next) */
+	uint32_t rb = (s & 0xff00ff) + (((d & 0xff00ff) * (255 - a) >> 8) & 0xff00ff);
+	uint32_t g = (s & 0x00ff00) + (((d & 0x00ff00) * (255 - a) >> 8) & 0x00ff00);
+
+	return rb | g | 0xff000000;
+}
+
+/* A row whose pixels are all at least this opaque is drawn as it is: what is under it would show through by no more than three 255ths. */
+#define OPAQUE_ENOUGH   252
+
+/*
+ * The least and the most opacity among `first` to `last` of a row of pixels, in 255ths. A row's
+ * whole is known from them before it is drawn: all clear (the panel keeps everything), opaque
+ * enough (the row is copied, no compositing at all), or the two mixed (pixel by pixel).
+ */
+static inline void
+row_alphas(const uint32_t * row, int32_t first, int32_t last, uint32_t * least, uint32_t * most)
+{
+	uint32_t lo = 255, hi = 0;
+
+	for (int32_t x = first; x <= last; x++) {
+		uint32_t a = row[x] >> 24;
+
+		if (a < lo) {
+			lo = a;
+		}
+		if (a > hi) {
+			hi = a;
+		}
+	}
+	*least = lo;
+	*most = hi;
+}
+
+/*
  * Where the middle of the `i`th of `out` pixels falls among `in` of them, in 256ths of a pixel,
  * kept within the first and the last.
  */
@@ -877,6 +999,50 @@ sample_at(int64_t i, int64_t in, int64_t out)
 	int64_t at = ((2 * i + 1) * in - out) * 128 / out;
 
 	return at < 0 ? 0 : at > (in - 1) * 256 ? (in - 1) * 256 : at;
+}
+
+/*
+ * How a rectangle of a 32-bit picture reads: the means of red, green and blue over a 12 by 12 grid
+ * of it, how many of the grid's samples are black (no colour at all), and how many have no opacity
+ * at all (a layer that is drawn over what is under it on the device, and over it here).  For telling
+ * the panel's picture from the surface's a frame was copied from -- they are the same picture when
+ * all is well -- and a layer meant to be seen through from one meant to hide all behind it.
+ */
+static void
+samplePixels(const uint8_t * base, uint32_t stride, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+    uint32_t * r, uint32_t * g, uint32_t * b, uint32_t * black, uint32_t * total, uint32_t * alpha,
+    uint32_t * clear)
+{
+	uint64_t sr = 0, sg = 0, sb = 0, dark = 0, sa = 0, see_through = 0, n = 0;
+
+	*r = *g = *b = *black = *total = *alpha = *clear = 0;
+	if (base == NULL || x1 <= x0 || y1 <= y0) {
+		return;
+	}
+	for (int i = 0; i < 12; i++) {
+		int32_t y = y0 + (int32_t) ((int64_t) (2 * i + 1) * (y1 - y0) / 24);
+		const uint32_t * row = (const uint32_t *) (base + (size_t) y * stride);
+
+		for (int j = 0; j < 12; j++) {
+			int32_t x = x0 + (int32_t) ((int64_t) (2 * j + 1) * (x1 - x0) / 24);
+			uint32_t p = row[x];
+
+			sb += p & 0xff;
+			sg += p >> 8 & 0xff;
+			sr += p >> 16 & 0xff;
+			sa += p >> 24 & 0xff;
+			dark += (p & 0x00ffffff) == 0;
+			see_through += (p >> 24) == 0;
+			n++;
+		}
+	}
+	*r = (uint32_t) (sr / n);
+	*g = (uint32_t) (sg / n);
+	*b = (uint32_t) (sb / n);
+	*black = (uint32_t) dark;
+	*total = (uint32_t) n;
+	*alpha = (uint32_t) (sa / n);
+	*clear = (uint32_t) see_through;
 }
 
 /*
@@ -892,7 +1058,7 @@ struct RowJob {
 	uint32_t        stride;
 	int32_t         sx, sy, sw, sh, px0, py0, px1, py1, cx0, cx1;
 	int32_t         ry0, ry1;       /* the rows of the rectangle that are on the panel: all that is looked at, whatever its size */
-	bool            filter, unscaled;
+	bool            filter, unscaled, blend;
 	uint64_t        scan;           /* fb_beam: when the scan that is to show the frame begins (0: write at once) */
 };
 
@@ -912,10 +1078,31 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 		if (y < 0 || (uint32_t) y >= fPanelHeight) {
 			continue;
 		}
-		to = (uint32_t *) (fBase + (size_t) y * fRowBytes);
+		to = fShadow != NULL ? fShadow + (size_t) y * fPanelWidth : (uint32_t *) (fBase + (size_t) y * fRowBytes);
 		if (job->unscaled) {
-			/* not scaled at all */
-			memcpy(to + px0, pixels + (size_t) (sy + y - py0) * stride + (size_t) sx * 4, (size_t) sw * 4);
+			/* not scaled at all: a row of the panel is a row of the source */
+			from = (const uint32_t *) (pixels + (size_t) (sy + y - py0) * stride) + sx;
+			if (job->blend) {
+				uint32_t least, most;
+
+				row_alphas(from, 0, sw - 1, &least, &most);
+				if (most == 0) {
+					continue;               /* (a clear row: the panel keeps everything) */
+				}
+				if (least >= OPAQUE_ENOUGH) {
+					memcpy(to + px0, from, (size_t) sw * 4);
+					continue;
+				}
+				for (int32_t x = 0; x < sw; x++) {
+					uint32_t s = from[x];
+
+					if (s >> 24) {
+						to[px0 + x] = over(s, to[px0 + x]);
+					}
+				}
+				continue;
+			}
+			memcpy(to + px0, from, (size_t) sw * 4);
 			continue;
 		}
 		if (filter) {
@@ -941,35 +1128,110 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 		} else {
 			from = (const uint32_t *) (pixels + (size_t) (sy + (int64_t) (y - py0) * sh / (py1 - py0)) * stride);
 		}
-		if (fDiff) {
-			for (int32_t x = cx0; x < cx1; x++) {
-				uint32_t value = filter ? blend(from[fColumn[x]], from[fColumn[x] + (fColumnWeight[x] != 0)], fColumnWeight[x]) :
-				    from[fColumn[x]];
+		{
+			bool blend_row = job->blend;        /* (whether a pixel of the panel is to show through this row's) */
 
-				if (to[x] != value) {
-					fDiffPixels++;
-					fDiffLeft = (uint32_t) x < fDiffLeft ? (uint32_t) x : fDiffLeft;
-					fDiffRight = (uint32_t) x > fDiffRight ? (uint32_t) x : fDiffRight;
-					fDiffTop = (uint32_t) y < fDiffTop ? (uint32_t) y : fDiffTop;
-					fDiffBottom = (uint32_t) y > fDiffBottom ? (uint32_t) y : fDiffBottom;
+			if (blend_row) {
+				uint32_t least, most;
+				uint32_t last = fColumn[cx1 - 1];
+
+				if (filter && fColumnWeight[cx1 - 1] != 0 && last + 1 < (uint32_t) sw) {
+					last++;
+				}
+				row_alphas(from, (int32_t) fColumn[cx0], (int32_t) last, &least, &most);
+				if (most == 0) {
+					continue;           /* (a clear row: the panel keeps everything) */
+				}
+				blend_row = least < OPAQUE_ENOUGH;
+			}
+			if (fDiff) {
+				for (int32_t x = cx0; x < cx1; x++) {
+					uint32_t value = filter ? blend(from[fColumn[x]], from[fColumn[x] + (fColumnWeight[x] != 0)], fColumnWeight[x]) :
+					    from[fColumn[x]];
+					uint32_t showed = blend_row ? over(value, to[x]) : value;
+
+					if (to[x] != showed) {
+						fDiffPixels++;
+						fDiffLeft = (uint32_t) x < fDiffLeft ? (uint32_t) x : fDiffLeft;
+						fDiffRight = (uint32_t) x > fDiffRight ? (uint32_t) x : fDiffRight;
+						fDiffTop = (uint32_t) y < fDiffTop ? (uint32_t) y : fDiffTop;
+						fDiffBottom = (uint32_t) y > fDiffBottom ? (uint32_t) y : fDiffBottom;
+					}
+				}
+			}
+			if (filter) {
+				const uint32_t * __restrict column = fColumn + cx0;
+				const uint16_t * __restrict weights = fColumnWeight + cx0;
+				uint32_t * __restrict out = to + cx0;
+				uint32_t n = (uint32_t) (cx1 - cx0);
+
+				if (!blend_row) {
+					for (uint32_t i = 0; i < n; i++) {
+						uint32_t c = column[i], w = weights[i], a = from[c];
+
+						out[i] = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+					}
+				} else {
+					for (uint32_t i = 0; i < n; i++) {
+						uint32_t c = column[i], w = weights[i], a = from[c];
+						uint32_t v = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+
+						if (v >> 24) {
+							/* (clear, the panel keeps its pixel: not even read, it is slow) */
+							out[i] = over(v, out[i]);
+						}
+					}
+				}
+			} else if (!blend_row) {
+				for (int32_t x = cx0; x < cx1; x++) {
+					to[x] = from[fColumn[x]];
+				}
+			} else {
+				for (int32_t x = cx0; x < cx1; x++) {
+					uint32_t s = from[fColumn[x]];
+
+					if (s >> 24) {
+						to[x] = over(s, to[x]);
+					}
 				}
 			}
 		}
-		if (filter) {
-			const uint32_t * __restrict column = fColumn + cx0;
-			const uint16_t * __restrict weights = fColumnWeight + cx0;
-			uint32_t * __restrict out = to + cx0;
+	}
+}
 
-			for (uint32_t i = 0, n = (uint32_t) (cx1 - cx0); i < n; i++) {
-				uint32_t c = column[i], w = weights[i], a = from[c];
-
-				out[i] = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
-			}
-		} else {
-			for (int32_t x = cx0; x < cx1; x++) {
-				to[x] = from[fColumn[x]];
-			}
-		}
+/*
+ * What was drawn into the shadow, put on the panel: rows y0 to y1, one copy of each. The panel's memory is mapped
+ * write-combining and not cached (the boot framebuffer, video_console.c: VM_WIMG_WCOMB), so a pixel of it read and
+ * written from the blending is two trips to the memory, some 8 ns each, and a frame of two layers did 2.6 million of
+ * them: 74 ms, six and a half scans of the 90 Hz panel, and the frame is shown the six times a scan goes over it
+ * while it is being written -- what looks like the picture refreshed line by line from the top (20 November). Made in
+ * the shadow instead, the frame costs what the mixing is worth in memory that is cached, and comes here as a copy a
+ * row at a time: some two milliseconds for the whole panel, inside the 11.1 ms of a scan, so the scan finds the
+ * frame whole. The copy goes in the panel's own order, top to bottom, and rows already behind the scan's line are
+ * not touched twice.
+ */
+void
+IOMobileFramebuffer::blitShadow(int32_t y0, int32_t y1)
+{
+	if (fShadow == NULL) {
+		return;
+	}
+	if (y0 < 0) {
+		y0 = 0;
+	}
+	if (y1 > (int32_t) fPanelHeight) {
+		y1 = (int32_t) fPanelHeight;
+	}
+	if (y1 <= y0) {
+		return;
+	}
+	if (fRowBytes == (uint32_t) fPanelWidth * 4) {
+		memcpy(fBase + (size_t) y0 * fRowBytes, fShadow + (size_t) y0 * fPanelWidth,
+		    (size_t) (y1 - y0) * (size_t) fRowBytes);
+		return;
+	}
+	for (int32_t y = y0; y < y1; y++) {
+		memcpy(fBase + (size_t) y * fRowBytes, fShadow + (size_t) y * fPanelWidth, (size_t) fPanelWidth * 4);
 	}
 }
 
@@ -1150,10 +1412,13 @@ IOMobileFramebuffer::beamShareDone(const struct RowJob * job, unsigned share, in
 /*
  * Put a rectangle of a 32-bit surface on the screen. `dst` is in display coordinates; the
  * panel may be of another size, and the layer itself may be scaled: both are done in one
- * step, bilinear (or nearest neighbour: fb_filter=0).
+ * step, bilinear (or nearest neighbour: fb_filter=0). With `blend`, the rectangle is drawn
+ * over what the panel holds instead of over it: a layer above the bottom one is clear where
+ * the layer under it is to be seen (the window server's composite over an application's
+ * displayed content), and the clear parts leave the panel as it was.
  */
 void
-IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst)
+IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst, bool blend)
 {
 	int32_t sx = src[0], sy = src[1], sw = src[2], sh = src[3];
 	int32_t dx = dst[0], dy = dst[1], dw = dst[2], dh = dst[3];
@@ -1263,6 +1528,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	job.ry0 = py0 < 0 ? 0 : py0;
 	job.ry1 = py1 > (int32_t) fPanelHeight ? (int32_t) fPanelHeight : py1;
 	job.filter = filter;
+	job.blend = blend;
 	job.unscaled = px1 - px0 == sw && py1 - py0 == sh && px0 >= 0 && (uint32_t) px1 <= fPanelWidth;
 	job.scan = fSettling ? 0 : fBeamScan;
 	if (fThreads <= 1 || fDiff || fHelpersStarted + 1 < fThreads) {
@@ -1484,6 +1750,7 @@ void
 IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 {
 	int32_t src[4], dst[4];
+	bool drew = false;
 
 	if (!fGraphics) {
 		return;
@@ -1497,9 +1764,18 @@ IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 		memcpy(src, swap + SWAP_SOURCE(layer), sizeof(src));
 		memcpy(dst, swap + SWAP_DEST(layer), sizeof(dst));
-		drawLayer(s, src, dst);
+		drawLayer(s, src, dst, layer > 0);
+		drew = true;
 	}
 	fSettling = false;
+	if (drew) {
+		blitShadow(0, (int32_t) fPanelHeight);
+		if (gClean) {
+			/* the last frame of a still screen goes to the controller's memory too */
+			panelToMemory(fBase, fRowBytes, 0, 0, (int32_t) fPanelWidth, (int32_t) fPanelHeight,
+			    fPanelWidth, fPanelHeight);
+		}
+	}
 	fStatSettled++;
 }
 
@@ -1510,8 +1786,12 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 	uint32_t set = swapWord(swap, SWAP_LAYERS_SET);
 	uint64_t began = mach_absolute_time(), nanos, ready, shown, drawn;
 	uint32_t layers = 0;
+	int32_t blit0 = (int32_t) fPanelHeight, blit1 = 0;      /* the rows this frame changes: what blitShadow() copies */
 	MiniIOSurface * recorded = NULL;
 	bool report;
+	/* (which surfaces the frames come to layer 0 in, counted until the five-second report says) */
+	static uint32_t seenSid[8];
+	static uint32_t seenFrames[8];
 
 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
 		if (surfaces[layer] != NULL && !MiniIOSurfaceDrawn(surfaces[layer], SWAP_GPU_MS)) {
@@ -1588,6 +1868,16 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			}
 		}
 		if (sid == 0) {
+			if (layer == 0) {
+				if (set & 1) {
+					fStatEmptySet++;
+				} else {
+					fStatEmptyPlain++;
+				}
+				if (swapWord(swap, SWAP_LAYERS_CLEARED) & 1) {
+					fStatEmptyCleared++;
+				}
+			}
 			/* the bottom layer taken away: nothing is shown, the screen is black */
 			if (layer == 0 && (set & 1) && fGraphics) {
 				static unsigned told;
@@ -1597,6 +1887,13 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 				}
 				for (uint32_t y = 0; y < fPanelHeight; y++) {
 					bzero(fBase + (size_t) y * fRowBytes, (size_t) fPanelWidth * 4);
+					if (fShadow != NULL) {
+						bzero(fShadow + (size_t) y * fPanelWidth, (size_t) fPanelWidth * 4);
+					}
+				}
+				if (gClean) {
+					panelToMemory(fBase, fRowBytes, 0, 0, (int32_t) fPanelWidth, (int32_t) fPanelHeight,
+					    fPanelWidth, fPanelHeight);
 				}
 			}
 			continue;
@@ -1661,6 +1958,9 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 		if (s == NULL) {
 			static unsigned told;
+			if (layer == 0) {
+				fStatMissing++;
+			}
 			if (told++ < 16) {
 				fbLine("fbshow: swap %u: layer %u names surface %u, which is not here\n",
 				    swapWord(swap, SWAP_ID), layer, sid);
@@ -1668,16 +1968,76 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			continue;
 		}
 		if (s->info.bytesPerElement == 4 && s->info.planeCount == 0) {
+			/*
+			 * (every six-hundredth frame: what each layer's frame holds, and what the panel had before it
+			 * and after -- every layer, not only the bottom one: the map of an application whose bottom
+			 * layer is white all over is drawn in a layer above it, and a sample of layer 0 alone says the
+			 * screen is white while it is black)
+			 */
+			bool sample = (swapWord(swap, SWAP_ID) % 600) == 0 && s->pixels() != NULL;
+			/* (what the frame is drawn into, and what the samples of it are of: the shadow while there is one) */
+			const uint8_t * drawn_into = fShadow != NULL ? (const uint8_t *) fShadow : fBase;
+			uint32_t drawn_stride = fShadow != NULL ? fPanelWidth * 4 : fRowBytes;
+			int64_t qx0 = (int64_t) dst[0] * fPanelWidth / fWidth;
+			int64_t qy0 = (int64_t) dst[1] * fPanelHeight / fHeight;
+			int64_t qx1 = ((int64_t) dst[0] + dst[2]) * fPanelWidth / fWidth;
+			int64_t qy1 = ((int64_t) dst[1] + dst[3]) * fPanelHeight / fHeight;
+			uint32_t before[7] = { 0 }, after[7] = { 0 }, source[7] = { 0 };
+
+			qx0 = qx0 < 0 ? 0 : qx0 > fPanelWidth ? fPanelWidth : qx0;
+			qy0 = qy0 < 0 ? 0 : qy0 > fPanelHeight ? fPanelHeight : qy0;
+			qx1 = qx1 < 0 ? 0 : qx1 > fPanelWidth ? fPanelWidth : qx1;
+			qy1 = qy1 < 0 ? 0 : qy1 > fPanelHeight ? fPanelHeight : qy1;
+			if (sample) {
+				samplePixels(drawn_into, drawn_stride, (int32_t) qx0, (int32_t) qy0, (int32_t) qx1, (int32_t) qy1,
+				    &before[0], &before[1], &before[2], &before[3], &before[4], &before[5], &before[6]);
+			}
 			if (!fGraphics) {
 				/* the first picture: the kernel's text console must stop drawing over it */
 				fGraphics = true;
 				PE_initialize_console(NULL, kPEGraphicsMode);
 			}
-			drawLayer(s, src, dst);
+			drawLayer(s, src, dst, layer > 0);
+			if (fShadow != NULL) {
+				/* (drawn into the shadow: on the panel once every layer of the frame has been) */
+				blit0 = (int32_t) qy0 < blit0 ? (int32_t) qy0 : blit0;
+				blit1 = (int32_t) qy1 > blit1 ? (int32_t) qy1 : blit1;
+			} else if (gClean) {
+				/* the controller reads memory, not this processor's cache: what was just drawn goes out to it */
+				panelToMemory(fBase, fRowBytes, (int32_t) qx0, (int32_t) qy0, (int32_t) qx1, (int32_t) qy1,
+				    fPanelWidth, fPanelHeight);
+			}
+			if (sample) {
+				samplePixels(drawn_into, drawn_stride, (int32_t) qx0, (int32_t) qy0, (int32_t) qx1, (int32_t) qy1,
+				    &after[0], &after[1], &after[2], &after[3], &after[4], &after[5], &after[6]);
+				samplePixels(s->pixels(), s->info.bytesPerRow, src[0], src[1], src[0] + src[2], src[1] + src[3],
+				    &source[0], &source[1], &source[2], &source[3], &source[4], &source[5], &source[6]);
+				fbLine("fbshow: swap %u: layer %u sid %u, source mean %u,%u,%u black %u/%u alpha %u clear %u/%u; "
+				    "panel %d,%d to %d,%d was %u,%u,%u black %u/%u, is %u,%u,%u black %u/%u\n",
+				    swapWord(swap, SWAP_ID), layer, sid, source[0], source[1], source[2], source[3], source[4],
+				    source[5], source[6], source[4], (int32_t) qx0, (int32_t) qy0, (int32_t) qx1, (int32_t) qy1,
+				    before[0], before[1], before[2], before[3], before[4], after[0], after[1], after[2],
+				    after[3], after[4]);
+			}
 			if (layer == 0) {
+				fStatDrawn++;
+				for (unsigned i = 0; i < 8; i++) {
+					if (seenSid[i] == sid || seenSid[i] == 0) {
+						seenSid[i] = sid;
+						seenFrames[i]++;
+						break;
+					}
+				}
 				recorded = s;   /* (recorded once the frame is in the panel's memory: see below) */
 				gShownSurface = sid;
 			}
+		}
+	}
+	if (blit1 > blit0) {
+		/* the frame whole, to the panel's memory: some 2 ms, inside the 11.1 ms of a scan (blitShadow()) */
+		blitShadow(blit0, blit1);
+		if (gClean) {
+			panelToMemory(fBase, fRowBytes, 0, blit0, (int32_t) fPanelWidth, blit1, fPanelWidth, fPanelHeight);
 		}
 	}
 	drawn = mach_absolute_time();
@@ -1690,7 +2050,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		    micros(drawn));
 	}
 	if (layers != fLayersShown) {
-		IOLog("MiniIOMobileFramebuffer: swap #%u: surfaces in layers 0x%x now (0x%x before): %u %u %u %u\n", fSwapsShown, layers,
+		/* (fbLine, not IOLog: the kernel's own lines do not reach the console ring the run keeps) */
+		fbLine("fbshow: swap #%u: surfaces in layers 0x%x now (0x%x before): %u %u %u %u\n", fSwapsShown, layers,
 		    fLayersShown, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)), swapWord(swap, SWAP_SURFACE(2)),
 		    swapWord(swap, SWAP_SURFACE(3)));
 		fLayersShown = layers;
@@ -1712,10 +2073,12 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		absolutetime_to_nanoseconds(fStatBeatWait, &beat);
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "
-		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered; %u of %u too late for the next scan\n", fStatFrames, nanos / NSEC_PER_MSEC,
+		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered; %u of %u too late for the next scan; "
+		    "%u frames to layer 0, %u swaps with no bottom layer (%u of them set, %u cleared), %u whose surface was not here\n", fStatFrames, nanos / NSEC_PER_MSEC,
 		    fStatFrames * NSEC_PER_SEC / nanos, drawing / fStatFrames / NSEC_PER_USEC,
 		    waiting / fStatFrames / NSEC_PER_USEC, fStatOnBeat, fStatOnBeat ? beat / fStatOnBeat / NSEC_PER_USEC : 0,
-		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, fStatScansMissed, fStatScans);
+		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled, fStatScansMissed, fStatScans,
+		    fStatDrawn, fStatEmptySet + fStatEmptyPlain, fStatEmptySet, fStatEmptyCleared, fStatMissing);
 		fStatScans = fStatScansMissed = 0;
 		if (fBeamIntf != 0) {
 			char shares[8 * 24] = "";
@@ -1748,8 +2111,20 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			    fStatSurfaces[4], made, making, again, freed, freeing);
 		}
 		bzero(fStatSurfaces, sizeof(fStatSurfaces));
+		if (seenSid[0] != 0) {
+			char came[8 * 24] = "";
+			size_t at = 0;
+
+			for (unsigned i = 0; i < 8 && seenSid[i] != 0; i++) {
+				at += (size_t) snprintf(came + at, sizeof(came) - at, " %u: %u", seenSid[i], seenFrames[i]);
+			}
+			fbLine("fbshow: frames to layer 0 in this while, by surface:%s\n", came);
+			bzero(seenSid, sizeof(seenSid));
+			bzero(seenFrames, sizeof(seenFrames));
+		}
 		fStatHeld = fStatLost = fStatOnBeat = fStatSettled = 0;
 		fStatWaiting = fStatBeatWait = 0;
+		fStatDrawn = fStatEmptySet = fStatEmptyPlain = fStatEmptyCleared = fStatMissing = 0;
 		reportFrameTimes();
 		if (fDiff) {
 			IOLog("MiniIOMobileFramebuffer: %llu pixels of the panel changed a frame, all within %u,%u to %u,%u\n",
