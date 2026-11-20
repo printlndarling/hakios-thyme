@@ -2241,6 +2241,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			}
 			bool dumpNow = false, dumpFirst = false, dumpWide = false;
 			char dumpWhat[40];
+			char wideWhat[48];
+			char preWhat[48];
 
 			/*
 			 * (any layer with pixels, not only those above the bottom one: on this panel the window
@@ -2271,21 +2273,41 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 						 * about is minutes later -- once was not enough to see the app's own window) */
 						dumpWide = (fDumpCount % 10) == 0;
 						fDumpCount++;
-						snprintf(dumpWhat, sizeof(dumpWhat), "ui@%llus",
-						    (unsigned long long) (since / NSEC_PER_SEC));
+						snprintf(dumpWhat, sizeof(dumpWhat), "ui@%llus/L%u",
+						    (unsigned long long) (since / NSEC_PER_SEC), layer);
 						if (dumpWide) {
-							dumpPixels(s, "searchbar", 150, 0, 64);
-							dumpColumn(s, "searchbar", 25, 110, 90);
-							dumpPixels(s, "panel", 700, 896, 80);
-							dumpColumn(s, "panel", 925, 650, 90);
-							dumpPixels(s, "zoom", 1300, 896, 80);
-							dumpPixels(s, "map", 1000, 896, 80);
-							dumpPixels(s, "tabbar", 2210, 60, 64);
+							/* (every line names its layer: the wide set is taken on each layer that
+							 * swaps, and run 32's lines named none -- a sample of the application's
+							 * drawable and one of the window server's surface read alike, and the
+							 * two are exactly what is being told apart) */
+							snprintf(wideWhat, sizeof(wideWhat), "L%u.searchbar", layer);
+							dumpPixels(s, wideWhat, 150, 0, 64);
+							dumpColumn(s, wideWhat, 25, 110, 90);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u.panel", layer);
+							dumpPixels(s, wideWhat, 700, 896, 80);
+							dumpColumn(s, wideWhat, 925, 650, 90);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u.zoom", layer);
+							dumpPixels(s, wideWhat, 1300, 896, 80);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u.map", layer);
+							dumpPixels(s, wideWhat, 1000, 896, 80);
+							snprintf(wideWhat, sizeof(wideWhat), "L%u.tabbar", layer);
+							dumpPixels(s, wideWhat, 2210, 60, 64);
 						}
 						/* (the search bar's rim every sample: it is where the thick edge is seen) */
 						dumpPixels(s, dumpWhat, 150, 0, 64);
 						dumpPixels(s, dumpWhat, 700, 912, 32);
 						dumpColumn(s, dumpWhat, 925, 680, 32);
+						/* (what the frame holds just before this layer is drawn into it: for the bottom
+						 * layer, what the last frame left where this one is transparent; for a layer
+						 * above it, the layers below. The `at` sample after the draw is the same place
+						 * once this layer's own pixels have been blended in, so the three lines say
+						 * which stage a band appears at) */
+						if (drawn_into != NULL) {
+							snprintf(preWhat, sizeof(preWhat), "pre@%llus/L%u",
+							    (unsigned long long) (since / NSEC_PER_SEC), layer);
+							dumpFramePixels(drawn_into, drawn_stride, preWhat, 150, 0, 64);
+							dumpFramePixels(drawn_into, drawn_stride, preWhat, 700, 912, 32);
+						}
 						if (gDumpEvery != 0 && (gDumpTimes == 0 || fDumpCount < gDumpTimes)) {
 							fDumpNext = (uint32_t) (since / NSEC_PER_SEC) + gDumpEvery;
 						} else {
@@ -2298,9 +2320,12 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			if (dumpNow && drawn_into != NULL) {
 				/* (what the layer was drawn into: the panel's own pixels, at the same places) */
 				if (dumpWide) {
-					dumpFramePixels(drawn_into, drawn_stride, "psearchbar", 150, 0, 64);
-					dumpFramePixels(drawn_into, drawn_stride, "ppanel", 700, 896, 80);
-					dumpFrameColumn(drawn_into, drawn_stride, "ppanel", 925, 650, 90);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u.psearchbar", layer);
+						dumpFramePixels(drawn_into, drawn_stride, wideWhat, 150, 0, 64);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u.ppanel", layer);
+						dumpFramePixels(drawn_into, drawn_stride, wideWhat, 700, 896, 80);
+					snprintf(wideWhat, sizeof(wideWhat), "L%u.ppanel", layer);
+						dumpFrameColumn(drawn_into, drawn_stride, wideWhat, 925, 650, 90);
 				}
 				dumpFramePixels(drawn_into, drawn_stride, dumpWhat, 150, 0, 64);
 				dumpFramePixels(drawn_into, drawn_stride, dumpWhat, 700, 912, 32);
