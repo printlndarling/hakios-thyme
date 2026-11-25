@@ -297,12 +297,20 @@ static int cell_page_hooked;
 static id
 cell_page_specifiers(id self, SEL _cmd)
 {
+	static int logged;
 	id list = original_cell_page_specifiers != NULL ?
 	    ((id (*)(id, SEL))original_cell_page_specifiers)(self, _cmd) : NULL;
 	unsigned long count = list != NULL ?
 	    ((unsigned long (*)(id, SEL))objc_msgSend)(list, sel_registerName("count")) : 0;
 
-	if (count == 0 && ((BOOL (*)(id, SEL, SEL))objc_msgSend)(self,
+	if (count > 0) {
+		if (logged < 4) {
+			logged++;
+			say("hakios-prefs: PSUICellularController -specifiers returned %lu native items\n", count);
+		}
+		return list;
+	}
+	if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(self,
 	    sel_registerName("respondsToSelector:"), sel_registerName("_deadTelephonySpecifiers"))) {
 		id dead = ((id (*)(id, SEL))objc_msgSend)(self,
 		    sel_registerName("_deadTelephonySpecifiers"));
@@ -310,6 +318,18 @@ cell_page_specifiers(id self, SEL _cmd)
 		    ((unsigned long (*)(id, SEL))objc_msgSend)(dead, sel_registerName("count")) : 0;
 
 		if (dead_count > 0) {
+			/* PSListController's table-view data source reads the _specifiers ivar
+			 * directly, not the return value of -specifiers; store dead there too. */
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(self,
+			    sel_registerName("respondsToSelector:"), sel_registerName("setSpecifiers:"))) {
+				((void (*)(id, SEL, id))objc_msgSend)(self,
+				    sel_registerName("setSpecifiers:"), dead);
+			} else {
+				Ivar ivar = class_getInstanceVariable(object_getClass(self), "_specifiers");
+				if (ivar != NULL) {
+					object_setIvar(self, ivar, dead);
+				}
+			}
 			say("hakios-prefs: the cellular page was empty; Apple's dead-telephony rows stand in (%lu)\n",
 			    dead_count);
 			return dead;

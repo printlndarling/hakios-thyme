@@ -43,7 +43,7 @@ WHOLE = ('usr/libexec/', 'usr/sbin/', 'usr/bin/', 'usr/lib/', 'usr/share/', 'sbi
 # Of Health only the pictures and films of the activity awards are left out, see SKIP_PREFIX and HEALTH)
 SKIP_SYSTEM_LIBRARY = ('LinguisticData', 'PreinstalledAssetsV2', 'NanoTimeKit', 'Audio',
                        'Assistant', 'AccessibilityBundles',
-                       'VideoProcessors', 'ScreenReader', 'Photos', 'Carrier Bundles', 'NanoPreferenceBundles',
+                       'VideoProcessors', 'ScreenReader', 'Photos', 'NanoPreferenceBundles',
                        'ImagingNetworks', 'ProductDocuments', 'AppPlaceholders', 'UserNotifications',
                        'Caches')
 FRAMEWORKS = ('System/Library/Frameworks/', 'System/Library/PrivateFrameworks/')
@@ -87,9 +87,12 @@ SKIP_PREFIX = ('usr/share/tokenizer/', 'usr/share/firmware/', 'usr/share/mecabra
                HEALTH + 'Assets/FitnessUIAssets.bundle/') + \
     tuple(f'System/Library/{name}/' for name in SKIP_SYSTEM_LIBRARY)
 BIG_PROGRAM = 10 << 20           # daemons bigger than this (locationd, lskdd, ...) are not on the way to the screen
-# ... but locationd is on the way to the Settings entry and CoreLocation: the job loads (LaunchDaemons
-# com.apple.locationd) and the daemon must be there to answer it, so it is kept whatever its size.
-KEEP_BIG_PROGRAMS = ('usr/libexec/locationd',)
+# ... but locationd, callservicesd and identityservicesd are required for Location Services, Phone/VoLTE and Messages/SMS.
+KEEP_BIG_PROGRAMS = (
+    'usr/libexec/locationd',
+    'System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd',
+    'System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/identityservicesd',
+)
 # sound, outside the directories above: the virtual audio device, a plug-in that all of mediaserverd's
 # audio goes through, with its tunings (signal processing chains) for this model and for any, and the
 # system's own sounds. Not the neural networks among the tunings, nor the sounds of the watch.
@@ -155,6 +158,8 @@ def wanted_file(path, size):
     if path.startswith(('Applications/', HEALTH)):
         return not path.lower().endswith(SKIP_APP_EXT) and '.mlmodelc/' not in path
     if path.startswith(FRAMEWORKS):
+        if path in KEEP_BIG_PROGRAMS:
+            return True
         if re.search(r'/(XPCServices|Support|Helpers)/', path):
             return size <= 32 << 20 and not path.lower().endswith(('.png', '.car', '.loctable', '.caml'))
         if path.endswith('.car'):

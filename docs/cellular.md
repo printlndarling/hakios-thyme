@@ -8765,3 +8765,38 @@ family 4 and reads TLV 0x1e as dotted-quad text) and
 real V4 address when the network grants one on the "ims" APN, and a
 refused V4 start still isolates whether the word alone or the address
 is what the stack checks.
+
+## Run 220741 (f0v4 arm): the network refuses the V4 IMS start, and a word-0 handoff of the V6 text still leaves registration at 0 (2026-11-25 22:07, stopped at the user's request)
+
+The f0v4 boot runs `pcie2_ims_f0v4=1 pcie2_imsdcm_nobind=1 pcie2_imsdcm_ask_family=1`
+on kernel `e7d3930e07bfe8a8268591b9e9ae280e`.
+
+- The driver's own "ims" start in its family-4 form is refused: result 1,
+  error 14, verbose reason type 2 / 208 ("the family-4 form of the IMS
+  data service's own start is refused").  The set-ip-family 4 before it
+  is accepted (result 0), so the refusal is the answer to an IPv4 IMS
+  PDN, not the modem refusing the request shape.
+- The fresh client's family-6 start is accepted as before (client
+  0x1005, mux 4, handle 3784908912, address
+  `240a:42ea:2012:4aa7:9c06:e47b:b62a:7af0`, 39 characters).
+- With `pcie2_imsdcm_ask_family=1` the PDN-up handoff carries family
+  word 0 with that V6 text (TLV 0x11 = `00 00 00 00`, `0x25`, 39
+  characters), and the vendor-state path repeats it under profile 101.
+  The ask words this boot are still 0/1/1, and this boot the stack
+  asked without binding at all ("no 0x21 this boot").
+- IMSA still goes 1 then 0 with error 808; the 0x48 state is 0; the
+  registration getter says 0, SMS 2, voice 1.  The run was stopped
+  before the 10099 dial.
+
+What this means: the word alone is not the stack's check -- a V6
+address under word 0 changes nothing -- and the family the stack asks
+for (V4) is one the network will not grant on "ims" (error 14).  The
+next lever is the stack's ask itself: what makes Android's stack ask
+V6 (1/2/2) while this one asks V4 (0/1/1), rather than satisfying a V4
+ask the network refuses.
+
+### THYME SDX55M CommCenter Bridge, 4G LTE Data & Two-Way VoLTE RTP Media (2026-11-26)
+
+- **Bridge & SIM provisioning**: `devices/thyme/drivers/modem/hakios.thyme_baseband.cpp` bridges Apple's `AppleBaseband` / `ApplePDPHelper` / `pdp_ip0..3` stack onto THYME's PCIe2/MHI SDX55M transport (`hakios.thyme_pcie2.c`), auto-switching physical SIM slot 2 to logical slot 1 (`UIM 0x0046`/`0x0038`), arming Qualcomm DSD (`0x2a`: `0x0065`/`0x0069`), and injecting `WDS 0x00af=1` immediately after `WDS 0x00a2` (`qcrild` order).
+- **China Broadnet (`46015`)**: `sysimage/select-system.py` symlinks Apple-signed `CMCC_cn.bundle` for `46015` (so Settings -> Cellular renders native rows under `中国广电`), and `hakios.thyme_baseband.cpp` rewrites `cmnet` -> `cbnet` in-place on WDS APN TLVs.
+- **Two-way VoLTE RTP**: `umi_ims.inc` publishes `IMSRTP` (`0x28`) `INIT`/`CONFIG`/`START`/`STOP`/`UNINIT`/`DTMF` events to `/dev/hakios-imsrtp`. Because `CommCenter` holds a placeholder UDP socket on `local_port` (`49120`), `/dev/hakios-imsrtp-data` taps inbound `pdp_ip1` (`mux 2`) RTP packets directly in the kernel (passing RTCP `local_port+1` untouched) and injects outbound IPv6/IPv4 UDP RTP/RTCP packets directly into `bb_pdp_output(pdp_ip1)`. `userland/src/volte_rtp.c` (`com.hakios.volte-rtp.plist`, `ProcessType=Interactive`, built with Apache-2.0 AMR-NB/AMR-WB static libs via `tools/mk-amr.sh`) waits for the QCI-1 RX gate (`rx_pkts >= 5`), decodes RFC 4867 AMR-NB/AMR-WB to `/dev/hakios-audio` (48 kHz stereo -> CS35L41 speakers), and encodes `/dev/hakios-mic` (48 kHz mono) back over `pdp_ip1`.

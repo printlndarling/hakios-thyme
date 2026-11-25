@@ -1,0 +1,16 @@
+# CommCenter + Cellular Data + IMS/VoLTE + UI verification scene (RC_JOBS=rc.jobs.cellcc)
+/redwood/bin/sleep_hold 600 &
+sleep 10
+/var/jb/usr/bin/mkdir -p /var/db/hakios-voice
+/var/jb/usr/bin/touch /var/db/hakios-voice/on
+/var/jb/usr/bin/touch /var/db/hakios-voice/ims-on
+sleep 20
+/var/jb/usr/bin/uiopen prefs: &
+sleep 60
+/redwood/bin/net_test show
+/redwood/bin/net_test resolve www.apple.com
+/redwood/bin/net_test fetch https://www.apple.com
+/var/jb/usr/bin/uiopen prefs:root=MOBILE_DATA_SETTINGS_ID &
+sleep 40
+/redwood/bin/net_test show
+sleep 150

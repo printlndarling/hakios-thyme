@@ -3,6 +3,7 @@
 
 driver THYME_MODEM_PCIE
 	file    bsd/dev/hakios.thyme_pcie2.c
+	file    iokit/Kernel/hakios.thyme_baseband.cpp iokitcpp
 	help    the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and
-	help    GDSC, the PHY's own sequence from the phone's DTB, link training
-	help    and the endpoint's configuration space (pcie2_test=1).
+	help    GDSC, the PHY's own sequence from the phone's DTB, link training,
+	help    MHI/QRTR/IP_HW0 and the AppleBaseband CommCenter bridge (pcie2_mhi=2).

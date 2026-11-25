@@ -3111,6 +3111,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	int torch_requested = 0;
 	/* "cam=5" there too: the phone's wide camera is Darwin's (drivers/camera/hakios.camera.c) */
 	int camera_requested = 0;
+	/* "pcie2_mhi=2" or "pcie2_cc=1": emit /baseband and Mav17 identity so CommCenter starts */
+	int baseband_requested = 0;
 	/* (the loader stays for run after run: what the last run's arguments said must not hold for this one) */
 	gamut_p3 = 0;
 	/* a run that does not ask for writes does not get them, whatever an earlier run of this
@@ -3133,6 +3135,10 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		    (c[9] == 0 || c[9] == ' ');
 		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
 		camera_requested |= starts_with(c, "cam=5") && (c == pi.cmdline || c[-1] == ' ') && (c[5] == 0 || c[5] == ' ');
+		baseband_requested |= (starts_with(c, "pcie2_mhi=2") && (c == pi.cmdline || c[-1] == ' ') &&
+		    (c[11] == 0 || c[11] == ' ')) ||
+		    (starts_with(c, "pcie2_cc=1") && (c == pi.cmdline || c[-1] == ' ') &&
+		    (c[10] == 0 || c[10] == ' '));
 		gamut_p3 |= starts_with(c, "gamut=p3") && (c == pi.cmdline || c[-1] == ' ');
 		if (starts_with(c, "ufs=") && (c == pi.cmdline || c[-1] == ' ') && c[4] >= '1' && c[4] <= '2' &&
 		    (c[5] == 0 || c[5] == ' ')) {
@@ -3452,6 +3458,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	/* the product: screen class, artwork scale, name ... as on the real phone */
 	dt_begin(&w, "product");
 	dt_identity(&w, identity_product, sizeof(identity_product) / sizeof(identity_product[0]), identity_product_data);
+	if (baseband_requested) {
+		dt_prop_str(&w, "baseband-chipset", "mav17");
+	}
 	/*
 	 * and its haptics: "closed-loop" (MobileGestalt's DeviceSupportsClosedLoopHaptics) makes Darwin play
 	 * its vibrations and feedbacks as waveforms on the "Actuator" audio device (the audio plug-in
@@ -3474,6 +3483,22 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		dt_end(&w);
 	}
 	dt_end(&w);
+
+	/*
+	 * pcie2_mhi=2 / pcie2_cc=1: the /baseband node lets launchd load the cellular
+	 * CommCenter (_LimitLoadToDeviceTree = baseband) and MobileGestalt report
+	 * HasBaseband = true. Identity matches D22AP (iPhone10,3 / Mav17); the kernel's
+	 * QcomBaseband bridge (hakios.thyme_baseband.cpp) serves the IOKit classes.
+	 */
+	if (baseband_requested) {
+		static const uint32_t baseband_config[10] = { 250, 500, 18500, 1000, 100, 100, 131, 37, 20, 100 };
+		dt_begin(&w, "baseband");
+		dt_prop_str(&w, "device_type", "baseband");
+		dt_prop_str(&w, "compatible", "baseband,n41");
+		dt_prop_u32(&w, "class", 3);
+		dt_prop(&w, "config", baseband_config, sizeof(baseband_config));
+		dt_end(&w);
+	}
 
 	/* IOKit publishes its NVRAM object on this node; without it IOKit asserts. */
 	dt_begin(&w, "options");

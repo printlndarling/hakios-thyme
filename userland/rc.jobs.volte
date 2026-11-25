@@ -1,0 +1,16 @@
+# VoLTE 10099 two-way call audio + CS35L41 calibrated speakers + global 90Hz verification
+/redwood/bin/sleep_hold 600 &
+sleep 10
+/var/jb/usr/bin/mkdir -p /var/db/hakios-voice
+/var/jb/usr/bin/touch /var/db/hakios-voice/on
+/var/jb/usr/bin/touch /var/db/hakios-voice/ims-on
+sleep 25
+/redwood/bin/volte_rtp selftest
+/redwood/bin/volte_rtp tone
+/redwood/bin/fps_info
+sleep 50
+/redwood/bin/net_test show
+/redwood/bin/volte_probe dial 10099 22
+sleep 5
+/redwood/bin/net_test show
+sleep 100

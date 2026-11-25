@@ -213,7 +213,7 @@ import sys
 # for ever, see «Sileo» in README.md.)
 # (mediaserverd is not among them, for all that there is neither sound nor a camera:
 # it is where VideoToolbox decodes for every other process, a HEIC picture included; see src/inject_media.c.)
-DENY = ('watchdog', 'CommCenter', 'wifi', 'WiFi', 'bluetooth', 'BTServer', 'locationd', 'softwareupdate',
+DENY = ('watchdog', 'CommCenter-noncellular', 'wifi', 'WiFi', 'bluetooth', 'BTServer', 'locationd', 'softwareupdate',
         'datamigrator', 'backupd', 'thermalmonitord', 'keybagd', 'nfcd', 'biometrickitd', 'pearld',
         'obliterat', 'storage_mounter', 'com.apple.fud', 'sepd', 'seputil', 'camera', 'ReportCrash',
         'osanalytics', 'lockdown', 'audio', 'jetsamproperties',
@@ -222,7 +222,7 @@ DENY = ('watchdog', 'CommCenter', 'wifi', 'WiFi', 'bluetooth', 'BTServer', 'loca
         # these start, crash and are asked for again, over and over. (aggregated, which was among them, is where
         # Darwin userland 16 keeps its power log -- com.apple.powerlog.plxpclogger.xpc and the rest -- that Settings > Battery
         # waits for; it now runs through a session.)
-        'homed', 'routined', 'duetexpertd', 'com.apple.dmd', 'syncdefaultsd', 'photoanalysisd', 'avconferenced')
+        'homed', 'routined', 'duetexpertd', 'syncdefaultsd', 'photoanalysisd', 'avconferenced')
 
 # ALLOW="word ..." in the environment lets jobs through that DENY would stop: for trying one out
 DENY = tuple(word for word in DENY if word not in os.environ.get('ALLOW', '').split())
@@ -266,7 +266,8 @@ def present(program):
 
 def tune_job(label, job):
     job["StandardErrorPath"] = "/dev/console"
-    job.pop("_LimitLoadToDeviceTree", None)
+    if job.get("_LimitLoadToDeviceTree") != "baseband":
+        job.pop("_LimitLoadToDeviceTree", None)
     if label == "com.apple.bluetoothd":
         speed = os.environ.get("BT_BAUDRATE", "3000000")
         job.setdefault("EnvironmentVariables", {}).update(

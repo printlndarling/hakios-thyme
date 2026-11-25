@@ -33,6 +33,7 @@
 #include <sys/errno.h>
 #include <sys/hakios.input.h>
 #include <sys/hakios.nas.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
 #include <sys/uio_internal.h>
@@ -40,6 +41,7 @@
 #include <sys/vnode_internal.h>
 #include <mach/vm_param.h>
 #include <vm/vm_kern.h>
+#include "umi_baseband.h"
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
@@ -48,6 +50,66 @@ extern int hakios_pmic_pon_modem_reset(void);
 extern void hakios_pmic_pon_report(void);
 extern kern_return_t thread_terminate(thread_t thread);
 extern uint64_t kvtophys(vm_offset_t va);
+
+/* pcie2_mhi=2 (or pcie2_cc=1): native AppleBaseband / CommCenter bridge mode */
+static uint32_t pcie2_mhi_mode;
+static int mhi_bb_wake_channel;
+static int mhi_bb_thread_alive;
+static int mhi_bb_live;
+static bool mhi_bb_data_open;
+static bool mhi_hw_events_ready;
+static uint64_t mhi_bb_data_tx, mhi_bb_data_rx, mhi_bb_data_drop;
+static uint64_t mhi_bb_active_at, mhi_bb_log_at;
+static uint32_t mhi_bb_host_svc[5];
+static bool mhi_bb_host_known;
+static unsigned mhi_bb_modem_node = 2;
+
+static uint64_t
+mhi_now_us(void)
+{
+	uint64_t ns = 0;
+
+	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+	return ns / 1000u;
+}
+
+static void
+mhi_bb_idle(unsigned ms)
+{
+	struct timespec pause = {
+		.tv_sec = ms / 1000,
+		.tv_nsec = (long)(ms % 1000) * NSEC_PER_MSEC
+	};
+
+	(void)msleep(&mhi_bb_wake_channel, NULL, PZERO, "thyme-modem", &pause);
+}
+
+void
+umi_modem_wake(void)
+{
+	wakeup(&mhi_bb_wake_channel);
+}
+
+int
+umi_modem_state(void)
+{
+	if (!__atomic_load_n(&mhi_bb_thread_alive, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+	return __atomic_load_n(&mhi_bb_live, __ATOMIC_ACQUIRE) ? 1 : 2;
+}
+
+int
+umi_modem_restart(void)
+{
+	return 0;
+}
+
+unsigned
+umi_modem_restarts(void)
+{
+	return 0;
+}
 
 #define GCC  0x00100000u
 #define PARF 0x01c10000u
@@ -1467,7 +1529,7 @@ struct mhi_channel {
 	uint64_t ring_base;
 	volatile uint8_t *buffer;
 	uint64_t buffer_iova;
-	bool tx_pending, tx_done, rx_posted, rx_ready;
+	bool tx_pending, tx_done, rx_posted, rx_ready, db_mode;
 	size_t rx_length;
 };
 
@@ -1476,7 +1538,7 @@ static struct {
 	uint64_t iova, used;
 } mhi_pool;
 static struct mhi_event_ring mhi_events[MHI_NER];
-#define MHI_CHANNELS    8u   /* 0/1 the SBL's Sahara; 2/3 the AMSS's QMI0 (ids 14, 15) */
+#define MHI_CHANNELS    10u  /* 0/1 SBL Sahara; 2/3 QMI0; 4/5 IPCR; 6/7 EFS; 8/9 IP_HW0 (100/101) */
 static struct mhi_channel mhi_channels[MHI_CHANNELS];
 static volatile uint32_t *mhi_chctx, *mhi_erctx, *mhi_cmdctx, *mhi_cmdring;
 static uint64_t mhi_chctx_iova, mhi_erctx_iova, mhi_cmdctx_iova;
@@ -1651,6 +1713,19 @@ mhi_fault(void)
 }
 
 static int mhi_post(struct mhi_channel *channel, size_t length);
+static int mhi_bb_data_poll(void);
+
+static void
+mhi_channel_doorbell(struct mhi_channel *c)
+{
+	if (c->id >= 100 && !c->db_mode) {
+		return;
+	}
+	mhi_doorbell(mhi_chdb + c->id * 8, c->ring_base + (uint64_t)c->wp * 16);
+	if (c->id >= 100) {
+		c->db_mode = false;
+	}
+}
 
 /*
  * One pass over the six event rings: command completions, transfer
@@ -1691,6 +1766,17 @@ mhi_poll(void)
 			mhi_last_channel = ch;
 			mhi_last_code = code;
 			mhi_last_bytes = event[2] & 65535;
+			/* M0 transition restores burst doorbells on hardware channels (IP_HW0). */
+			if (type == 0x20 && code == 2 && e == 0) {
+				for (unsigned i = 8; i < MHI_CHANNELS; i++) {
+					struct mhi_channel *hc = &mhi_channels[i];
+
+					hc->db_mode = true;
+					if (hc->ring != NULL && (hc->tx_pending || hc->rx_posted)) {
+						mhi_channel_doorbell(hc);
+					}
+				}
+			}
 			if (type == 0x21 && pointer == mhi_command_wait && e == 0) {
 				mhi_command_cc = (int)code;
 			}
@@ -1702,7 +1788,15 @@ mhi_poll(void)
 						c = &mhi_channels[i];
 					}
 				}
-				if (c == NULL || c->er != e || code != 2 ||
+				/* Hardware channels (100/101) ask for a new doorbell via OOB (5) / DB_MODE (6). */
+				if (c != NULL && c->er == e && ch >= 100 && (code == 5 || code == 6)) {
+					c->db_mode = true;
+					if (c->tx_pending || c->rx_posted) {
+						mhi_channel_doorbell(c);
+					}
+					goto next_event;
+				}
+				if (c == NULL || c->er != e || (code != 2 && !(ch >= 100 && code == 4)) ||
 				    !mhi_ringptr(c->ring_base, MHI_TRES, pointer) ||
 				    pointer != c->ring_base + (uint64_t)((c->wp + MHI_TRES - 1) % MHI_TRES) * 16) {
 					hakios_tl("pcie2: MHI: erratic transfer event ER=%u ch=%u code=%u bytes=%u pointer %#llx\n",
@@ -1724,6 +1818,7 @@ mhi_poll(void)
 					c->rx_posted = false;
 				}
 			}
+next_event:
 			ring->consumer = (ring->consumer + 1) % ring->count;
 			ring->wp = (ring->wp + 1) % ring->count;
 		}
@@ -1734,6 +1829,9 @@ mhi_poll(void)
 			mhi_publish();
 			mhi_doorbell(mhi_erdb + e * 8, ring->base + (uint64_t)ring->wp * 16);
 		}
+	}
+	if (mhi_bb_data_open) {
+		return mhi_bb_data_poll();
 	}
 	return 0;
 }
@@ -1763,7 +1861,7 @@ mhi_post(struct mhi_channel *c, size_t length)
 	}
 	mhi_set64(mhi_channel_context(c->id), 9, c->ring_base + (uint64_t)c->wp * 16);
 	mhi_publish();
-	mhi_doorbell(mhi_chdb + c->id * 8, c->ring_base + (uint64_t)c->wp * 16);
+	mhi_channel_doorbell(c);
 	return 0;
 }
 
@@ -1961,6 +2059,7 @@ mhi_contexts(void)
 		hakios_tl("pcie2: MHI: event ring %u: %u entries at %#llx\n", e, ring->count,
 		    (unsigned long long)ring->base);
 	}
+	mhi_hw_events_ready = false;
 	mhi_set64(mhi_cmdctx, 3, mhi_pool.iova + mhi_cmdring_off);
 	mhi_set64(mhi_cmdctx, 5, MHI_TRES * 16);
 	mhi_set64(mhi_cmdctx, 7, mhi_pool.iova + mhi_cmdring_off);
@@ -2077,6 +2176,31 @@ mhi_contexts(void)
 	return 0;
 }
 
+static int
+mhi_enable_hw_events(void)
+{
+	if (mhi_hw_events_ready) {
+		return 0;
+	}
+	for (unsigned e = 4; e < MHI_NER; e++) {
+		struct mhi_event_ring *ring = &mhi_events[e];
+		volatile uint32_t *ctx = mhi_erctx + e * 11;
+
+		if (ring->words == NULL || ring->count == 0) {
+			return EPROTO;
+		}
+		ring->consumer = 0;
+		ring->wp = ring->count - 1;
+		mhi_set64(ctx, 9, ring->base + (uint64_t)ring->wp * 16);
+		mhi_publish();
+		mhi_doorbell(mhi_erdb + e * 8, ring->base + (uint64_t)ring->wp * 16);
+	}
+	mhi_hw_events_ready = true;
+	hakios_tl("pcie2: MHI: hardware event rings ready (ER4 %u, ER5 %u)\n",
+	    mhi_events[4].count, mhi_events[5].count);
+	return 0;
+}
+
 /*
  * A channel is opened by a START_CHAN command entry in the command ring, and
  * the device answers with the command completion event (0x21) on event ring
@@ -2098,6 +2222,7 @@ mhi_start_channel(unsigned slot, unsigned id, unsigned er)
 	c->id = id;
 	c->er = er;
 	c->wp = 0;
+	c->db_mode = true;
 	c->ring = mhi_words(ring);
 	c->ring_base = mhi_pool.iova + ring;
 	c->buffer = (volatile uint8_t *)(mhi_pool.io + buffer);
@@ -2105,7 +2230,7 @@ mhi_start_channel(unsigned slot, unsigned id, unsigned er)
 	c->tx_pending = c->tx_done = c->rx_posted = c->rx_ready = false;
 	c->rx_length = 0;
 	ctx = mhi_channel_context(id);
-	ctx[0] = 0x201;
+	ctx[0] = id >= 100 ? 0x301 : 0x201;
 	ctx[1] = (id & 1) ? 2 : 1;
 	ctx[2] = er;
 	mhi_set64(ctx, 3, c->ring_base);
@@ -4584,6 +4709,10 @@ mhi_qrtr_announce(struct mhi_channel *out, unsigned modem, unsigned service, con
 		uint8_t packet[20] = { 0 }, frame[40];
 		size_t length;
 
+		if (pcie2_mhi_mode == 2 &&
+		    (mhi_host_services[i].service == 0x302 || mhi_host_services[i].service == 0x28)) {
+			continue;
+		}
 		if (service != ~0u && mhi_host_services[i].service != service) {
 			continue;
 		}
@@ -4594,6 +4723,16 @@ mhi_qrtr_announce(struct mhi_channel *out, unsigned modem, unsigned service, con
 		mhi_qrtr_put(packet, 16, mhi_host_services[i].port);
 		length = mhi_qrtr_put3(frame, 4, 0xfffe, modem, 0xfffe, packet,
 		    sizeof(packet));
+		if (mhi_send(out, frame, length) == 0) {
+			sent++;
+		}
+	}
+	if (pcie2_mhi_mode == 2 && mhi_bb_host_known &&
+	    (service == ~0u || service == mhi_bb_host_svc[1])) {
+		uint8_t frame[40];
+		size_t length = mhi_qrtr_put3(frame, 4, 0xfffe, modem, 0xfffe,
+		    mhi_bb_host_svc, sizeof(mhi_bb_host_svc));
+
 		if (mhi_send(out, frame, length) == 0) {
 			sent++;
 		}
@@ -5302,6 +5441,9 @@ mhi_qrtr_learn(unsigned service, unsigned instance, unsigned node, unsigned port
 {
 	mhi_qrtr_survey(service, instance, node, port);
 	mhi_qrtr_remember(service, node, port);
+	if (pcie2_mhi_mode == 2) {
+		umi_bb_new_server(service, instance, node, port);
+	}
 }
 
 /* The whole survey, once per boot: the rolling run log drops the boot's
@@ -14610,6 +14752,407 @@ mhi_cellular_start(void)
 	hakios_tl("pcie2: cellular: the NAS state is polled every two seconds; kern.hakios.cellular_* are live\n");
 }
 
+/* ---- CommCenter bridge (pcie2_mhi=2): IP_HW0 QMAP data plane + QRTR/QMUX loop ---- */
+
+static uint8_t mhi_bb_txframe[MHI_PACKET];
+static uint8_t mhi_bb_rxdata[MHI_PACKET];
+static uint8_t mhi_bb_txdata[MHI_PACKET];
+static uint8_t mhi_bb_ipcr_rx[MHI_PACKET];
+
+int
+umi_bb_announce(uint32_t service, uint32_t version, uint32_t instance, uint32_t port)
+{
+	mhi_bb_host_svc[0] = 4u;
+	mhi_bb_host_svc[1] = service;
+	mhi_bb_host_svc[2] = (version & 0xffu) | (instance << 8);
+	mhi_bb_host_svc[3] = 1u;
+	mhi_bb_host_svc[4] = port;
+	mhi_bb_host_known = true;
+	if (mhi_channels[4].ring != NULL) {
+		uint8_t frame[40];
+		size_t length = mhi_qrtr_put3(frame, 4, 0xfffe, mhi_bb_modem_node, 0xfffe,
+		    mhi_bb_host_svc, sizeof(mhi_bb_host_svc));
+
+		return mhi_send(&mhi_channels[4], frame, length);
+	}
+	return 0;
+}
+
+static int
+mhi_bb_qmap_next(const uint8_t *frame, size_t length, size_t *at, uint8_t *mux,
+    const uint8_t **payload, size_t *payload_length)
+{
+	size_t p, n, pad;
+
+	if (!frame || !at || *at > length || length - *at < 4) {
+		return -1;
+	}
+	p = *at;
+	pad = frame[p] & 0x3f;
+	n = ((size_t)frame[p + 2] << 8) | frame[p + 3];
+	if (!n || pad > n || n > length - p - 4) {
+		return -1;
+	}
+	if (mux) {
+		*mux = frame[p + 1];
+	}
+	if (payload) {
+		*payload = frame + p + 4;
+	}
+	if (payload_length) {
+		*payload_length = n - pad;
+	}
+	*at = p + 4 + n;
+	return 0;
+}
+
+static int
+mhi_bb_data_poll(void)
+{
+	struct mhi_channel *tx = &mhi_channels[8], *rx = &mhi_channels[9];
+	int error;
+
+	if (!mhi_bb_data_open) {
+		return 0;
+	}
+	if (tx->tx_done) {
+		tx->tx_done = false;
+		mhi_bb_data_tx++;
+	}
+	if (rx->rx_ready) {
+		size_t rx_len = rx->rx_length, at = 0;
+
+		if (rx_len > sizeof(mhi_bb_rxdata)) {
+			rx_len = sizeof(mhi_bb_rxdata);
+		}
+		memcpy(mhi_bb_rxdata, (const void *)rx->buffer, rx_len);
+		rx->rx_ready = false;
+		error = mhi_post(rx, MHI_PACKET);
+		if (error) {
+			return error;
+		}
+		while (at < rx_len) {
+			const uint8_t *ip;
+			size_t n, start = at;
+			uint8_t mux;
+
+			if (mhi_bb_qmap_next(mhi_bb_rxdata, rx_len, &at, &mux, &ip, &n)) {
+				mhi_bb_data_drop++;
+				break;
+			}
+			if (!(mhi_bb_rxdata[start] & 0xc0)) {
+				if (umi_bb_data_input(mux, ip, (uint32_t)n)) {
+					mhi_bb_data_rx++;
+				} else {
+					mhi_bb_data_drop++;
+				}
+				mhi_bb_active_at = mhi_now_us();
+			}
+		}
+	}
+	if (!tx->tx_pending) {
+		uint8_t mux = 1;
+		uint32_t n = umi_bb_data_take(&mux, mhi_bb_txdata + 4, MHI_PACKET - 4);
+
+		if (n > 0) {
+			mhi_bb_active_at = mhi_now_us();
+			mhi_bb_txdata[0] = 0;
+			mhi_bb_txdata[1] = mux;
+			mhi_bb_txdata[2] = (uint8_t)(n >> 8);
+			mhi_bb_txdata[3] = (uint8_t)n;
+			memcpy((void *)tx->buffer, mhi_bb_txdata, n + 4);
+			mhi_publish();
+			error = mhi_post(tx, n + 4);
+			if (error) {
+				return error;
+			}
+		}
+	}
+	return 0;
+}
+
+static int
+mhi_bb_data_link(struct mhi_channel *out, struct mhi_channel *in, unsigned wda_node,
+    unsigned wda_port, uint32_t *dl_max_out)
+{
+	/* WDA Set Data Format (0x0020): Raw IP (2), UL/DL QMAP (5), max 32 pkts / 32768 B, EP PCIe/4 */
+	static const uint8_t wda_req[] = {
+		0x00, 0x01, 0x00, 0x20, 0x00, 0x2e, 0x00,
+		0x11, 0x04, 0x00, 0x02, 0x00, 0x00, 0x00,
+		0x12, 0x04, 0x00, 0x05, 0x00, 0x00, 0x00,
+		0x13, 0x04, 0x00, 0x05, 0x00, 0x00, 0x00,
+		0x15, 0x04, 0x00, 0x20, 0x00, 0x00, 0x00,
+		0x16, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00,
+		0x17, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+	};
+	uint8_t answer[256];
+	size_t got;
+	unsigned header, result = ~0u, qerr = ~0u;
+	uint32_t proto = 0, ul = 0, dl = 0, dl_max = 0;
+	int error;
+
+	error = mhi_enable_hw_events();
+	if (error) {
+		hakios_tl("pcie2: bridge: IP_HW0 event rings failed (%d)\n", error);
+		return error;
+	}
+	error = mhi_start_channel(8, 100, 4);
+	if (error) {
+		hakios_tl("pcie2: bridge: IP_HW0 channel 100 failed (%d)\n", error);
+		return error;
+	}
+	error = mhi_start_channel(9, 101, 5);
+	if (error) {
+		hakios_tl("pcie2: bridge: IP_HW0 channel 101 failed (%d)\n", error);
+		return error;
+	}
+	mhi_bb_data_open = true;
+	mhi_bb_log_at = mhi_now_us() + 60000000ull;
+
+	got = mhi_qmi_call(out, in, 0x1004, wda_node, wda_port, wda_req, sizeof(wda_req),
+	    "WDA set data format (IP_HW0 QMAP)", answer, sizeof(answer));
+	if (got == 0) {
+		hakios_tl("pcie2: bridge: WDA set data format timed out\n");
+		return ETIMEDOUT;
+	}
+	mhi_qmi_outcome(answer, got, &result, &qerr);
+	if (result != 0 || qerr != 0) {
+		hakios_tl("pcie2: bridge: WDA set data format refused result=%u err=%u\n", result, qerr);
+		return EIO;
+	}
+	header = (got >= 32 && mhi_qrtr_word(answer, 0) == 1) ? 32 : 16;
+	got = mhi_qrtr_payload(answer, got, header);
+	if (got >= header + 7) {
+		const uint8_t *qmi = answer + header;
+		size_t body = got - header;
+
+		for (size_t at = 7; at + 3 <= body; ) {
+			unsigned t = qmi[at];
+			unsigned l = qmi[at + 1] | ((unsigned)qmi[at + 2] << 8);
+
+			if (at + 3 + l > body) {
+				break;
+			}
+			if (l == 4) {
+				uint32_t v = mhi_qrtr_word(qmi, (unsigned)(at + 3));
+
+				if (t == 0x11) proto = v;
+				else if (t == 0x12) ul = v;
+				else if (t == 0x13) dl = v;
+				else if (t == 0x16) dl_max = v;
+			}
+			at += 3 + l;
+		}
+	}
+	hakios_tl("pcie2: bridge: WDA format proto=%u ul=%u dl=%u dl_max=%u\n", proto, ul, dl, dl_max);
+	if (proto != 2 || ul != 5 || dl != 5 || dl_max == 0 || dl_max > MHI_PACKET) {
+		return EPROTONOSUPPORT;
+	}
+	*dl_max_out = dl_max;
+	return 0;
+}
+
+static void
+mhi_bb_send(uint32_t local_port, uint32_t node, uint32_t port, const void *message, uint32_t length)
+{
+	if (length > MHI_PACKET - 20) {
+		hakios_tl("pcie2: bridge: send port %#x dropped (too large %u)\n", local_port, length);
+		return;
+	}
+	size_t framed = mhi_qrtr_put3_frame(mhi_bb_txframe, 1,
+	    local_port == 0xfffffffe ? 0xfffe : local_port,
+	    node == 0xffffffff ? 0xffff : node,
+	    port == 0xfffffffe ? 0xfffe : port,
+	    message, length);
+	int error = mhi_send(&mhi_channels[4], mhi_bb_txframe, framed);
+
+	if (error) {
+		hakios_tl("pcie2: bridge: send port %#x bytes %u failed (%d)\n", local_port, length, error);
+	}
+}
+
+static void
+mhi_bb_release(uint32_t local_port)
+{
+	uint32_t del[5] = { 6, 1, local_port, 0, 0 };
+	uint8_t frame[40];
+	size_t framed = mhi_qrtr_put3_frame(frame, 6, local_port, 0xffff, 0xfffe, del, sizeof(del));
+
+	(void)mhi_send(&mhi_channels[4], frame, framed);
+}
+
+static void
+mhi_bb_qrtr_rx(struct mhi_channel *out, const uint8_t *frame, size_t got, unsigned *modem)
+{
+	unsigned header, type, src_node, src_port, dst_port, declared;
+	bool confirm;
+
+	if (got >= 32 && mhi_qrtr_word(frame, 0) == 1) {
+		header = 32;
+		type = mhi_qrtr_word(frame, 4);
+		src_node = mhi_qrtr_word(frame, 8);
+		src_port = mhi_qrtr_word(frame, 12);
+		confirm = mhi_qrtr_word(frame, 16) != 0;
+		declared = mhi_qrtr_word(frame, 20);
+		dst_port = mhi_qrtr_word(frame, 28);
+	} else if (got >= 16) {
+		type = frame[1];
+		confirm = (frame[2] & 1) != 0;
+		header = 16u + frame[3];
+		declared = mhi_qrtr_word(frame, 4);
+		src_node = frame[8] | ((unsigned)frame[9] << 8);
+		src_port = frame[10] | ((unsigned)frame[11] << 8);
+		dst_port = frame[14] | ((unsigned)frame[15] << 8);
+		if (src_port == 0xfffe) src_port = 0xfffffffe;
+		if (dst_port == 0xfffe) dst_port = 0xfffffffe;
+	} else {
+		return;
+	}
+	if (header > got || declared > got - header) {
+		return;
+	}
+	const uint8_t *payload = frame + header;
+	if (confirm) {
+		mhi_qrtr_resume(out, dst_port == 0xfffffffe ? 0xfffe : dst_port,
+		    src_node, src_port == 0xfffffffe ? 0xfffe : src_port);
+	}
+	if (type == 4 && declared >= 20 && mhi_qrtr_word(payload, 0) == 4) {
+		mhi_qrtr_learn(mhi_qrtr_word(payload, 4), mhi_qrtr_word(payload, 8),
+		    mhi_qrtr_word(payload, 12), mhi_qrtr_word(payload, 16));
+	} else if (type == 5 && declared >= 20 && mhi_qrtr_word(payload, 0) == 5) {
+		umi_bb_del_server(mhi_qrtr_word(payload, 4),
+		    mhi_qrtr_word(payload, 12), mhi_qrtr_word(payload, 16));
+	} else if (type == 2 && declared >= 4) {
+		uint32_t hello[5] = { 2, 0, 0, 0, 0 };
+		uint8_t hframe[40];
+		size_t hlen;
+
+		*modem = src_node;
+		mhi_bb_modem_node = src_node;
+		hlen = mhi_qrtr_put3(hframe, 2, 0xfffe, src_node, 0xfffe, hello, sizeof(hello));
+		(void)mhi_send(out, hframe, hlen);
+		mhi_qrtr_announce(out, src_node, ~0u, "bridge hello");
+	} else if (type == 10 && declared >= 20 && mhi_qrtr_word(payload, 0) == 10) {
+		unsigned service = mhi_qrtr_word(payload, 4);
+
+		mhi_qrtr_announce(out, src_node, service, "bridge lookup");
+		mhi_qrtr_announce_end(out, src_node);
+	} else if (type == 1) {
+		int hsvc = mhi_host_service(dst_port);
+
+		if (hsvc >= 0 && mhi_host_services[hsvc].service == 4096) {
+			mhi_tftp_request(out, frame, got, header, "bridge");
+			return;
+		}
+		if (hsvc >= 0 && mhi_host_services[hsvc].service == 64 && declared >= 7) {
+			mhi_servreg_answer(out, frame, got, header, "bridge");
+			return;
+		}
+		if (hsvc < 0 && mhi_tftp_ack(out, frame, got, header, dst_port, "bridge")) {
+			return;
+		}
+		if (umi_bb_qrtr(dst_port, src_node, src_port, payload, declared)) {
+			mhi_bb_active_at = mhi_now_us();
+			return;
+		}
+		static unsigned unknown_rx;
+		if (unknown_rx++ < 16) {
+			if (dst_port != 0x1007u && dst_port != 0x100eu && dst_port != 0x100fu)
+					hakios_tl("pcie2: bridge: unhandled QRTR data dst=%#x from %u:%#x bytes=%u\n",
+			    dst_port, src_node, src_port, declared);
+		}
+	}
+}
+
+static int
+mhi_bb_bridge_run(struct mhi_channel *out, struct mhi_channel *in, unsigned modem)
+{
+	uint64_t quiet_at = mhi_now_us();
+	bool data_attempted = false;
+	unsigned wda_node = 0, wda_port = 0;
+	int error = 0;
+
+	mhi_stage = "bridge";
+	mhi_bb_modem_node = modem;
+	mhi_bb_active_at = quiet_at;
+	mhi_bb_log_at = quiet_at + 60000000ull;
+
+	if (mhi_qrtr_service(0x1a, &wda_node, &wda_port)) {
+		uint32_t dl_max = 0;
+		int derr;
+
+		data_attempted = true;
+		derr = mhi_bb_data_link(out, in, wda_node, wda_port, &dl_max);
+		umi_bb_link(derr == 0 ? dl_max : 0);
+	}
+	{
+		static uint8_t dsd_answer[1024];
+
+		/* Arm Qualcomm DSD (0x2a) before CommCenter starts WDS: on dual-SIM
+		 * X55M with physical slot 2 switched to logical slot 1, DSD 0x0065
+		 * (DDS=1) and 0x0069 (UI data enabled) clear CM_ACL_FAILURE (3/1042). */
+		mhi_dsd_settings_client(out, in, dsd_answer, sizeof(dsd_answer));
+		mhi_dsd_arm(out, in, dsd_answer, sizeof(dsd_answer));
+	}
+	__atomic_store_n(&mhi_bb_live, 1, __ATOMIC_RELEASE);
+	umi_bb_modem_ready();
+	hakios_tl("pcie2: bridge: CommCenter bridge live (primary_gw %#x, QMI/QMAP owned by CommCenter)\n",
+	    mhi_uim_state.primary_gw);
+
+	for (;;) {
+		error = mhi_poll();
+		if (error) {
+			hakios_tl("pcie2: bridge: MHI poll failed (%d); leaving bridge loop\n", error);
+			break;
+		}
+		if (!data_attempted && mhi_qrtr_service(0x1a, &wda_node, &wda_port)) {
+			uint32_t dl_max = 0;
+			int derr;
+
+			data_attempted = true;
+			derr = mhi_bb_data_link(out, in, wda_node, wda_port, &dl_max);
+			umi_bb_link(derr == 0 ? dl_max : 0);
+		}
+		if (umi_bb_poll(mhi_bb_send, mhi_bb_release)) {
+			mhi_bb_active_at = mhi_now_us();
+		}
+		if (mhi_channels[MHI_EFS_IN_SLOT].rx_ready || mhi_efs_pos < mhi_efs_size) {
+			(void)mhi_efs_service();
+			quiet_at = mhi_now_us();
+		}
+		if (in->rx_ready) {
+			size_t got = in->rx_length;
+
+			if (got > sizeof(mhi_bb_ipcr_rx)) {
+				got = sizeof(mhi_bb_ipcr_rx);
+			}
+			memcpy(mhi_bb_ipcr_rx, (const void *)in->buffer, got);
+			in->rx_ready = false;
+			error = mhi_post(in, MHI_PACKET);
+			if (error) {
+				hakios_tl("pcie2: bridge: IPCR RX repost failed (%d)\n", error);
+				break;
+			}
+			mhi_bb_qrtr_rx(out, mhi_bb_ipcr_rx, got, &modem);
+			quiet_at = mhi_now_us();
+			continue;
+		}
+		uint64_t now = mhi_now_us();
+		if (now >= mhi_bb_log_at) {
+			hakios_tl("pcie2: bridge: IP_HW0 tx=%llu rx=%llu drop=%llu\n",
+			    (unsigned long long)mhi_bb_data_tx, (unsigned long long)mhi_bb_data_rx,
+			    (unsigned long long)mhi_bb_data_drop);
+			umi_bb_report((unsigned)(now / 1000000ull));
+			mhi_bb_log_at = now + 60000000ull;
+		}
+		mhi_bb_idle((now - quiet_at < 2000000ull || now - mhi_bb_active_at < 2000000ull) ? 1 : 50);
+	}
+	mhi_bb_data_open = false;
+	__atomic_store_n(&mhi_bb_live, 0, __ATOMIC_RELEASE);
+	umi_bb_modem_lost();
+	return error;
+}
+
 static int
 mhi_amss_ipcr(void)
 {
@@ -14876,7 +15419,7 @@ mhi_amss_ipcr(void)
 				 * out at the dig, which is what starts the
 				 * carrier-config load; only the mode request
 				 * itself is skipped then. */
-				for (slice = 0; slice < 360; slice++) {
+				for (slice = 0; slice < (pcie2_mhi_mode == 2 ? 80u : 360u); slice++) {
 					if (asked == 0 && mhi_mcfg_dig_done != 0) {
 						uint8_t set[11] = {
 							0x00, 0x58, 0x00, 0x2e, 0x00, 0x04, 0x00,
@@ -14988,8 +15531,10 @@ mhi_amss_ipcr(void)
 	 * register and the attach still read {6}, so every stage that
 	 * precedes the register sets the list and reads it back (see
 	 * mhi_wds_early). */
-	mhi_wds_steered = mhi_wds_early("before the card work", out, in, answer,
-	    sizeof(answer)) != 0;
+	if (pcie2_mhi_mode != 2) {
+		mhi_wds_steered = mhi_wds_early("before the card work", out, in, answer,
+		    sizeof(answer)) != 0;
+	}
 	/* The SIM itself, over the port UIM named.  GET_CARD_STATUS (0x2f)
 	 * with no TLVs, framed the way libqmi frames it: the size field is the
 	 * message's own seven bytes, and the frame is padded to a multiple of
@@ -15074,6 +15619,17 @@ mhi_amss_ipcr(void)
 				    mhi_qrtr_servers[i].node, mhi_qrtr_servers[i].port,
 				    what, answer, sizeof(answer));
 			}
+		}
+		if (pcie2_mhi_mode == 2) {
+			unsigned dn, dp;
+
+			for (unsigned w = 0; w < 20 &&
+			    (!mhi_qrtr_service(0x03, &dn, &dp) ||
+			    !mhi_qrtr_service(0x01, &dn, &dp) ||
+			    !mhi_qrtr_service(0x1a, &dn, &dp)); w++) {
+				(void)mhi_qrtr_pump(out, in, 500, "before bridge handoff");
+			}
+			return mhi_bb_bridge_run(out, in, modem);
 		}
 		/* The attach steering, second stage: the card work above is
 		 * done, the EFS sync and the NAS register are next, and the
@@ -15549,6 +16105,7 @@ mhi_amss_replay(void)
 	    cfg, (cfg & 0xffff) | (MHI_NER << 16) | (2u << 24),
 	    (unsigned long long)mhi_chctx_iova, (unsigned long long)mhi_erctx_iova,
 	    (unsigned long long)mhi_cmdctx_iova);
+	mhi_hw_events_ready = false;
 	for (unsigned e = 0; e < MHI_NER; e++) {
 		struct mhi_event_ring *ring = &mhi_events[e];
 		volatile uint32_t *c = mhi_erctx + e * 11;
@@ -15699,15 +16256,18 @@ mhi_amss_start(void)
 	    rd(MHI_BAR + 0xa0), rd(MHI_BAR + 0xa4));
 	error = mhi_amss_replay();
 	if (error == 0) {
-		int qmi_error = mhi_start_channel(2, 14, 1);
+		int qmi_error = EOPNOTSUPP;
 
-		hakios_tl("pcie2: AMSS: channel 14 (QMI0 out) %s\n",
-		    qmi_error == 0 ? "open" : "did not open");
-		if (qmi_error == 0) {
-			mhi_log_channel(14);
-			qmi_error = mhi_start_channel(3, 15, 2);
-			hakios_tl("pcie2: AMSS: channel 15 (QMI0 in) %s\n",
+		if (pcie2_mhi_mode != 2) {
+			qmi_error = mhi_start_channel(2, 14, 1);
+			hakios_tl("pcie2: AMSS: channel 14 (QMI0 out) %s\n",
 			    qmi_error == 0 ? "open" : "did not open");
+			if (qmi_error == 0) {
+				mhi_log_channel(14);
+				qmi_error = mhi_start_channel(3, 15, 2);
+				hakios_tl("pcie2: AMSS: channel 15 (QMI0 in) %s\n",
+				    qmi_error == 0 ? "open" : "did not open");
+			}
 		}
 		/* The QRTR pair first.  Stock's host questions DMS 2.2 s after
 		 * the AMSS takes over and changes its mode while the modem is
@@ -15722,7 +16282,7 @@ mhi_amss_start(void)
 		 * contact, UIM, NAS, EFS.  The QMI0 pair's own state must not
 		 * gate it. */
 		error = mhi_amss_ipcr();
-		if (error == 0) {
+		if (error == 0 && pcie2_mhi_mode != 2) {
 			/* The modem is the system's now: NAS is polled from
 			 * here on, and kern.hakios.cellular_* stays current
 			 * for the UI. */
@@ -17038,19 +17598,32 @@ pcie2_run(void)
 static void
 pcie2_thread(__unused void *parameter, __unused wait_result_t result)
 {
+	__atomic_store_n(&mhi_bb_thread_alive, 1, __ATOMIC_RELEASE);
 	delay(3000);
+	if (pcie2_mhi_mode == 2) {
+		/* Publish AppleBaseband, PCI channels, Mav PDP manager, AppleIPAppender and pdp_ip0..3
+		 * before the modem finishes Sahara/QRTR so CommCenter finds them immediately at launch. */
+		umi_bb_publish();
+	}
 	pcie2_run();
+	__atomic_store_n(&mhi_bb_live, 0, __ATOMIC_RELEASE);
+	__atomic_store_n(&mhi_bb_thread_alive, 0, __ATOMIC_RELEASE);
 	thread_terminate(current_thread());
 }
 
 void
 hakios_thyme_pcie2_test(void)
 {
-	uint32_t on = 0;
+	uint32_t on = 0, cc = 0;
 	thread_t thread;
 
 	if (!PE_parse_boot_argn("pcie2_test", &on, sizeof(on)) || on != 1) {
 		return;
+	}
+	(void)PE_parse_boot_argn("pcie2_mhi", &pcie2_mhi_mode, sizeof(pcie2_mhi_mode));
+	(void)PE_parse_boot_argn("pcie2_cc", &cc, sizeof(cc));
+	if (cc == 1 && pcie2_mhi_mode < 2) {
+		pcie2_mhi_mode = 2;
 	}
 	if (kernel_thread_start(pcie2_thread, NULL, &thread) == KERN_SUCCESS) {
 		thread_deallocate(thread);
