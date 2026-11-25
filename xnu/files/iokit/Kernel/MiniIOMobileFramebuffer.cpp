@@ -667,6 +667,7 @@ hakios_fb_publish_refresh(void)
 	IOMobileFramebuffer * fb = gPublishedFramebuffer;
 
 	if (fb != NULL) {
+		fb->publishModes();
 		fb->publishRefresh();
 	}
 }

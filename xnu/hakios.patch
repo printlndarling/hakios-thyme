@@ -744,7 +744,7 @@ index 1d71c66629fb..ab6757b260e9 100644
  	ret = persona_proc_adopt(p, persona, cred);
  
  	kauth_cred_unref(&cred);
-@@ -5586,10 +5685,75 @@ bad:
+@@ -5586,10 +5685,81 @@ bad:
   * Note:	The argument and environment vectors are user space pointers
   *		to arrays of user space pointers.
   */
@@ -797,6 +797,12 @@ index 1d71c66629fb..ab6757b260e9 100644
 +			if (!matched && (size_t)(p - word) == namelen && namelen != 0 && liblen != 0 &&
 +			    strncmp(word, name, namelen) == 0) {
 +				matched = true;         /* this group names this program; its library is added once */
++			} else if (!matched && (size_t)(p - word) == 5 && strncmp(word, "@apps", 5) == 0 && liblen != 0 &&
++			    imgp->ip_ndp->ni_cnd.cn_pnbuf != NULL &&
++			    strnstr(imgp->ip_ndp->ni_cnd.cn_pnbuf, ".app/", MAXPATHLEN) != NULL &&
++			    strnstr(imgp->ip_ndp->ni_cnd.cn_pnbuf, ".appex/", MAXPATHLEN) == NULL &&
++			    !(namelen == 11 && strncmp(name, "SpringBoard", 11) == 0)) {
++				matched = true;         /* @apps: every UIKit .app bundle (except SpringBoard) */
 +			}
 +		}
 +		if (matched && liblen != 0 && used + 1 + liblen < size) {

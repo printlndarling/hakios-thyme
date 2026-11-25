@@ -1387,7 +1387,7 @@ run_command(char *line)
 	char *argv[64];
 	/* /var/jb/... first: a package manager's own programs call one another by name (dpkg, dpkg-query) */
 	char *envp[] = { "PATH=/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:/bin:/sbin:/usr/bin:/usr/sbin",
-		         "HOME=/var/mobile", "TERM=dumb", NULL };
+		         "HOME=/var/mobile", "TERM=dumb", "CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0", NULL };
 	const char *append_to = NULL;
 	int argc = 0, status = 0, background = 0;
 	struct stat st;

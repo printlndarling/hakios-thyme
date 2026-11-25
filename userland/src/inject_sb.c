@@ -643,6 +643,21 @@ static id cellular_aggregator;
 static int cellular_last_bars = -2, cellular_last_registered = -2, cellular_said;
 static long cellular_active_mode;	/* the active signal mode; declared with its meaning below */
 
+/* True once the kernel's native CommCenter baseband bridge (AppleBaseband) is present:
+ * let CommCenter drive the real status bar signal, carrier, and LTE/5G data items directly. */
+static bool
+baseband_native(void)
+{
+	static bool found;
+	io_service_t service;
+
+	if (!found && (service = IOServiceGetMatchingService(0, IOServiceMatching("AppleBaseband"))) != 0) {
+		IOObjectRelease(service);
+		found = true;
+	}
+	return found;
+}
+
 /* The getters and setters are blocks (their type is "@?"): called through the block's own invoke pointer, with the block first. */
 struct block_layout {
 	void *isa;
@@ -990,6 +1005,10 @@ signal_view_hook(void)
 static void
 cellular_hook(void)
 {
+	if (baseband_native()) {
+		say("hakios: cellular: AppleBaseband present; leaving status bar to native CommCenter\n");
+		return;
+	}
 	signal_view_hook();
 	{
 		const char *service_selector = "_updateServiceItem:withData:SIMInfo:otherSIMInfo:serviceStringGetter:serviceStringSetter:"
@@ -2436,7 +2455,7 @@ set_fps(id self, SEL selector, long fps)
 		say("hakios: display link %p asked for %ld a second%s by %s\n", (void *)self, fps, full_rate(self) ? " (dropped)" : "",
 		    caller(__builtin_return_address(0), who, sizeof(who)));
 	}
-	original_set_fps(self, selector, full_rate(self) ? 0 : fps);
+	original_set_fps(self, selector, (full_rate(self) || (dl_max && fps >= 48 && fps < 90)) ? 0 : fps);
 }
 
 static void
@@ -2448,7 +2467,7 @@ set_range(id self, SEL selector, frame_rate_range range)
 		say("hakios: display link %p asked for %.0f..%.0f, %.0f a second%s by %s\n", (void *)self, range.minimum,
 		    range.maximum, range.preferred, full_rate(self) ? " (dropped)" : "", caller(__builtin_return_address(0), who, sizeof(who)));
 	}
-	if (full_rate(self)) {
+	if (full_rate(self) || (dl_max && ((range.maximum >= 48.0f && range.maximum < 90.0f) || (range.preferred >= 48.0f && range.preferred < 90.0f)))) {
 		range = (frame_rate_range){ 0, 0, 0 };
 	}
 	original_set_range(self, selector, range);
@@ -2502,11 +2521,11 @@ animation_rates(const char *arguments)
 {
 	Method add = class_getInstanceMethod(objc_getClass("CALayer"), sel_registerName("addAnimation:forKey:"));
 
-	if (!boot_arg(arguments, "anim_max=1") || add == NULL) {
+	if (boot_arg(arguments, "anim_max=0") || add == NULL) {
 		return;
 	}
 	original_add_animation = (void (*)(id, SEL, id, id))method_setImplementation(add, (IMP)add_animation_full_rate);
-	say("hakios: SpringBoard's animations ask for 80..120 a second (anim_max=1)\n");
+	say("hakios: SpringBoard's animations ask for 80..120 a second (anim_max=1 default)\n");
 }
 
 static void

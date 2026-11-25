@@ -131,6 +131,9 @@ DARWIN_JOBS=${JOBS-"
 # (Count a QEMU run log with its duplicate lines removed: run-darwin.sh prints launchd's log twice.)
 # WIFID=0 leaves it out.
 [ "${WIFID-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.wifid"
+# Native CommCenter: mkjobs.py preserves _LimitLoadToDeviceTree = baseband, so launchd starts
+# CommCenter only when the loader emits /baseband (pcie2_mhi=2 / pcie2_cc=1). Inert otherwise.
+[ "${COMMCENTER-1}" != 0 ] && DARWIN_JOBS="$DARWIN_JOBS com.apple.CommCenter"
 
 # Location Services: the system's locationd was never in the job list, so its XPC registration
 # was absent ("failed lookup: com.apple.locationd.registration" from wifid, SpringBoard and
@@ -176,6 +179,7 @@ INJECT=${INJECT-"/redwood/lib/libhakios.dylib backboardd containermanagerd conta
 /redwood/lib/libhakios.app.dylib Sileo
 /redwood/lib/libhakios.tweaks.dylib Preferences
 /redwood/lib/libhakios.prefs.dylib Preferences
+/redwood/lib/libhakios.hfr.dylib @apps
 /redwood/lib/libhakios.sydexc.dylib syncdefaultsd
 /redwood/lib/libhakios.bluetooth.dylib bluetoothd"}
 # WEATHERLOG=1: the Weather app started with a library that says every URL request it makes
@@ -286,6 +290,13 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -lproc -o obj/killby src/killby.c
 		$DYN -framework CoreFoundation -framework CoreGraphics -framework CoreText -o obj/font_test src/font_test.c
 		$DYN -fobjc-arc -framework Foundation -framework SystemConfiguration -o obj/net_test src/net_test.m
+		if [ -f obj/amr-arm64/lib/libopencore-amrnb.a ]; then
+			$DYN -Os -Wl,-dead_strip -Wl,-x -Iobj/amr-arm64/include -o obj/volte_rtp src/volte_rtp.c \
+				obj/amr-arm64/lib/libopencore-amrnb.a obj/amr-arm64/lib/libopencore-amrwb.a \
+				obj/amr-arm64/lib/libvo-amrwbenc.a -lc++ -lpthread
+		fi
+		$DYN -fobjc-arc -Wno-four-char-constants -framework Foundation -framework AudioToolbox -framework CoreAudio -lobjc -o obj/volte_probe src/volte_probe.m &&
+			{ ${LDID:-ldid} -Ssrc/volte_probe.entitlements obj/volte_probe 2>/dev/null || true; }
 		# what CoreLocation says about location services (src/loc_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreLocation -framework CoreFoundation -o obj/loc_test src/loc_test.m
 		# WeatherDaemon's switches for the mobile user (src/weatherprefs.c)
@@ -368,6 +379,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		# port's Preferences filters out of Privacy.plist, inserted at page load
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.prefs.dylib -framework CoreFoundation -lobjc \
 			-o obj/libhakios.prefs.dylib src/inject_prefs.c
+		$DYN -Os -Wl,-dead_strip -Wl,-x -dynamiclib -install_name /redwood/lib/libhakios.hfr.dylib -framework CoreFoundation -lobjc \
+			-o obj/libhakios.hfr.dylib src/inject_hfr.c
 		# an uncaught exception's stack on the console, for a daemon that dies before it logs (src/inject_exc.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libhakios.sydexc.dylib -framework Foundation -lobjc \
 			-o obj/libhakios.sydexc.dylib src/inject_exc.m
@@ -508,6 +521,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/pipelinelib_test ] && cp obj/pipelinelib_test root/bin/
 	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
+	[ -f obj/volte_probe ] && cp obj/volte_probe root/bin/
+	[ -f obj/volte_rtp ] && cp obj/volte_rtp root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
 	[ -f obj/weatherprefs ] && cp obj/weatherprefs root/bin/
 	[ -f obj/plistcat ] && cp obj/plistcat root/bin/
@@ -574,6 +589,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/libhakios.bluetooth.dylib ] && cp obj/libhakios.bluetooth.dylib root/lib/
 	[ -f obj/libhakios.tweaks.dylib ] && cp obj/libhakios.tweaks.dylib root/lib/
 	[ -f obj/libhakios.prefs.dylib ] && cp obj/libhakios.prefs.dylib root/lib/
+		cp obj/libhakios.hfr.dylib root/lib/
 	[ -f obj/libhakios.sydexc.dylib ] && cp obj/libhakios.sydexc.dylib root/lib/
 	[ -f obj/libhakios.weatherlog.dylib ] && cp obj/libhakios.weatherlog.dylib root/lib/
 	[ -f obj/libhakios.weatherjwt.dylib ] && cp obj/libhakios.weatherjwt.dylib root/lib/
@@ -689,6 +705,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# and not by what select-system.py extracted here (--root-volume; seven jobs turn on the difference,
 	# fairplayd among them).
 	cp com.hakios.demo.plist com.hakios.wifi.plist com.hakios.wifi-keepalive.plist root/LaunchDaemons/
+	[ -f root/bin/volte_rtp ] && cp com.hakios.volte-rtp.plist root/LaunchDaemons/
 	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
 	if [ -n "${FAIRPLAYSTUB:-}" ] && [ -f obj/fairplaystub ]; then
 		cp obj/fairplaystub root/bin/
@@ -810,7 +827,9 @@ if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
 	fi
 	if [ -d ../fw-audio/cs35l41 ]; then
 		mkdir -p root/fw/cs35l41
-		cp -R ../fw-audio/cs35l41/. root/fw/cs35l41/
+		for f in ../fw-audio/cs35l41/cs35l41-dsp1-spk-prot* ../fw-audio/cs35l41/cs35l41_cal*.bin; do
+			[ -f "$f" ] && cp "$f" root/fw/cs35l41/
+		done
 	fi
 fi
 # ... and with SLPI=1 the image of the sensor DSP, from the same place into ../fw-slpi
@@ -1043,6 +1062,24 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		if [ -d ../fw-modem/image ]; then
 			rm -rf sysroot/fw/image && cp -R ../fw-modem/image sysroot/fw/image
 		fi
+	fi
+	# Apple's Mav17 baseband files (from the user's own iPhone10,3 16.5 IPSW into ../fw-baseband/Mav17,
+	# never in git): required by CommCenter's BBUpdater when booting with the baseband bridge (pcie2_mhi=2).
+	# Staged at both the plain standalone path and the boot-manifest-hash personalized path (hard-linked).
+	if [ -d ../fw-baseband/Mav17 ]; then
+		BB_HASH=726564776F6F64$(printf '%082d' 0)
+		mkdir -p sysroot/usr/local/standalone/firmware/Baseband/Mav17
+		cp -R ../fw-baseband/Mav17/. sysroot/usr/local/standalone/firmware/Baseband/Mav17/
+		mkdir -p sysroot/private/preboot/$BB_HASH/usr/local/standalone/firmware/Baseband/Mav17
+		linkcopy sysroot/usr/local/standalone/firmware/Baseband/Mav17/. \
+			sysroot/private/preboot/$BB_HASH/usr/local/standalone/firmware/Baseband/Mav17/
+	fi
+	# China Broadnet (PLMN 46015) has no carrier bundle in iPhone10,3 iOS 16.5 (20F66), so CommCenter
+	# falls back to Unknown.bundle (empty APNs, no VoLTE/IMS). Map 46015 to Apple's signed CMCC_cn.bundle
+	# (same MOCN LTE/VoLTE/IMS architecture; the bridge rewrites APN "cmnet" -> "cbnet" for 46015 SIMs).
+	if [ -d "sysroot/System/Library/Carrier Bundles/iPhone/CMCC_cn.bundle" ] &&
+	   [ ! -e "sysroot/System/Library/Carrier Bundles/iPhone/46015" ]; then
+		ln -s CMCC_cn.bundle "sysroot/System/Library/Carrier Bundles/iPhone/46015"
 	fi
 	# ... and the speaker amplifiers' configuration, the phone's /vendor/etc/aw882xx_acf.bin (drivers/audio/hakios.speaker.c,
 	# for sound=3): Android's own register values, which are not in the repository either

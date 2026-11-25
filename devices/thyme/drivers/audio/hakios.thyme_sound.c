@@ -1699,8 +1699,10 @@ hakios_sound_dsp_up(void)
 	if (!PE_parse_boot_argn("sound", &level, sizeof(level)) || level == 0) {
 		return;
 	}
-	uint32_t umi = 0;
-	umi_profile = PE_parse_boot_argn("adsp_umi", &umi, sizeof(umi)) && umi == 1;
+	/* THYME only has Cirrus Logic CS35L41 speakers; default to the CS35L41 profile unless adsp_umi=0. */
+	uint32_t umi = 1;
+	(void)PE_parse_boot_argn("adsp_umi", &umi, sizeof(umi));
+	umi_profile = (umi != 0);
 	if (umi_profile) {
 		/* UMI media can already reach full-scale PCM. Redwood's fixed +12 dB
 		 * bring-up compensation drives the limiter throughout music playback. */
