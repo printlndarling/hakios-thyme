@@ -1420,6 +1420,10 @@ run_command(char *line)
 		printf(" %s", argv[i]);
 	}
 	printf("\n");
+	/* The command line goes to the console before the command runs: when one
+	   hung, the log showed its "$ ..." line and nothing after it (215739-run.log),
+	   and a missing next "$" line is the program -- libmini's printf writes
+	   straight to fd 1 (vdprintf, mini.c), so there is nothing left buffered. */
 	if (argc > 1 && strcmp(argv[argc - 1], "&") == 0) {
 		background = 1;
 		argv[--argc] = NULL;

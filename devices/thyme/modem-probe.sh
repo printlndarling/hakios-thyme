@@ -35,9 +35,13 @@ export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
 
 SYSTEM_IMAGE=${SYSTEM_IMAGE:-devices/thyme/prebuilt/system.apfs}
 SCENE=${SCENE:-out/thyme-boot/root-modemprobe.apfs}
-# The loader composes the first ~180 characters itself and its buffer is 607
-# (BOOT_LINE_LENGTH 608): everything past that is cut, silently, at the tail --
-# which is where the probe's own arguments sit. BASE_ARGS exists so a probe
+# The kernel's boot_args.CommandLine keeps 607 characters (BOOT_LINE_LENGTH
+# 608) and the loader composes its own prefix in front of ours: 230 characters
+# measured from run 005621's echo, 263 once ufs=2 makes it add
+# ufs_shared_pa=0x... (run 010649). Everything past 607 is cut, silently, at
+# the tail -- which is where the probe's own arguments sit: run 010649 lost
+# "pcie2_sid=5 pmic_modem_pon_sid=8" to the 33 ufs_shared_pa took, and the
+# image was never mapped for the endpoint's SID. BASE_ARGS exists so a probe
 # that needs room can drop the daily args it does not use.
 ARGS=${BASE_ARGS:-$(tr -d '\n' < devices/thyme/ram.args)}
 BHI=${BHI:-1}
@@ -61,10 +65,36 @@ if [ "$(./xl state)" != android ]; then
 	[ "$(./xl state)" = android ] || { echo "modem-probe: Android did not come back" >&2; exit 1; }
 fi
 
-CMDLINE="$ARGS pcie2_test=1 pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS}"
-echo "modem-probe: pcie2_bhi=$BHI pcie2_img=$IMG ${EXTRA_ARGS:-}"
-echo "modem-probe: our kernel arguments are ${#CMDLINE} characters (about 420 fit before the loader cuts)"
-[ "${#CMDLINE}" -le 420 ] || echo "modem-probe: WARNING: the tail of these arguments may not reach the kernel" >&2
+# pcie2_img is the driver's default (1) when it is left out: the twelve
+# characters it costs are what a probe with ufs=2 and pcie2_mhi=1 needs back.
+IMG_ARG=""
+if [ "$IMG" != 1 ]; then
+	IMG_ARG=" pcie2_img=$IMG"
+fi
+CMDLINE="$ARGS pcie2_test=1 pcie2_bhi=$BHI${IMG_ARG} ${EXTRA_ARGS}"
+echo "modem-probe: pcie2_bhi=$BHI pcie2_img=$IMG ${IMG_ARG}${EXTRA_ARGS:-}"
+# What the loader adds in front: 230 characters, and 263 when ufs=2 is among
+# ours (it then writes ufs_shared_pa=0x... itself). What xl adds behind ours,
+# through the payload's cmdline: "kernel_sha=... image_sha=... loader_sha=..."
+# -- about 70 characters. Run 012201, with 335 of ours in front: 607 of 607
+# written and 62 cut, the cut starting inside kernel_sha= and eating only
+# those three. So ours fit up to 607-263-70 = 274; between 275 and 344 the
+# cut takes xl's hashes (the kernel can no longer say which image it booted;
+# the probe is unaffected); past 344 it takes our own tail.
+PREFIX=230
+case " $CMDLINE " in
+*" ufs=2 "*) PREFIX=263 ;;
+esac
+SUFFIX=70
+BUDGET=$((607 - PREFIX - SUFFIX))
+echo "modem-probe: our kernel arguments are ${#CMDLINE} characters; the loader's ${PREFIX} and xl's ${SUFFIX} leave ${BUDGET} of the kernel's 607"
+if [ "${#CMDLINE}" -gt "$BUDGET" ]; then
+	if [ "${#CMDLINE}" -le $((BUDGET + SUFFIX)) ]; then
+		echo "modem-probe: note: xl's sha arguments will be cut, not ours" >&2
+	else
+		echo "modem-probe: WARNING: the tail of these arguments will not reach the kernel" >&2
+	fi
+fi
 
 ./xl enter
 ./xl ramdisk "$SYSTEM_IMAGE"
@@ -72,7 +102,7 @@ XL_SECS=$XL_SECS XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} XL_RAMDISK="$SCENE" \
 	XL_CMDLINE="$CMDLINE" \
 	./xl run
 
-LOG=$(ls -t logs/*-run.log | head -1)
+LOG=$(ls -t logs/*-run.log | sed -n 1p)
 [ -n "$LOG" ] || { echo "modem-probe: no run log" >&2; exit 1; }
 echo "modem-probe: log $LOG (SHA-256 $(sha256sum "$LOG" | cut -d' ' -f1))"
 grep -a 'pcie2: \(BHI: sbl1\|BHI: status\|AER:\|PARF:\|SMMU: SGFSR\)' "$LOG" || true

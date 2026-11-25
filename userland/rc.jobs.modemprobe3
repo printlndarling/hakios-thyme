@@ -1,0 +1,9 @@
+# The cellular/IMS probe scene. One job only: keep the system out of idle
+# sleep for the whole run. Without a hold the display locks a few minutes
+# after boot, idle sleep suspends every scene process, the touch and the
+# loader's USB endpoint go with it, and the phone sits frozen and warm
+# (run 124850, 12:54:48 was the last console line; xl then declared the
+# kernel hung and the phone was force-restarted). sleep_hold holds
+# kPMMinutesToSleep and kPMMinutesToDim (userland/src/sleep_hold.c); 650 s
+# outlives the run's XL_SECS=600 with margin.
+/redwood/bin/sleep_hold 650 &

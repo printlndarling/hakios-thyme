@@ -48,7 +48,10 @@ struct boot_video {
 	uint64_t v_baseAddr, v_display, v_rowBytes, v_width, v_height, v_depth;
 };
 
-#define BOOT_LINE_LENGTH 608
+/* Must equal XNU's pexpert/pexpert/arm64/boot.h BOOT_LINE_LENGTH: the
+ * phone's real-device boot line is longer than iBoot's 608, and at 608 the
+ * payload's last arguments were cut. */
+#define BOOT_LINE_LENGTH 1024
 
 struct boot_args {
 	uint16_t revision;

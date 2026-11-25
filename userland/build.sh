@@ -59,6 +59,10 @@
 #                                   the kernel. adsp=1 needs none of it: the system image has the firmware in /fw.
 #                      MODEM=1      stage checked local MPSS firmware from ../fw-modem in system.apfs /fw.
 #                                   This does not start the modem; the XNU MPSS driver is still required.
+#                      SDX55=1      stage the SDX55M's boot images (../fw-modem-sdx55m: qdsp6sw.mbn, the 84 MB AMSS,
+#                                   and the rest of its Sahara set) in system.apfs /fw/modem, where the PCIe2 driver's
+#                                   Sahara server reads them (pcie2_mhi=1, devices/thyme/drivers/modem/
+#                                   hakios.thyme_pcie2.c); root.apfs keeps only the sbl1.mbn that the BHI load needs.
 #   system.apfs      the system image, the root filesystem (the resident RAM disk, /dev/md0), an
 #                    APFS container: the part of Darwin userland 16.5 chosen by ../sysimage/select-system.py at
 #                    its real paths, the dyld shared cache, and src/stage0.c as /sbin/launchd (the
@@ -735,7 +739,10 @@ done
 # (devices/thyme/drivers/modem/hakios.thyme_pcie2.c, pcie2_bhi=1; the phone's
 # /vendor/firmware_mnt/image/sbl1.mbn in ../fw-modem-sdx55m, 548 KB, the
 # vendor's and not in the repository either). Without it the probe's retry
-# loop gives up after 30 s and none of the MHI load path runs.
+# loop gives up after 30 s and none of the MHI load path runs. The rest of the
+# set its Sahara stream asks for -- qdsp6sw.mbn above all -- lives in the
+# system image's /fw/modem (SDX55=1, below): this image shares the loader's
+# 64 MB with the kernel, and the small ones alone would not fit.
 if [ -f ../fw-modem-sdx55m/sbl1.mbn ]; then
 	mkdir -p root/fw/modem
 	install -m 0644 ../fw-modem-sdx55m/sbl1.mbn root/fw/modem/
@@ -1009,6 +1016,30 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		cp ../fw-modem/modem.mdt ../fw-modem/modem.b[0-9][0-9] sysroot/fw/
 		# ... and the firmware partition's image/ (its mcfg configurations and the registry's *.jsn, pulled from
 		# the phone's /vendor/firmware_mnt/image into ../fw-modem/image), which the modem reads over TFTP (hakios.mpss.c)
+		if [ -d ../fw-modem/image ]; then
+			rm -rf sysroot/fw/image && cp -R ../fw-modem/image sysroot/fw/image
+		fi
+	fi
+	# The SDX55M's boot images that its SBL's Sahara stream asks for, qdsp6sw.mbn (the 84 MB AMSS) above all: far too
+	# large for the small boot image the loader carries beside the kernel, so SDX55=1 stages the set in the system
+	# image's /fw/modem, where the PCIe2 driver reads it (devices/thyme/drivers/modem/hakios.thyme_pcie2.c,
+	# pcie2_mhi=1). root.apfs carries sbl1.mbn alone, which the BHI load needs before this volume could be read.
+	if [ -n "$SDX55" ]; then
+		[ -f ../fw-modem-sdx55m/qdsp6sw.mbn ] || { echo "build.sh: SDX55=1 needs ../fw-modem-sdx55m/qdsp6sw.mbn" >&2; exit 1; }
+		mkdir -p sysroot/fw/modem
+		for f in ../fw-modem-sdx55m/*.mbn ../fw-modem-sdx55m/efs*.bin ../fw-modem-sdx55m/sec.elf; do
+			[ -f "$f" ] || continue
+			cp "$f" sysroot/fw/modem/
+		done
+		# ... and the firmware partition's image/ tree when it is on hand: the carrier
+		# configuration (modem_pr/mcfg) the modem reads over TFTP before it leaves OFFLINE.
+		# A production build does not hand out /vendor/firmware_mnt, so this comes from a
+		# firmware-only package extracted to ../fw-modem/image.  It belongs in this system
+		# image and not in root.apfs: the loader's payload window is 63 MiB, kernel and
+		# root scene together, and the scene already takes 48.  The driver's TFTP server
+		# resolves /readonly/firmware/image/... to /redwood/fw/image/... and then to
+		# /fw/image/... here (hakios.thyme_pcie2.c, mhi_tftp_open); /fw/modem is read
+		# from this same volume by the Sahara loader.
 		if [ -d ../fw-modem/image ]; then
 			rm -rf sysroot/fw/image && cp -R ../fw-modem/image sysroot/fw/image
 		fi

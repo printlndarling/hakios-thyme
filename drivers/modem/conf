@@ -2,6 +2,10 @@
 # CONFIG_HAKIOS_<NAME>=y in a defconfig builds a driver into the kernel; "standard" files are always built.
 # tools/hakios-config.py reads this file; docs/drivers-config.md says what each word means and how it reaches XNU.
 
+standard bsd/dev/hakios.nas.c
+	help    the QMI NAS parser (Serving System, signal, PLMN): the legacy modem driver and the thyme
+	help    PCIe driver both feed it, and both publish its state as kern.hakios.cellular_*
+
 driver QMI
 	file    bsd/dev/hakios.qmi.c
 	help    QMI messages over the IPC router: how the Wi-Fi firmware's service and the modem's are spoken to
@@ -9,7 +13,6 @@ driver QMI
 driver MODEM
 	file    bsd/dev/hakios.mpss.c
 	file    bsd/dev/hakios.cell.c
-	file    bsd/dev/hakios.nas.c
 	file    bsd/dev/hakios.ipa.c
 	requires QMI UFS
 	help    the modem (modem=1): started, its file systems served from the flash, the IPA's data path as en1,

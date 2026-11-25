@@ -1,0 +1,35 @@
+# RC_JOBS=rc.jobs.weather2: 贵州天气 (cn.guizhou.weathergz) installed straight from the LAN
+# and left on the screen to be used: the location consent answered, the page scrolled up and
+# back, then a settled minute.
+#
+# Why this scene: the store path for this app is proven (rc.jobs.storeweather, run of 2026-11-18
+# 17:49).  What this run asks is the other half -- the app running "normally" on the display as
+# it is now: UIKit text and the coloured warning cards over the fixed compositing (run 24's
+# source-over, run 25-26's shadow copy), live data over the network, and a gesture the app has
+# to answer (the scroll).  The install is the same TrollStore helper the store scenes used; the
+# store UI itself is not in this run.
+#
+# The IPA is the developer's own GitHub release, staged on the LAN as WeatherGZ.ipa (cryptid 0,
+# arm64, minOS 16.0, 731,163 bytes, sha256 e3777b82...1c25 -- the digest from devices/thyme/
+# ipas.md, which hk_download compares before the helper sees the file).
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/rwtouch wait 25
+/var/jb/bin/sh /redwood/bin/hk-appinstall.sh TrollStore.app com.opa334.TrollStore
+/redwood/bin/mcm_test com.opa334.TrollStore /Applications/TrollStore.app /redwood/share/tsldid/ldid
+/redwood/bin/hk_download http://192.168.0.104:8000/WeatherGZ.ipa /private/var/tmp/target.ipa e3777b8288f165e8843437087177b5187b971c373e22ea0bf8ba163000e71c25
+/var/jb/usr/bin/chmod 644 /private/var/tmp/target.ipa
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /private/var/tmp/target.ipa
+/var/jb/usr/bin/uicache -a
+/var/jb/usr/bin/uiopen --bundleid cn.guizhou.weathergz
+# The location consent comes up over the app (the 17:49 run's frame); Allow While Using App.
+/redwood/bin/rwtouch wait 40 tap 0.5 0.694
+/redwood/bin/rwtouch wait 30
+# A gesture the app must answer: scroll the page up, then back down.
+/redwood/bin/rwtouch swipe 0.5 0.75 0.5 0.30 600
+/redwood/bin/rwtouch wait 25 swipe 0.5 0.30 0.5 0.75 600
+/redwood/bin/rwtouch wait 30
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/weather2.txt
+/redwood/bin/rwtouch wait 120
+/var/jb/usr/bin/ls -l /var/containers/Bundle/Application >> /private/var/tmp/weather2.txt
+/var/jb/usr/bin/cat /private/var/tmp/weather2.txt

@@ -43,6 +43,7 @@
 #include <kern/clock.h>
 #include <kern/locks.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <os/atomic_private.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
@@ -1706,6 +1707,100 @@ SYSCTL_QUAD(_kern_hakios, OID_AUTO, ufs_native_fallbacks, CTLFLAG_RD | CTLFLAG_L
 
 /* ---- bringing it up ---- */
 
+/*
+ * mdm_dump=1: the modem's own board-local stores as hex, read only -- the four
+ * Sahara IDs the vendor serves from the phone's partitions (16/17/20 from
+ * mdm1m9kefs1/2/3, 34 from mdmddr), so a run can carry their real bytes to the
+ * host and the probe can stop answering with the firmware package's dummy
+ * placeholders (fw-modem-sdx55m/efs*.bin are "IMGEFS- DUMMY-N"). The SBL asks
+ * for the first 512 bytes of each EFS store and 40 of mdmddr; a little more is
+ * printed here. Nothing is written.
+ *
+ * It runs a few seconds after the driver is brought up, not in it: the read
+ * goes through the loader's block page, which is served on the loader's own
+ * schedule, and a thread call is where a driver may wait for it.
+ *
+ * The lines go into the loader's log (osfmk/arm64/loader_return.c) as well as
+ * printf, the way hakios.battguard.c's say() does: in this kernel a plain
+ * printf does not reach that log -- run 003446 lost every line of this driver's
+ * init -- and the run's log fetch (xl log, XL_FOLLOW) keeps what was written
+ * with loader_log_putc.
+ */
+extern void loader_log_putc(char c);
+
+static thread_call_t mdm_dump_call;
+
+static int
+mdm_say(const char *format, ...) __printflike(1, 2);
+
+static int
+mdm_say(const char *format, ...)
+{
+	char line[300];
+	va_list list;
+
+	va_start(list, format);
+	vsnprintf(line, sizeof(line), format, list);
+	va_end(list);
+	for (const char *c = line; *c != 0; c++) {
+		loader_log_putc(*c);
+	}
+	return printf("%s", line);
+}
+
+static void
+ufs_mdm_dump(void)
+{
+	static const struct {
+		const char *name;
+		uint32_t bytes;
+	} stores[] = {
+		{ "mdm1m9kefs1", 512 }, { "mdm1m9kefs2", 512 }, { "mdm1m9kefs3", 512 }, { "mdmddr", 64 },
+	};
+	uint32_t on = 0;
+	uint8_t block[512];
+
+	if (!PE_parse_boot_argn("mdm_dump", &on, sizeof(on)) || on != 1) {
+		return;
+	}
+	mdm_say("mdm_dump: the modem's stores, read only, hex\n");
+	for (unsigned i = 0; i < sizeof(stores) / sizeof(stores[0]); i++) {
+		uint64_t size = 0;
+		uint32_t want;
+		int error;
+
+		error = hakios_ufs_read_partition(stores[i].name, 0, NULL, 0, &size);
+		if (error || size == 0) {
+			mdm_say("mdm_dump: %s: no partition (%d)\n", stores[i].name, error ? error : ENOENT);
+			continue;
+		}
+		want = size < stores[i].bytes ? (uint32_t)size : stores[i].bytes;
+		error = hakios_ufs_read_partition(stores[i].name, 0, block, want, NULL);
+		if (error) {
+			mdm_say("mdm_dump: %s: read error %d\n", stores[i].name, error);
+			continue;
+		}
+		mdm_say("mdm_dump: %s: %llu bytes in the partition; the first %u:\n", stores[i].name,
+		    (unsigned long long)size, want);
+		for (uint32_t at = 0; at < want; at += 32) {
+			char line[112];
+			size_t used = 0;
+
+			line[0] = 0;
+			for (uint32_t b = at; b < at + 32 && b < want; b++) {
+				used += (size_t)snprintf(line + used, sizeof(line) - used, " %02x", block[b]);
+			}
+			mdm_say("mdm_dump: %s %04x:%s\n", stores[i].name, at, line);
+		}
+	}
+}
+
+static void
+ufs_mdm_dump_elapsed(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	ufs_mdm_dump();
+}
+
 void
 hakios_ufs_init(void)
 {
@@ -1758,6 +1853,16 @@ hakios_ufs_init(void)
 	ufs_ready = true;
 	printf("ufs: %u partitions of the phone's storage as /dev/ufs_NAME and /dev/rufs_NAME, read only, "
 	    "through the loader's page at %llx and its %u KB buffer\n", made, pa, ufs_buffer_size >> 10);
+	{
+		uint32_t on = 0;
+		uint64_t deadline;
+
+		if (PE_parse_boot_argn("mdm_dump", &on, sizeof(on)) && on == 1 &&
+		    (mdm_dump_call = thread_call_allocate(ufs_mdm_dump_elapsed, NULL)) != NULL) {
+			clock_interval_to_deadline(5000, NSEC_PER_MSEC, &deadline);
+			thread_call_enter_delayed(mdm_dump_call, deadline);
+		}
+	}
 
 	/*
 	 * ufs_write=1: /dev/rufs_darwin takes writes, past the Darwin volume and the cryptexes. darwin

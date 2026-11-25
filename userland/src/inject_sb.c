@@ -640,7 +640,8 @@ battery_update_items(id self, SEL sel)
  */
 static void (*original_update_signal_item)(id self, SEL sel, long item, void *data, id sim, void *getter, void *setter);
 static id cellular_aggregator;
-static int cellular_last_bars = -2, cellular_said;
+static int cellular_last_bars = -2, cellular_last_registered = -2, cellular_said;
+static long cellular_active_mode;	/* the active signal mode; declared with its meaning below */
 
 /* The getters and setters are blocks (their type is "@?"): called through the block's own invoke pointer, with the block first. */
 struct block_layout {
@@ -649,6 +650,182 @@ struct block_layout {
 	void (*invoke)(void *, ...);
 };
 #define BLOCK_CALL(block, type, ...) ((type)((struct block_layout *)(block))->invoke)((block), __VA_ARGS__)
+
+/*
+ * The aggregator's data can carry four bars while the icon on the screen still
+ * draws four grey outlines: the view keeps the count it was last shown and the
+ * aggregator's item update does not always reach it (run 190153: "4 bars
+ * shown" in the log, grey bars on the screen).  So the live signal views are
+ * found and told themselves: signal mode active, four active bars.  The
+ * method each view class offers is said once, so the names on this userland
+ * are on the record.
+ */
+static void
+signal_view_walk(id view, unsigned depth, int *said)
+{
+	const char *name = object_getClassName(view);
+	id subviews;
+	unsigned long count;
+
+	if (name == NULL) {
+		return;
+	}
+	if (strstr(name, "Signal") != NULL && strstr(name, "Wifi") == NULL) {
+		int registered = sysctl_int("kern.hakios.cellular_registered");
+
+		if (*said < 6) {
+			Class cls = object_getClass(view);
+			char line[512] = "";
+			size_t at = 0;
+			unsigned methods = 0;
+			Method *list = class_copyMethodList(cls, &methods);
+
+			for (unsigned i = 0; list && i < methods && at < sizeof(line) - 40; i++) {
+				const char *method = sel_getName(method_getName(list[i]));
+				size_t n = strlen(method);
+
+				if (strstr(method, "ar") == NULL && strstr(method, "ignal") == NULL) {
+					continue;
+				}
+				memcpy(line + at, method, n);
+				at += n;
+				line[at++] = ' ';
+				line[at] = 0;
+			}
+			free(list);
+			(*said)++;
+			say("hakios: cellular: live %s: %s; setNumberOfActiveBars %d, setNumberOfBars %d, signalMode getter %d\n",
+			    name, at ? line : "(no bar/mode methods)",
+			    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view, sel_registerName("respondsToSelector:"),
+				sel_registerName("setNumberOfActiveBars:")),
+			    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view, sel_registerName("respondsToSelector:"),
+				sel_registerName("setNumberOfBars:")),
+			    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view, sel_registerName("respondsToSelector:"),
+				sel_registerName("signalMode")));
+		}
+		if (registered > 0 &&
+		    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+			sel_registerName("respondsToSelector:"), sel_registerName("setSignalMode:"))) {
+			int shown = sysctl_int("kern.hakios.cellular_bars");
+			int dbm = sysctl_int("kern.hakios.cellular_dbm");
+
+			/* The bars that count: the kernel's reading, or the same
+			 * dBm-to-bars rule the aggregator update uses.  The view's
+			 * own API is setNumberOfBars: (how many outlines) and
+			 * setNumberOfActiveBars: (how many drawn); there is no
+			 * setBars: or setActiveBars: in this UIKit.  The private
+			 * _updateBars/_updateActiveBars then redraw the layers. */
+			if (shown <= 0) {
+				shown = dbm < 0 ?
+				    (dbm >= -95 ? 4 : dbm >= -105 ? 3 : dbm >= -115 ? 2 : 1) : 4;
+			}
+			if (shown > 4) {
+				shown = 4;
+			}
+			((void (*)(id, SEL, long))objc_msgSend)(view, sel_registerName("setSignalMode:"),
+			    cellular_active_mode);
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+			    sel_registerName("respondsToSelector:"), sel_registerName("setNumberOfBars:"))) {
+				((void (*)(id, SEL, long))objc_msgSend)(view,
+				    sel_registerName("setNumberOfBars:"), 4);
+			}
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+			    sel_registerName("respondsToSelector:"), sel_registerName("_updateBars"))) {
+				((void (*)(id, SEL))objc_msgSend)(view, sel_registerName("_updateBars"));
+			}
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+			    sel_registerName("respondsToSelector:"), sel_registerName("setNumberOfActiveBars:"))) {
+				((void (*)(id, SEL, long))objc_msgSend)(view,
+				    sel_registerName("setNumberOfActiveBars:"), shown);
+			}
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+			    sel_registerName("respondsToSelector:"), sel_registerName("_updateActiveBars"))) {
+				((void (*)(id, SEL))objc_msgSend)(view, sel_registerName("_updateActiveBars"));
+			}
+			((void (*)(id, SEL))objc_msgSend)(view, sel_registerName("setNeedsDisplay"));
+			if (*said < 6) {
+				say("hakios: cellular: forced %s: mode %ld, bars %d (setNumberOfActiveBars %d, setNumberOfBars %d)\n",
+				    name, cellular_active_mode, shown,
+				    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+					sel_registerName("respondsToSelector:"), sel_registerName("setNumberOfActiveBars:")),
+				    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(view,
+					sel_registerName("respondsToSelector:"), sel_registerName("setNumberOfBars:")));
+				(*said)++;
+			}
+		}
+	}
+	if (depth >= 12) {
+		return;
+	}
+	subviews = ((id (*)(id, SEL))objc_msgSend)(view, sel_registerName("subviews"));
+	if (subviews == NULL) {
+		return;
+	}
+	count = ((unsigned long (*)(id, SEL))objc_msgSend)(subviews, sel_registerName("count"));
+	for (unsigned long i = 0; i < count && i < 64; i++) {
+		signal_view_walk(((id (*)(id, SEL, unsigned long))objc_msgSend)(subviews,
+		    sel_registerName("objectAtIndex:"), i), depth + 1, said);
+	}
+}
+
+static void
+signal_views_force(void)
+{
+	static int said;
+	Class cls = objc_getClass("UIApplication");
+	id app, windows;
+	unsigned long count;
+
+	if (cls == NULL) {
+		return;
+	}
+	app = ((id (*)(id, SEL))objc_msgSend)(cls, sel_registerName("sharedApplication"));
+	if (app == NULL) {
+		return;
+	}
+	windows = ((id (*)(id, SEL))objc_msgSend)(app, sel_registerName("windows"));
+	if (windows == NULL) {
+		return;
+	}
+	count = ((unsigned long (*)(id, SEL))objc_msgSend)(windows, sel_registerName("count"));
+	for (unsigned long i = 0; i < count && i < 16; i++) {
+		signal_view_walk(((id (*)(id, SEL, unsigned long))objc_msgSend)(windows,
+		    sel_registerName("objectAtIndex:"), i), 0, &said);
+	}
+}
+
+
+/*
+ * The live aggregator, found without waiting for SpringBoard to call one of
+ * the updaters below: the SpringBoard application object (UIApplication's
+ * shared instance here) exposes -statusBarStateAggregator, the same object
+ * whose item updaters are replaced.  Without CommCenter those updaters may
+ * never run at all, so the timer reaches the instance itself.
+ */
+static id
+cellular_state_aggregator(void)
+{
+	Class app_class;
+	id app;
+
+	if (cellular_aggregator != NULL) {
+		return cellular_aggregator;
+	}
+	app_class = objc_getClass("UIApplication");
+	app = app_class != NULL ?
+	    ((id (*)(id, SEL))objc_msgSend)(app_class, sel_registerName("sharedApplication")) : NULL;
+	if (app != NULL &&
+	    ((BOOL (*)(id, SEL, SEL))objc_msgSend)(app, sel_registerName("respondsToSelector:"),
+		sel_registerName("statusBarStateAggregator"))) {
+		cellular_aggregator = ((id (*)(id, SEL))objc_msgSend)(app,
+		    sel_registerName("statusBarStateAggregator"));
+		if (cellular_aggregator != NULL) {
+			say("hakios: cellular: the aggregator reached through the application (%s)\n",
+			    object_getClassName(cellular_aggregator));
+		}
+	}
+	return cellular_aggregator;
+}
 
 static void
 update_signal_item(id self, SEL sel, long item, void *data, id sim, void *getter, void *setter)
@@ -707,7 +884,17 @@ update_signal_item(id self, SEL sel, long item, void *data, id sim, void *getter
 			say("hakios: cellular: %d bars shown (item %ld; kernel bars %d, %d dBm, registered %d)\n", shown, item, bars, dbm, registered);
 		}
 	}
+	/*
+	 * The walk over the live views is only worth its cost when what it would
+	 * draw changed: it runs on a change of bars or of registration, not on
+	 * every pass of the aggregator (which is often, and on the main thread --
+	 * the whole desktop felt it, 21:26).
+	 */
+	if (shown != cellular_last_bars || registered != cellular_last_registered) {
+		signal_views_force();
+	}
 	cellular_last_bars = shown;
+	cellular_last_registered = registered;
 }
 
 static void (*original_update_service_item)(id self, SEL sel, long item, void *data, id sim, id other, void *g1, void *s1, void *g2, void *s2,
@@ -857,24 +1044,43 @@ cellular_hook(void)
 		}
 		free(list);
 	}
-	/* every 3 s: when the kernel's registration or bars change, the item is asked to update itself */
+	/*
+	 * Every 10 s: when the kernel's registration or bars changed, the item is
+	 * asked to update itself, which runs our updater and (on the change) the
+	 * walk over the live views.  Nothing else here touches the screen, apart
+	 * from one walk a minute in case a view was made anew between changes:
+	 * the first version walked every 3 s whatever had changed, on the main
+	 * thread, and the desktop lagged for it.
+	 */
 	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
 
-	dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), 3 * NSEC_PER_SEC, NSEC_PER_SEC / 2);
+	dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, NSEC_PER_SEC);
 	dispatch_source_set_event_handler(timer, ^{
 		static int last_registered = -2, last_bars = -2;
+		static unsigned ticks;
 		int registered = sysctl_int("kern.hakios.cellular_registered"), bars = sysctl_int("kern.hakios.cellular_bars");
+		id aggregator;
 
-		if ((registered != last_registered || bars != last_bars) && cellular_aggregator != nil) {
+		ticks++;
+		if (registered == last_registered && bars == last_bars) {
+			if (ticks % 6 == 0) {
+				signal_views_force();   /* a view made anew between changes */
+			}
+			return;
+		}
+		last_registered = registered;
+		last_bars = bars;
+		aggregator = cellular_state_aggregator();
+		if (aggregator != NULL) {
 			SEL update = sel_registerName("_updateSignalStrengthItem");
 
-			last_registered = registered;
-			last_bars = bars;
-			if (class_getInstanceMethod(object_getClass(cellular_aggregator), update)) {
-				((void (*)(id, SEL))objc_msgSend)(cellular_aggregator, update);
+			if (class_getInstanceMethod(object_getClass(aggregator), update)) {
+				((void (*)(id, SEL))objc_msgSend)(aggregator, update);
 				say("hakios: cellular: the signal item asked to update (registered %d, bars %d)\n", registered, bars);
+				return;         /* its run of our updater walks the views, the count having changed */
 			}
 		}
+		signal_views_force();
 	});
 	dispatch_resume(timer);
 }

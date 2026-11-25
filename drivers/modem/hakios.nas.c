@@ -22,6 +22,48 @@ bars_for(int16_t dbm)
 	return 4;
 }
 
+/* The network's description of the PLMN (serving system TLV 0x12) can be
+ * UTF-16LE -- China Broadnet's is 2d 4e fd 56 7f 5e 35 75, "中国广电" --
+ * while an all-ASCII name arrives as plain bytes.  The former is decoded
+ * to UTF-8; the latter is copied as it comes. */
+static int
+nas_utf16_plausible(const uint8_t *p, unsigned n)
+{
+	unsigned i, units = n / 2, good = 0;
+
+	if (units == 0) return 0;
+	for (i = 0; i < units; i++) {
+		uint16_t u = (uint16_t)(p[i * 2] | p[i * 2 + 1] << 8);
+
+		if ((u >= 0x20 && u <= 0x7e) || (u >= 0x4e00 && u <= 0x9fff) ||
+		    (u >= 0x3000 && u <= 0x30ff) || (u >= 0xac00 && u <= 0xd7af))
+			good++;
+	}
+	return good * 4 >= units * 3;
+}
+
+static unsigned
+nas_utf8(char *out, size_t cap, unsigned at, uint32_t cp)
+{
+	if (cp < 0x80) {
+		if (at + 1 < cap) out[at] = (char)cp;
+		return at + 1;
+	}
+	if (cp < 0x800) {
+		if (at + 2 < cap) {
+			out[at] = (char)(0xc0 | cp >> 6);
+			out[at + 1] = (char)(0x80 | (cp & 0x3f));
+		}
+		return at + 2;
+	}
+	if (at + 3 < cap) {
+		out[at] = (char)(0xe0 | cp >> 12);
+		out[at + 1] = (char)(0x80 | ((cp >> 6) & 0x3f));
+		out[at + 2] = (char)(0x80 | (cp & 0x3f));
+	}
+	return at + 3;
+}
+
 int
 hakios_nas_apply(struct hakios_nas_state *state, const void *frame, size_t length)
 {
@@ -75,22 +117,55 @@ hakios_nas_apply(struct hakios_nas_state *state, const void *frame, size_t lengt
 			next.registered = value[0] == 1;
 			next.bars = next.registered && next.has_signal ? bars_for(next.dbm) : 0;
 			serving = true;
-		} else if (message == 0x24 && type == 0x10 && size >= 5 && size >= (size_t)5 + value[4]) {
-			/* the current PLMN: MCC, MNC (16 bits each), the description's length and bytes */
+		} else if (message == 0x24 && type == 0x12 && size >= 5 && size >= (size_t)5 + value[4]) {
+			/* the current PLMN (TLV 0x12; 0x10 is the roaming
+			 * indicator, one byte): MCC, MNC (16 bits each), the
+			 * description's length and bytes */
 			unsigned n = value[4] < sizeof(next.operator_name) - 1 ? value[4] : sizeof(next.operator_name) - 1;
 
 			next.mcc = le16(value);
 			next.mnc = le16(value + 2);
-			memcpy(next.operator_name, value + 5, n);
-			next.operator_name[n] = 0;
-		} else if ((message == 0x4f || message == 0x51) && type == 0x17 && size >= 4) {
-			level = (int16_t)le16(value); radio = 12; signal = true;
-		} else if ((message == 0x4f || message == 0x51) && type == 0x14 && size >= 6 && radio != 12) {
-			level = (int16_t)le16(value + 2); radio = 8; signal = true;
-		} else if ((message == 0x4f || message == 0x51) && type == 0x13 && size >= 3 && !signal) {
-			level = (int8_t)value[0]; radio = 5; signal = true;
-		} else if ((message == 0x4f || message == 0x51) && type == 0x12 && size >= 1 && !signal) {
-			level = (int8_t)value[0]; radio = 4; signal = true;
+			if (n >= 2 && (n % 2) == 0 && nas_utf16_plausible(value + 5, n)) {
+				unsigned at = 0, i;
+
+				for (i = 0; i + 1 < n; i += 2) {
+					uint16_t u = (uint16_t)(value[5 + i] | value[6 + i] << 8);
+
+					if (u == 0) break;
+					at = nas_utf8(next.operator_name, sizeof(next.operator_name), at, u);
+				}
+				next.operator_name[at < sizeof(next.operator_name) ? at : sizeof(next.operator_name) - 1] = 0;
+			} else {
+				memcpy(next.operator_name, value + 5, n);
+				next.operator_name[n] = 0;
+			}
+		} else if (message == 0x4f || message == 0x51) {
+			/*
+			 * Each TLV is one radio's reading, and the modem fills
+			 * the other radios' TLVs with zeros: run 051024's LTE
+			 * answer carried TLV 0x14 (RSRP -102 dBm) beside
+			 * TLV 0x17 = 00 00 00 00.  The old "0x17 seen, radio
+			 * 12" took the zero-valued NR TLV as the reading and
+			 * its radio!=12 guard then hid the LTE one, so a real
+			 * -102 dBm was dropped.  A value outside the dBm range
+			 * is no reading at all.  Priority: NR, LTE, UMTS, GSM.
+			 */
+			int16_t candidate = 0;
+			uint8_t which = 0;
+
+			if (type == 0x17 && size >= 4) {
+				candidate = (int16_t)le16(value); which = 12;
+			} else if (type == 0x14 && size >= 6) {
+				candidate = (int16_t)le16(value + 2); which = 8;
+			} else if (type == 0x13 && size >= 3) {
+				candidate = (int8_t)value[0]; which = 5;
+			} else if (type == 0x12 && size >= 1) {
+				candidate = (int8_t)value[0]; which = 4;
+			}
+			if (which != 0 && candidate >= -150 && candidate <= -30 &&
+			    (radio == 0 || which > radio)) {
+				level = candidate; radio = which; signal = true;
+			}
 		}
 	}
 	if (data[0] == 2 && (!result_seen || !success)) return 0;

@@ -1,0 +1,17 @@
+# The Settings check (RC_JOBS=rc.jobs.cellui): open Settings at its root page
+# with the system's own URL, hold there long enough for the root list to be in
+# a screenshot (Bluetooth and the stock CELLULAR row together), then open the
+# CELLULAR row's own page (Apple's SettingsCellular bundle) -- which is to show
+# Apple's dead-telephony rows now, not a blank page.
+# The delays are init's builtin sleep (no program is started for them), and the
+# uiopen calls are backgrounded: one run blocked for ever in rwtouch wait and
+# the scene never took another step (215739-run.log), so nothing here waits on
+# a program.  The URLs are unquoted on purpose: run_command() splits on spaces
+# and passes the word through as written, so quotes would reach uiopen as part
+# of the URL.  No taps: nothing blind.
+/redwood/bin/sleep_hold 600 &
+sleep 15
+/var/jb/usr/bin/uiopen prefs: &
+sleep 40
+/var/jb/usr/bin/uiopen prefs:root=MOBILE_DATA_SETTINGS_ID &
+sleep 200

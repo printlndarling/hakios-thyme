@@ -135,7 +135,11 @@ FASTRPC_WAIT	arg	fastrpc_wait	User space	k	hakios.thyme_slpi.c
 FB_BEAM	arg	fb_beam	GPU and display	k	MiniIOMobileFramebuffer.cpp	frames written to the panel's memory whenever their beat comes, as before
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_CA_HZ	arg	fb_ca_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
+FB_CLEAN	arg	fb_clean	GPU and display	k	MiniIOMobileFramebuffer.cpp	leave what is drawn into the panel's memory in this processor's cache, as this driver did before
 FB_DIFF	arg	fb_diff	GPU and display	k	MiniIOMobileFramebuffer.cpp	which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
+FB_DUMP	arg	fb_dump	GPU and display	k	MiniIOMobileFramebuffer.cpp	the pixels of one row of a layer, as the layer's memory holds them (a pixel is 0xAARRGGBB in these words, BGRA in the memory), `n` of them from panel
+FB_DUMP_EVERY	arg	fb_dump_every	GPU and display	k	MiniIOMobileFramebuffer.cpp	after the first, another sample every E seconds -- a band that comes and goes is followed frame after frame
+FB_DUMP_TIMES	arg	fb_dump_times	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_FILTER	arg	fb_filter	GPU and display	k	MiniIOMobileFramebuffer.cpp	the picture is scaled to the panel nearest neighbour, as it once was
 FB_HZ	arg	fb_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp,hakios.thyme_display.c	
 FB_INTF	arg	fb_intf	GPU and display	k	MiniIOMobileFramebuffer.cpp	the registers of the display interface the panel is on, for a port
@@ -277,14 +281,18 @@ PANEL_TE_RATE	arg	panel_te_rate	GPU and display	k	hakios.thyme_display.c	count t
 PCIE2_ADDR	hex	pcie2_addr	User space	k	hakios.thyme_pcie2.c	hand the PBL an address other than the file's
 PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c	
 PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	zero the real image in place, to keep the file's address and size while its content is wrong
+PCIE2_EETRACE	arg	pcie2_eetrace	User space	k	hakios.thyme_pcie2.c	sample BHI_EXECENV and BHI_STATUS every millisecond for the first 500 ms after the doorbell, logging every change
 PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMGSZ	arg	pcie2_imgsz	User space	k	hakios.thyme_pcie2.c	hand the PBL a size other than the file's
 PCIE2_INB	arg	pcie2_inb	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IOVA	arg	pcie2_iova	User space	k	hakios.thyme_pcie2.c	where in the DT's pool the modem finds the image
 PCIE2_KEEP	arg	pcie2_keep	User space	k	hakios.thyme_pcie2.c	leave the endpoint's PERST alone
+PCIE2_MHI	arg	pcie2_mhi	User space	k	hakios.thyme_pcie2.c	
 PCIE2_MHIRAW	arg	pcie2_mhiraw	User space	k	hakios.thyme_pcie2.c	leave the MHI registers exactly as Android does before the load
+PCIE2_MSI	arg	pcie2_msi	User space	k	hakios.thyme_pcie2.c	the vendor's md_enable_dma order -- the GIC MBI page in the same context, then the endpoint's MSI.
 PCIE2_PERST	arg	pcie2_perst	User space	k	hakios.thyme_pcie2.c	
+PCIE2_PERST_EARLY	arg	pcie2_perst_early	User space	k	hakios.thyme_pcie2.c	
 PCIE2_PON_LATE	arg	pcie2_pon_late	User space	k	hakios.thyme_pcie2.c	the vendor's order -- the link is up first (the controller driver proves the endpoint), then the ESOC power-on
 PCIE2_POWER	arg	pcie2_power	User space	k	hakios.thyme_pcie2.c	
 PCIE2_RESET	arg	pcie2_reset	User space	k	hakios.thyme_pcie2.c	

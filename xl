@@ -90,8 +90,11 @@ adb() {
 	fi
 }
 
-# one fastboot at a time (a run in one terminal, "xl screenshot" in another): each takes the lock for itself
-fb() { flock -w 90 $PHONE.lock timeout "${FB_TIMEOUT:-10}" fastboot "$@" 2>&1; }
+# one fastboot at a time (a run in one terminal, "xl screenshot" in another): each takes the lock for itself.
+# -k 5: fastboot.exe is a Windows process through interop and does not always take SIGTERM; without the
+# KILL the pipe stays open and xl blocks in the read for good (a modem probe sat 5 minutes that way on
+# 2026-11-21, the phone in fastboot all along).
+fb() { flock -w 90 $PHONE.lock timeout -k 5 "${FB_TIMEOUT:-10}" fastboot "$@" 2>&1; }
 # does the loader answer while its kernel runs (0.5 and later)? an older one answers only when the run is over
 live_loader() { fb getvar version | grep -Eq 'version: 0\.([5-9]|[1-9][0-9])'; }
 in_fastboot() { fastboot devices 2>/dev/null | grep -q fastboot; }

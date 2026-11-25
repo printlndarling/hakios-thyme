@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **496 arguments**: 421 read by the kernel, 14 by the loader, 72 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **504 arguments**: 429 read by the kernel, 14 by the loader, 72 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (85)
+## GPU and display (89)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -28,7 +28,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fb_beam` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_BEAM` |  |
 | `fb_beat` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_BEAT` |  |
 | `fb_ca_hz` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_CA_HZ` |  |
+| `fb_clean` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_CLEAN` |  |
 | `fb_diff` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DIFF` |  |
+| `fb_dump` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DUMP` |  |
+| `fb_dump_every` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DUMP_EVERY` |  |
+| `fb_dump_times` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DUMP_TIMES` |  |
 | `fb_filter` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_FILTER` |  |
 | `fb_hz` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.thyme_display.c` | `CONFIG_FB_HZ` |  |
 | `fb_intf` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_INTF` |  |
@@ -438,7 +442,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (141)
+## User space (145)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -521,14 +525,18 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `pcie2_addr` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_ADDR` |  |
 | `pcie2_bhi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI` |  |
 | `pcie2_bhi_bad` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI_BAD` |  |
+| `pcie2_eetrace` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_EETRACE` |  |
 | `pcie2_exid` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_EXID` |  |
 | `pcie2_img` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMG` |  |
 | `pcie2_imgsz` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMGSZ` |  |
 | `pcie2_inb` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_INB` |  |
 | `pcie2_iova` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IOVA` |  |
 | `pcie2_keep` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_KEEP` |  |
+| `pcie2_mhi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MHI` |  |
 | `pcie2_mhiraw` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MHIRAW` |  |
+| `pcie2_msi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MSI` |  |
 | `pcie2_perst` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PERST` |  |
+| `pcie2_perst_early` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PERST_EARLY` |  |
 | `pcie2_pon_late` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PON_LATE` |  |
 | `pcie2_power` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_POWER` |  |
 | `pcie2_reset` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_RESET` |  |
