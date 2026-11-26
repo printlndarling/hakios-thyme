@@ -64,6 +64,14 @@ static void voice_mask(const uint8_t *p, uint32_t n, uint32_t type, const char *
         VOICE_LOG("NAS %s mask 0x%08x%08x\n", name, cbd_rd32(v + 4), cbd_rd32(v));
 }
 
+static struct {
+    int mode, nr5g_dis, set_mode, set_nr5g_dis;
+    int serving_reg, serving_rat;
+    int lte_svc, lte_vops, endc_avail, dc_nr_restr;
+    int nr5g_svc, nr5g_dom, nr5g_cap;
+    uint32_t sys_info_seen, pref_seen, set_seen;
+} nas_obs = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0 };
+
 static void voice_nas(const uint8_t *p, uint32_t n)
 {
     uint32_t message = cbd_rd16(p + 3), len = 0;
@@ -71,31 +79,63 @@ static void voice_nas(const uint8_t *p, uint32_t n)
     if (message == 0x33 || message == 0x34) {
         if ((message == 0x33 && p[0] != 0) || (message == 0x34 && p[0] == 0)) return;
         bool set = message == 0x33;
-        VOICE_LOG("NAS %s mode %d service-domain %d usage %d voice-domain %d duration %d (-1 absent)\n",
-            set ? "set" : "current", voice_scalar(p, n, 0x11, 2), voice_scalar(p, n, 0x18, 4),
-            voice_scalar(p, n, set ? 0x21 : 0x1f, 4), voice_scalar(p, n, set ? 0x23 : 0x20, 4),
-            set ? voice_scalar(p, n, 0x17, 1) : -1);
-        voice_mask(p, n, 0x12, "legacy-band");
-        voice_mask(p, n, 0x15, "LTE-band");
+        int mode = voice_scalar(p, n, 0x11, 2);
+        int nr5g_dis = voice_scalar(p, n, 0x31, 4);
+        if (set) { nas_obs.set_seen++; nas_obs.set_mode = mode; nas_obs.set_nr5g_dis = nr5g_dis; }
+        else { nas_obs.pref_seen++; nas_obs.mode = mode; nas_obs.nr5g_dis = nr5g_dis; }
+        if (voice.enabled) {
+            VOICE_LOG("NAS %s mode %d service-domain %d usage %d voice-domain %d nr5g-disable %d duration %d (-1 absent)\n",
+                set ? "set" : "current", mode, voice_scalar(p, n, 0x18, 4),
+                voice_scalar(p, n, set ? 0x21 : 0x1f, 4), voice_scalar(p, n, set ? 0x23 : 0x20, 4),
+                nr5g_dis, set ? voice_scalar(p, n, 0x17, 1) : -1);
+            voice_mask(p, n, 0x12, "legacy-band");
+            voice_mask(p, n, 0x15, "LTE-band");
+        }
     } else if (message == 0x24 && p[0] != 0) {
         v = cbd_find(p, n, 0x01, &len);
         if (!v || len < 5u || len != 5u + v[4]) return;
-        VOICE_LOG("NAS serving reg %u CS-attach %u PS-attach %u network %u RAT-count %u\n",
-            v[0], v[1], v[2], v[3], v[4]);
-        for (uint32_t i = 0; i < v[4]; i++) VOICE_LOG("NAS serving RAT %u\n", v[5 + i]);
+        nas_obs.serving_reg = v[0];
+        if (v[4] > 0) nas_obs.serving_rat = v[5];
+        if (voice.enabled) {
+            VOICE_LOG("NAS serving reg %u CS-attach %u PS-attach %u network %u RAT-count %u\n",
+                v[0], v[1], v[2], v[3], v[4]);
+            for (uint32_t i = 0; i < v[4]; i++) VOICE_LOG("NAS serving RAT %u\n", v[5 + i]);
+        }
     } else if ((message == 0x4d && p[0] == 2) || (message == 0x4e && p[0] == 4)) {
+        nas_obs.sys_info_seen++;
         for (uint32_t rat = 0; rat < 2; rat++) {
             const char *name = rat ? "LTE" : "GSM";
             v = cbd_find(p, n, rat ? 0x14 : 0x12, &len);
-            if (v && len == 3)
-                VOICE_LOG("NAS %s service %u true-service %u preferred %u\n", name, v[0], v[1], v[2]);
+            if (v && len == 3) {
+                if (rat) nas_obs.lte_svc = v[0];
+                if (voice.enabled) VOICE_LOG("NAS %s service %u true-service %u preferred %u\n", name, v[0], v[1], v[2]);
+            }
             v = cbd_find(p, n, rat ? 0x19 : 0x17, &len);
-            if (v && len >= 6)
+            if (v && len >= 6 && voice.enabled)
                 VOICE_LOG("NAS %s domain %d capability %d roaming %d (-1 invalid)\n", name,
                     v[0] ? v[1] : -1, v[2] ? v[3] : -1, v[4] ? v[5] : -1);
         }
-        VOICE_LOG("NAS LTE voice-support %d voice-domain %d registration-domain %d (-1 absent)\n",
-            voice_scalar(p, n, 0x21, 1), voice_scalar(p, n, 0x2a, 4), voice_scalar(p, n, 0x31, 4));
+        v = cbd_find(p, n, 0x49, &len);
+        if (v && len == 3) {
+            nas_obs.nr5g_svc = v[0];
+            if (voice.enabled) VOICE_LOG("NAS NR5G service %u true-service %u preferred %u\n", v[0], v[1], v[2]);
+        }
+        v = cbd_find(p, n, 0x4a, &len);
+        if (v && len >= 6) {
+            nas_obs.nr5g_dom = v[0] ? v[1] : -1;
+            nas_obs.nr5g_cap = v[2] ? v[3] : -1;
+            if (voice.enabled) VOICE_LOG("NAS NR5G domain %d capability %d roaming %d (-1 invalid)\n",
+                nas_obs.nr5g_dom, nas_obs.nr5g_cap, v[4] ? v[5] : -1);
+        }
+        int vops = voice_scalar(p, n, 0x21, 1);
+        int endc = voice_scalar(p, n, 0x4d, 1);
+        int dcnr = voice_scalar(p, n, 0x4e, 1);
+        if (vops >= 0) nas_obs.lte_vops = vops;
+        if (endc >= 0) nas_obs.endc_avail = endc;
+        if (dcnr >= 0) nas_obs.dc_nr_restr = dcnr;
+        if (voice.enabled)
+            VOICE_LOG("NAS LTE voice-support %d voice-domain %d registration-domain %d endc-avail %d dc-nr-restr %d (-1 absent)\n",
+                vops, voice_scalar(p, n, 0x2a, 4), voice_scalar(p, n, 0x31, 4), endc, dcnr);
     }
 }
 
@@ -103,9 +143,10 @@ static void voice_nas(const uint8_t *p, uint32_t n)
  * delivered to ABM. A malformed diagnostic never changes the delivered SDU. */
 static void voice_note(const char *direction, const struct cbq_result &r, const uint8_t *p, uint32_t n)
 {
-    if (!voice.enabled || (r.service != 3 && r.service != 9) || !cbd_sdu_ok(p, n)) return;
-    uint32_t message = cbd_rd16(p + 3);
+    if ((r.service != 3 && r.service != 9) || !cbd_sdu_ok(p, n)) return;
     if (r.service == 3) { voice_nas(p, n); return; }
+    if (!voice.enabled) return;
+    uint32_t message = cbd_rd16(p + 3);
     VOICE_LOG("%s ch %u cid %u port 0x%x type %u msg 0x%x txn %u error 0x%x t %u\n",
         direction, r.channel, r.cid, r.local_port, p[0], message, cbd_rd16(p + 1),
         p[0] == 2 ? cbd_error(p, n) : 0u, bb_now_ms());

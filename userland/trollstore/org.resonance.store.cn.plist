@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Default TrollApps preferences for mainland China users: Simplified Chinese UI,
+	     one-tap install, and live-verified CN-accessible / accelerated JSON repositories. -->
+	<key>repos</key>
+	<string>["https://ghfast.top/https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/ResonanceTeamRepo.json","https://ghfast.top/https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/haxi0_2.0.json","https://ghfast.top/https://raw.githubusercontent.com/TheResonanceTeam/.default-sources/main/BonnieRepo_2.0.json","https://apps.altstore.io/","https://community-apps.sidestore.io/sidecommunity.json","https://wuxu1.github.io/wuxu-complete.json"]</string>
+	<key>skip_install_prompt</key>
+	<true/>
+	<key>lang</key>
+	<string>zh-hans</string>
+	<key>appVersion</key>
+	<string>2.3</string>
+</dict>
+</plist>

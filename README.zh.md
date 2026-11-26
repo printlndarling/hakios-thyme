@@ -30,14 +30,14 @@
 | 触控与按键 | **PASS** | FTS521 多点触控、手势、电源键与音量键正常 |
 | 音频与触感 | **PASS** | 双 CS35L41 独立左右声道扬声器、双麦克风、AW8697 CoreHaptics 正常 |
 | 相机与闪光灯 | **PASS** | 后摄 27 MP S5KHMX + AK7377 自动对焦、前摄 S5K3T2、镜头切换与 PM8150L 闪光灯 |
-| 蜂窝与通话 | **PASS** | SDX55M SIM 识别、设置页正常、4G 双栈数据与双向 VoLTE 语音（短信暂缓） |
+| 蜂窝与通话 | **PASS** | SDX55M 4G LTE 双栈数据与双向 VoLTE 语音（当前 `Mav17` 仅 4G，5G 需 `Mav20`） |
 | 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测精准蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
 | Wi-Fi（QCA6390） | **PARTIAL** | 2.4/5 GHz WPA2、DHCP/TLS 及断电恢复正常；`SystemSleep` 唤醒重连待完善 |
 | 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对与 A2DP 播放正常；HFP/AVRCP/自动重连待完善 |
 | 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |
 | 传感器（SLPI） | **PARTIAL** | SLPI 固件与 QRTR 服务已起；加速度/环境光/距离 HID 上报待打通 |
 | 中文界面 | **PASS** | 开机默认简体中文界面、苹方字体与简体拼音键盘 |
-| 包管理器（Sileo） | **PARTIAL** | 无根 Procursus `apt`/`dpkg` 在线安装可用；Sileo 队列交互待完善 |
+| Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内/无根源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
 | 持久化存储 | **TODO** | 默认纯内存启动；受保护的闪存持久化与独立安装流程尚未启用 |
 
 ## 后续重点

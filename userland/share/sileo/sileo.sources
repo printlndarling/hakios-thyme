@@ -1,0 +1,59 @@
+Types: deb
+URIs: https://havoc.app/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://repo.chariz.com/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://ellekit.space/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://opa334.github.io/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://apt.82flex.com/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://apt.25mao.com/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://poomsmart.github.io/repo/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://cydia.ichitaso.com/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://tigisoftware.com/repo/
+Suites: ./
+Components:
+Trusted: yes
+
+Types: deb
+URIs: https://34306.github.io/
+Suites: ./
+Components:
+Trusted: yes

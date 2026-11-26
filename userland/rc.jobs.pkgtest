@@ -1,0 +1,26 @@
+# RC_JOBS=rc.jobs.pkgtest: end-to-end live verification of Sileo (11 CN/rootless repos + UX fixes),
+# TrollStore (ldid + IPA install), TrollApps (Chinese UI + 6 CN/accelerated JSON sources),
+# and SDX55M 5G NR / LTE NAS telemetry on Mi 10S.
+/redwood/bin/loc_test enable
+/redwood/bin/net_test wait 25 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 10
+# Wake & unlock screen
+/redwood/bin/rwtouch wait 4 tap 0.5 0.5 wait 2 notify com.hakios.unlock wait 2 swipe 0.5 0.985 0.5 0.3 200 wait 2
+# Wait for com.hakios.pkgsetup to finish (up to 35s)
+/var/jb/bin/sh -c 'i=0; while [ ! -f /private/var/tmp/pkgsetup.done ] && [ $i -lt 35 ]; do sleep 1; i=$((i+1)); done; cat /private/var/tmp/pkgsetup.log; ls -la /sileolists /var/containers/Bundle/Application/*/TrollStore.app/ldid* 2>&1 || true'
+# 1. Verify all 11 Rootless/CN Sileo repos with apt-get update (should exit 0!)
+/var/jb/usr/bin/apt-get update
+/var/jb/bin/sh /redwood/bin/sileo-seed.sh
+# 2. Verify TrollStore CLI helper installs an unsigned IPA (LocProbe.ipa) cleanly with pre-installed ldid
+/var/jb/Applications/TrollStore.app/trollstorehelper install custom /redwood/fw/ipa/LocProbe.ipa
+# 3. Launch TrollStore UI -> Settings tab (verify NO "Installing ldid" & NO update nag!)
+/var/jb/usr/bin/uiopen --bundleid com.opa334.TrollStore
+/redwood/bin/rwtouch wait 14 tap 0.75 0.94 wait 10
+# 4. Launch TrollApps UI -> Featured -> Sources tab (verify all 6 CN repos!)
+/var/jb/usr/bin/uiopen --bundleid org.resonance.store
+/redwood/bin/rwtouch wait 14 tap 0.38 0.94 wait 10
+# 5. Launch Sileo UI -> dismiss notification alert ("允许") -> Sources tab -> tap 82Flex (y=0.39) -> open sileo://package/tree (native Done button!)
+/var/jb/usr/bin/uiopen --bundleid org.coolstar.SileoStore
+/redwood/bin/rwtouch wait 14 tap 0.68 0.57 wait 4 tap 0.50 0.94 wait 14 tap 0.50 0.39 wait 12
+/var/jb/usr/bin/uiopen sileo://package/tree
+/redwood/bin/rwtouch wait 16

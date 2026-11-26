@@ -30,14 +30,14 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
 | Audio & Haptics | **PASS** | Dual CS35L41 stereo L/R speakers, dual mics, AW8697 CoreHaptics |
 | Camera & Torch | **PASS** | Rear 27 MP S5KHMX + AK7377 AF, front S5K3T2, lens switching, PM8150L flash |
-| Cellular & VoLTE | **PASS** | SDX55M SIM, Settings UI, 4G LTE dual-stack data, two-way VoLTE voice (SMS deferred) |
+| Cellular & VoLTE | **PASS** | SDX55M 4G LTE dual-stack data, VoLTE voice, Settings UI (`Mav17`; 5G NR requires `Mav20`) |
 | Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (verified in Baidu Maps) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
 | Wi-Fi (QCA6390) | **PARTIAL** | 2.4/5 GHz WPA2, DHCP/TLS & power recovery; `SystemSleep` auto-wake open |
 | Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing & A2DP playback; HFP/AVRCP/reconnect open |
 | Battery & Thermal | **PASS** | Fuel gauge, USB charging telemetry, thermal throttling & low-battery guard |
 | Sensors (SLPI) | **PARTIAL** | SLPI firmware & QRTR services up; accelerometer/ALS/proximity HID delivery open |
 | Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts & Pinyin keyboard |
-| Package Manager | **PARTIAL** | Rootless Procursus `apt`/`dpkg` online installs work; Sileo UI queue open |
+| Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
 | Persistent Storage | **TODO** | RAM-boot only by default; guarded flash storage & installer not enabled |
 
 ## Current Priorities

@@ -2316,6 +2316,11 @@ extern "C" void umi_bb_report(unsigned second)
          bb_control.unsupported, bb_activations, bb_trace_lines, bb_trace_held, bb_vops_flips, umi_modem_restarts());
   BB_LOG("%u s: requests answered by the X55 %u, by timeout %u, in flight %u, table full %u, dropped on a lost transport %u\n",
          second, bb_pending.answered, bb_pending.expired, owed, bb_pending.overflow, bb_lost_drops);
+  BB_LOG("%u s: NAS5G: mode=%d nr5g_dis=%d (set=%d/%d #%u) pref=%u sys=%u reg=%d rat=%d lte_svc=%d vops=%d nr5g_svc=%d dom=%d cap=%d endc=%d dcnr=%d\n",
+         second, nas_obs.mode, nas_obs.nr5g_dis, nas_obs.set_mode, nas_obs.set_nr5g_dis, nas_obs.set_seen,
+         nas_obs.pref_seen, nas_obs.sys_info_seen, nas_obs.serving_reg, nas_obs.serving_rat,
+         nas_obs.lte_svc, nas_obs.lte_vops, nas_obs.nr5g_svc, nas_obs.nr5g_dom, nas_obs.nr5g_cap,
+         nas_obs.endc_avail, nas_obs.dc_nr_restr);
   for (uint32_t c = 0; c < CBH_PUBLISHED; c++) {
     const bb_channel *ch = &bb_ch[c];
     if (ch->opens)

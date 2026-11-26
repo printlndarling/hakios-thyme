@@ -555,6 +555,11 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# so a scene can drive them (see the files)
 	mkdir -p root/share/trollstore
 	cp trollstore/*.plist root/share/trollstore/
+	# Curated mainland-China-accessible Rootless Sileo repositories
+	if [ -f share/sileo/sileo.sources ]; then
+		mkdir -p root/share/sileo
+		cp share/sileo/sileo.sources root/share/sileo/sileo.sources
+	fi
 	# ldid, which the helper spawns from TrollStore's own container bundle: mcm_test puts this
 	# copy there, and without it the helper returns 173 before it ever applies CoreTrust.  It
 	# used to arrive as an EXTRA_SHARE from /tmp, so the first clean `rm -rf root` rebuild
@@ -696,6 +701,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# the wrapper that keeps an app's own words under the SpringBoard launch
 	cp bin/hk-execwrap.sh root/bin/hk-execwrap.sh
 	chmod 755 root/bin/hk-execwrap.sh
+	# Sileo Release mirror + one-shot Sileo/TrollStore/TrollApps boot setup
+	[ -f sileo-seed.sh ] && cp sileo-seed.sh root/bin/sileo-seed.sh && chmod 755 root/bin/sileo-seed.sh
+	[ -f bin/hk-pkgsetup.sh ] && cp bin/hk-pkgsetup.sh root/bin/hk-pkgsetup.sh && chmod 755 root/bin/hk-pkgsetup.sh
 	cp ${RC:-rc.launchd} root/etc/rc
 	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
@@ -711,6 +719,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	cp com.hakios.demo.plist com.hakios.wifi.plist com.hakios.wifi-keepalive.plist root/LaunchDaemons/
 	[ -f root/bin/volte_rtp ] && cp com.hakios.volte-rtp.plist root/LaunchDaemons/
 	[ -f root/bin/umi_gnssd ] && cp com.hakios.gnss.plist root/LaunchDaemons/
+	[ -f root/bin/hk-pkgsetup.sh ] && cp com.hakios.pkgsetup.plist root/LaunchDaemons/
 	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
 	if [ -n "${FAIRPLAYSTUB:-}" ] && [ -f obj/fairplaystub ]; then
 		cp obj/fairplaystub root/bin/
@@ -1110,6 +1119,8 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		for c in $SILEO_BIN; do
 			ln -sf /var/jb/usr/bin/$c sysroot/bin/$c
 		done
+		# Sileo invokes apt-get with relative -oDir::State::lists=sileolists/ from cwd="/"; provide /sileolists.
+		ln -sfn /var/jb/var/lib/apt/sileolists sysroot/sileolists
 		echo "  the package manager's prefix: $(du -sh sysroot/jb | cut -f1) as /jb (init puts it at /var/jb)"
 	fi
 	# our audio device, where the audio server looks for such plug-ins (and for no others: Apple's are left out)

@@ -58,6 +58,9 @@ __pycache__/
 /userland/*
 !/userland/build.sh
 !/userland/sileo-seed.sh
+!/userland/share/
+!/userland/share/sileo/
+!/userland/share/sileo/sileo.sources
 !/userland/sileolists-probe.sh
 !/userland/*.py
 !/userland/rc.*

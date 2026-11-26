@@ -53,6 +53,8 @@ for f in "$@"; do
 	ls -l "$dst/$f"
 done
 
-/var/jb/usr/bin/uicache -a
-echo "uicache: $?"
+if [ "${NO_UICACHE:-0}" != "1" ]; then
+	/var/jb/usr/bin/uicache -a
+	echo "uicache: $?"
+fi
 exit 0

@@ -6605,3 +6605,21 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `logs/143544-run.log` (SDX55M GNSS `satellites in view 1` + `0/289` missed scans) | `b631a819b47a855ec5f09ea184268c8a658c8f67d2a2baca9de4228e9e1abbc4` |
 | `logs/144523-run.log` (Unlocked Baidu Maps `88 fps`, `0/442` missed scans, active CL arrow) | `1aea7a925d4a8bc5ae4d3e57e126a9ffa15e4971fdb4da9ded893785730bd3e7` |
 | `logs/145516-run.log` (Clean live Baidu Maps Xi'an blue-dot fix + `0/192` missed scans) | `67b8ac35963748a291cadef233ff1134a9ce8984c2dc5a2626550e800986f622` |
+
+### Sileo, TrollStore, TrollApps Out-of-the-Box CN Setup & SDX55M 5G NR Telemetry (2026-11-26)
+
+- **One-shot boot setup (`com.hakios.pkgsetup.plist` + `userland/bin/hk-pkgsetup.sh`)**: Runs automatically on every boot (including canonical `wirelessfull`) to bootstrap `/var/jb/usr/libexec/firmware`, seed 10 curated mainland-China-accessible Rootless Sileo repos (`userland/share/sileo/sileo.sources`, `Trusted: yes`) beside Procursus (**11 total repos**), write `org.coolstar.SileoStore.plist` (`CanisterIngest=false`, `ShowProvisional=false`, `UseSystemLanguage=true`), create TrollStore's MCM container with executable `ldid` + `ldid.version` (`v2.1.5-procursus7-new`) in both `/var/jb/Applications/TrollStore.app` and `/var/containers/Bundle/Application/*/TrollStore.app`, seed `com.opa334.TrollStore.plist` and `org.resonance.store.cn.plist` (Simplified Chinese + 6 CN-accessible/accelerated TrollApps JSON sources), and register via a single `uicache -a`.
+- **Sileo UX & queue fixes (`userland/src/inject_app.c` + `userland/build.sh`)**: Disables Canister `CanisterIngest` / `ShowProvisional` cleanly on main queue, auto-skips/dismisses `_TtC10Onboarding24OnboardingViewController`, injects a native `"完成"` (`UIBarButtonSystemItemDone`) button on modal `_TtC5Sileo27NativePackageViewController` sheets, and bakes `/sileolists -> /var/jb/var/lib/apt/sileolists` into `system.apfs` (`build-root.sh` also auto-enables `SDX55=1` when `SYSTEM=1`).
+- **Live hardware verification (`logs/161515-run.log`, `logs/162623-run.log`)**:
+  - `apt-get update` fetched 1,050 kB across all 11 repos (`Reading package lists... Done`, zero `E:` errors).
+  - `trollstorehelper install custom /redwood/fw/ipa/LocProbe.ipa` returned `0`; TrollStore Settings shows `ldid: Installed (v2.1.5-procursus7-new)` with no spinner or update nag (`pkg3-t105.png`).
+  - TrollApps renders in Simplified Chinese with all 6 CN sources populated (AltStore 6, Bonnie 1, Resonance Team 2, SideStore Team Picks 23, WuXu's Library 36, haxi0 6; `pkg4-t132.png`).
+  - Sileo renders in Simplified Chinese with zero Canister modal, all 11 repos + icons (`pkg4-t160.png`), and browsable package lists (`82Flex`: 33 packages, `pkg4-t180.png`).
+- **SDX55M 5G NR telemetry (`xnu/files/bsd/dev/umi_voice.inc` + `devices/thyme/drivers/modem/hakios.thyme_baseband.cpp`)**: Read-only 60 s `NAS5G:` heartbeat confirms `mode=80 (0x50 = LTE|NR5G)`, `nr5g_dis=-1`, `lte_svc=2`, `nr5g_svc=-1`, `endc=-1`, `dcnr=-1` (`logs/162623-run.log`). Although Mi 10S hardware (`SDX55M`) camps on 5G `NR_SA` (ARFCN `504990`, Band n41) under Android, HakiOS boots arm64 `iPhone10,3` (`Mav17` / MDM9655 4G-only identity, `capabilities::bb::radio::isMav20Plus() == false`), so 5G NR UI/control requires a future `Mav20` baseband bridge & firmware manifest.
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,961,632 B, always-on `NAS5G` heartbeat) | `84426a9af83d6c425e2b76db0fc23a51c3ac0d6f7a7bd0177c26a99eed0df235` |
+| `out/thyme-boot/root-wirelessfull.apfs` (48,988,160 B; sum 65,949,792 B < 66,060,288 B) | `c107456ba728d41c7a32d102411c727a0970bb16cde9c4ed496e096b89fc1595` |
+| `logs/161515-run.log` (`pkgtest3`: TrollStore `ldid`, `apt-get update`, `NAS5G`) | `783a6d94f6f2b8bebd26c46dc70fb34a9708f5acd28fc7997ec9ef9aa482c5a9` |
+| `logs/162623-run.log` (`pkgtest4`: Sileo 11 repos + `82Flex` 33 pkgs, TrollApps 6 CN sources, `NAS5G`) | `c0683bc377b7c582d6f85429660819c951b6e588488851c3f02dd168c0822bc7` |

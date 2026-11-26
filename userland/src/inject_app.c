@@ -189,8 +189,13 @@ keep_to_the_repositories(void)
 	}
 	defaults = get(defaults, sel_registerName("standardUserDefaults"));
 	if (defaults != NULL) {
+		id ingestKey = from_text((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "CanisterIngest");
 		set_bool(defaults, sel_registerName("setBool:forKey:"), 0, key);
-		say("hakios: Sileo: its Canister search is turned off (it is not reachable here)\n", 73);
+		if (ingestKey != NULL) {
+			set_bool(defaults, sel_registerName("setBool:forKey:"), 0, ingestKey);
+		}
+		say("hakios: Sileo: Canister search & ingest prompt disabled\n",
+		    sizeof("hakios: Sileo: Canister search & ingest prompt disabled\n") - 1);
 	}
 }
 
@@ -458,6 +463,153 @@ close_presented(void)
 	((void (*)(id, SEL, BOOL, id))objc_msgSend)(top, sel_registerName("dismissViewControllerAnimated:completion:"), YES, nil);
 	say("hakios: Sileo: close-sheet: the page on top was dismissed\n",
 	    sizeof("hakios: Sileo: close-sheet: the page on top was dismissed\n") - 1);
+}
+
+/*
+ * Sileo UX fixes:
+ *  1) Skip _TtC5Sileo21PrivacyViewController (Canister Download Analytics consent):
+ *     Canister is unreachable from mainland China and its Accept button at y=0.90
+ *     collides with the home indicator. Auto-dismissing it keeps first-run clean.
+ *  2) Add a native "Done" (完成) leftBarButtonItem on modal _TtC5Sileo27NativePackageViewController:
+ *     Sileo 2.5 commented out its modal Done button, trapping users on package sheets.
+ */
+static void (*orig_present_vc)(id, SEL, id, BOOL, id);
+static void (*orig_onboard_did_appear)(id, SEL, BOOL);
+
+static int
+cls_is_sileo_privacy(const char *cls)
+{
+	if (cls == NULL) {
+		return 0;
+	}
+	return strstr(cls, "PrivacyViewController") != NULL ||
+	    strstr(cls, "OnboardingViewController") != NULL;
+}
+
+static int
+is_sileo_privacy_vc(id vc)
+{
+	if (vc == nil) {
+		return 0;
+	}
+	if (cls_is_sileo_privacy(class_getName(object_getClass(vc)))) {
+		return 1;
+	}
+	if (class_respondsToSelector(object_getClass(vc), sel_registerName("topViewController"))) {
+		id top = ((id (*)(id, SEL))objc_msgSend)(vc, sel_registerName("topViewController"));
+		if (top != nil && cls_is_sileo_privacy(class_getName(object_getClass(top)))) {
+			return 1;
+		}
+	}
+	if (class_respondsToSelector(object_getClass(vc), sel_registerName("viewControllers"))) {
+		id arr = ((id (*)(id, SEL))objc_msgSend)(vc, sel_registerName("viewControllers"));
+		if (arr != nil && ((unsigned long (*)(id, SEL))objc_msgSend)(arr, sel_registerName("count")) > 0) {
+			id first = ((id (*)(id, SEL, unsigned long))objc_msgSend)(arr, sel_registerName("objectAtIndex:"), 0UL);
+			if (first != nil && cls_is_sileo_privacy(class_getName(object_getClass(first)))) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static void
+watched_present_vc(id self, SEL cmd, id vc, BOOL animated, id completion)
+{
+	if (is_sileo_privacy_vc(vc)) {
+		say("hakios: Sileo: skipped Canister Onboarding/Privacy modal\n",
+		    sizeof("hakios: Sileo: skipped Canister Onboarding/Privacy modal\n") - 1);
+		if (completion != nil) {
+			((void (^)(void))completion)();
+		}
+		return;
+	}
+	orig_present_vc(self, cmd, vc, animated, completion);
+}
+
+static void
+watched_onboard_did_appear(id self, SEL cmd, BOOL animated)
+{
+	orig_onboard_did_appear(self, cmd, animated);
+	say("hakios: Sileo: auto-dismissing Canister OnboardingViewController\n",
+	    sizeof("hakios: Sileo: auto-dismissing Canister OnboardingViewController\n") - 1);
+	((void (*)(id, SEL, BOOL, id))objc_msgSend)(self, sel_registerName("dismissViewControllerAnimated:completion:"), NO, nil);
+}
+
+static void (*orig_pkg_view_will_appear)(id, SEL, BOOL);
+
+static void
+hakios_dismiss_pkg_sheet(id self, SEL _cmd)
+{
+	(void)_cmd;
+	((void (*)(id, SEL, BOOL, id))objc_msgSend)(self, sel_registerName("dismissViewControllerAnimated:completion:"), YES, nil);
+}
+
+static void
+watched_pkg_view_will_appear(id self, SEL cmd, BOOL animated)
+{
+	orig_pkg_view_will_appear(self, cmd, animated);
+	id nav = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("navigationController"));
+	id presenter = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("presentingViewController"));
+	if (presenter == nil && nav != nil) {
+		presenter = ((id (*)(id, SEL))objc_msgSend)(nav, sel_registerName("presentingViewController"));
+	}
+	if (presenter == nil) {
+		return;
+	}
+	id navItem = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("navigationItem"));
+	if (navItem == nil) {
+		return;
+	}
+	id existing = ((id (*)(id, SEL))objc_msgSend)(navItem, sel_registerName("leftBarButtonItem"));
+	if (existing != nil) {
+		return;
+	}
+	Class barBtnCls = objc_getClass("UIBarButtonItem");
+	if (barBtnCls == Nil) {
+		return;
+	}
+	id btn = ((id (*)(id, SEL))objc_msgSend)((id)barBtnCls, sel_registerName("alloc"));
+	/* UIBarButtonSystemItemDone = 0 */
+	btn = ((id (*)(id, SEL, long, id, SEL))objc_msgSend)(btn,
+	    sel_registerName("initWithBarButtonSystemItem:target:action:"),
+	    0L, self, sel_registerName("hakios_dismissPackageSheet"));
+	if (btn != nil) {
+		((void (*)(id, SEL, id))objc_msgSend)(navItem, sel_registerName("setLeftBarButtonItem:"), btn);
+		((void (*)(id, SEL))objc_msgSend)(btn, sel_registerName("release"));
+	}
+}
+
+static int sileo_present_hooked, sileo_onboard_hooked, sileo_pkg_hooked;
+
+static void
+install_sileo_ui_fixes(void)
+{
+	if (!sileo_present_hooked) {
+		watch("UIViewController", "presentViewController:animated:completion:", (IMP)watched_present_vc, &orig_present_vc);
+		if (orig_present_vc != NULL) {
+			sileo_present_hooked = 1;
+		}
+	}
+	if (!sileo_onboard_hooked && objc_getClass("_TtC10Onboarding24OnboardingViewController") != Nil) {
+		watch("_TtC10Onboarding24OnboardingViewController", "viewDidAppear:",
+		    (IMP)watched_onboard_did_appear, &orig_onboard_did_appear);
+		if (orig_onboard_did_appear != NULL) {
+			sileo_onboard_hooked = 1;
+		}
+	}
+	if (!sileo_pkg_hooked) {
+		Class pkgCls = objc_getClass("_TtC5Sileo27NativePackageViewController");
+		if (pkgCls != Nil) {
+			class_addMethod(pkgCls, sel_registerName("hakios_dismissPackageSheet"),
+			    (IMP)hakios_dismiss_pkg_sheet, "v@:");
+			watch("_TtC5Sileo27NativePackageViewController", "viewWillAppear:",
+			    (IMP)watched_pkg_view_will_appear, &orig_pkg_view_will_appear);
+			sileo_pkg_hooked = 1;
+			say("hakios: Sileo: installed modal Done button + Onboarding/Privacy skip\n",
+			    sizeof("hakios: Sileo: installed modal Done button + Onboarding/Privacy skip\n") - 1);
+		}
+	}
 }
 
 /*
@@ -787,6 +939,7 @@ hakios_app_init(void)
 	if (strcmp(name, "Sileo") == 0) {
 		dispatch_async(dispatch_get_main_queue(), ^{ keep_to_the_repositories(); });
 		dispatch_async(dispatch_get_main_queue(), ^{ stay_awake(); });
+		dispatch_async(dispatch_get_main_queue(), ^{ install_sileo_ui_fixes(); });
 		{
 			int token = 0;
 

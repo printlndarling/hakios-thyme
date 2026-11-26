@@ -18,6 +18,10 @@ export BLUETOOTH=1
 export ADSP=1
 export GL=1
 export RC_JOBS
+# When building system.apfs, keep SDX55M modem Sahara/TFTP firmware staged if present locally.
+if [ -n "${SYSTEM:-}" ] && [ -z "${SDX55+x}" ] && [ -f ../fw-modem-sdx55m/qdsp6sw.mbn ]; then
+	export SDX55=1
+fi
 # A caller's EXTRA (files for /redwood/bin, paths relative to userland/) passes
 # through: the Sileo scene carries sileo-seed.sh that way.
 export EXTRA="${EXTRA:-}"
