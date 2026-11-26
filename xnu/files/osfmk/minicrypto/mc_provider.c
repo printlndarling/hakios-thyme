@@ -120,6 +120,13 @@ mc_prng_reseed(struct cckprng_ctx *ctx __unused, size_t nbytes, const void *seed
 	cc_clear(sizeof(discard), discard);
 }
 
+void hakios_prng_mix(const void *seed, size_t nbytes);
+void
+hakios_prng_mix(const void *seed, size_t nbytes)
+{
+	mc_prng_reseed(NULL, nbytes, seed);
+}
+
 /* Pull whatever the kernel entropy collector has accumulated and mix it in. */
 static void
 mc_prng_refresh(struct cckprng_ctx *ctx)

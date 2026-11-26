@@ -1299,6 +1299,15 @@ struct hakios_sensor_state {
 	uint64_t pressure_seq;
 	int32_t  pressure_mhpa;
 	uint32_t pressure_pad;
+	uint64_t rear_als_seq;
+	int32_t  rear_als_mlux;
+	int32_t  rear_als_raw;
+	uint64_t step_seq;
+	uint32_t step_count;
+	uint32_t step_pad;
+	uint64_t orient_seq;
+	int32_t  orient_state;
+	uint32_t orient_pad;
 };
 
 static void *
@@ -1307,7 +1316,9 @@ sensor_thread(void *arg)
 	IOHIDEventSystemClientRef client = (IOHIDEventSystemClientRef)arg;
 	IOHIDServiceClientRef accel_svc = NULL, als_svc = NULL, prox_svc = NULL, gyro_svc = NULL, mag_svc = NULL;
 	uint64_t last_accel = 0, last_als = 0, last_prox = 0, last_gyro = 0, last_mag = 0, last_press = 0;
+	uint64_t last_rear_als = 0, last_step = 0, last_orient = 0;
 	unsigned accel_logged = 0, als_logged = 0, prox_logged = 0, gyro_logged = 0, mag_logged = 0, press_logged = 0;
+	unsigned rear_als_logged = 0, step_logged = 0, orient_logged = 0;
 
 	pthread_setname_np("redwood sensors");
 	for (;;) {
@@ -1315,7 +1326,7 @@ sensor_thread(void *arg)
 		size_t sz = sizeof(st);
 
 		if (sysctlbyname("kern.hakios.sensor_state", &st, &sz, NULL, 0) != 0 || sz != sizeof(st) ||
-		    st.version != 2 || st.flags == 0) {
+		    st.version != 3 || st.flags == 0) {
 			usleep(250000);
 			continue;
 		}
@@ -1435,6 +1446,31 @@ sensor_thread(void *arg)
 				    (unsigned long long)st.pressure_seq, (double)st.pressure_mhpa / 1000.0);
 			}
 			last_press = st.pressure_seq;
+		}
+		if ((st.flags & 64u) && st.rear_als_seq != last_rear_als) {
+			if (rear_als_logged < 5) {
+				rear_als_logged++;
+				say("hakios: sensor: rear_als #%llu lux=%d (mlux=%d raw=%d)\n",
+				    (unsigned long long)st.rear_als_seq, st.rear_als_mlux / 1000,
+				    st.rear_als_mlux, st.rear_als_raw);
+			}
+			last_rear_als = st.rear_als_seq;
+		}
+		if ((st.flags & 128u) && st.step_seq != last_step) {
+			if (step_logged < 5) {
+				step_logged++;
+				say("hakios: sensor: pedometer #%llu steps=%u\n",
+				    (unsigned long long)st.step_seq, st.step_count);
+			}
+			last_step = st.step_seq;
+		}
+		if ((st.flags & 256u) && st.orient_seq != last_orient) {
+			if (orient_logged < 5) {
+				orient_logged++;
+				say("hakios: sensor: device_orient #%llu state=%d\n",
+				    (unsigned long long)st.orient_seq, st.orient_state);
+			}
+			last_orient = st.orient_seq;
 		}
 		usleep(50000);
 	}

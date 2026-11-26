@@ -2141,7 +2141,7 @@ step_start(void)
 			if (fastrpc_early && ready_at != 0 && handed_over) {
 				printf("slpi: %u: fastrpc_early: leaving watch at +%llu.%03llu ms so adsp_default_listener precedes SNS_REG_INIT\n",
 				    step, (now - started) / 1000, (now - started) % 1000);
-				break;
+				return true;
 			}
 		}
 		sleep_us(200);
@@ -2977,15 +2977,20 @@ qrtr_input(const uint8_t *data, uint32_t length)
 #define SNS_MSG_SENSOR_CONFIG   513u            /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_CONFIG */
 #define SNS_MSG_ON_CHANGE_CFG   514u            /* SNS_STD_SENSOR_MSGID_SNS_STD_ON_CHANGE_CONFIG */
 #define SNS_MSG_SUID_EVENT      768u            /* SNS_SUID_MSGID_SNS_SUID_EVENT */
-#define SNS_MSG_PROXIMITY_EVENT 769u            /* SNS_PROXIMITY_MSGID_SNS_PROXIMITY_EVENT */
-#define SNS_MSG_SENSOR_EVENT    1025u           /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_EVENT */
+#define SNS_MSG_PROXIMITY_EVENT     769u        /* SNS_PROXIMITY_MSGID_SNS_PROXIMITY_EVENT */
+#define SNS_MSG_DEVICE_ORIENT_EVENT 776u        /* SNS_DEVICE_ORIENT_MSGID_SNS_DEVICE_ORIENT_EVENT */
+#define SNS_MSG_SENSOR_EVENT        1025u       /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_EVENT */
+#define SNS_MSG_PEDOMETER_EVENT     1028u       /* SNS_PEDOMETER_MSGID_SNS_STEP_EVENT */
 
 static uint8_t sns_suid[16], sns_als_suid[16], sns_prox_suid[16];
 static uint8_t sns_gyro_live_suid[16], sns_mag_suid[16], sns_press_suid[16];
+static uint8_t sns_rear_als_suid[16], sns_pedo_suid[16], sns_orient_suid[16];
 static bool sns_have_suid, sns_have_registry, sns_have_als, sns_have_prox;
 static bool sns_have_gyro, sns_have_mag, sns_have_press;
+static bool sns_have_rear_als, sns_have_pedo, sns_have_orient;
 static bool sns_accel_configured, sns_als_configured, sns_prox_configured;
 static bool sns_gyro_configured, sns_mag_configured, sns_press_configured;
+static bool sns_rear_als_configured, sns_pedo_configured, sns_orient_configured;
 
 /*
  * Fixed-point sensor snapshot exported via kern.hakios.sensor_state for backboardd
@@ -2993,8 +2998,8 @@ static bool sns_gyro_configured, sns_mag_configured, sns_press_configured;
  * representation avoids kernel floating-point ABI issues.
  */
 struct hakios_sensor_state {
-	uint32_t version;           /* 2 */
-	uint32_t flags;             /* bit0=accel, bit1=als, bit2=prox, bit3=gyro, bit4=mag, bit5=pressure */
+	uint32_t version;           /* 3 */
+	uint32_t flags;             /* bit0=accel, 1=als, 2=prox, 3=gyro, 4=mag, 5=press, 6=rear_als, 7=pedo, 8=orient */
 	uint64_t accel_seq;
 	int32_t  accel_mmps2[3];    /* milli-m/s^2 (1 g ~= 9807) */
 	uint32_t accel_pad;
@@ -3013,11 +3018,21 @@ struct hakios_sensor_state {
 	uint64_t pressure_seq;
 	int32_t  pressure_mhpa;     /* milli-hPa (sea level ~= 1013250) */
 	uint32_t pressure_pad;
+	uint64_t rear_als_seq;
+	int32_t  rear_als_mlux;
+	int32_t  rear_als_raw;
+	uint64_t step_seq;
+	uint32_t step_count;
+	uint32_t step_pad;
+	uint64_t orient_seq;
+	int32_t  orient_state;
+	uint32_t orient_pad;
 };
 
 static LCK_MTX_DECLARE(sensor_state_lock, &slpi_lock_group);
-static struct hakios_sensor_state sensor_state = { .version = 2 };
-static uint32_t sns_als_samples, sns_prox_samples, sns_gyro_samples, sns_mag_samples, sns_press_samples, sns_qmi_ind_logged;
+static struct hakios_sensor_state sensor_state = { .version = 3 };
+static uint32_t sns_als_samples, sns_prox_samples, sns_gyro_samples, sns_mag_samples, sns_press_samples;
+static uint32_t sns_rear_als_samples, sns_pedo_samples, sns_orient_samples, sns_qmi_ind_logged;
 
 SYSCTL_DECL(_kern_hakios);
 
@@ -3610,6 +3625,123 @@ sns_sensor_event(const uint8_t event_suid[16], const uint8_t *data, uint32_t len
 		} else {
 			sns_press_samples++;
 		}
+	} else if (sns_have_rear_als && memcmp(event_suid, sns_rear_als_suid, 16) == 0) {
+		int32_t mlux = ieee754_to_milli(raw_bits[0]);
+		int32_t raw = count >= 2 ? ieee754_to_milli(raw_bits[1]) / 1000 : 0;
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 64u;
+		sensor_state.rear_als_seq++;
+		sensor_state.rear_als_mlux = mlux;
+		sensor_state.rear_als_raw = raw;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_rear_als_samples < 6) {
+			printf("slpi: sns: rear_als %u: mlux=%d raw=%d\n", ++sns_rear_als_samples, mlux, raw);
+		} else {
+			sns_rear_als_samples++;
+		}
+	} else if (sns_have_pedo && memcmp(event_suid, sns_pedo_suid, 16) == 0) {
+		uint32_t steps = (uint32_t)(ieee754_to_milli(raw_bits[0]) / 1000);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 128u;
+		sensor_state.step_seq++;
+		sensor_state.step_count = steps;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_pedo_samples < 6) {
+			printf("slpi: sns: pedometer(std) %u: steps=%u\n", ++sns_pedo_samples, steps);
+		} else {
+			sns_pedo_samples++;
+		}
+	} else if (sns_have_orient && memcmp(event_suid, sns_orient_suid, 16) == 0) {
+		int32_t st = ieee754_to_milli(raw_bits[0]) / 1000;
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 256u;
+		sensor_state.orient_seq++;
+		sensor_state.orient_state = st;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_orient_samples < 6) {
+			printf("slpi: sns: device_orient(std) %u: state=%d\n", ++sns_orient_samples, st);
+		} else {
+			sns_orient_samples++;
+		}
+	}
+}
+
+static void
+sns_pedometer_event(const uint8_t *data, uint32_t length)
+{
+	const uint8_t *at = data, *end = data + length;
+	uint32_t steps = 0;
+
+	while (at < end) {
+		uint64_t key = sns_read_varint(&at, end);
+		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
+
+		if (field == 1 && wire == 0) {
+			steps = (uint32_t)sns_read_varint(&at, end);
+		} else if (wire == 0) {
+			(void)sns_read_varint(&at, end);
+		} else if (wire == 1) {
+			at += 8;
+		} else if (wire == 2) {
+			uint64_t n = sns_read_varint(&at, end);
+			if (n > (uint64_t)(end - at)) break;
+			at += n;
+		} else if (wire == 5 && at + 4 <= end) {
+			at += 4;
+		} else {
+			break;
+		}
+	}
+	lck_mtx_lock(&sensor_state_lock);
+	sensor_state.flags |= 128u;
+	sensor_state.step_seq++;
+	sensor_state.step_count = steps;
+	lck_mtx_unlock(&sensor_state_lock);
+	if (sns_pedo_samples < 6) {
+		printf("slpi: sns: pedometer %u: steps=%u\n", ++sns_pedo_samples, steps);
+	} else {
+		sns_pedo_samples++;
+	}
+}
+
+static void
+sns_orient_event(const uint8_t *data, uint32_t length)
+{
+	const uint8_t *at = data, *end = data + length;
+	int32_t st = -1;
+
+	while (at < end) {
+		uint64_t key = sns_read_varint(&at, end);
+		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
+
+		if (field == 1 && wire == 0) {
+			st = (int32_t)sns_read_varint(&at, end);
+		} else if (wire == 0) {
+			(void)sns_read_varint(&at, end);
+		} else if (wire == 1) {
+			at += 8;
+		} else if (wire == 2) {
+			uint64_t n = sns_read_varint(&at, end);
+			if (n > (uint64_t)(end - at)) break;
+			at += n;
+		} else if (wire == 5 && at + 4 <= end) {
+			at += 4;
+		} else {
+			break;
+		}
+	}
+	lck_mtx_lock(&sensor_state_lock);
+	sensor_state.flags |= 256u;
+	sensor_state.orient_seq++;
+	sensor_state.orient_state = st;
+	lck_mtx_unlock(&sensor_state_lock);
+	if (sns_orient_samples < 6) {
+		printf("slpi: sns: device_orient %u: state=%d\n", ++sns_orient_samples, st);
+	} else {
+		sns_orient_samples++;
 	}
 }
 
@@ -3784,6 +3916,27 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 				sns_press_configured = true;
 				sns_config_rate(sns_press_suid, 1.0f, "barometer");
 			}
+		} else if (strcmp(name, "tsl2540_rear") == 0) {
+			memcpy(sns_rear_als_suid, chosen, sizeof(sns_rear_als_suid));
+			sns_have_rear_als = true;
+			if (!sns_rear_als_configured) {
+				sns_rear_als_configured = true;
+				sns_config_on_change(sns_rear_als_suid, "tsl2540_rear");
+			}
+		} else if (strcmp(name, "pedometer") == 0) {
+			memcpy(sns_pedo_suid, chosen, sizeof(sns_pedo_suid));
+			sns_have_pedo = true;
+			if (!sns_pedo_configured) {
+				sns_pedo_configured = true;
+				sns_config_on_change(sns_pedo_suid, "pedometer");
+			}
+		} else if (strcmp(name, "device_orient") == 0) {
+			memcpy(sns_orient_suid, chosen, sizeof(sns_orient_suid));
+			sns_have_orient = true;
+			if (!sns_orient_configured) {
+				sns_orient_configured = true;
+				sns_config_on_change(sns_orient_suid, "device_orient");
+			}
 		} else if (strcmp(name, "proximity") == 0) {
 			memcpy(sns_prox_suid, chosen, sizeof(sns_prox_suid));
 			sns_have_prox = true;
@@ -3874,6 +4027,10 @@ sns_event(const uint8_t *data, uint32_t length)
 				sns_sensor_event(event_suid, payload, payload_length);
 			} else if (msg_id == SNS_MSG_PROXIMITY_EVENT && payload != NULL) {
 				sns_proximity_event(event_suid, payload, payload_length);
+			} else if (msg_id == SNS_MSG_PEDOMETER_EVENT && payload != NULL) {
+				sns_pedometer_event(payload, payload_length);
+			} else if (msg_id == SNS_MSG_DEVICE_ORIENT_EVENT && payload != NULL) {
+				sns_orient_event(payload, payload_length);
 			} else if (msg_id != 0 && sns_qmi_ind_logged < 32) {
 				printf("slpi: sns: event %u, %u bytes\n", msg_id, payload_length);
 			}
@@ -4572,7 +4729,8 @@ sns_start(void)
 		/* the sensor process may still be initialising at three seconds: ask again for a while */
 		for (unsigned attempt = 0; attempt < 8 && !(sns_have_registry && sns_have_suid && sns_have_gyro &&
 		    sns_have_mag && sns_have_als && sns_have_press &&
-		    (sns_have_prox || attempt >= 2) && (sns_ask_name[0] == 0 || sns_have_ask_name)); attempt++) {
+		    ((sns_have_rear_als && sns_have_pedo && sns_have_orient && sns_have_prox) || attempt >= 3) &&
+		    (sns_ask_name[0] == 0 || sns_have_ask_name)); attempt++) {
 			if (!sns_have_registry) {
 				sns_ask("registry");
 			}
@@ -4591,8 +4749,19 @@ sns_start(void)
 			if (!sns_have_press) {
 				sns_ask("pressure");
 			}
-			if (!sns_have_prox && attempt < 2) {
-				sns_ask("proximity");
+			if (attempt == 1 || attempt == 2) {
+				if (!sns_have_rear_als) {
+					sns_ask("tsl2540_rear");
+				}
+				if (!sns_have_pedo) {
+					sns_ask("pedometer");
+				}
+				if (!sns_have_orient) {
+					sns_ask("device_orient");
+				}
+				if (!sns_have_prox) {
+					sns_ask("proximity");
+				}
 			}
 			if (sns_ask_name[0] != 0 && !sns_have_ask_name) {
 				sns_ask(sns_ask_name);
@@ -4600,11 +4769,12 @@ sns_start(void)
 			sleep_ms(1500);
 		}
 	}
-	printf("slpi: sns: registry %s, accel %s, gyro %s, mag %s, ambient_light %s, pressure %s, proximity %s\n",
+	printf("slpi: sns: registry %s, accel %s, gyro %s, mag %s, ambient_light %s, pressure %s, rear_als %s, pedometer %s, device_orient %s, proximity %s\n",
 	    sns_have_registry ? "ANSWERED" : "silent", sns_have_suid ? "ANSWERED" : "silent",
 	    sns_have_gyro ? "ANSWERED" : "silent", sns_have_mag ? "ANSWERED" : "silent",
 	    sns_have_als ? "ANSWERED" : "silent", sns_have_press ? "ANSWERED" : "silent",
-	    sns_have_prox ? "ANSWERED" : "silent");
+	    sns_have_rear_als ? "ANSWERED" : "silent", sns_have_pedo ? "ANSWERED" : "silent",
+	    sns_have_orient ? "ANSWERED" : "silent", sns_have_prox ? "ANSWERED" : "silent");
 	if (sns_ask_name[0] != 0) {
 		printf("slpi: sns: \"%s\" %s\n", sns_ask_name, sns_have_ask_name ? "ANSWERED" : "silent");
 	}
@@ -7505,7 +7675,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_offer_heap(physical, shared_offset, shared, packet);
 	}
 	{
-		unsigned max_tries = fastrpc_early ? 200u : 1u;
+		unsigned max_tries = fastrpc_early ? 500u : 1u;
 		bool attached = false;
 
 		for (unsigned t = 0; t < max_tries; t++) {
@@ -7523,7 +7693,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 				}
 				break;
 			}
-			sleep_ms(5);
+			sleep_ms(1);
 		}
 	}
 	if (fastrpc_grow_after) {
@@ -7531,7 +7701,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_offer_heap(physical, shared_offset, shared, packet);
 	}
 	{
-		unsigned max_tries = fastrpc_early ? 100u : 1u;
+		unsigned max_tries = fastrpc_early ? 300u : 1u;
 		bool inited = false;
 
 		for (unsigned t = 0; t < max_tries; t++) {
@@ -7547,7 +7717,7 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 			if (inited && fastrpc_call_retval == 0) {
 				break;
 			}
-			sleep_ms(5);
+			sleep_ms(1);
 		}
 		if (!inited || fastrpc_call_retval != 0) {
 			return;
@@ -7561,10 +7731,10 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		sleep_ms(200);
 	}
 	handle = 0;
-	for (unsigned t = 0; t < (fastrpc_early ? 100u : 1u) && handle == 0; t++) {
+	for (unsigned t = 0; t < (fastrpc_early ? 250u : 1u) && handle == 0; t++) {
 		handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
 		if (handle == 0 && fastrpc_early) {
-			sleep_ms(10);
+			sleep_ms(2);
 		}
 	}
 	if (handle == 0) {
@@ -8934,13 +9104,15 @@ link_stop(void)
 			lck_mtx_lock(&sensor_state_lock);
 			snap = sensor_state;
 			lck_mtx_unlock(&sensor_state_lock);
-			printf("slpi: sensors: flags=%#x accel(suid=%d seq=%llu mm/s^2=%d,%d,%d) gyro(suid=%d seq=%llu mrad/s=%d,%d,%d) mag(suid=%d seq=%llu muT=%d,%d,%d) als(suid=%d seq=%llu mlux=%d raw=%d) press(suid=%d seq=%llu mhPa=%d) prox(suid=%d seq=%llu near=%u raw=%u)\n",
+			printf("slpi: sensors: flags=%#x accel(suid=%d seq=%llu mm/s^2=%d,%d,%d) gyro(suid=%d seq=%llu mrad/s=%d,%d,%d) mag(suid=%d seq=%llu muT=%d,%d,%d) als(suid=%d seq=%llu mlux=%d raw=%d) press(suid=%d seq=%llu mhPa=%d) rear_als(suid=%d seq=%llu mlux=%d raw=%d) pedo(suid=%d seq=%llu steps=%u) orient(suid=%d seq=%llu st=%d)\n",
 			    snap.flags, sns_have_suid, snap.accel_seq, snap.accel_mmps2[0], snap.accel_mmps2[1], snap.accel_mmps2[2],
 			    sns_have_gyro, snap.gyro_seq, snap.gyro_mradps[0], snap.gyro_mradps[1], snap.gyro_mradps[2],
 			    sns_have_mag, snap.mag_seq, snap.mag_mut[0], snap.mag_mut[1], snap.mag_mut[2],
 			    sns_have_als, snap.als_seq, snap.als_mlux, snap.als_raw,
 			    sns_have_press, snap.pressure_seq, snap.pressure_mhpa,
-			    sns_have_prox, snap.prox_seq, snap.prox_near, snap.prox_raw);
+			    sns_have_rear_als, snap.rear_als_seq, snap.rear_als_mlux, snap.rear_als_raw,
+			    sns_have_pedo, snap.step_seq, snap.step_count,
+			    sns_have_orient, snap.orient_seq, snap.orient_state);
 		}
 		if (sns_cm_result_seen) {
 			printf("slpi: sns: sns_cm write result %u\n", sns_cm_result);
@@ -9115,8 +9287,8 @@ step_link(void)
 		return false;
 	}
 	thread_deallocate(thread);
-	for (unsigned ms = 0; ms < 5000 && (!glink.channel[CHANNEL_QRTR].open || (fastrpc_early && !glink.channel[CHANNEL_FASTRPC].open)) && !glink.broken; ms++) {
-		sleep_ms(1);
+	for (unsigned tick = 0; tick < 10000 && (!glink.channel[CHANNEL_QRTR].open || (fastrpc_early && !glink.channel[CHANNEL_FASTRPC].open)) && !glink.broken; tick++) {
+		sleep_us(fastrpc_early ? 500 : 1000);
 	}
 	if (!fastrpc_early) {
 		sleep_ms(50);

@@ -16,24 +16,42 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <sys/hakios.input.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern kern_return_t thread_terminate(thread_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
+extern void hakios_prng_mix(const void *, size_t) __attribute__((weak));
+
+SYSCTL_DECL(_kern_hakios);
 
 #define UMI_ARB_CORE_PA       0x0c440000UL
 #define UMI_ARB_CNFG_PA       0x0c40a000UL
 #define UMI_ARB_OBSERVER_PA   0x0e600000UL
 #define UMI_PON_PPID          0x0008u
+#define UMI_RTC_PPID          0x0060u
 #define UMI_GPIO6_PPID        0x00c5u
 #define UMI_PON_RT_STATUS     0x0810u
+#define UMI_RTC_TYPE          0x6004u
+#define UMI_RTC_SUBTYPE       0x6005u
+#define UMI_RTC_CTRL          0x6046u
+#define UMI_RTC_VAL0          0x6048u
 #define UMI_GPIO_RT_STATUS    0xc110u
 #define UMI_GPIO_MODE         0xc140u
 #define UMI_GPIO_ENABLE       0xc146u
 #define UMI_GPIO_SUBTYPE      0xc105u
 #define UMI_KEY_POLL_MS       20
 #define UMI_NO_APID           0xffffu
+
+#define UMI_GCC_PA            0x00100000UL
+#define UMI_GCC_PRNG_CBCR     0x34004u
+#define UMI_GCC_PRNG_VOTE     0x52004u
+#define UMI_PRNG_PA           0x00793000UL
+#define UMI_PRNG_DATA_OUT     0x000u
+#define UMI_PRNG_STATUS       0x004u
+
+#define UMI_HALL_GPIO14_PA    0x0f50e000UL
 
 #define ARB_VERSION           0x000
 #define ARB_FEATURES          0x004
@@ -43,15 +61,24 @@ extern void hakios_tl(const char *, ...) __printflike(1, 2);
 #define OBS_STATUS            0x08
 #define OBS_DATA0             0x18
 #define OBS_DONE              0x1u
+#define OBS_DROPPED           0x4u
 #define OBS_ERRORS            0x0eu
 #define OBS_READ_LONG         (1u << 27)
 
-static vm_offset_t arb_core, arb_cnfg, arb_observer;
-static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID;
-static bool keys_started;
-static int keys_sleep_chan;
+static vm_offset_t arb_core, arb_cnfg, arb_observer, hall_gpio;
+static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_NO_APID;
+static bool keys_started, rtc_ready;
+static int keys_sleep_chan, qrng_ready, hall_closed;
+static uint32_t rtc_boot_seconds;
 static uint32_t press_ms = 150, press_gap = 10, press_left;
 static thread_call_t press_call;
+
+SYSCTL_INT(_kern_hakios, OID_AUTO, qrng_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &qrng_ready, 0,
+    "SM8250 hardware TRNG seeded XNU mc_prng (1=ready)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, hall_closed,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &hall_closed, 0,
+    "Xiaomi Mi 10S Hall sensor state (0=open, 1=closed)");
 
 static uint32_t
 keys_reg(vm_offset_t base, uint32_t offset)
@@ -94,26 +121,174 @@ keys_read(uint16_t apid, uint16_t address, uint8_t *value)
 		return false;
 	}
 	uint32_t offset = 0x80u * apid; /* EE 0 observer, one 0x80-byte window per APID */
-	uint64_t deadline, now;
-	clock_interval_to_deadline(2, NSEC_PER_MSEC, &deadline);
-	hakios_spmi_lock();
-	__asm__ volatile("dmb oshst" ::: "memory");
-	keys_write(arb_observer, offset + OBS_COMMAND,
-	    OBS_READ_LONG | ((uint32_t)(address & 0xffu) << 4));
-	do {
-		uint32_t status = keys_reg(arb_observer, offset + OBS_STATUS);
-		if (status & OBS_DONE) {
-			bool okay = !(status & OBS_ERRORS);
-			if (okay) {
-				*value = (uint8_t)keys_reg(arb_observer, offset + OBS_DATA0);
+	for (unsigned attempt = 0; attempt < 3; attempt++) {
+		uint64_t deadline, now;
+		clock_interval_to_deadline(2, NSEC_PER_MSEC, &deadline);
+		hakios_spmi_lock();
+		__asm__ volatile("dmb oshst" ::: "memory");
+		keys_write(arb_observer, offset + OBS_COMMAND,
+		    OBS_READ_LONG | ((uint32_t)(address & 0xffu) << 4));
+		bool dropped = false;
+		do {
+			uint32_t status = keys_reg(arb_observer, offset + OBS_STATUS);
+			if (status & OBS_DONE) {
+				bool okay = !(status & OBS_ERRORS);
+				if (okay) {
+					*value = (uint8_t)keys_reg(arb_observer, offset + OBS_DATA0);
+					hakios_spmi_unlock();
+					return true;
+				}
+				dropped = (status & OBS_DROPPED) != 0;
+				hakios_spmi_unlock();
+				if (!dropped) {
+					return false;
+				}
+				break;
 			}
+			now = mach_absolute_time();
+		} while (now < deadline);
+		if (!dropped) {
 			hakios_spmi_unlock();
-			return okay;
+			return false;
+		}
+		clock_interval_to_deadline(50, NSEC_PER_USEC, &deadline);
+		while (mach_absolute_time() < deadline) {
+		}
+	}
+	return false;
+}
+
+static bool
+umi_rtc_read(uint32_t *seconds_out)
+{
+	uint32_t first = 0, second = 0;
+
+	if (rtc_apid == UMI_NO_APID) {
+		return false;
+	}
+	for (unsigned attempt = 0; attempt < 3; attempt++) {
+		uint8_t b[4] = { 0 };
+
+		for (unsigned i = 0; i < 4; i++) {
+			if (!keys_read(rtc_apid, (uint16_t)(UMI_RTC_VAL0 + i), &b[i])) {
+				return false;
+			}
+		}
+		first = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+		for (unsigned i = 0; i < 4; i++) {
+			if (!keys_read(rtc_apid, (uint16_t)(UMI_RTC_VAL0 + i), &b[i])) {
+				return false;
+			}
+		}
+		second = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+		if (first == second) {
+			*seconds_out = second;
+			return true;
+		}
+	}
+	*seconds_out = second;
+	return true;
+}
+
+static int
+sysctl_umi_rtc_seconds(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2,
+    struct sysctl_req *req)
+{
+	uint32_t secs = 0;
+	int value;
+
+	if (!rtc_ready || !umi_rtc_read(&secs)) {
+		return ENXIO;
+	}
+	value = (int)secs;
+	return SYSCTL_OUT(req, &value, sizeof(value));
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, umi_rtc_seconds,
+    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
+    sysctl_umi_rtc_seconds, "I", "PM8150 SPMI hardware RTC seconds (thyme)");
+
+static void
+thyme_qrng_init(void)
+{
+	vm_offset_t gcc = ml_io_map(UMI_GCC_PA, 0x60000UL);
+	vm_offset_t qrng = 0;
+	uint32_t words[16];
+	uint32_t vote_before, cbcr, distinct = 0;
+	bool all_zero = true, all_ones = true;
+
+	if (gcc == 0) {
+		hakios_tl("UMI qrng: GCC map failed\n");
+		return;
+	}
+	vote_before = keys_reg(gcc, UMI_GCC_PRNG_VOTE);
+	cbcr = keys_reg(gcc, UMI_GCC_PRNG_CBCR);
+	keys_write(gcc, UMI_GCC_PRNG_VOTE, vote_before | (1u << 13));
+	uint64_t deadline, now;
+	clock_interval_to_deadline(2000, NSEC_PER_USEC, &deadline);
+	do {
+		cbcr = keys_reg(gcc, UMI_GCC_PRNG_CBCR);
+		if ((cbcr & 0x80000000u) == 0) {
+			break;
 		}
 		now = mach_absolute_time();
 	} while (now < deadline);
-	hakios_spmi_unlock();
-	return false;
+	if ((cbcr & 0x80000000u) != 0) {
+		keys_write(gcc, UMI_GCC_PRNG_VOTE, vote_before);
+		hakios_tl("UMI qrng: GCC_PRNG_AHB_CLK remained halted (%#x)\n", cbcr);
+		return;
+	}
+	qrng = ml_io_map(UMI_PRNG_PA, 0x1000UL);
+	if (qrng == 0) {
+		keys_write(gcc, UMI_GCC_PRNG_VOTE, vote_before);
+		hakios_tl("UMI qrng: PRNG MMIO map failed\n");
+		return;
+	}
+	unsigned collected = 0;
+	for (unsigned i = 0; i < 16; i++) {
+		clock_interval_to_deadline(2000, NSEC_PER_USEC, &deadline);
+		bool avail = false;
+		do {
+			if (keys_reg(qrng, UMI_PRNG_STATUS) & 1u) {
+				avail = true;
+				break;
+			}
+			now = mach_absolute_time();
+		} while (now < deadline);
+		if (!avail) {
+			break;
+		}
+		words[i] = keys_reg(qrng, UMI_PRNG_DATA_OUT);
+		if (words[i] != 0) {
+			all_zero = false;
+		}
+		if (words[i] != 0xffffffffu) {
+			all_ones = false;
+		}
+		bool dup = false;
+		for (unsigned j = 0; j < i; j++) {
+			if (words[j] == words[i]) {
+				dup = true;
+				break;
+			}
+		}
+		if (!dup) {
+			distinct++;
+		}
+		collected++;
+	}
+	keys_write(gcc, UMI_GCC_PRNG_VOTE, vote_before);
+	if (collected == 16 && !all_zero && !all_ones && distinct >= 12) {
+		if (hakios_prng_mix != NULL) {
+			hakios_prng_mix(words, sizeof(words));
+		}
+		qrng_ready = 1;
+		hakios_tl("UMI qrng: SM8250 hardware TRNG seeded XNU mc_prng (64 bytes, 16/16 words, distinct=%u)\n",
+		    distinct);
+	} else {
+		hakios_tl("UMI qrng: insufficient entropy (words=%u distinct=%u)\n", collected, distinct);
+	}
+	memset(words, 0, sizeof(words));
 }
 
 static void
@@ -142,7 +317,10 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 	/* Unknown initial state is observed silently; only subsequent transitions are events. */
 	int state[3] = { -1, -1, -1 };
 	bool live[3] = { false, false, false };
-	unsigned errors = 0;
+	unsigned errors = 0, ticks = 0, hall_debounce = 0;
+	int hall_candidate = hall_closed;
+	bool rtc_tick_checked = !rtc_ready;
+
 	for (;;) {
 		uint8_t pon = 0, gpio = 0;
 		bool pon_ok = keys_read(pon_apid, UMI_PON_RT_STATUS, &pon);
@@ -171,6 +349,34 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 			} else if (state[key] != current[key]) {
 				state[key] = current[key];
 				keys_post(key, current[key]);
+			}
+		}
+		if (hall_gpio != 0) {
+			int cur_closed = (keys_reg(hall_gpio, 0x04) & 1u) == 0 ? 1 : 0;
+
+			if (cur_closed != hall_closed) {
+				if (cur_closed == hall_candidate) {
+					if (++hall_debounce >= 3) {
+						hall_closed = cur_closed;
+						hall_debounce = 0;
+						hakios_tl("UMI hall: magnetic cover %s\n",
+						    hall_closed ? "closed" : "open");
+					}
+				} else {
+					hall_candidate = cur_closed;
+					hall_debounce = 1;
+				}
+			} else {
+				hall_debounce = 0;
+			}
+		}
+		if (!rtc_tick_checked && ++ticks >= 100) {
+			uint32_t now_secs = 0;
+
+			rtc_tick_checked = true;
+			if (umi_rtc_read(&now_secs)) {
+				hakios_tl("UMI rtc: tick check t0=%u t1=%u delta=%u s\n",
+				    rtc_boot_seconds, now_secs, now_secs - rtc_boot_seconds);
 			}
 		}
 		keys_wait();
@@ -254,6 +460,7 @@ umi_keys_init(void)
 		return;
 	}
 	pon_apid = keys_find_apid(UMI_PON_PPID, channels);
+	rtc_apid = keys_find_apid(UMI_RTC_PPID, channels);
 	gpio_apid = keys_find_apid(UMI_GPIO6_PPID, channels);
 	uint8_t mode = 0, enable = 0, subtype = 0;
 	bool mode_ok = keys_read(gpio_apid, UMI_GPIO_MODE, &mode);
@@ -267,6 +474,49 @@ umi_keys_init(void)
 	}
 	hakios_tl("UMI keys: arbiter=%#x channels=%u PON-APID=%u GPIO6-APID=%u\n",
 	    version, channels, pon_apid, gpio_apid);
+	thyme_qrng_init();
+	{
+		static const uint16_t rtc_candidates[] = { 0x0060u, 0x0061u, 0x0062u };
+
+		for (unsigned c = 0; c < sizeof(rtc_candidates) / sizeof(rtc_candidates[0]); c++) {
+			uint16_t ap = keys_find_apid(rtc_candidates[c], channels);
+			uint8_t rtype = 0, rsub = 0, rctrl = 0;
+
+			if (ap == UMI_NO_APID) {
+				continue;
+			}
+			if (keys_read(ap, UMI_RTC_TYPE, &rtype) &&
+			    keys_read(ap, UMI_RTC_SUBTYPE, &rsub) &&
+			    keys_read(ap, UMI_RTC_CTRL, &rctrl)) {
+				hakios_tl("UMI rtc: candidate ppid=%#x apid=%u type=%#x subtype=%#x ctrl=%#x\n",
+				    rtc_candidates[c], ap, rtype, rsub, rctrl);
+				if ((rtype == 0x07u || rtype == 0x06u) && rsub == 0x01u && (rctrl & 0x80u) != 0) {
+					rtc_apid = ap;
+					if (umi_rtc_read(&rtc_boot_seconds)) {
+						rtc_ready = true;
+						hakios_tl("UMI rtc: PM8150 RTC ready ppid=%#x apid=%u seconds=%u\n",
+						    rtc_candidates[c], rtc_apid, rtc_boot_seconds);
+						break;
+					}
+				}
+			}
+		}
+	}
+	hall_gpio = ml_io_map(UMI_HALL_GPIO14_PA, 0x1000UL);
+	if (hall_gpio != 0) {
+		uint32_t cfg0 = keys_reg(hall_gpio, 0x00);
+		uint32_t io = keys_reg(hall_gpio, 0x04);
+
+		if (cfg0 == 0 && io == 0) {
+			/* cfg=0/io=0 on GPIO14 (RAZ/unconfigured); disable polling rather than false-closed. */
+			hakios_tl("UMI hall: TLMM SOUTH GPIO14 cfg=0 io=0 (unconfigured/RAZ; polling disabled)\n");
+			hall_gpio = 0;
+		} else {
+			hall_closed = (io & 1u) == 0 ? 1 : 0;
+			hakios_tl("UMI hall: TLMM SOUTH GPIO14 cfg=%#x io=%#x state=%s\n",
+			    cfg0, io, hall_closed ? "closed" : "open");
+		}
+	}
 	kern_return_t kr = kernel_thread_start(keys_thread, NULL, &thread);
 	if (kr == KERN_SUCCESS) {
 		thread_deallocate(thread);

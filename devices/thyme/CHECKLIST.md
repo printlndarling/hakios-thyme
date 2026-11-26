@@ -19,7 +19,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Hardware / Component | DTB / Silicon Identity | Priority | Status | Current Scope & Gaps |
 |---|---|---|---|---|
 | CPU Cluster (7/8 cores) | Snapdragon 870 (`SM8250-AC`) Silver/Gold/Prime | P1 | **PASS** | `bootcpu=7 cpus=7`, EPSS DVFS up to `1.80 / 2.42 / 3.19 GHz` (`cpufreq=1`, `thermal=1`) |
-| CPU0 (8th Core) | Silver core 0 | P1 | **TODO** | Left inactive under `bootcpu=7 cpus=7` configuration |
+| CPU0 (8th Core) | Silver core 0 | P1 | **TODO** | `xnuloader/loader.c` deliberately reserves core 0 for UEFI/EL3 firmware under `bootcpu=7 cpus=7` RAM boot |
 | GPU (OpenGL ES) | Adreno 650 (`0x06050002`) + GMU | P0 | **PASS** | Hardware rendering via Mesa/Freedreno (`hakios-gl`) |
 | GPU (System Metal) | Adreno 650 (`hakios-metal` + `HakiosMetalCA`) | P0 | **PARTIAL** | Compiles and initializes in probes (`CA`); full `metal_all=1` / VectorKit / ANGLE stability open |
 | Display & Refresh | 6.67" 1080×2340 OLED (`j2s_mp_42_02_0a_dsc_cmd`) | P0 | **PASS** | Hardware `89.08 Hz` TE-synced (`INTF_1`, `0%` missed scans), DCS brightness, lock blanking |
@@ -43,9 +43,9 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Magnetometer / Compass | `AK0991x` over SLPI QRTR | P1 | **PASS** | 10 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Front Ambient Light (ALS) | Under-OLED `TCS3701` over SLPI + live backlight sysfs | P1 | **PASS** | Live lux (`224 -> 59 lux`) -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Barometer | `BMP285` over SLPI QRTR | P2 | **PASS** | Continuous pressure telemetry (`957–962 hPa`) |
-| Rear Ambient Light | `TSL2540` (`xiaomi.sensor.back_lux`) | P2 | **TODO** | Present in `fw-sensors`; not subscribed/exposed to iOS |
+| Rear Ambient Light | `TSL2540` (`xiaomi.sensor.back_lux`) | P2 | **TODO** | `"tsl2540_rear"` SUID query silent (`suid=0` in `logs/222034-run.log`); needs multi-SUID `"ambient_light"` / `"tsl2540"` probe |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
-| Hall Sensor | `hall_key` (DTB pinctrl) | P2 | **TODO** | Smart-cover / magnetic Hall input not implemented |
+| Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
 | NFC Controller | `qcom,nq-nci` | P1 | **TODO** | No XNU NCI driver or userland routing |
 | IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
@@ -55,14 +55,14 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | USB only used in UEFI loader; no XNU `DWC3` gadget, `usbmux`, or `lockdownd` (PC i4Tools/iTunes blocked) |
 | USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | **PARTIAL** | Read-only partition access (`PASS` for modem EFS/devcfg); guarded writable persistence (`ufs_write=1`) not enabled |
-| Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI) | P1 | **PARTIAL** | Clock synchronized at boot via loader `epoch=`; direct PMIC SPMI RTC read/alarm/drift check `TODO` |
+| Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI `PPID 0x60`) | P1 | **PARTIAL** | PM8150 SPMI RTC hardware counter `PASS` (`kern.hakios.umi_rtc_seconds`, live 1 Hz tick `delta=2 s` in `logs/222034-run.log`); Unix epoch offset sync & alarm wake `TODO` |
 | Software / UI / Packages | Simplified Chinese UI + Sileo + TrollStore + TrollApps | P1 | **PASS** | Cold boots `zh-Hans`, PingFang, Pinyin, Sileo (11 CN repos), TrollStore (`ldid`), TrollApps (6 CN repos) |
 
 ### 2. SoC Low-Level Capabilities (`SM8250-AC`)
 
 | Capability | Priority | Status | Notes |
 |---|---|---|---|
-| All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`), core 0 unused |
+| All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
 | CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **TODO** | Display blanking (`DCS 0x51=0` + `Main will unblank`) works (`logs/173008-run.log`), but SoC `WFI`/PSCI deep power collapse not implemented |
 | GPU Dynamic Frequency Scaling (DVFS) | P1 | **TODO** | Fixed/GMU initialization clock; dynamic DCVS/thermal GPU scaling unimplemented |
 | VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` unimplemented; browser/player video decodes in CPU software |
@@ -70,7 +70,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) not brought up |
 | NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
-| Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **TODO** | `qcedev@1de0000` / `prng` unported; kernel uses software crypto & boot entropy |
+| Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (64 B / 16 distinct words mixed into XNU `mc_prng`, `kern.hakios.qrng_ready=1`); `qcedev@1de0000` bulk crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
 | Hardware Watchdog | P1 | **TODO** | `qcom,wdt@17c10000` unconfigured; XNU panics return via loader/soft-reboot |
 
@@ -88,7 +88,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | **Touch** | Multi-touch, gestures, lock/home swipe | Palm rejection, edge-grip tuning, double-tap-to-wake (DT2W) during deep sleep |
 | **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004` | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
 | **Battery & Thermal** | Fuel gauge, USB charge, `battery_stop=40` guard, CPU EPSS thermal throttling | Battery health/cycle calibration, charge-full cutoff, off-mode charging UI, multi-zone thermal policy (charger + GPU + modem) |
-| **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` ALS -> `backboardd` HID, `BMP285` barometer | Rear `TSL2540` ALS, ADSP ultrasonic proximity screen-off on call, Hall sensor, pedometer, raise-to-wake, back-tap |
+| **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` ALS -> `backboardd` HID, `BMP285` barometer, `device_orient` (`PASS` `state=0`), `pedometer` SUID (`suid=1`, stationary `0`) | Walk-test `pedometer` steps, rear `TSL2540` ALS (`"tsl2540_rear"` silent), ADSP ultrasonic proximity screen-off on call, Hall `GPIO14` (`cfg=0 io=0` RAZ), raise-to-wake, back-tap |
 
 ### 4. OS-Level Readiness & Proprietary Boundaries
 
@@ -6816,3 +6816,21 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `out/thyme-boot/root-wirelessfull.apfs` / `userland/root.apfs` (48,992,256 B; total `65,956,568 B < 66,060,288 B`) | `0143c5f3eb8d844aa1784954bbb0776b3b5ceaeaa4fdd8531e3289887c59183d` |
 | `userland/system.apfs` (with `fw/slpi.*` staged for daily `slpi=1`) | `83e304d77605b489e66042fb0378c2b72e059d2527cfd02ced4cbeafe5f198ef` |
 | `logs/212544-run.log` (Unified `boot-hakios-ram.sh` 120 s live run: SLPI 5 sensors + SDX55M + Wi-Fi + BT + 90 Hz) | `b2ab3ff6ef26204366eb22013688d812aec311b7671b614cca34b4e5cc2b9620` |
+
+### Batch 1 Quick-Win Silicon Bring-Up: QRNG, PM8150 RTC, SLPI Sensors & Hall Probe (2026-11-26)
+
+- **SM8250 Hardware TRNG (`qrng@793000` -> `mc_prng`) (`PASS`)** (`xnu/files/osfmk/minicrypto/mc_provider.c`, `devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Exported `hakios_prng_mix()` forwarding to `mc_prng_reseed()`. On boot, `thyme_qrng_init()` votes `GCC_PRNG_AHB_CLK` (`0x00100000 + 0x52004` bit 13), collects 16 distinct 32-bit random words (64 bytes) from `0x00793000`, mixes them into XNU `mc_prng`, restores the GCC clock vote, and sets `kern.hakios.qrng_ready=1`.
+- **PM8150 SPMI Hardware RTC (`PPID 0x60`) (`PASS hardware counter`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Discovers `PPID 0x60` (`type=0x7`, `subtype=0x1`, `ctrl=0x80`) via SPMI observer APID `2` (avoiding collision with `hakios.pmic.c`'s `kern.hakios.rtc_seconds`), verifies consistent double-read across byte carry, exposes `kern.hakios.umi_rtc_seconds`, and confirms a live 1 Hz hardware tick (`t0=28394751 -> t1=28394753`, `delta=2 s`). Added `OBS_DROPPED` SPMI read retry in `keys_read()`.
+- **SLPI Sensor Expansion & Early FastRPC Timing Fix (`devices/thyme/drivers/sensor/hakios.thyme_slpi.c`, `userland/src/inject.c`)**:
+  - Exiting `step_start()` immediately on `fastrpc_early && ready_at != 0 && handed_over` (skipping SMEM debug dumps on the critical path), polling `CHANNEL_QRTR`/`CHANNEL_FASTRPC` at `500 us`, and tightening `fastrpc_phone_chain()` retry intervals (`1-2 ms`) restored FastRPC registration to `+141.383 ms` (`3,481 apps_std calls`, `63/63` SNS `result 0`, zero refusals).
+  - Upgraded `kern.hakios.sensor_state` to `version=3` (`flags=0x13b`): added `device_orient` (`PASS`, `suid=1`, `seq=1`, live `hakios: sensor: device_orient #1 state=0` in `backboardd`), `pedometer` (`PARTIAL`, `suid=1`, `seq=0` while stationary), and confirmed `"tsl2540_rear"` returned `suid=0` (needs multi-SUID `"ambient_light"` / `"tsl2540"` lookup).
+- **Hall Sensor (`GPIO14` @ `0x0f50e000`) (`TODO` / safely disabled)**:
+  - Verified DTB binds `gpio_keys/hall_key` to `TLMM SOUTH GPIO14` active-low, while `0x0f50e000` reads `cfg=0 io=0` (unconfigured/RAZ) and writing bias-pull-up to `0x0f50e000` caused an immediate bus/XPU hang in an earlier test build. Kept strictly read-only and disabled polling when `cfg=0 && io=0`.
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,982,072 B, Batch 1: QRNG + PM8150 RTC + SLPI `version=3` + early FastRPC fix) | `84b2e74d79bca0a6eed3a4822b1a98fe0e5cd37a65e64222f48d5c767ee640aa` |
+| `userland/root.apfs` / `out/thyme-boot/root-wirelessfull.apfs` (48,992,256 B; total `65,974,328 B < 66,060,288 B`) | `5aaf9e9466e299b94f93df12897f9742690d3f56042678bc206d0ed940e2a75f` |
+| `logs/222034-run.log` (Batch 1 live 100 s verification: QRNG + RTC 2 s tick + SLPI `flags=0x13b` + `inject`) | `50550dc4b85e0eb3e3d0541ce0d91f5fc5ee86fdeb132b53606250c08ea22079` |
