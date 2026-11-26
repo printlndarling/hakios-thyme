@@ -299,6 +299,9 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			{ ${LDID:-ldid} -Ssrc/volte_probe.entitlements obj/volte_probe 2>/dev/null || true; }
 		# what CoreLocation says about location services (src/loc_test.m)
 		$DYN -fobjc-arc -framework Foundation -framework CoreLocation -framework CoreFoundation -o obj/loc_test src/loc_test.m
+		# SDX55M QMI LOC GNSS -> CoreLocation bridge daemon (src/umi_gnssd.m)
+		$DYN -Os -Wl,-dead_strip -Wl,-x -fobjc-arc -framework Foundation -framework CoreLocation -lobjc -o obj/umi_gnssd src/umi_gnssd.m &&
+			{ ${LDID:-ldid} -Ssrc/umi_gnssd.entitlements obj/umi_gnssd 2>/dev/null || true; }
 		# WeatherDaemon's switches for the mobile user (src/weatherprefs.c)
 		$DYN -framework CoreFoundation -o obj/weatherprefs src/weatherprefs.c
 		# fairplayd's two Mach service names, answered by a logger (src/fairplaystub.c; FAIRPLAYSTUB=1 scene)
@@ -524,6 +527,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/volte_probe ] && cp obj/volte_probe root/bin/
 	[ -f obj/volte_rtp ] && cp obj/volte_rtp root/bin/
 	[ -f obj/loc_test ] && cp obj/loc_test root/bin/
+	[ -f obj/umi_gnssd ] && cp obj/umi_gnssd root/bin/
 	[ -f obj/weatherprefs ] && cp obj/weatherprefs root/bin/
 	[ -f obj/plistcat ] && cp obj/plistcat root/bin/
 	[ -f obj/clcheck ] && cp obj/clcheck root/bin/
@@ -706,6 +710,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# fairplayd among them).
 	cp com.hakios.demo.plist com.hakios.wifi.plist com.hakios.wifi-keepalive.plist root/LaunchDaemons/
 	[ -f root/bin/volte_rtp ] && cp com.hakios.volte-rtp.plist root/LaunchDaemons/
+	[ -f root/bin/umi_gnssd ] && cp com.hakios.gnss.plist root/LaunchDaemons/
 	if [ -f root/bin/scname ]; then cp com.hakios.scname.plist root/LaunchDaemons/; fi
 	if [ -n "${FAIRPLAYSTUB:-}" ] && [ -f obj/fairplaystub ]; then
 		cp obj/fairplaystub root/bin/

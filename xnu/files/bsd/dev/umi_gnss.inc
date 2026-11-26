@@ -1,16 +1,27 @@
 /* SPDX-License-Identifier: BSD-2-Clause
- * Included by hakios.umi_baseband.cpp. bb_lock protects state; only the modem
- * thread calls the transport. A dedicated QRTR endpoint never enters ABM's
+ * Included by hakios.umi_baseband.cpp / hakios.thyme_baseband.cpp. bb_lock protects state;
+ * only the modem thread calls the transport. A dedicated QRTR endpoint never enters ABM's
  * client pool, reset paths, pending table or frame queues.
  */
 #include <sys/sysctl.h>
 #include <sys/kauth.h>
 #include "umi_gnss_qmi.h"
 #define GNSS_LOG(...) hakios_tl("gnss: " __VA_ARGS__)
-enum { GNSS_IDLE, GNSS_REGISTER, GNSS_START, GNSS_RUNNING, GNSS_STOP, GNSS_UNREGISTER, GNSS_FAILED };
+enum {
+    GNSS_IDLE,
+    GNSS_REGISTER,
+    GNSS_SET_OPMODE,
+    GNSS_WAIT_SET_OPMODE_IND,
+    GNSS_START,
+    GNSS_RUNNING,
+    GNSS_STOP,
+    GNSS_UNREGISTER,
+    GNSS_FAILED
+};
 static struct {
-    uint32_t phase, wanted, heartbeat, sent_at, started_at, received_at;
+    uint32_t phase, wanted, heartbeat, sent_at, started_at, received_at, wait_at;
     uint32_t node, port, sequence, fixes, view, view_at, sv_logs, malformed;
+    uint32_t opmode_req;
     uint16_t txn, pending_txn, pending_message;
     uint8_t session;
     bool failed, view_known;
@@ -68,12 +79,27 @@ static void gnss_receive(uint32_t node, uint32_t port, const uint8_t *p, uint32_
         int result = ugl_result(p, n);
         GNSS_LOG("response msg 0x%x result %d (0 success, positive QMI error+1)\n", message, result);
         gnss.pending_message = 0;
-        if (result) gnss.failed = true;
         switch (gnss.phase) {
-        case GNSS_REGISTER: gnss.phase = result ? GNSS_FAILED : GNSS_START; break;
+        case GNSS_REGISTER:
+            if (result) { gnss.failed = true; gnss.phase = GNSS_FAILED; }
+            else gnss.phase = GNSS_SET_OPMODE;
+            break;
+        case GNSS_SET_OPMODE:
+            gnss.phase = result ? GNSS_START : GNSS_WAIT_SET_OPMODE_IND;
+            gnss.wait_at = now;
+            break;
         case GNSS_START:
-            gnss.phase = result ? GNSS_STOP : GNSS_RUNNING;
-            if (!result) GNSS_LOG("session started; periodic 1000 ms, simulated delivery by umi_gnssd\n");
+            if (!result) {
+                gnss.phase = GNSS_RUNNING;
+                GNSS_LOG("session started; opmode %u, periodic 1000 ms, simulated delivery by umi_gnssd\n",
+                         gnss.opmode_req);
+            } else if (gnss.opmode_req == UGL_OPMODE_STANDALONE) {
+                gnss.opmode_req = UGL_OPMODE_DEFAULT;
+                gnss.phase = GNSS_SET_OPMODE;
+            } else {
+                gnss.failed = true;
+                gnss.phase = GNSS_STOP;
+            }
             break;
         case GNSS_STOP: gnss.phase = GNSS_UNREGISTER; break;
         case GNSS_UNREGISTER:
@@ -84,7 +110,27 @@ static void gnss_receive(uint32_t node, uint32_t port, const uint8_t *p, uint32_
         }
         return;
     }
-    if (!gnss.wanted || (gnss.phase != GNSS_RUNNING && gnss.phase != GNSS_START) || p[0] != 4) return;
+    if (p[0] != 4) return;
+    if (message == UGL_SET_OPMODE) {
+        uint64_t st = 0;
+        ugl_field(p, n, 1, 4, &st);
+        GNSS_LOG("ind SET_OPMODE(%u) status %u\n", gnss.opmode_req, (unsigned)st);
+        if (gnss.phase == GNSS_WAIT_SET_OPMODE_IND) gnss.phase = GNSS_START;
+        return;
+    }
+    if (message == UGL_ENGINE_STATE) {
+        uint64_t es = 0;
+        ugl_field(p, n, 1, 4, &es);
+        GNSS_LOG("engine state %u (1=ON 2=OFF)\n", (unsigned)es);
+        return;
+    }
+    if (message == UGL_FIX_SESSION_STATE) {
+        uint64_t ss = 0;
+        ugl_field(p, n, 1, 4, &ss);
+        GNSS_LOG("fix session state %u (1=STARTED 2=STOPPED)\n", (unsigned)ss);
+        return;
+    }
+    if (!gnss.wanted || (gnss.phase != GNSS_RUNNING && gnss.phase != GNSS_START)) return;
     if (message == UGL_POSITION) {
         struct umi_gnss_fix fix = {};
         int result = ugl_position(p, n, gnss.session, &fix);
@@ -111,6 +157,9 @@ static void gnss_receive(uint32_t node, uint32_t port, const uint8_t *p, uint32_
         uint32_t view;
         if (!ugl_satellites(p, n, &view)) { gnss.malformed++; return; }
         gnss.view = view; gnss.view_at = now; gnss.view_known = true;
+        gnss.latest.satellites_view = view;
+        gnss.latest.flags |= UMI_GNSS_VIEW;
+        if (!(gnss.latest.flags & UMI_GNSS_POSITION)) gnss.latest.session_status = 1;
         if (gnss.sv_logs++ % 30 == 0) GNSS_LOG("satellites in view %u; fixes %u\n", view, gnss.fixes);
     }
 }
@@ -139,24 +188,38 @@ static uint32_t gnss_poll(uint8_t *packet, uint32_t *node, uint32_t *port)
         GNSS_LOG("timeout msg 0x%x; toggle switch to retry\n", gnss.pending_message);
         gnss.failed = true; gnss.pending_message = 0;
         if (gnss.phase == GNSS_START) gnss.phase = GNSS_STOP;
-        else if (gnss.phase == GNSS_STOP || gnss.phase == GNSS_REGISTER) gnss.phase = GNSS_UNREGISTER;
+        else if (gnss.phase == GNSS_STOP || gnss.phase == GNSS_REGISTER || gnss.phase == GNSS_SET_OPMODE)
+            gnss.phase = GNSS_UNREGISTER;
         else gnss.phase = GNSS_FAILED;
+    }
+    if (gnss.phase == GNSS_WAIT_SET_OPMODE_IND && now - gnss.wait_at >= 2000) {
+        gnss.phase = GNSS_START;
     }
     if (gnss.phase == GNSS_IDLE && gnss.wanted && !gnss.failed) {
         gnss.node = server->node; gnss.port = server->port;
         if (!++gnss.session) ++gnss.session;
         gnss.fixes = gnss.malformed = gnss.sv_logs = 0;
         gnss.view_known = false; gnss.started_at = now;
+        gnss.opmode_req = UGL_OPMODE_STANDALONE;
         gnss.phase = GNSS_REGISTER;
-        GNSS_LOG("session start requested; LOC on independent QRTR port 0x%x\n", UGL_PORT);
+        GNSS_LOG("session start requested; LOC %u:0x%x via independent QRTR port 0x%x (AFW)\n",
+                 server->node, server->port, UGL_PORT);
     }
-    if (!gnss.wanted && gnss.phase == GNSS_START) gnss.phase = GNSS_UNREGISTER;
+    if (!gnss.wanted && (gnss.phase == GNSS_START || gnss.phase == GNSS_SET_OPMODE || gnss.phase == GNSS_WAIT_SET_OPMODE_IND))
+        gnss.phase = GNSS_UNREGISTER;
     if (!gnss.wanted && gnss.phase == GNSS_RUNNING) gnss.phase = GNSS_STOP;
-    uint16_t message = gnss.phase == GNSS_REGISTER || gnss.phase == GNSS_UNREGISTER ? UGL_REGISTER :
-                       gnss.phase == GNSS_START ? UGL_START : gnss.phase == GNSS_STOP ? UGL_STOP : 0;
-    if (!message) return 0;
+    uint16_t message = 0;
+    uint32_t param = 0;
+    switch (gnss.phase) {
+    case GNSS_REGISTER: message = UGL_REGISTER; param = 1; break;
+    case GNSS_UNREGISTER: message = UGL_REGISTER; param = 0; break;
+    case GNSS_SET_OPMODE: message = UGL_SET_OPMODE; param = gnss.opmode_req; break;
+    case GNSS_START: message = UGL_START; break;
+    case GNSS_STOP: message = UGL_STOP; break;
+    default: return 0;
+    }
     if (!++gnss.txn) ++gnss.txn;
     gnss.pending_txn = gnss.txn; gnss.pending_message = message; gnss.sent_at = now;
     *node = gnss.node; *port = gnss.port;
-    return ugl_request(packet, gnss.txn, message, gnss.session, gnss.phase == GNSS_REGISTER);
+    return ugl_request(packet, gnss.txn, message, gnss.session, param);
 }

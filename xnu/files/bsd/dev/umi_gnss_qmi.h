@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: BSD-2-Clause
- * LOC v2 wire definitions checked against Debian libqmi 1.36.0 (libqmi-glib.so.5.11.0):
- * qmi_client_loc_{register_events,start,stop}, position_report_indication_parse,
- * gnss_sv_info_indication_parse and qmi_loc_* enum tables. See LOCATION-umi.md.
+ * LOC v2 wire definitions checked against libqmi (including commit 532de37 for
+ * QMI_LOC_REG_EVENTS AFW client identification TLVs 0x10/0x11) and Qualcomm
+ * location_service_v02.h: qmiLocRegEventsReqMsgT_v02, start/stop/set_opmode,
+ * position_report_indication_parse, gnss_sv_info_indication_parse.
  * Byte operations only; used by the actual kernel client and host tests.
  */
 #ifndef UMI_GNSS_QMI_H
@@ -13,11 +14,18 @@
 #define UGL_STOP 0x23u
 #define UGL_POSITION 0x24u
 #define UGL_SV 0x25u
+#define UGL_ENGINE_STATE 0x2bu
+#define UGL_FIX_SESSION_STATE 0x2cu
+#define UGL_SET_OPMODE 0x4au
+#define UGL_OPMODE_DEFAULT 1u
+#define UGL_OPMODE_STANDALONE 4u
+#define UGL_CLIENT_TYPE_AFW 1u
 #define UGL_PORT 0x4200u /* outside ABM 0x4100..0x415f and kernel/TFTP 0x4000.. */
 static uint32_t ugl_u16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
 static uint32_t ugl_u32(const uint8_t *p) { return ugl_u16(p) | ugl_u16(p + 2) << 16; }
 static uint64_t ugl_u64(const uint8_t *p) { return ugl_u32(p) | (uint64_t)ugl_u32(p + 4) << 32; }
 static void ugl_w16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void ugl_w32(uint8_t *p, uint32_t v) { ugl_w16(p, v); ugl_w16(p + 2, v >> 16); }
 /* Strict framing, including malformed unknown TLVs and duplicates. */
 static int ugl_valid(const uint8_t *p, uint32_t n)
 {
@@ -91,7 +99,8 @@ static int ugl_satellites(const uint8_t *p, uint32_t n, uint32_t *view)
     if (!ugl_field(p, n, 1, 1, &altitude_assumed)) return 0;
     uint32_t len;
     const uint8_t *list = ugl_tlv(p, n, 0x10, &len);
-    if (!list || !len || len != 1u + 28u * list[0]) return 0;
+    if (!list) { *view = 0; return 1; } /* TLV 0x10 is optional when 0 satellites are in view */
+    if (!len || len != 1u + 28u * list[0]) return 0;
     *view = list[0]; return 1;
 }
 static int ugl_result(const uint8_t *p, uint32_t n)
@@ -102,17 +111,31 @@ static int ugl_result(const uint8_t *p, uint32_t n)
     if (!v || len != 4) return -1;
     return ugl_u16(v) == 0 ? 0 : (int)ugl_u16(v + 2) + 1;
 }
-/* Register mask bit0 position + bit1 SV, no NMEA (coordinates must never reach logs).
+/* Register mask: bit0 position + bit1 SV + bit7 engine state + bit8 fix session state (no NMEA),
+ * plus AFW client identification TLVs (0x10 clientStrId="MHAL", 0x11 clientType=eQMI_LOC_CLIENT_AFW=1)
+ * required by SDX55M / SM8250 GNSS firmware (otherwise client defaults to NFW and START returns error 46).
  * Start: session, recurrence=periodic(1), intermediate reports=disable(2), interval=1000ms.
- * Only volatile session commands; no operation mode, lock, SUPL, NV or EFS writes.
+ * Only volatile per-session commands; never writes NV, EFS, SUPL or engine lock.
  */
-static uint32_t ugl_request(uint8_t *p, uint16_t txn, uint16_t message, uint8_t session, int enabled)
+static uint32_t ugl_request(uint8_t *p, uint16_t txn, uint16_t message, uint8_t session, uint32_t param)
 {
     uint32_t n = 7;
     p[0] = 0; ugl_w16(p + 1, txn); ugl_w16(p + 3, message);
     if (message == UGL_REGISTER) {
         p[n++] = 1; ugl_w16(p + n, 8); n += 2;
-        for (unsigned i = 0; i < 8; i++) p[n++] = i == 0 && enabled ? 3 : 0;
+        uint64_t mask = param ? 0x0183ull : 0ull;
+        for (unsigned i = 0; i < 8; i++) p[n++] = (uint8_t)(mask >> (8 * i));
+        if (param) {
+            /* TLV 0x10: clientStrId = "MHAL" (max 4 chars) */
+            p[n++] = 0x10; ugl_w16(p + n, 4); n += 2;
+            p[n++] = 'M'; p[n++] = 'H'; p[n++] = 'A'; p[n++] = 'L';
+            /* TLV 0x11: clientType = eQMI_LOC_CLIENT_AFW (1) */
+            p[n++] = 0x11; ugl_w16(p + n, 4); n += 2;
+            ugl_w32(p + n, UGL_CLIENT_TYPE_AFW); n += 4;
+        }
+    } else if (message == UGL_SET_OPMODE) {
+        p[n++] = 1; ugl_w16(p + n, 4); n += 2;
+        ugl_w32(p + n, param ? param : UGL_OPMODE_STANDALONE); n += 4;
     } else {
         p[n++] = 1; ugl_w16(p + n, 1); n += 2; p[n++] = session;
         if (message == UGL_START) {

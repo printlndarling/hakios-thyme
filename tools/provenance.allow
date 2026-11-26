@@ -27,6 +27,7 @@ pending  userland/trollstore/tsldid/ldid   ldid v2.1.5-procursus7, arm64: Jay Fr
 
 # --- preference seeds written by this project ----------------------------------------------------------
 open     userland/var/mobile/Library/Preferences/com.apple.locationd.plist   a one-key seed (LocationServicesEnabledIn8.0 = true) written by this project, not an Apple file
+open     userland/var/mobile/Library/Preferences/.GlobalPreferences.plist   default Simplified Chinese language/locale/keyboard seed written by this project, not an Apple file
 
 # --- proprietary: Qualcomm's and Xiaomi's, taken out of the phone's own UEFI; not for a public tree ---------
 vendor   devices/redwood/uefi/files/Binaries/redwood/*       UEFI drivers extracted from the vendor's xbl firmware (QcomPkg, MiPkg, RawFiles and the EDK2 modules as the vendor built them)

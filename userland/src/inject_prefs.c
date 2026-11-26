@@ -157,10 +157,31 @@ ensure_location_row(id self)
 			return;
 		}
 		{
+			id title = (id)CFSTR("Location Services");
+			Class bundle_class = objc_getClass("NSBundle");
+			if (bundle_class != NULL) {
+				id bundle = ((id (*)(id, SEL, id))objc_msgSend)(bundle_class,
+				    sel_registerName("bundleForClass:"), detail_class);
+				if (bundle != NULL) {
+					id loc = ((id (*)(id, SEL, id, id, id))objc_msgSend)(bundle,
+					    sel_registerName("localizedStringForKey:value:table:"),
+					    (id)CFSTR("LOCATION_SERVICES"), (id)CFSTR("Location Services"),
+					    (id)CFSTR("Location Services"));
+					if (loc != NULL) {
+						title = loc;
+					}
+				}
+			}
+			SEL getter = (SEL)0;
+			SEL cand = sel_registerName("locationServicesEnabled:");
+			if (((BOOL (*)(id, SEL, SEL))objc_msgSend)(self,
+			    sel_registerName("respondsToSelector:"), cand)) {
+				getter = cand;
+			}
 			id specifier = ((id (*)(id, SEL, id, id, SEL, SEL, id, long, id))objc_msgSend)(
 			    specifier_class,
 			    sel_registerName("preferenceSpecifierNamed:target:set:get:detail:cell:edit:"),
-			    (id)CFSTR("Location Services"), self, (SEL)0, (SEL)0, detail_class,
+			    title, self, (SEL)0, getter, detail_class,
 			    2, (id)0);
 
 			if (specifier == NULL) {
@@ -171,6 +192,35 @@ ensure_location_row(id self)
 			((void (*)(id, SEL, id, id))objc_msgSend)(specifier,
 			    sel_registerName("setProperty:forKey:"), (id)CFSTR("Location"),
 			    (id)CFSTR("iconCache"));
+			/* Populate iconImage directly for programmatic insertion: try Apple's stock Settings icon cache first */
+			{
+				id icon = NULL;
+				Class psui = objc_getClass("UIImage");
+				Class bcls = objc_getClass("NSBundle");
+				if (psui != NULL && bcls != NULL) {
+					const char *bundles[] = {
+						"/System/Library/PrivateFrameworks/Preferences.framework",
+						"/System/Library/PrivateFrameworks/PreferencesUI.framework",
+						"/System/Library/PrivateFrameworks/Settings/PrivacySettingsUI.framework",
+						"/System/Library/PrivateFrameworks/Settings/GeneralSettingsUI.framework",
+					};
+					for (unsigned bi = 0; bi < 4 && icon == NULL; bi++) {
+						CFStringRef bp = CFStringCreateWithCString(NULL, bundles[bi], kCFStringEncodingUTF8);
+						id b = bp ? ((id (*)(id, SEL, id))objc_msgSend)(bcls, sel_registerName("bundleWithPath:"), (id)bp) : NULL;
+						if (bp) CFRelease(bp);
+						if (b != NULL) {
+							icon = ((id (*)(id, SEL, id, id, id))objc_msgSend)(psui,
+							    sel_registerName("imageNamed:inBundle:compatibleWithTraitCollection:"),
+							    (id)CFSTR("Location"), b, NULL);
+						}
+					}
+				}
+				if (icon != NULL) {
+					((void (*)(id, SEL, id, id))objc_msgSend)(specifier,
+					    sel_registerName("setProperty:forKey:"), icon,
+					    (id)CFSTR("iconImage"));
+				}
+			}
 			((void (*)(id, SEL, id))objc_msgSend)(specifier,
 			    sel_registerName("setIdentifier:"), (id)CFSTR("LOCATION"));
 			((void (*)(id, SEL, id, unsigned long, BOOL))objc_msgSend)(self,
@@ -217,7 +267,7 @@ ensure_capability_override(void)
 	Class manager = objc_getClass("PSCapabilityManager");
 	Class dict_class = objc_getClass("NSMutableDictionary");
 	id shared, overrides;
-	const char *const granted[] = { "cellular-data", "bluetooth" };
+	const char *const granted[] = { "cellular-data", "bluetooth", "location-services" };
 
 	if (manager == NULL || dict_class == NULL) {
 		if (!said) {
