@@ -43,15 +43,15 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Magnetometer / Compass | `AK0991x` over SLPI QRTR | P1 | **PASS** | 10 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Front Ambient Light (ALS) | Under-OLED `TCS3701` over SLPI + live backlight sysfs | P1 | **PASS** | Live lux (`224 -> 59 lux`) -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Barometer | `BMP285` over SLPI QRTR | P2 | **PASS** | Continuous pressure telemetry (`957–962 hPa`) |
-| Rear Ambient Light | `TSL2540` (`xiaomi.sensor.back_lux`) | P2 | **TODO** | `"tsl2540_rear"` SUID query silent (`suid=0` in `logs/222034-run.log`); needs multi-SUID `"ambient_light"` / `"tsl2540"` probe |
+| Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
 | Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
 | NFC Controller | `qcom,nq-nci` | P1 | **TODO** | No XNU NCI driver or userland routing |
 | IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
-| 33W Wired Fast Charge | `bq25970` charge pump + `smb1390` + USB-PD | P1 | **TODO** | Standard USB charging works; QC/PD high-wattage negotiation unimplemented |
-| 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `rx1619` (`0x61`) | P1 | **TODO** | Present in DTB (`idt,reverse-enable`); XNU wireless PMIC driver unimplemented |
+| 33W Wired Fast Charge | `bq25970` (`0x66` on QUP15 `gpio44/45`) + `smb1390` + USB-PD | P1 | **PARTIAL** | Read-only I2C telemetry `PASS` (`part=0x16 vbus=5104 mV vac=4960 mV vbat=4406 mV ibus=0 mA`, `kern.hakios.fastchg_*`); active QC/PD high-wattage pump control `TODO` |
+| 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `ln8282` (`0x55`) / `rx1619` (`0x61`) on QUP16 | P1 | **TODO** | QUP16 `gpio48/49` verified idle-high (`cfg=0x1 io=0x1`); `0x3b`/`0x55` NACK off wireless pad (`idt,enable` `GPIO155`/`VRECT` unpowered); active WLC `TODO` |
 | USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | USB only used in UEFI loader; no XNU `DWC3` gadget, `usbmux`, or `lockdownd` (PC i4Tools/iTunes blocked) |
 | USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | **PARTIAL** | Read-only partition access (`PASS` for modem EFS/devcfg); guarded writable persistence (`ufs_write=1`) not enabled |
@@ -72,7 +72,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
 | Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (64 B / 16 distinct words mixed into XNU `mc_prng`, `kern.hakios.qrng_ready=1`); `qcedev@1de0000` bulk crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
-| Hardware Watchdog | P1 | **TODO** | `qcom,wdt@17c10000` unconfigured; XNU panics return via loader/soft-reboot |
+| Hardware Watchdog | P1 | **PARTIAL** | Read-only MMIO probe `PASS` (`0x17c10000`: `ctl=0 sts=0 bark=524287 bite=1048575`, `kern.hakios.wdt_*`); active bark/pet policy `TODO` |
 
 ### 3. Existing Subsystem Completeness Checklist (Daily-Driver Standard)
 
@@ -86,9 +86,9 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | **Camera** | 27 MP rear `S5KHMX` (`AK7377` AF), front `S5K3T2`, lens switch, flash/torch | `OIS` stabilization, `108 MP` full-res mode, video recording with audio, slow-motion, HDR, live QR scan |
 | **Display** | `89.08 Hz` `INTF_1` TE sync (`0` missed), DCS brightness slider, lock blanking | Dynamic `60/90 Hz` UI switching, `auto-brightness` closed-loop tuning from ALS lux, True Tone/Night Shift, AOD |
 | **Touch** | Multi-touch, gestures, lock/home swipe | Palm rejection, edge-grip tuning, double-tap-to-wake (DT2W) during deep sleep |
-| **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004` | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
-| **Battery & Thermal** | Fuel gauge, USB charge, `battery_stop=40` guard, CPU EPSS thermal throttling | Battery health/cycle calibration, charge-full cutoff, off-mode charging UI, multi-zone thermal policy (charger + GPU + modem) |
-| **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` ALS -> `backboardd` HID, `BMP285` barometer, `device_orient` (`PASS` `state=0`), `pedometer` SUID (`suid=1`, stationary `0`) | Walk-test `pedometer` steps, rear `TSL2540` ALS (`"tsl2540_rear"` silent), ADSP ultrasonic proximity screen-off on call, Hall `GPIO14` (`cfg=0 io=0` RAZ), raise-to-wake, back-tap |
+| **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004`, `fsa4480@0x42` USB-C switch ACK (`id=0x9`) | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
+| **Battery & Thermal** | Fuel gauge, USB charge, `bq25970@0x66` ADC telemetry (`part=0x16 VBUS/VAC/VBAT/IBUS`), `battery_stop=40` guard, CPU EPSS thermal throttling | Active QC/PD/33W & 30W wireless charge control, battery health calibration, charge-full cutoff, off-mode charging UI, multi-zone thermal policy |
+| **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` front ALS + `TSL2540` rear ALS (`37.1 lux`) -> `backboardd` HID, `BMP285` barometer, `device_orient` (`PASS` `state=0`), `pedometer` (`suid=1`, stationary `0`) | Walk-test `pedometer` steps, ADSP ultrasonic proximity screen-off on call, Hall `GPIO14` (`cfg=0 io=0` RAZ), raise-to-wake, back-tap |
 
 ### 4. OS-Level Readiness & Proprietary Boundaries
 
@@ -6834,3 +6834,20 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `hakios-kernel` (16,982,072 B, Batch 1: QRNG + PM8150 RTC + SLPI `version=3` + early FastRPC fix) | `84b2e74d79bca0a6eed3a4822b1a98fe0e5cd37a65e64222f48d5c767ee640aa` |
 | `userland/root.apfs` / `out/thyme-boot/root-wirelessfull.apfs` (48,992,256 B; total `65,974,328 B < 66,060,288 B`) | `5aaf9e9466e299b94f93df12897f9742690d3f56042678bc206d0ed940e2a75f` |
 | `logs/222034-run.log` (Batch 1 live 100 s verification: QRNG + RTC 2 s tick + SLPI `flags=0x13b` + `inject`) | `50550dc4b85e0eb3e3d0541ce0d91f5fc5ee86fdeb132b53606250c08ea22079` |
+
+### Batch 1B Quick-Win Silicon Probes: Rear ALS (`ambient_light_back`), Watchdog & Charger I2C Telemetry (2026-11-26)
+
+- **SLPI Rear Ambient Light (`TSL2540`) (`PASS`)** (`devices/thyme/drivers/sensor/hakios.thyme_slpi.c`):
+  - Changed the SLPI SUID query from `"tsl2540_rear"` to the actual `slpi.b15` `data_type` `"ambient_light_back"`. Live `logs/223423-run.log` registered FastRPC at `+142.939 ms`, received `64/64` SNS `result 0` responses (`flags=0x17b`), streamed `rear_als(suid=1 seq=1 mlux=37099 raw=40)`, and logged `hakios: sensor: rear_als #1 lux=37 (mlux=37099 raw=40)` in `backboardd`.
+- **SM8250 Watchdog Read-Only Probe (`qcom,wdt@17c10000`) (`PARTIAL`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Mapped `0x17c10000` read-only and exported `kern.hakios.wdt_ctl` / `kern.hakios.wdt_sts`; observed `ctl=0 sts=0 bark=524287 bite=1048575`.
+- **Wired 33W Charger Pump (`bq25970@0x66`), USB-C Audio Switch (`fsa4480@0x42`) & QUP16 Wireless Bus (`PARTIAL`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Added guarded SOUTH-tile TLMM open-drain I2C read-only probing (`gpio44/45` QUP15 & `gpio48/49` QUP16) checking non-RAZ and idle-high before toggling lines and restoring `GPIO_CFG`/`GPIO_IO` afterward:
+    - QUP15 (`gpio44/45 cfg=0x1/0x1 io=0x1/0x1`): `bq25970@0x66` verified `part=0x16 vbus=5104 mV vac=4960 mV vbat=4406 mV ibus=0 mA` (exported via `kern.hakios.fastchg_*`), and `fsa4480@0x42` ACKed `id=0x9`.
+    - QUP16 (`gpio48/49 cfg=0x1/0x1 io=0x1/0x1`): `idtp9415@0x3b` and `ln8282@0x55` NACKed while off wireless pad without driving `GPIO155/156` enable/power (`TODO`).
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,983,832 B, Batch 1B: `ambient_light_back` + WDT & charger I2C telemetry) | `045bfac1b62fcfa5fbf651dd2d4f159ff781651a6c4fa62fbe52928acb0057c5` |
+| `userland/root.apfs` (48,992,256 B; total `65,976,088 B < 66,060,288 B`) | `5aaf9e9466e299b94f93df12897f9742690d3f56042678bc206d0ed940e2a75f` |
+| `logs/223423-run.log` (Batch 1B live 100 s verification: SLPI `flags=0x17b` + `rear_als` + `bq25970` + `fsa4480` + `wdt`) | `c19c688089f2a56c523a548e7bdd9851f88fd023ad9f083668f19da55ed618d1` |

@@ -3916,12 +3916,12 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 				sns_press_configured = true;
 				sns_config_rate(sns_press_suid, 1.0f, "barometer");
 			}
-		} else if (strcmp(name, "tsl2540_rear") == 0) {
+		} else if (strcmp(name, "ambient_light_back") == 0) {
 			memcpy(sns_rear_als_suid, chosen, sizeof(sns_rear_als_suid));
 			sns_have_rear_als = true;
 			if (!sns_rear_als_configured) {
 				sns_rear_als_configured = true;
-				sns_config_on_change(sns_rear_als_suid, "tsl2540_rear");
+				sns_config_on_change(sns_rear_als_suid, "ambient_light_back");
 			}
 		} else if (strcmp(name, "pedometer") == 0) {
 			memcpy(sns_pedo_suid, chosen, sizeof(sns_pedo_suid));
@@ -4751,7 +4751,7 @@ sns_start(void)
 			}
 			if (attempt == 1 || attempt == 2) {
 				if (!sns_have_rear_als) {
-					sns_ask("tsl2540_rear");
+					sns_ask("ambient_light_back");
 				}
 				if (!sns_have_pedo) {
 					sns_ask("pedometer");
