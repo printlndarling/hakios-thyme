@@ -9130,6 +9130,8 @@ step_link(void)
 
 /* ---- step 10: QRTR ---------------------------------------------------------------------------------- */
 
+static bool keep;                       /* the DSP and the link stay up while the system runs (slpi_keep, slpi=1) */
+
 static bool
 step_qrtr(void)
 {
@@ -9138,7 +9140,15 @@ step_qrtr(void)
 	if (!glink.channel[CHANNEL_QRTR].open) {
 		return false;
 	}
-	uint32_t sns_on = 0, fastrpc_smmu = 0, fastrpc_call = 0, servreg_on = 0, dump_item = 0, dump_hex = 0;
+	uint32_t sns_on = keep ? 1u : 0u, fastrpc_smmu = keep ? 2u : 0u, fastrpc_call = keep ? 9u : 0u;
+	uint32_t servreg_on = keep ? 1u : 0u, dump_item = 0, dump_hex = 0;
+
+	if (keep) {
+		fastrpc_early = 1;
+		fastrpc_phone = 2;
+		fastrpc_pd = 2;
+		sns_start_delay = 8;
+	}
 
 	PE_parse_boot_argn("sns", &sns_on, sizeof(sns_on));
 	PE_parse_boot_argn("sns_accel_direct", &sns_accel_direct, sizeof(sns_accel_direct));
@@ -9348,8 +9358,6 @@ static bool (*const steps[STEPS])(void) = {
 	step_qrtr,
 };
 
-static bool keep;                       /* the DSP and the link stay up while the system runs (slpi_keep, slpi=1) */
-
 static void
 steps_over(uint32_t done)
 {
@@ -9485,10 +9493,17 @@ hakios_slpi_init(void)
 		printf("slpi: slpi=1 and slpi_step=N are for the phone's sensor DSP, and this is not the phone\n");
 		return;
 	}
+	if (last_step == 0) {
+		/* Production defaults for slpi=1 (overrideable via boot-args below). */
+		fastrpc_grow_kb = 4096;
+		fastrpc_grow_after = 1;
+		fastrpc_early = 1;
+	}
 	/* the grow_ddr heap is taken now, while the memory below 4 GB is still in large pieces */
 	(void)PE_parse_boot_argn("fastrpc_grow_kb", &fastrpc_grow_kb, sizeof(fastrpc_grow_kb));
 	(void)PE_parse_boot_argn("fastrpc_grow_after", &fastrpc_grow_after, sizeof(fastrpc_grow_after));
 	(void)PE_parse_boot_argn("fastrpc_grow_ddr", &fastrpc_grow_ddr, sizeof(fastrpc_grow_ddr));
+	(void)PE_parse_boot_argn("fastrpc_early", &fastrpc_early, sizeof(fastrpc_early));
 	fastrpc_heap_reserve();
 	if (last_step == 0) {
 		/* all of it, on a thread of its own, and left up */

@@ -6669,3 +6669,19 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `logs/174603-run.log` (SLPI Stage 1: `+147.598 ms` FastRPC, `31/31` SNS `result 0`, `lsm6dso` stream) | `5ecc76b92a66d8c577b99d7e3df73e54ff6a77a32d782c8a11c3583c7cdc71d0` |
 | `logs/180216-run.log` (SLPI Stage 2: `+141.854 ms` FastRPC, accel + OLED sysfs ALS -> `backboardd`) | `5143b4ba7d60682b6e97b1c656bec516030304641ec2a907a1b85da370f87f41` |
 | `logs/181653-run.log` (SLPI 5-sensor `55/55` SNS `result 0` -> `backboardd` HID + `PlayAndRecord` HFP/A2DP `yes`) | `7161c7ade72d2446f78da02b841e7504b8541b84645276bac5d89fab9324fde2` |
+
+### Unified Plug-and-Play `slpi=1` Daily-Driver Verification (`ram.args` + `system.apfs` + `root-wirelessfull.apfs`, 2026-11-26)
+
+- **Kernel & daily cmdline defaults (`devices/thyme/drivers/sensor/hakios.thyme_slpi.c`, `devices/thyme/ram.args`)**:
+  - When booting in `slpi=1` production mode (`last_step == 0` / `keep`), `hakios.thyme_slpi.c` now defaults `fastrpc_grow_kb=4096`, `fastrpc_grow_after=1`, `fastrpc_early=1` (initialized in `hakios_slpi_init()` so `step_link()` waits for FastRPC before QRTR), `fastrpc_smmu=2`, `fastrpc_call=9`, `fastrpc_phone=2`, `fastrpc_pd=2`, `servreg=1`, `sns=1`, and `sns_start_delay=8` unless overridden by explicit boot arguments.
+  - Added `slpi=1` directly to `devices/thyme/ram.args`, while `SYSTEM=1 SCENE=wirelessfull devices/thyme/build-root.sh` staged `fw/slpi.*` into `system.apfs` so `root-wirelessfull.apfs` (`48,992,256 B`) + `hakios-kernel` (`16,964,312 B`) stay within the `66,060,288 B` small-image budget (`103,720 B` margin).
+- **Live daily-driver verification (`logs/212544-run.log`, exact `boot-hakios-ram.sh` flow, zero panics, returned cleanly to Android)**:
+  - Loaded `slpi.mdt` / `slpi.b00..b20` from `system.apfs` using only `slpi=1` in `ram.args`; registered FastRPC at `+146.574 ms`, received `55/55` SNS `result 0` responses (`accel` 1,905 samples, `gyro` 1,905 samples, `mag` 1,412 samples, `ambient_light` 70 samples `224 -> 59 lux`, `barometer` 74 samples `961.85 hPa`), and dispatched live HID events (`ok=1`) to `backboardd`.
+  - Coexisted cleanly with `pcie2_mhi=1` (`SDX55M` Sahara/QMI PDC active), `adsp=1` (stereo speakers/mics/AW8697 haptics), `wifi=1` (`en0` keepalive), `bt=1` (3 Mbaud H4 ready), hardware 89.08 Hz TE-synced OLED display, and `hakios-gl`.
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,964,312 B, `slpi=1` daily production defaults) | `6b4158bbfa828fd07d13ef7f3b8033b72515bbf10f09c2663d145317349a6659` |
+| `out/thyme-boot/root-wirelessfull.apfs` / `userland/root.apfs` (48,992,256 B; total `65,956,568 B < 66,060,288 B`) | `0143c5f3eb8d844aa1784954bbb0776b3b5ceaeaa4fdd8531e3289887c59183d` |
+| `userland/system.apfs` (with `fw/slpi.*` staged for daily `slpi=1`) | `83e304d77605b489e66042fb0378c2b72e059d2527cfd02ced4cbeafe5f198ef` |
+| `logs/212544-run.log` (Unified `boot-hakios-ram.sh` 120 s live run: SLPI 5 sensors + SDX55M + Wi-Fi + BT + 90 Hz) | `b2ab3ff6ef26204366eb22013688d812aec311b7671b614cca34b4e5cc2b9620` |
