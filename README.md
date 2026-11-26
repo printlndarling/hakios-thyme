@@ -20,6 +20,8 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 
 ## Hardware & Feature Status
 
+> Full Mi 10S (`thyme`) silicon inventory audit (including SoC VPU/idle/crypto, NFC, IR, FOD, aux cameras, wired/wireless fast charging, USB gadget/OTG, OS-level readiness, and 168 h stability gates) lives in the **Master Audit Matrix** at the top of [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
+
 | Subsystem | Status | Summary |
 |---|---|---|
 | Boot & SpringBoard | **PASS** | Cold RAM boot to `launchd`, `backboardd`, SpringBoard, and Settings |

@@ -20,6 +20,8 @@
 
 ## 硬件与功能状态
 
+> 基于小米 10S 设备树与完整日用标准的**全量逐项审计清单**（含 SoC 视频编解码/休眠/加密、NFC、红外、屏下指纹、副摄/OIS、快充/无线充、USB 数据/OTG、系统层能力及长期稳定性门禁）已置于 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 顶部总表。
+
 | 功能模块 | 状态 | 实测摘要 |
 |---|---|---|
 | 系统启动与桌面 | **PASS** | RAM 冷启动至 `launchd`、`backboardd`、SpringBoard 与设置 |

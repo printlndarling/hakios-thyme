@@ -1,8 +1,139 @@
 # THYME daily-driver checklist
 
 Status meanings: `PASS` is observed on the physical Mi 10S in the named build;
-`PARTIAL` is implemented but incomplete; `FAIL` is a reproduced failure;
-`TODO` has not been tested.
+`PARTIAL` is implemented but incomplete or missing sub-features; `FAIL` is a reproduced failure;
+`TODO` has not been tested or implemented. `N/A (Apple Proprietary)` marks features gated by Apple SEP, FairPlay DRM, Apple servers, or proprietary hardware that are out of scope for third-party silicon unless replaced with an open/standalone alternative.
+
+> **Honest Maturity Assessment (2026-11-26 Audit)**:
+> - **Core HakiOS bring-up & verified hardware drivers**: ~75%
+> - **Full standalone daily-driver smartphone OS** (adding VPU hardware video encode/decode, USB gadget/OTG, standalone UFS persistence, deep sleep, aux cameras, NFC/IR/FOD, wired/wireless fast charging, and 168 h soak): ~50–55%
+
+---
+
+## Master Smartphone-Grade Audit Matrix (Xiaomi Mi 10S / `thyme`)
+
+Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys sensorservice` / `fw-sensors`, XNU kernel drivers (`devices/thyme/drivers/`), and iOS 16.5 system capabilities.
+
+### 1. Hardware & Peripheral Inventory (Full Mi 10S Silicon)
+
+| Hardware / Component | DTB / Silicon Identity | Priority | Status | Current Scope & Gaps |
+|---|---|---|---|---|
+| CPU Cluster (7/8 cores) | Snapdragon 870 (`SM8250-AC`) Silver/Gold/Prime | P1 | **PASS** | `bootcpu=7 cpus=7`, EPSS DVFS up to `1.80 / 2.42 / 3.19 GHz` (`cpufreq=1`, `thermal=1`) |
+| CPU0 (8th Core) | Silver core 0 | P1 | **TODO** | Left inactive under `bootcpu=7 cpus=7` configuration |
+| GPU (OpenGL ES) | Adreno 650 (`0x06050002`) + GMU | P0 | **PASS** | Hardware rendering via Mesa/Freedreno (`hakios-gl`) |
+| GPU (System Metal) | Adreno 650 (`hakios-metal` + `HakiosMetalCA`) | P0 | **PARTIAL** | Compiles and initializes in probes (`CA`); full `metal_all=1` / VectorKit / ANGLE stability open |
+| Display & Refresh | 6.67" 1080×2340 OLED (`j2s_mp_42_02_0a_dsc_cmd`) | P0 | **PASS** | Hardware `89.08 Hz` TE-synced (`INTF_1`, `0%` missed scans), DCS brightness, lock blanking |
+| Touchscreen | FocalTech `FTS521` | P0 | **PASS** | Multi-touch, edge/home gestures, coordinate/latency logging (`touch_lat=1`) |
+| Physical Keys | Power / Volume +/- (`hakios.thyme_keys`) | P0 | **PASS** | Short/long press, screenshot chord, reboot/wake sequence |
+| Speakers & Earpiece | Dual `CS35L41` (`0x40` bottom + `0x42` top RCV) | P0 | **PASS** | Independent stereo L/R channels, ADSP `0x1004` TERT_MI2S, VoLTE call audio |
+| Microphones | Dual onboard mics (`mic=4`) | P0 | **PASS** | Dual-mic capture & VoLTE voice uplink active |
+| Linear Haptics | `AW8697` LRA | P1 | **PASS** | CoreHaptics transient taps + continuous waveform |
+| Main Rear Camera + AF | 108 MP `S5KHMX` (`27 MP` Tetracell) + `AK7377` VCM | P1 | **PASS** | Live ~26 fps preview, adaptive AF, 5×5 Malvar-He-Cutler ISP, sharp stills (`cam_mode=1`) |
+| Front Camera | 20 MP `S5K3T2` | P1 | **PASS** | Live switch & capture |
+| Camera Flash | `PM8150L` WLED/Torch | P1 | **PASS** | Torch & shutter flash (`torch=3`) |
+| Camera OIS | `qcom,ois@1` | P1 | **TODO** | Hardware node present in DTB; XNU OIS driver not implemented |
+| Aux Cameras (Ultrawide / Macro / Depth) | Rear secondary CCI/CSIPHY sensors | P2 | **TODO** | Only rear wide (`S5KHMX`) + front (`S5K3T2`) driven; ultrawide, macro & depth unimplemented |
+| Cellular Modem (4G / VoLTE) | External `SDX55M` over `PCIe2 / MHI` | P0 | **PASS** | China Broadnet `46015` 4G LTE dual-stack data & bidirectional VoLTE calls (`10099`) |
+| 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` Band n41) | P1 | **TODO** | Kernel `NAS5G` reads `mode=0x50`; iOS userland emulates `Mav17` (4G-only); needs `Mav20` bridge + 2nd SIM slot |
+| GNSS Receiver | `SDX55M QMI LOC 0x10` + `umi_gnssd` | P0 | **PARTIAL** | Wi-Fi CoreLocation (`+/-52..92 m`, Baidu Maps `PASS`) & `START=0` SV stream active; outdoor 3D fix pending |
+| Wi-Fi | `QCA6390` (`PCIe0 / MHI / ath11k`) | P0 | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s sleep/wake, AP deauth & power auto-rejoin |
+| Bluetooth | `QCA6390` (UART `3 Mbaud` H4) | P1 | **PARTIAL** | Scan, pair, A2DP audio, `BlueTool deepsleep`, `PlayAndRecord` HFP/A2DP `yes`; live headset HFP/AVRCP open |
+| Accelerometer | `LSM6DSO` over SLPI QRTR | P1 | **PASS** | 20 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
+| Gyroscope | `LSM6DSO` over SLPI QRTR | P1 | **PASS** | 20 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
+| Magnetometer / Compass | `AK0991x` over SLPI QRTR | P1 | **PASS** | 10 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
+| Front Ambient Light (ALS) | Under-OLED `TCS3701` over SLPI + live backlight sysfs | P1 | **PASS** | Live lux (`224 -> 59 lux`) -> `backboardd` virtual `IOHIDService` (`ok=1`) |
+| Barometer | `BMP285` over SLPI QRTR | P2 | **PASS** | Continuous pressure telemetry (`957–962 hPa`) |
+| Rear Ambient Light | `TSL2540` (`xiaomi.sensor.back_lux`) | P2 | **TODO** | Present in `fw-sensors`; not subscribed/exposed to iOS |
+| Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
+| Hall Sensor | `hall_key` (DTB pinctrl) | P2 | **TODO** | Smart-cover / magnetic Hall input not implemented |
+| NFC Controller | `qcom,nq-nci` | P1 | **TODO** | No XNU NCI driver or userland routing |
+| IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
+| Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
+| Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
+| 33W Wired Fast Charge | `bq25970` charge pump + `smb1390` + USB-PD | P1 | **TODO** | Standard USB charging works; QC/PD high-wattage negotiation unimplemented |
+| 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `rx1619` (`0x61`) | P1 | **TODO** | Present in DTB (`idt,reverse-enable`); XNU wireless PMIC driver unimplemented |
+| USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | USB only used in UEFI loader; no XNU `DWC3` gadget, `usbmux`, or `lockdownd` (PC i4Tools/iTunes blocked) |
+| USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
+| UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | **PARTIAL** | Read-only partition access (`PASS` for modem EFS/devcfg); guarded writable persistence (`ufs_write=1`) not enabled |
+| Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI) | P1 | **PARTIAL** | Clock synchronized at boot via loader `epoch=`; direct PMIC SPMI RTC read/alarm/drift check `TODO` |
+| Software / UI / Packages | Simplified Chinese UI + Sileo + TrollStore + TrollApps | P1 | **PASS** | Cold boots `zh-Hans`, PingFang, Pinyin, Sileo (11 CN repos), TrollStore (`ldid`), TrollApps (6 CN repos) |
+
+### 2. SoC Low-Level Capabilities (`SM8250-AC`)
+
+| Capability | Priority | Status | Notes |
+|---|---|---|---|
+| All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`), core 0 unused |
+| CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **TODO** | Display blanking (`DCS 0x51=0` + `Main will unblank`) works (`logs/173008-run.log`), but SoC `WFI`/PSCI deep power collapse not implemented |
+| GPU Dynamic Frequency Scaling (DVFS) | P1 | **TODO** | Fixed/GMU initialization clock; dynamic DCVS/thermal GPU scaling unimplemented |
+| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` unimplemented; browser/player video decodes in CPU software |
+| VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
+| ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
+| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) not brought up |
+| NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
+| Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **TODO** | `qcedev@1de0000` / `prng` unported; kernel uses software crypto & boot entropy |
+| IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
+| Hardware Watchdog | P1 | **TODO** | `qcom,wdt@17c10000` unconfigured; XNU panics return via loader/soft-reboot |
+
+### 3. Existing Subsystem Completeness Checklist (Daily-Driver Standard)
+
+| Subsystem | Verified (`PASS`) | Remaining for Complete Daily Use (`TODO` / `PARTIAL`) |
+|---|---|---|
+| **Cellular** | 4G LTE dual-stack data, `46015` operator, Settings UI | 5G SA/NSA (`Mav20`), Dual-SIM DSDS + data switch, SMS & OTP verification, USSD, Airplane Mode radio toggle |
+| **Voice Calls** | Outgoing VoLTE (`10099`), earpiece + bottom speaker, dual mic | Incoming ring & lockscreen wakeup, live earpiece/speakerphone switch mid-call, uplink ANC tuning |
+| **Wi-Fi** | Wi-Fi 6/5 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s blank wake, AP deauth & power rejoin | WPA3-SAE, hidden SSID, Personal Hotspot sharing, 8h deep-sleep keepalive |
+| **Bluetooth** | 3 Mbaud H4, scan/pair, A2DP audio, `BlueTool deepsleep`, `PlayAndRecord` HFP/A2DP session | Paired-headset live HFP/SCO call audio, AVRCP media keys, battery level reporting, BT HID keyboards/mice |
+| **GNSS / Location** | Settings `定位服务` toggle, Wi-Fi CL (`BaiduMap` blue dot), `SDX55M QMI LOC` engine & SV stream | Outdoor 3D multi-constellation fix (GPS + BeiDou L1/L5), A-GPS XTRA injection, moving navigation, screen-off tracking |
+| **Camera** | 27 MP rear `S5KHMX` (`AK7377` AF), front `S5K3T2`, lens switch, flash/torch | `OIS` stabilization, `108 MP` full-res mode, video recording with audio, slow-motion, HDR, live QR scan |
+| **Display** | `89.08 Hz` `INTF_1` TE sync (`0` missed), DCS brightness slider, lock blanking | Dynamic `60/90 Hz` UI switching, `auto-brightness` closed-loop tuning from ALS lux, True Tone/Night Shift, AOD |
+| **Touch** | Multi-touch, gestures, lock/home swipe | Palm rejection, edge-grip tuning, double-tap-to-wake (DT2W) during deep sleep |
+| **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004` | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
+| **Battery & Thermal** | Fuel gauge, USB charge, `battery_stop=40` guard, CPU EPSS thermal throttling | Battery health/cycle calibration, charge-full cutoff, off-mode charging UI, multi-zone thermal policy (charger + GPU + modem) |
+| **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` ALS -> `backboardd` HID, `BMP285` barometer | Rear `TSL2540` ALS, ADSP ultrasonic proximity screen-off on call, Hall sensor, pedometer, raise-to-wake, back-tap |
+
+### 4. OS-Level Readiness & Proprietary Boundaries
+
+| Layer | Scope & Status |
+|---|---|
+| **Security & Privacy** | TCC/App permissions prompts (`PARTIAL` — Location prompt verified); Keychain persistence, lockscreen passcode/passcode encryption, `goodix` FOD BiometricKit, kernel MAC/sandbox completeness (`TODO` without SEP/flash) |
+| **Install & Storage** | RAM-boot via `boot-hakios-ram.bat` (`PASS`); guarded dual-boot UFS userdata partition, standalone bootloader (no PC USB), recovery mode, OTA/update, backup/wipe, crash-safe APFS (`TODO`) |
+| **Background Services** | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` running (`PASS`); background audio soak, alarm/timer wake from deep sleep, local notifications (`TODO`) |
+| **Networking** | IPv4/IPv6 dual-stack, DNS, HTTPS TLS (`PASS`); VPN (`utun`/`NEPacketTunnel`), HTTP/SOCKS proxy config, per-app cellular data firewall, Personal Hotspot (`TODO`) |
+| **System Interaction** | Simplified Chinese UI, Pinyin keyboard, control/notification center, app switcher (`PASS`); screenshot button chord polish, screen recording, orientation auto-rotate verification with live accel/gyro HID (`PARTIAL`), accessibility |
+| **App Ecosystem** | `Sileo` (11 CN repos), `TrollStore` (`ldid`), `TrollApps` (6 CN sources), `WebKit`/`WKWebView`, `BaiduMap` (`PASS`); DocumentPicker / cross-app share sheet & sideloaded video/social app soak (`PARTIAL`) |
+| **Apple-Proprietary Boundaries** | **`N/A (Apple Proprietary)`**: Apple ID, iCloud, App Store (`cryptid=1` FairPlay DRM), Apple Pay, APNs push, iMessage, FaceTime, Secure Enclave (`SEP`). Substitutes (TrollStore/Sileo/open apps/local notifications) are tracked separately from native hardware drivers |
+
+### 5. Long-Term Stability & Soak Acceptance Gates
+
+| Test Gate | Target Standard | Current Status |
+|---|---|---|
+| Continuous Uptime | 168 hours zero kernel panic / watchdog reset | **TODO** (longest soaks: 32 min 60 Hz `logs/035725-run.log` & 21 min 90 Hz `logs/021747-run.log`) |
+| Screen-Off Standby Drain | 8 hours blanked standby with `%`/mAh drain measurement | **TODO** (65 s blanked sleep/wake verified `logs/173008-run.log`) |
+| Lock / Wake Cycles | 500 consecutive lock/unlock cycles without display/touch/Wi-Fi hang | **TODO** |
+| Cold RAM Boots | 50 consecutive cold boots `PASS` | **TODO** |
+| Multi-App Pressure | Rapid switching across Safari / BaiduMap / Camera / Sileo / Settings | **TODO** |
+| Video Playback | 2 hours continuous playback with A/V sync & thermal check | **TODO** (needs VPU or SW decode soak) |
+| Network Handoff | Repeated Wi-Fi ↔ 4G LTE transitions | **TODO** |
+| Full Charge Cycle | 10% -> 100% -> 10% thermal & gauge linearity | **TODO** |
+| Sustained High Load | 30 min CPU/GPU sustained load within safe thermal envelope | **TODO** |
+| Memory Leak Check | Kernel zones + `SpringBoard`/`backboardd` RSS over multi-hour run | **TODO** |
+| Data Integrity | Unclean power-off / reboot filesystem fsck | **TODO** (blocked until persistent RW UFS storage) |
+
+### 6. Top 10 Engineering Priorities (`P0` / `P1`)
+
+1. **P0 — USB Device Gadget (`dwc3@a600000` + `usbmux` + `lockdownd`)** for PC connection (爱思助手 / iTunes / fast USB logs & IPA install).
+2. **P0 — System-Wide `MTLDevice` (`HakiosMetal` + `hakios-metal` for apps)** beyond compositor-only Metal.
+3. **P0 — Standalone Boot & Guarded Persistent Storage** on `ufshc@1d84000` (with safe rollback/recovery).
+4. **P0 — Deep Sleep & SoC Power Management** (`WFI`/idle C-states, `CPU0`, GPU DVFS, PMIC SPMI RTC).
+5. **P0 — Hardware Video Codec (`pil-venus`)** for smooth low-power H.264/HEVC decode & camera/screen encode.
+6. **P0 — Complete Telephony & Messaging** (SMS + OTP codes, incoming call ring/wake, audio route toggle, USSD, DSDS).
+7. **P0 — Lockscreen Security & Crypto/PRNG** (`qcedev`/`prng` hardware entropy, persistent Keychain/passcode without SEP).
+8. **P1 — Wired 33W (`bq25970`) & 30W Wireless (`idt,p9415`/`rx1619`) Charging**.
+9. **P1 — Under-Display Fingerprint (`goodix,fingerprint`) & `OIS` / Aux Cameras**.
+10. **P1 — `Mav20` 5G NR SA/NSA + NFC (`qcom,nq-nci`) + Outdoor GNSS 3D Fix + Long-Term Soak Gates**.
+
+---
+
+## Chronological Verification Logs & Evidence
 
 ## The Settings Location row, and Wi-Fi location in Maps (2026-11-16)
 
