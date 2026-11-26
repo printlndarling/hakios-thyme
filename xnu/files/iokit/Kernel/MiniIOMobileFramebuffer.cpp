@@ -412,6 +412,23 @@ measurePanel(__unused void * arg, __unused wait_result_t wr)
  * did not take. A phone without the driver leaves the weak symbol undefined.
  */
 extern "C" int hakios_panel_refresh_hz __attribute__((weak));
+struct hakios_display_scan {
+	int ok;
+	uint32_t lines;
+	uint32_t shown;
+	uint32_t millihz;
+	uint64_t line_ns, frame_ns;
+};
+extern "C" int hakios_display_command_mode(void) __attribute__((weak));
+extern "C" const struct hakios_display_scan * hakios_display_scan(void) __attribute__((weak));
+extern "C" int hakios_display_wait_copy(uint64_t copy_ns, uint64_t limit_ns) __attribute__((weak));
+extern "C" uint64_t hakios_display_next_frame_ns(void) __attribute__((weak));
+static inline bool cmdTeSyncActive(void)
+{
+	return &hakios_display_command_mode != NULL && hakios_display_command_mode() != 0 &&
+	    &hakios_display_scan != NULL && hakios_display_scan() != NULL &&
+	    &hakios_display_wait_copy != NULL;
+}
 
 static inline uint32_t
 refreshHz(void)
@@ -531,6 +548,7 @@ public:
 	/* ... and the frame's copy from the shadow to the panel's memory (blitPanel()): how many, their time, the longest */
 	uint32_t        fStatCopies;
 	uint64_t        fStatCopyTime, fStatCopyLongest;
+	uint64_t        fCmdCopyNs;             /* smoothed blitPanel() time in ns for command-mode TE budget */
 	/* ... and how evenly: the time from each frame to the next, counted by the millisecond (the last count: longer) */
 	uint64_t        fLastFrame;
 	uint32_t        fFrameTimes[FRAME_TIMES + 1], fFramePauses, fFrameLongest;
@@ -2068,6 +2086,10 @@ IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 	fSettling = false;
 	if (drew) {
 		/* the last frame of a still screen goes to the controller's memory too (blitPanel()) */
+		if (cmdTeSyncActive()) {
+			const struct hakios_display_scan * scan = hakios_display_scan();
+			(void)hakios_display_wait_copy(fCmdCopyNs ? fCmdCopyNs : 1500000ULL, scan->frame_ns * 2);
+		}
 		blitPanel(0, (int32_t) fPanelHeight);
 	}
 	fStatSettled++;
@@ -2096,8 +2118,9 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 	fStatWaiting += mach_absolute_time() - began;
 	began = ready = mach_absolute_time();
 	fBeamScan = fBeamIntf != 0 ? beamNextScan(began) : 0;
-	if (fBeamIntf != 0) {
-		/* (on the panel when that scan reads it: that is the beat now, kept by the panel) */
+	const bool cmdTe = cmdTeSyncActive();
+	if (fBeamIntf != 0 || cmdTe) {
+		/* (on the panel when that scan/TE reads it: that is the beat now, kept by the panel) */
 		fStatOnBeat++;
 	} else if (gOnTheBeat) {
 		uint64_t period, aim, next;
@@ -2480,8 +2503,33 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 	}
 	if (blit1 > blit0) {
-		/* the frame whole, to the panel's memory, shared out between the threads that drew it (blitPanel()) */
-		blitPanel(blit0, blit1);
+		if (cmdTe) {
+			const struct hakios_display_scan * scan = hakios_display_scan();
+			uint64_t wait_began = mach_absolute_time();
+			bool got = scan != NULL && hakios_display_wait_copy(fCmdCopyNs ? fCmdCopyNs : 1500000ULL, scan->frame_ns * 2) != 0;
+			fStatBeatWait += mach_absolute_time() - wait_began;
+			fStatScans++;
+			if (!got) {
+				fStatScansMissed++;
+			}
+			shown = mach_absolute_time();
+			/* If we missed the idle window AND a fresher swap is already waiting, keep the previous clean frame */
+			bool skip_late = false;
+			if (!got) {
+				IOLockLock(fSwapLock);
+				skip_late = fSwapsWaiting > 0;
+				IOLockUnlock(fSwapLock);
+			}
+			if (!skip_late) {
+				uint64_t copy_began = mach_absolute_time(), copy_ns = 0;
+				blitPanel(blit0, blit1);
+				absolutetime_to_nanoseconds(mach_absolute_time() - copy_began, &copy_ns);
+				fCmdCopyNs = fCmdCopyNs == 0 ? copy_ns : (fCmdCopyNs * 7 + copy_ns) / 8;
+			}
+		} else {
+			/* the frame whole, to the panel's memory, shared out between the threads that drew it (blitPanel()) */
+			blitPanel(blit0, blit1);
+		}
 	}
 	drawn = mach_absolute_time();
 	if (recorded != NULL) {
@@ -2716,6 +2764,23 @@ IOMobileFramebufferUserClient::armVSync(void)
 
 	/* one refresh after the last, not after whenever we got round to this: the rate does not drift */
 	nanoseconds_to_absolutetime(NSEC_PER_SEC / refreshHz(), &period);
+	if (&hakios_display_scan != NULL && &hakios_display_next_frame_ns != NULL) {
+		const struct hakios_display_scan * scan = hakios_display_scan();
+		if (scan != NULL && scan->frame_ns > 0) {
+			uint64_t ahead_ns = hakios_display_next_frame_ns();
+			if (ahead_ns > 0) {
+				/* Guard against early timer wake right before TE wrap causing double-VSync */
+				if (ahead_ns < scan->frame_ns / 2) {
+					ahead_ns += scan->frame_ns;
+				}
+				uint64_t ahead;
+				nanoseconds_to_absolutetime(ahead_ns, &ahead);
+				fVSyncTime = now + ahead;
+				thread_call_enter_delayed(fVSyncCall, fVSyncTime);
+				return;
+			}
+		}
+	}
 	fVSyncTime += period;
 	if (fVSyncTime <= now || fVSyncTime > now + 2 * period) {
 		fVSyncTime = now + period;

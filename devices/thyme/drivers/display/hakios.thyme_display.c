@@ -28,6 +28,21 @@ extern void loader_log_putc(char c);
 #define GCC_PHYS                   hakios_board_addr("gcc", 0x00100000UL)
 #define DISPCC_PHYS                hakios_board_addr("dispcc", 0x0af00000UL)
 #define DSI0_PHYS                  hakios_board_addr("dsi0", 0x0ae94000UL)
+#define INTF1_PHYS                 hakios_board_addr("intf", 0x0ae6b800UL)
+
+#define INTF_TIMING_ENGINE_EN      0x000
+#define INTF_TEAR_MDP_VSYNC_SEL    0x280
+#define INTF_TEAR_TEAR_CHECK_EN    0x284
+#define INTF_TEAR_SYNC_CONFIG_VSYNC 0x288
+#define INTF_TEAR_SYNC_CONFIG_HEIGHT 0x28c
+#define INTF_TEAR_SYNC_WRCOUNT     0x290
+#define INTF_TEAR_VSYNC_INIT_VAL   0x294
+#define INTF_TEAR_INT_COUNT_VAL    0x298
+#define INTF_TEAR_SYNC_THRESH      0x29c
+#define INTF_TEAR_START_POS        0x2a0
+#define INTF_TEAR_OUT_LINE_COUNT   0x2ac
+#define INTF_TEAR_LINE_COUNT       0x2b0
+#define INTF_TEAR_AUTOREFRESH_CFG  0x2b4
 
 #define GCC_DISP_AHB_CBCR          0x0b00c
 #define DISPCC_MDSS_CORE_GDSCR     0x3000
@@ -60,7 +75,18 @@ extern void loader_log_putc(char c);
 #define THYME_BL_MAX_LEVEL         4095u
 #define THYME_BL_DEFAULT_PERMILLE  600
 
-static vm_offset_t gcc_map, dispcc_map, dsi0;
+struct hakios_display_scan {
+	int ok;
+	uint32_t lines;
+	uint32_t shown;
+	uint32_t millihz;
+	uint64_t line_ns, frame_ns;
+};
+
+static vm_offset_t gcc_map, dispcc_map, dsi0, intf1;
+static struct hakios_display_scan te_scan;
+static bool te_command_mode;
+static uint32_t te_initial, te_idle_start;
 static bool brightness_ready;
 static int brightness_permille = THYME_BL_DEFAULT_PERMILLE;
 static int backlight_factor = 1000;
@@ -282,14 +308,17 @@ dsi_send_long(const uint8_t *payload, unsigned length)
 static bool
 dsi_send_short(const uint8_t *payload, unsigned length)
 {
-	uint32_t words[2];
+	uint32_t dt, word;
 
 	if (length == 0 || length > 2) {
 		return false;
 	}
-	words[0] = 0xc0150000u | length;
-	words[1] = payload[0] | (length > 1 ? (uint32_t)payload[1] << 8 : 0);
-	return dsi_send_words(words, 2);
+	/* MSM DSI command DMA short packet: 1 word = [cmd, param, dt, 0x80 (LAST, !LONG)] */
+	dt = length == 2 ? 0x15u : 0x05u;
+	word = 0x80000000u | (dt << 16) |
+	    ((length == 2 ? (uint32_t)payload[1] : 0u) << 8) |
+	    (uint32_t)payload[0];
+	return dsi_send_words(&word, 1);
 }
 
 static bool
@@ -327,38 +356,53 @@ static const uint8_t panel_b4_90[] = {
 	0xd8, 0xe8, 0xe8, 0xf8, 0xf8, 0x48, 0x48, 0x48, 0x48, 0x0a,
 };
 
+/*
+ * Panel 0A (qcom,mdss_dsi_j2s_mp_42_02_0a_dsc_cmd, primary on thyme):
+ *   F0 page 0, B4 table, DCS 0x2f (0x01/0x04), DCS 0x26 (0x01/0x02).
+ * Panel 0B (qcom,mdss_dsi_j2s_mp_42_02_0b_dsc_cmd):
+ *   60 Hz -> DCS 0x2f 0x01; 90 Hz -> DCS 0x2f 0x02.
+ *
+ * NOTE: On SM8250 DSI TPG command-DMA FIFO, 1-word short packets (dsi_send_short)
+ * are silently ignored by the panel, whereas 2-word DCS long writes (0x39,
+ * dsi_send_long) reliably reach the panel (verified live via INTF_1 TE readout).
+ * Wait for the DMA-idle window before each packet so command DMA never collides
+ * with MDP autorefresh.
+ *
+ * sequence=0: Panel 0A full sequence via dsi_send_long (F0, B4, 2f 04/01, 26 02/01)
+ * sequence=1: Panel 0B fallback via dsi_send_long (2f 02/01)
+ */
+static void
+wait_dma_idle_brief(void)
+{
+	if (intf1 == 0 || !display_regs_alive()) {
+		return;
+	}
+	for (unsigned w = 0; w < 200; w++) {
+		if ((rd(intf1, INTF_TEAR_LINE_COUNT) & 0xffffu) >= 2340u) {
+			return;
+		}
+		delay_for_interval(100, NSEC_PER_USEC);
+	}
+}
+
 static bool
 send_panel_timing_cmd(uint32_t hz, uint32_t sequence)
 {
+	if (sequence == 1) {
+		uint8_t rate_0b[2] = { 0x2f, hz >= 90 ? 0x02 : 0x01 };
+		tell("display: THYME panel timing (0B long): 2f %#x\n", rate_0b[1]);
+		wait_dma_idle_brief();
+		return dsi_send_long(rate_0b, sizeof(rate_0b));
+	}
 	const uint8_t *b4 = hz >= 90 ? panel_b4_90 : panel_b4_60;
 	uint8_t rate[2] = { 0x2f, hz >= 90 ? 0x04 : 0x01 };
 	uint8_t mode[2] = { 0x26, hz >= 90 ? 0x02 : 0x01 };
-
-	if (sequence >= 2) {
-		return true;
-	}
-	if (sequence == 0) {
-		/*
-		 * The live device tree's timing-switch-command for this panel (J2,
-		 * panel-id 0x4a32: timing@0 60 Hz, timing@1 90 Hz), verbatim:
-		 * F0 page 0, the mode's B4 table, 2f, 26. The J1S nodes carry a
-		 * longer sequence (C1, F0 page 3, BB); that is another panel's.
-		 */
-		tell("display: THYME panel timing: F0 page\n");
-		if (!dsi_send_long(panel_page_f0, sizeof(panel_page_f0))) {
-			return false;
-		}
-		tell("display: THYME panel timing: B4 table\n");
-		if (!dsi_send_long(b4, 30)) {
-			return false;
-		}
-	}
-	tell("display: THYME panel timing: 2f %#x\n", rate[1]);
-	if (!dsi_send_short(rate, sizeof(rate))) {
-		return false;
-	}
-	tell("display: THYME panel timing: 26 %#x\n", mode[1]);
-	return dsi_send_short(mode, sizeof(mode));
+	tell("display: THYME panel timing (0A long): F0 + B4 + 2f %#x + 26 %#x\n", rate[1], mode[1]);
+	wait_dma_idle_brief();
+	if (!dsi_send_long(panel_page_f0, sizeof(panel_page_f0))) return false;
+	if (!dsi_send_long(b4, 30)) return false;
+	if (!dsi_send_long(rate, sizeof(rate))) return false;
+	return dsi_send_long(mode, sizeof(mode));
 }
 
 static bool
@@ -637,6 +681,224 @@ sysctl_backlight_factor(__unused struct sysctl_oid *oidp, __unused void *arg1, _
 	return 0;
 }
 
+
+/*
+ * SM8250 DPU 6.0 command-mode TE synchronization (INTF_1 at 0x0ae6b800).
+ * Reads only — never modifies bootloader DPU pipe/autorefresh registers.
+ * Allows MiniIOMobileFramebuffer to lock VSync to the real panel TE and copy
+ * the staging buffer strictly inside the DMA-idle window (zero tearing/ghosting).
+ */
+int
+hakios_display_command_mode(void)
+{
+	return __atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE) && te_command_mode;
+}
+
+const struct hakios_display_scan *
+hakios_display_scan(void)
+{
+	return __atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE) ? &te_scan : NULL;
+}
+
+uint32_t
+hakios_display_line(uint32_t *frame)
+{
+	uint32_t raw, line;
+
+	if (intf1 == 0 || !__atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+	if (!display_regs_alive()) {
+		tell("display: TE clock/power dropped; disabling TE sync\n");
+		__atomic_store_n(&te_scan.ok, 0, __ATOMIC_RELEASE);
+		intf1 = 0;
+		return 0;
+	}
+	raw = rd(intf1, INTF_TEAR_INT_COUNT_VAL) & 0xffffu;
+	if (frame != NULL) {
+		*frame = 0;
+	}
+	line = raw >= te_initial ? raw - te_initial : 0;
+	return line < te_scan.lines ? line : te_scan.lines - 1;
+}
+
+uint64_t
+hakios_display_next_frame_ns(void)
+{
+	uint32_t line;
+
+	if (!__atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+	line = hakios_display_line(NULL);
+	if (!__atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE)) {
+		return 0;
+	}
+	return (uint64_t)(te_scan.lines - line) * te_scan.line_ns;
+}
+
+int
+hakios_display_wait_copy(uint64_t copy_ns, uint64_t limit_ns)
+{
+	uint64_t start = mach_absolute_time(), elapsed;
+	uint64_t budget;
+
+	if (!hakios_display_command_mode()) {
+		return 0;
+	}
+	if (copy_ns < 500000ULL) {
+		copy_ns = 1400000ULL;
+	}
+	uint64_t idle_ns = (uint64_t)(te_scan.lines > te_idle_start ? te_scan.lines - te_idle_start : 0) * te_scan.line_ns;
+	if (te_scan.frame_ns < 13000000ULL) {
+		budget = copy_ns + 100000ULL;
+		if (idle_ns > 500000ULL && budget > idle_ns - 400000ULL) {
+			budget = idle_ns - 400000ULL;
+		}
+	} else {
+		budget = copy_ns + copy_ns / 4 + 400000ULL;
+	}
+	uint32_t early_check = te_idle_start > 16u ? te_idle_start - 16u : te_idle_start;
+	for (;;) {
+		uint32_t before = hakios_display_line(NULL);
+		if (!__atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE)) {
+			return 0;
+		}
+		uint32_t written = rd(intf1, INTF_TEAR_LINE_COUNT) & 0xffffu;
+		uint32_t phase = hakios_display_line(NULL);
+		if (!__atomic_load_n(&te_scan.ok, __ATOMIC_ACQUIRE)) {
+			return 0;
+		}
+		uint64_t used = (uint64_t)phase * te_scan.line_ns;
+		if (phase >= before && phase >= early_check && written >= te_scan.shown &&
+		    used < te_scan.frame_ns && budget < te_scan.frame_ns - used) {
+			return 1;
+		}
+		absolutetime_to_nanoseconds(mach_absolute_time() - start, &elapsed);
+		if (elapsed >= limit_ns) {
+			return 0;
+		}
+		uint64_t ahead = 0, nap = 50000ULL;
+		if (phase < te_idle_start) {
+			ahead = (uint64_t)(te_idle_start - phase) * te_scan.line_ns;
+		} else if (used >= te_scan.frame_ns || budget >= te_scan.frame_ns - used) {
+			ahead = (used < te_scan.frame_ns ? te_scan.frame_ns - used : 0) +
+			    (uint64_t)te_idle_start * te_scan.line_ns;
+		}
+		if (ahead > 400000ULL) {
+			nap = ahead - 200000ULL;
+		}
+		if (nap > limit_ns - elapsed) {
+			nap = limit_ns - elapsed;
+		}
+		delay_for_interval((uint32_t)((nap + 999ULL) / 1000ULL), NSEC_PER_USEC);
+	}
+}
+
+static bool
+thyme_command_te_calibrate(const char *tag, bool publish)
+{
+	if (intf1 == 0 || !display_regs_alive()) {
+		return false;
+	}
+	uint32_t eng = rd(intf1, INTF_TIMING_ENGINE_EN);
+	uint32_t vsel = rd(intf1, INTF_TEAR_MDP_VSYNC_SEL);
+	uint32_t ten = rd(intf1, INTF_TEAR_TEAR_CHECK_EN);
+	uint32_t cfg = rd(intf1, INTF_TEAR_SYNC_CONFIG_VSYNC);
+	uint32_t hgt = rd(intf1, INTF_TEAR_SYNC_CONFIG_HEIGHT);
+	uint32_t wrc = rd(intf1, INTF_TEAR_SYNC_WRCOUNT);
+	uint32_t ini = rd(intf1, INTF_TEAR_VSYNC_INIT_VAL);
+	uint32_t thr = rd(intf1, INTF_TEAR_SYNC_THRESH);
+	uint32_t pos = rd(intf1, INTF_TEAR_START_POS);
+	uint32_t aut = rd(intf1, INTF_TEAR_AUTOREFRESH_CFG);
+
+	tell("display: INTF1[%s] eng=%#x vsel=%#x ten=%#x cfg=%#x hgt=%#x wrc=%#x ini=%#x thr=%#x pos=%#x auto=%#x\n",
+	    tag, eng, vsel, ten, cfg, hgt, wrc, ini, thr, pos, aut);
+
+	if ((eng & 1u) || !(ten & 1u) || !(aut & 0x80000000u)) {
+		tell("display: INTF1[%s]: not in command autorefresh mode\n", tag);
+		return false;
+	}
+	uint32_t base_init = ini & 0xffffu;
+	if (base_init < 500u || base_init > 4096u) {
+		tell("display: INTF1[%s]: unexpected init_val=%u\n", tag, base_init);
+		return false;
+	}
+
+	uint64_t start = mach_absolute_time(), prev_t = start, first_wrap = 0, last_wrap = 0;
+	uint64_t line_time = 0, line_count = 0, elapsed = 0;
+	uint32_t prev_raw = rd(intf1, INTF_TEAR_INT_COUNT_VAL) & 0xffffu;
+	uint32_t raw_min = prev_raw, raw_max = prev_raw, busy_last = 0;
+	unsigned wraps = 0, busy_samples = 0, idle_samples = 0;
+
+	while (wraps < 6) {
+		delay_for_interval(50, NSEC_PER_USEC);
+		uint32_t raw = rd(intf1, INTF_TEAR_INT_COUNT_VAL) & 0xffffu;
+		uint32_t written = rd(intf1, INTF_TEAR_LINE_COUNT) & 0xffffu;
+		uint64_t now = mach_absolute_time(), interval;
+		absolutetime_to_nanoseconds(now - start, &elapsed);
+		if (elapsed > 220000000ULL) {
+			break;
+		}
+		if ((rd(intf1, INTF_TEAR_INT_COUNT_VAL) & 0xffffu) < raw) {
+			continue;
+		}
+		if (raw < raw_min) raw_min = raw;
+		if (raw > raw_max) raw_max = raw;
+		if (raw < prev_raw) {
+			if (wraps++ == 0) {
+				first_wrap = now;
+			}
+			last_wrap = now;
+		} else if (raw > prev_raw) {
+			absolutetime_to_nanoseconds(now - prev_t, &interval);
+			line_time += interval;
+			line_count += (raw - prev_raw);
+		}
+		uint32_t phase = raw >= base_init ? raw - base_init : 0;
+		if (written > 0 && written < base_init) {
+			if (phase > busy_last) busy_last = phase;
+			busy_samples++;
+		} else if (written >= base_init) {
+			idle_samples++;
+		}
+		prev_raw = raw;
+		prev_t = now;
+	}
+
+	if (wraps < 2 || line_count == 0 || busy_samples == 0 || idle_samples == 0) {
+		tell("display: INTF1[%s]: calibration incomplete (wraps=%u raw=%u..%u busy=%u idle=%u)\n",
+		    tag, wraps, raw_min, raw_max, busy_samples, idle_samples);
+		return false;
+	}
+	absolutetime_to_nanoseconds(last_wrap - first_wrap, &elapsed);
+	uint64_t frame_ns = elapsed / (wraps - 1);
+	uint64_t line_ns = line_time / line_count;
+	if (line_ns == 0 || frame_ns < NSEC_PER_SEC / 140 || frame_ns > NSEC_PER_SEC / 30) {
+		tell("display: INTF1[%s]: implausible frame_ns=%llu line_ns=%llu\n", tag, frame_ns, line_ns);
+		return false;
+	}
+	uint32_t lines = (uint32_t)(frame_ns / line_ns);
+	uint32_t idle_start = busy_last + (frame_ns < 13000000ULL ? 8u : 24u);
+	uint32_t millihz = (uint32_t)(1000000000000ULL / frame_ns);
+	tell("display: THYME command TE[%s]: %u.%03u Hz, %llu ns/line, %u phase lines (raw %u..%u); DMA idle after %u (busy=%u idle=%u)\n",
+	    tag, millihz / 1000u, millihz % 1000u, line_ns, lines, raw_min, raw_max, idle_start, busy_samples, idle_samples);
+
+	if (publish && lines >= 800u && lines <= 8192u && idle_start < lines) {
+		te_initial = base_init;
+		te_idle_start = idle_start;
+		te_scan.lines = lines;
+		te_scan.shown = base_init;
+		te_scan.millihz = millihz;
+		te_scan.line_ns = line_ns;
+		te_scan.frame_ns = frame_ns;
+		te_command_mode = true;
+		__atomic_store_n(&te_scan.ok, 1, __ATOMIC_RELEASE);
+		return true;
+	}
+	return false;
+}
+
 SYSCTL_PROC(_kern_hakios, OID_AUTO, backlight_factor,
     CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
     sysctl_backlight_factor, "I", "display backlight factor in permille (0=off..1000=full)");
@@ -684,30 +946,82 @@ hakios_brightness_init(void)
 	}
 
 	brightness_ready = true;
+	{
+		/* Map SM8250 DPU INTF_1 (0x0ae6b800) using 16 KB page alignment */
+		vm_offset_t intf_page = ml_io_map((vm_offset_t)(INTF1_PHYS & ~0x3fffUL), 0x4000);
+		if (intf_page != 0) {
+			intf1 = intf_page + (vm_offset_t)(INTF1_PHYS & 0x3fffUL);
+		}
+	}
+	uint32_t te_sync = 1;
+	(void)PE_parse_boot_argn("fb_te_sync", &te_sync, sizeof(te_sync));
+	if (intf1 != 0) {
+		(void)thyme_command_te_calibrate("before", false);
+	}
 	uint32_t fb_hz = 0;
 	/* the thyme panel's hardware is 90 Hz at most (the device tree's 0x78 entry is not this panel's) */
 	if (PE_parse_boot_argn("fb_hz", &fb_hz, sizeof(fb_hz)) && (fb_hz == 60 || fb_hz == 90)) {
-		uint32_t sequence = 0;
-		(void)PE_parse_boot_argn("panel_seq", &sequence, sizeof(sequence));
-		if (sequence > 2) {
-			sequence = 0;
-		}
+		uint32_t forced_seq = 99;
+		(void)PE_parse_boot_argn("panel_seq", &forced_seq, sizeof(forced_seq));
 		bool switched = false;
+		bool te_ok = false;
+		uint32_t used_seq = 0;
 
-		for (unsigned attempt = 0; attempt < 5 && !switched; attempt++) {
-			if (attempt != 0) {
-				delay_for_interval(20, NSEC_PER_MSEC);
+		/* Auto-try Panel 0A long (seq 0) and Panel 0B long fallback (seq 1) until TE confirms 90 Hz */
+		uint32_t first_seq = forced_seq <= 1 ? forced_seq : 0;
+		uint32_t last_seq = forced_seq <= 1 ? forced_seq : (fb_hz >= 90 ? 1 : 0);
+		for (uint32_t seq = first_seq; seq <= last_seq; seq++) {
+			bool sent = false;
+			for (unsigned attempt = 0; attempt < 5 && !sent; attempt++) {
+				if (attempt != 0) delay_for_interval(20, NSEC_PER_MSEC);
+				sent = send_panel_timing(fb_hz, seq);
 			}
-			switched = send_panel_timing(fb_hz, sequence);
+			used_seq = seq;
+			if (sent) switched = true;
+			delay_for_interval(80, NSEC_PER_MSEC);
+			if (intf1 != 0 && te_sync != 0) {
+				char tag[24];
+				snprintf(tag, sizeof(tag), "after-s%u", seq);
+				te_ok = thyme_command_te_calibrate(tag, true);
+				if (te_ok && (fb_hz < 90 || te_scan.millihz >= 80000u)) {
+					break;
+				}
+				/* If Panel 0B fallback lowered a 0A panel below 58 Hz (e.g. 55 Hz), restore 60 Hz */
+				if (seq == 1 && te_ok && te_scan.millihz < 58000u) {
+					(void)send_panel_timing(60, 0);
+					delay_for_interval(80, NSEC_PER_MSEC);
+					te_ok = thyme_command_te_calibrate("restore-60", true);
+				}
+			} else if (sent) {
+				break;
+			}
 		}
-		if (switched && fb_hz >= 90) {
+		if (te_ok) {
+			/* Lock framebuffer refresh rate to the REAL measured hardware TE rate */
+			uint32_t measured_hz = (te_scan.millihz + 500u) / 1000u;
+			/* Round 59.4..60.4 -> 60, 89.0..90.5 -> 90 for clean CoreAnimation cadence */
+			if (measured_hz >= 87u && measured_hz <= 92u) measured_hz = 90u;
+			else if (measured_hz >= 58u && measured_hz <= 62u) measured_hz = 60u;
+			hakios_panel_refresh_hz = (int)measured_hz;
+			if (&hakios_fb_publish_refresh != NULL) {
+				hakios_fb_publish_refresh();
+			}
+		} else if (switched && fb_hz >= 90) {
 			hakios_panel_refresh_hz = (int)fb_hz;
 			if (&hakios_fb_publish_refresh != NULL) {
 				hakios_fb_publish_refresh();
 			}
 		}
-		tell("display: THYME panel timing %u Hz seq=%u (%s), framebuffer rate %d Hz\n", fb_hz, sequence,
-		    switched ? "ok" : "skipped", hakios_panel_refresh_hz);
+		tell("display: THYME panel timing %u Hz seq=%u (%s), TE=%s (%u.%03u Hz), framebuffer rate %d Hz\n",
+		    fb_hz, used_seq, switched ? "ok" : "skipped", te_ok ? "synced" : "off",
+		    te_scan.millihz / 1000u, te_scan.millihz % 1000u, hakios_panel_refresh_hz);
+	} else if (intf1 != 0 && te_sync != 0) {
+		if (thyme_command_te_calibrate("default", true)) {
+			hakios_panel_refresh_hz = (int)((te_scan.millihz + 500u) / 1000u);
+			if (&hakios_fb_publish_refresh != NULL) {
+				hakios_fb_publish_refresh();
+			}
+		}
 	}
 	uint32_t level = permille_to_level(brightness_permille);
 	bool ok = false;

@@ -6573,3 +6573,35 @@ All fixes below were verified live via RAM boot (`./xl`, `battery_stop=40` activ
 | `logs/114028-run.log` (Canonical `root-wirelessfull.apfs` + polished `umi_gnss` zero-cycle soak) | `363fb53395022597c6d363b21244adfd9ca64c9aab4aafd2172e6ebabb138530` |
 | `hakios-kernel` (16,944,256 B) | `506aef22676a25256646b1a89e39a7af27deff5d464c4938541d44d91c5ea042` |
 | `out/thyme-boot/root-wirelessfull.apfs` (48,984,064 B; total 65,928,320 B < 66,060,288 B) | `a2e5272fe46417ada6ad620f7bfe18a774c46b2151871e5664a4fc35e06c5a93` |
+
+## 2026-11-26 Hardware 90 Hz TE-Sync Anti-Ghosting Fix & Baidu Maps Live Location Verification (`5290780a`)
+
+All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img`, `battery_stop=40` active throughout, zero partition writes, phone returned cleanly to Android):
+
+1. **Root Cause & Fix of Scroll Ghosting / Refresh Rate Mismatch (`PASS` — true hardware 89.1 Hz / 90 Hz, `0.00%` missed TE scans)**:
+   - **Diagnosis (NOT GPU)**: Adreno 650 (`hakios-gl` / `HakiosMetalCA`) completed every frame in `0.23–1.6 ms` with `0` GPU drops. Scroll ghosting came from two display-pipeline defects:
+     1. **Unsynchronized command-mode VRAM copies**: `MiniIOMobileFramebuffer` disabled `fb_beam` on `thyme`, so `blitPanel()` overwrote live UEFI VRAM mid-DMA transfer without TE synchronization.
+     2. **Panel hardware stayed at `59.39 Hz` while `fb_hz=90` paced 90 fps into it (3:2 judder + ghosting)**: Bootloader cmdline selects `qcom,mdss_dsi_j2s_mp_42_02_0a_dsc_cmd` (`timing@1` 90 Hz = `F0 + B4 + 2f 04 + 26 02`), and SM8250 DSI TPG command-DMA FIFO silently ignored `dsi_send_short()` 1-word short packets (`2f 04` / `26 02` never reached the panel; verified live in `logs/135842-run.log` where `dsi_send_short` left TE at `59.43 Hz` while `dsi_send_long` immediately changed TE).
+   - **Fix (`devices/thyme/drivers/display/hakios.thyme_display.c`, `xnu/files/iokit/Kernel/MiniIOMobileFramebuffer.cpp`)**:
+     - Added read-only SM8250 DPU 6.0 `INTF_1` (`0x0ae6b800`, 16 KB aligned mapping) command-mode TEAR synchronization (`INTF_TEAR_INT_COUNT_VAL` `0x298` + `INTF_TEAR_LINE_COUNT` `0x2b0`) exposing `hakios_display_command_mode()`, `hakios_display_scan()`, `hakios_display_next_frame_ns()`, and `hakios_display_wait_copy()`.
+     - Switched `send_panel_timing_cmd()` to deliver the full `j2s_mp_42_02_0a` 90 Hz sequence (`F0`, `B4`, `2f 04`, `26 02`) via proven `dsi_send_long()` (`0x39`) inside the DMA-idle window (with `j2s_mp_42_02_0b` `2f 02` fallback + auto-restore guard), verifying real hardware TE via `thyme_command_te_calibrate()` before publishing `hakios_panel_refresh_hz`.
+     - Wired `MiniIOMobileFramebuffer` (`show()`, `settle()`, `armVSync()`) to lock VSync to real panel TE with an `< frame_ns / 2` double-VSync guard and smoothed 90 Hz DMA-idle copy budget (`fCmdCopyNs`).
+   - **Verified Live (`5/5` consecutive boots on `5290780a`)**:
+     - Real `INTF_1` hardware TE switched cleanly from **`59.39–59.47 Hz` (`2374–2377` phase lines)** to **`89.08–89.17 Hz` (`1583–1584` phase lines, DMA idle after line `1197–1198`)** on every boot (`logs/141412-run.log`, `logs/142439-run.log`, `logs/143544-run.log`, `logs/144523-run.log`, `logs/145516-run.log`).
+     - Sustained 90 Hz rendering (`logs/142439-run.log`, kernel `d1642a54e4ff`): **`446 frames in 5008 ms (89.1 fps)`**, **`0 of 446 too late for the next scan`**, `0` under 10 ms (zero double-VSync), **`446/446` frames in `10–12 ms` (`P50 < 12 ms`, `P95 < 12 ms`, `0` pauses, `0` gave up)**, `blitPanel()` copy `1.00–1.07 ms` inside the `2.73 ms` DMA-idle window. Active Baidu Maps animation (`logs/144523-run.log`, `logs/145516-run.log`): `442 frames / 5010 ms (88 fps)`, **`0 of 442` / `0 of 192` / `0 of 47` / `0 of 45` missed scans**.
+
+2. **Third-Party Map & Location Verification — Baidu Maps (`com.baidu.map` v22.2.20, `PASS`)**:
+   - Audited operator-provided `百度地图-路线规划出行必备.ipa` (`207,202,418 B`, SHA-256 `299ea64e50d1841499b64822eae236ea0fed7323fea88010fe7a6ea20363ac43`): `IphoneCom.app` (`com.baidu.map` v22.2.20, arm64, `LC_ENCRYPTION_INFO_64: cryptid=0`, unencrypted).
+   - Fixed auto-lock / auto-dim wake & unlock handling and `新人福利` modal dismissal in `userland/rc.jobs.mapdiag`; built `out/thyme-boot/root-mapdiag.apfs` (`SCENE=mapdiag METAL_PLUGIN=ca`, `49,090,560 B`, payload total `66,051,696 B < 66,060,288 B`).
+   - **Verified Live (`logs/143544-run.log`, `logs/144523-run.log`, `logs/145516-run.log`, with full SDX55M modem+GNSS + Wi-Fi + Metal `metal=1 metal_apps=1`)**:
+     - Downloaded over LAN (`192.168.0.103 -> 192.168.0.104:8000`, HTTP `200`, SHA-256 verified), installed via `trollstorehelper install custom`, registered via `uicache -a`, and launched in Simplified Chinese iOS with active China Broadnet (`46015`) cellular registration and SDX55M QMI LOC GNSS (`gnss: satellites in view 1; fixes 0` indoors in `logs/143544-run.log`).
+     - Live framebuffer screenshots (`bmap4-t205.png`, `bmap4-t225.png`, `bmap4-t245.png`) confirm: solid CoreLocation arrow active in the status bar, crisp HD vector map rendering, and accurate blue location dot + heading cone locked directly onto the real Xi'an location (`陕西省西安市长安区郭杜街道...`, ~92 m indoor Wi-Fi CoreLocation accuracy, `locationd` + `BaiduMap` live tiles/POI cards functional, zero crashes).
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,961,136 B, `INTF_1` 89.1 Hz TE-sync + `armVSync` fix) | `d1642a54e4ff4758ae6b34053e69ad2361b7f66664440fbcbec2178b4790decb` |
+| `logs/141412-run.log` (First hardware `59.39 -> 89.12 Hz` TE switch on Panel `0A`) | `ae1f74dbfcd8a8e114037fc20ca782cd8b1a75ad71e43e9c56bf120ef3974700` |
+| `logs/142439-run.log` (Sustained `89.1 fps`, `446/446` in `10–12 ms`, `0/446` missed scans) | `0950afb4d5ee8f3db324e65b3ef22f35232df6c26e6e41d88e2e0ec4f91d3013` |
+| `logs/143544-run.log` (SDX55M GNSS `satellites in view 1` + `0/289` missed scans) | `b631a819b47a855ec5f09ea184268c8a658c8f67d2a2baca9de4228e9e1abbc4` |
+| `logs/144523-run.log` (Unlocked Baidu Maps `88 fps`, `0/442` missed scans, active CL arrow) | `1aea7a925d4a8bc5ae4d3e57e126a9ffa15e4971fdb4da9ded893785730bd3e7` |
+| `logs/145516-run.log` (Clean live Baidu Maps Xi'an blue-dot fix + `0/192` missed scans) | `67b8ac35963748a291cadef233ff1134a9ce8984c2dc5a2626550e800986f622` |

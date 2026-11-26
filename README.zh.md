@@ -24,14 +24,14 @@
 |---|---|---|
 | 系统启动与桌面 | **PASS** | RAM 冷启动至 `launchd`、`backboardd`、SpringBoard 与设置 |
 | CPU / 调频 | **PASS** | 7 核在线，EPSS 三丛集频率达 1.80 / 2.42 / 3.19 GHz |
-| 显示与刷新率 | **PASS** | 1080 × 2340 OLED，全局 90 Hz（`fb_hz=90`）、DCS 亮度调节与锁屏灭背光 |
+| 显示与刷新率 | **PASS** | 1080 × 2340 OLED，真硬件 90 Hz（`INTF_1` TE 同步零漏扫）、DCS 亮度调节与锁屏灭背光 |
 | GPU（OpenGL） | **PASS** | Adreno 650 经 Mesa/Freedreno 硬件渲染（`hakios-gl`） |
 | Metal | **PARTIAL** | `hakios-metal` 可编译；系统 `MTLDevice` / VectorKit / ANGLE 应用待打通 |
 | 触控与按键 | **PASS** | FTS521 多点触控、手势、电源键与音量键正常 |
 | 音频与触感 | **PASS** | 双 CS35L41 独立左右声道扬声器、双麦克风、AW8697 CoreHaptics 正常 |
 | 相机与闪光灯 | **PASS** | 后摄 27 MP S5KHMX + AK7377 自动对焦、前摄 S5K3T2、镜头切换与 PM8150L 闪光灯 |
 | 蜂窝与通话 | **PASS** | SDX55M SIM 识别、设置页正常、4G 双栈数据与双向 VoLTE 语音（短信暂缓） |
-| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位与 SDX55M QMI LOC 1 Hz 卫星流打通；室外 3D 定位待实测 |
+| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测精准蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
 | Wi-Fi（QCA6390） | **PARTIAL** | 2.4/5 GHz WPA2、DHCP/TLS 及断电恢复正常；`SystemSleep` 唤醒重连待完善 |
 | 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对与 A2DP 播放正常；HFP/AVRCP/自动重连待完善 |
 | 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |

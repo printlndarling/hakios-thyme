@@ -24,14 +24,14 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 |---|---|---|
 | Boot & SpringBoard | **PASS** | Cold RAM boot to `launchd`, `backboardd`, SpringBoard, and Settings |
 | CPU / DVFS | **PASS** | 7 cores active; EPSS scaling up to 1.80 / 2.42 / 3.19 GHz |
-| Display & Refresh | **PASS** | 1080 × 2340 OLED, global 90 Hz (`fb_hz=90`), DCS brightness & lock blanking |
+| Display & Refresh | **PASS** | 1080 × 2340 OLED, hardware 90 Hz (`INTF_1` TE-synced, 0 missed scans), DCS brightness & lock blanking |
 | GPU (OpenGL) | **PASS** | Hardware Adreno 650 rendering via Mesa/Freedreno (`hakios-gl`) |
 | Metal | **PARTIAL** | `hakios-metal` builds; system `MTLDevice` / VectorKit / ANGLE apps pending |
 | Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
 | Audio & Haptics | **PASS** | Dual CS35L41 stereo L/R speakers, dual mics, AW8697 CoreHaptics |
 | Camera & Torch | **PASS** | Rear 27 MP S5KHMX + AK7377 AF, front S5K3T2, lens switching, PM8150L flash |
 | Cellular & VoLTE | **PASS** | SDX55M SIM, Settings UI, 4G LTE dual-stack data, two-way VoLTE voice (SMS deferred) |
-| Location & GNSS | **PARTIAL** | Settings UI/toggle, Wi-Fi fixes & SDX55M QMI LOC 1 Hz SV active; outdoor 3D fix pending |
+| Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (verified in Baidu Maps) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
 | Wi-Fi (QCA6390) | **PARTIAL** | 2.4/5 GHz WPA2, DHCP/TLS & power recovery; `SystemSleep` auto-wake open |
 | Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing & A2DP playback; HFP/AVRCP/reconnect open |
 | Battery & Thermal | **PASS** | Fuel gauge, USB charging telemetry, thermal throttling & low-battery guard |
