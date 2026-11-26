@@ -46,13 +46,13 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
 | Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
-| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **PARTIAL** | Real NCI 2.0 hardware handshake `PASS` (`0x28` write ACK, `CORE_RESET 40 00 01 00` + `CORE_INIT 40 01 1e 00 1a 3e 06 00`, `kern.hakios.nfc_present=1`, `logs/033757-run.log`); `/dev/hakios-nfc` NCI daemon & CoreNFC bridge `TODO` |
+| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 char device `PASS` (exact-len NCI reader: `CORE_RESET rsp len=4`, `CORE_RESET ntf len=13 ver=0x20`, `CORE_INIT rsp len=33`, `kern.hakios.nfc_dev_ready=1`, `logs/034840-run.log`); userspace NCI daemon & CoreNFC bridge `TODO` |
 | IR Blaster | `ir-spi@0` (`gpio116` MOSI on NORTH TLMM) | P2 | **PASS** | `/dev/hakios-ir` registered (`38 kHz` NEC TX on `gpio116`, `cfg=0x1`, `kern.hakios.ir_ready=1`, `logs/033757-run.log`) |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | DTB GPIOs surveyed (`pwr(10)=0/0 irq(23)=0/0 rst(24)=0x1/0`, `logs/033757-run.log`); SPI/BiometricKit HAL & HBM zone `TODO` |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
 | 33W Wired Fast Charge | `bq25970` (`0x66` on QUP15 `gpio44/45`) + `smb1390` + USB-PD | P1 | **PARTIAL** | Read-only I2C telemetry `PASS` (`part=0x16 vbus=5104 mV vac=4960 mV vbat=4406 mV ibus=0 mA`, `kern.hakios.fastchg_*`); active QC/PD high-wattage pump control `TODO` |
 | 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `ln8282` (`0x55`) / `rx1619` (`0x61`) on QUP16 | P1 | **TODO** | QUP16 `gpio48/49` verified idle-high (`cfg=0x1 io=0x1`); `0x3b`/`0x55` NACK off wireless pad (`idt,enable` `GPIO155`/`VRECT` unpowered); active WLC `TODO` |
-| USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | USB only used in UEFI loader; no XNU `DWC3` gadget, `usbmux`, or `lockdownd` (PC i4Tools/iTunes blocked) |
+| USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | Read-only hardware MMIO probe `PASS` (`id=0x33313130 hw0=0x4020400a hw3=0x10420086 dsts=0x82cdf0 speed=0 link=0`, `kern.hakios.usb_dwc3_*`, `logs/034840-run.log`); XNU `DWC3` gadget, `usbmux`, `lockdownd` `TODO` |
 | USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | **PARTIAL** | Read-only partition access (`PASS` for modem EFS/devcfg); guarded writable persistence (`ufs_write=1`) not enabled |
 | Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI `PPID 0x60`) | P1 | **PASS** | PM8150 SPMI RTC counter (`kern.hakios.umi_rtc_seconds`, `delta=2 s`) + `epoch=` Unix sync (`kern.hakios.umi_rtc_unix_time=1795721417`, `logs/033017-run.log`); alarm wake `TODO` |
@@ -134,6 +134,17 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 5 Autonomous Audit (2026-11-27, `logs/034840-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `3b2ca5f1ba82`, `result: returned 1414621 0`):
+
+- **NFC NCI 2.0 Char Device (`/dev/hakios-nfc`) & Exact-Length NCI Reader (`PARTIAL` -> HW+cdev `PASS`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Replaced fixed-size NCI reads with header-first `nfc_read_packet()` (reads 3-byte NCI header then exact `hdr[2]` payload length over QUP1 `0x28`), eliminating trailing padding/overlap: `CORE_RESET rsp (16 ms irq=0 len=4): 40 00 01 00 00 00`, `CORE_RESET ntf (len=13 ver=0x20): 60 00 0a 02 01 20 04 05`, `CORE_INIT rsp (4 ms len=33): 40 01 1e 00 1a 3e 06 00`.
+  - Registered `/dev/hakios-nfc` (`nfc_cdevsw`: `open` asserts `VEN` wake pulse, `write` sends NCI frame to `0x28`, `read` polls `IRQ` `gpio111` up to 200 ms and returns exact packet, `close` restores saved `VEN`/`FIRM` state) and exported `kern.hakios.nfc_dev_ready=1`. Userspace NCI daemon / CoreNFC bridge remains `TODO`.
+- **Synopsys DWC3 (`dwc3@a600000`) Read-Only Hardware Telemetry Probe** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Added strictly read-only `thyme_usb_dwc3_probe()` (`0x0a60c000`, zero writes so `xnuloader` live USB stays intact) and exported `kern.hakios.usb_dwc3_id` / `kern.hakios.usb_dwc3_dsts`: observed `id=0x33313130 hw0=0x4020400a hw3=0x10420086 dsts=0x82cdf0 speed=0 link=0` with clean USB log return (`result: returned 1414621 0`).
+- **Artifacts**: `hakios-kernel` (`17,005,336 B`, sha256 `3b2ca5f1ba82b2cf4cd4d3aae1411672f44bffd51672521b36fbf7200fb69ec2`), `userland/root.apfs` (`48,992,256 B`, sha256 `99594b1ddac37ac810aacf62d6619f35ca8a0e99aa49946eda233e69c269bc8a`; total `65,997,592 B < 66,060,288 B`), `logs/034840-run.log` (sha256 `b057b2da5fb619119e9234cb4b1d49a291a002501007e1517f5b744800b78fd8`).
 
 ## Batch 4 Autonomous Audit (2026-11-27, `logs/033757-run.log`)
 

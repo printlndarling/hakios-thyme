@@ -17,6 +17,7 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
 #include <sys/conf.h>
+#include <sys/errno.h>
 #include <sys/hakios.input.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
@@ -78,6 +79,7 @@ SYSCTL_DECL(_kern_hakios);
 #define UMI_WDT_STS           0x0cu
 #define UMI_WDT_BARK          0x10u
 #define UMI_WDT_BITE          0x14u
+#define UMI_USB3_DWC3_PA      0x0a60c000UL
 
 #define ARB_VERSION           0x000
 #define ARB_FEATURES          0x004
@@ -97,7 +99,10 @@ static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts;
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
-static int nfc_present, nfc_nci_ver, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
+static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
+static int usb_dwc3_id, usb_dwc3_dsts;
+static uint32_t nfc_saved_ven_cfg, nfc_saved_ven_io, nfc_saved_firm_cfg, nfc_saved_firm_io;
+static bool nfc_saved_valid;
 static uint32_t rtc_boot_seconds;
 static int64_t umi_rtc_epoch_offset;
 static bool umi_rtc_synced;
@@ -137,6 +142,15 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_present,
 SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_nci_ver,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &nfc_nci_ver, 0,
     "NFC controller NCI protocol version from CORE_RESET");
+SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_dev_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &nfc_dev_ready, 0,
+    "NFC NCI character device /dev/hakios-nfc ready state");
+SYSCTL_INT(_kern_hakios, OID_AUTO, usb_dwc3_id,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &usb_dwc3_id, 0,
+    "Synopsys DWC3 GSNPSID register");
+SYSCTL_INT(_kern_hakios, OID_AUTO, usb_dwc3_dsts,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &usb_dwc3_dsts, 0,
+    "Synopsys DWC3 DSTS device status register");
 SYSCTL_INT(_kern_hakios, OID_AUTO, usbc_audio_id,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &usbc_audio_id, 0,
     "USB-C audio switch fsa4480@0x42 chip ID register (0x00)");
@@ -756,6 +770,132 @@ i2c_read_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
 	return ok;
 }
 
+static bool
+nfc_read_packet(uint8_t *buf, unsigned max_len, unsigned *out_len)
+{
+	unsigned plen;
+
+	if (north_tlmm == 0 || max_len < 3u) {
+		return false;
+	}
+	if (!i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u, buf, 3u)) {
+		return false;
+	}
+	plen = buf[2];
+	if (plen > max_len - 3u) {
+		plen = max_len - 3u;
+	}
+	if (plen > 0 &&
+	    !i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u, buf + 3, plen)) {
+		return false;
+	}
+	if (out_len != NULL) {
+		*out_len = 3u + plen;
+	}
+	return true;
+}
+
+static int
+nfc_dev_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+{
+	if (north_tlmm == 0 || !nfc_present) {
+		return ENODEV;
+	}
+	if (nfc_saved_valid) {
+		tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, 0);
+		tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, (nfc_saved_firm_cfg & ~0x3cu) | 0x200u);
+		tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, 0);
+		tlmm_cfg_wr(north_tlmm, UMI_NFC_VEN_PIN, (nfc_saved_ven_cfg & ~0x3cu) | 0x200u);
+		delay_for_interval(10, NSEC_PER_MSEC);
+		tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, 2u);
+		delay_for_interval(25, NSEC_PER_MSEC);
+	}
+	return 0;
+}
+
+static int
+nfc_dev_close(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+{
+	if (north_tlmm != 0 && nfc_saved_valid) {
+		tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, nfc_saved_ven_io & 2u);
+		tlmm_cfg_wr(north_tlmm, UMI_NFC_VEN_PIN, nfc_saved_ven_cfg);
+		tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, nfc_saved_firm_io & 2u);
+		tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, nfc_saved_firm_cfg);
+	}
+	return 0;
+}
+
+static int
+nfc_dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	uint8_t buf[260];
+	uint32_t saved_cfg[2], saved_io[2];
+	user_ssize_t resid = uio_resid(uio);
+	unsigned len;
+	int err;
+	bool ok;
+
+	if (north_tlmm == 0 || !nfc_present) {
+		return ENODEV;
+	}
+	if (resid <= 0 || resid > 258) {
+		return EINVAL;
+	}
+	len = (unsigned)resid;
+	err = uiomove((caddr_t)buf, (int)len, uio);
+	if (err != 0) {
+		return err;
+	}
+	if (!i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
+		return EBUSY;
+	}
+	ok = i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u, buf, len);
+	i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
+	return ok ? 0 : EIO;
+}
+
+static int
+nfc_dev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	uint8_t buf[260];
+	uint32_t saved_cfg[2], saved_io[2];
+	user_ssize_t resid = uio_resid(uio);
+	unsigned pkt_len = 0, copy_len;
+	bool ok;
+
+	if (north_tlmm == 0 || !nfc_present) {
+		return ENODEV;
+	}
+	if (resid < 3) {
+		return EINVAL;
+	}
+	for (unsigned w = 0; w < 200 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0; w++) {
+		delay_for_interval(1, NSEC_PER_MSEC);
+	}
+	if ((tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
+		return EAGAIN;
+	}
+	if (!i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
+		return EBUSY;
+	}
+	ok = nfc_read_packet(buf, sizeof(buf), &pkt_len);
+	i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
+	if (!ok || pkt_len == 0) {
+		return EIO;
+	}
+	copy_len = pkt_len;
+	if ((user_ssize_t)copy_len > resid) {
+		copy_len = (unsigned)resid;
+	}
+	return uiomove((caddr_t)buf, (int)copy_len, uio);
+}
+
+static const struct cdevsw nfc_cdevsw = {
+	.d_open = nfc_dev_open, .d_close = nfc_dev_close, .d_read = nfc_dev_read, .d_write = nfc_dev_write,
+	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
+	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0,
+};
+
 static void
 ir_carrier_us(unsigned us)
 {
@@ -843,6 +983,29 @@ thyme_wdt_probe(void)
 	hakios_tl("UMI wdt: 0x17c10000 ctl=%#x sts=%#x bark=%u bite=%u\n", ctl, sts, bark, bite);
 }
 
+/* Strictly read-only Synopsys DWC3 hardware telemetry probe (dwc3@a600000). */
+static void
+thyme_usb_dwc3_probe(void)
+{
+	vm_offset_t dwc3 = ml_io_map(UMI_USB3_DWC3_PA, 0x1000UL);
+
+	if (dwc3 == 0) {
+		hakios_tl("UMI usb_dwc3: map failed\n");
+		return;
+	}
+	uint32_t id = keys_reg(dwc3, 0x120u);
+	uint32_t hw0 = keys_reg(dwc3, 0x140u);
+	uint32_t hw3 = keys_reg(dwc3, 0x14cu);
+	uint32_t dsts = keys_reg(dwc3, 0x70cu);
+	unsigned speed = dsts & 0x7u;
+	unsigned link = (dsts >> 18) & 0xfu;
+
+	usb_dwc3_id = (int)id;
+	usb_dwc3_dsts = (int)dsts;
+	hakios_tl("UMI usb_dwc3: id=%#x hw0=%#x hw3=%#x dsts=%#x speed=%u link=%u\n",
+	    id, hw0, hw3, dsts, speed, link);
+}
+
 /* Strictly read-only I2C telemetry probe for wired 33W (bq25970), wireless 30W (idtp9415/ln8282) & NFC (nq-nci). */
 static void
 thyme_charger_probe(void)
@@ -920,6 +1083,11 @@ thyme_charger_probe(void)
 		if (ven_cfg == 0) {
 			hakios_tl("UMI nfc: gpio83 VEN cfg=0 (RAZ/suspended); skip toggling\n");
 		} else {
+			nfc_saved_ven_cfg = ven_cfg;
+			nfc_saved_ven_io = ven_io;
+			nfc_saved_firm_cfg = firm_cfg;
+			nfc_saved_firm_io = firm_io;
+			nfc_saved_valid = true;
 			/* Drive FIRM=0, then pulse VEN LOW (10 ms) -> HIGH (25 ms) for clean NCI mode wake. */
 			tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, 0);
 			tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, (firm_cfg & ~0x3cu) | 0x200u);
@@ -945,8 +1113,8 @@ thyme_charger_probe(void)
 			hakios_tl("UMI nfc: nq-nci@0x28 write %s%s\n", tx_ok ? "ACK" : "NACK",
 			    ven_toggled ? " (VEN pulsed)" : "");
 			if (tx_ok) {
-				uint8_t rsp[16] = { 0 };
-				unsigned waited = 0;
+				uint8_t rsp[32] = { 0 };
+				unsigned rsp_len = 0, waited = 0;
 
 				while (waited < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
 					delay_for_interval(1, NSEC_PER_MSEC);
@@ -955,26 +1123,26 @@ thyme_charger_probe(void)
 				if (waited >= 50) {
 					delay_for_interval(20, NSEC_PER_MSEC);
 				}
-				if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
-				    0x28u, rsp, sizeof(rsp))) {
-					if (rsp[0] == 0x40 && rsp[1] == 0x00 && rsp[2] >= 2) {
+				if (nfc_read_packet(rsp, sizeof(rsp), &rsp_len)) {
+					if (rsp[0] == 0x40 && rsp[1] == 0x00 && rsp_len >= 5u && rsp[2] >= 2u) {
 						nfc_nci_ver = (int)rsp[4];
 					}
-					hakios_tl("UMI nfc: CORE_RESET rsp (%u ms irq=%u): %02x %02x %02x %02x %02x %02x\n",
-					    waited, tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u,
+					hakios_tl("UMI nfc: CORE_RESET rsp (%u ms irq=%u len=%u): %02x %02x %02x %02x %02x %02x\n",
+					    waited, tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u, rsp_len,
 					    rsp[0], rsp[1], rsp[2], rsp[3], rsp[4], rsp[5]);
 					for (unsigned w = 0; w < 30 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0; w++) {
 						delay_for_interval(1, NSEC_PER_MSEC);
 					}
 					if ((tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) != 0) {
-						uint8_t ntf[16] = { 0 };
+						uint8_t ntf[32] = { 0 };
+						unsigned ntf_len = 0;
 
-						if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
-						    0x28u, ntf, sizeof(ntf))) {
-							if (ntf[0] == 0x60 && ntf[1] == 0x00 && ntf[2] >= 4) {
+						if (nfc_read_packet(ntf, sizeof(ntf), &ntf_len)) {
+							if (ntf[0] == 0x60 && ntf[1] == 0x00 && ntf_len >= 6u && ntf[2] >= 4u) {
 								nfc_nci_ver = (int)ntf[5];
 							}
-							hakios_tl("UMI nfc: CORE_RESET ntf: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+							hakios_tl("UMI nfc: CORE_RESET ntf (len=%u ver=%#x): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+							    ntf_len, nfc_nci_ver,
 							    ntf[0], ntf[1], ntf[2], ntf[3], ntf[4], ntf[5], ntf[6], ntf[7]);
 						}
 					}
@@ -987,17 +1155,16 @@ thyme_charger_probe(void)
 					}
 					if (i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
 					    0x28u, nci_init, init_len)) {
-						uint8_t init_rsp[24] = { 0 };
-						unsigned iw = 0;
+						uint8_t init_rsp[64] = { 0 };
+						unsigned init_rsp_len = 0, iw = 0;
 
 						while (iw < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
 							delay_for_interval(1, NSEC_PER_MSEC);
 							iw++;
 						}
-						if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
-						    0x28u, init_rsp, sizeof(init_rsp))) {
-							hakios_tl("UMI nfc: CORE_INIT rsp (%u ms): %02x %02x %02x %02x %02x %02x %02x %02x\n",
-							    iw, init_rsp[0], init_rsp[1], init_rsp[2], init_rsp[3],
+						if (nfc_read_packet(init_rsp, sizeof(init_rsp), &init_rsp_len)) {
+							hakios_tl("UMI nfc: CORE_INIT rsp (%u ms len=%u): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+							    iw, init_rsp_len, init_rsp[0], init_rsp[1], init_rsp[2], init_rsp[3],
 							    init_rsp[4], init_rsp[5], init_rsp[6], init_rsp[7]);
 						}
 					}
@@ -1020,6 +1187,15 @@ thyme_charger_probe(void)
 			tlmm_cfg_wr(north_tlmm, UMI_NFC_VEN_PIN, ven_cfg);
 			tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_io & 2u);
 			tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_cfg);
+		}
+		if (nfc_present == 1) {
+			int nmajor = cdevsw_add(-1, &nfc_cdevsw);
+
+			if (nmajor >= 0 &&
+			    devfs_make_node(makedev(nmajor, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "hakios-nfc") != NULL) {
+				nfc_dev_ready = 1;
+				hakios_tl("UMI nfc: /dev/hakios-nfc ready (NCI ver=%#x)\n", nfc_nci_ver);
+			}
 		}
 		/* IR Blaster (ir-spi@0 on QUP2 gpio115..118, MOSI gpio116) */
 		{
@@ -1161,6 +1337,7 @@ umi_keys_init(void)
 		}
 	}
 	thyme_wdt_probe();
+	thyme_usb_dwc3_probe();
 	thyme_charger_probe();
 	kern_return_t kr = kernel_thread_start(keys_thread, NULL, &thread);
 	if (kr == KERN_SUCCESS) {
