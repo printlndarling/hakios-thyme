@@ -582,7 +582,9 @@ main(int argc, char **argv)
 		} else if (strcmp(argv[i], "tone") == 0 && i + 1 < argc) {
 			double seconds = atof(argv[++i]);
 
-			if (i + 2 < argc && atof(argv[i + 1]) > 0 && atof(argv[i + 2]) > 0) {
+			if (i + 2 < argc &&
+			    argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9' &&
+			    argv[i + 2][0] >= '0' && argv[i + 2][0] <= '9') {
 				frequency[0] = atof(argv[++i]);
 				frequency[1] = atof(argv[++i]);
 			}

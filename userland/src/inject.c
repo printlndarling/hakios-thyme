@@ -677,10 +677,12 @@ brightness_fixes(void)
 /* ---- backboardd: the CoreBrightness slider drives the THYME panel ------------------------------- */
 
 static float thyme_brightness = 0.6f;
+static float thyme_backlight_factor = 1.0f;
 static bool thyme_brightness_user_set;
 static id thyme_bk_controller;
 static id thyme_tx_manager;
 static unsigned thyme_brightness_logs;
+static unsigned thyme_factor_logs;
 
 static id (*orig_bk_init)(id, SEL, id, id, id);
 static float (*orig_bk_get_brightness)(id, SEL);
@@ -707,9 +709,27 @@ thyme_apply_brightness(float level, const char *source)
 	}
 	permille = (int)(level * 1000.0f + 0.5f);
 	(void)sysctlbyname("kern.hakios.brightness", NULL, NULL, &permille, sizeof(permille));
-	if (thyme_brightness_logs < 8) {
+	if (thyme_brightness_logs < 32) {
 		thyme_brightness_logs++;
 		say("hakios: brightness (%s): %.3f -> %d permille\n", source, (double)level, permille);
+	}
+}
+
+static void
+thyme_apply_backlight_factor(float factor, const char *source)
+{
+	int permille;
+	bool edge;
+
+	if (factor < 0.0f) factor = 0.0f;
+	if (factor > 1.0f) factor = 1.0f;
+	edge = (factor <= 0.001f) != (thyme_backlight_factor <= 0.001f);
+	thyme_backlight_factor = factor;
+	permille = (int)(factor * 1000.0f + 0.5f);
+	(void)sysctlbyname("kern.hakios.backlight_factor", NULL, NULL, &permille, sizeof(permille));
+	if (thyme_factor_logs < 32 || edge) {
+		thyme_factor_logs++;
+		say("hakios: backlight factor (%s): %.3f -> %d permille\n", source, (double)factor, permille);
 	}
 }
 
@@ -823,22 +843,41 @@ my_bsi_set_prop(id self, SEL cmd, id prop, id key, id client)
 {
 	BOOL ok = orig_bsi_set_prop(self, cmd, prop, key, client);
 
-	if (key != NULL && prop != NULL && CFGetTypeID((CFTypeRef)key) == CFStringGetTypeID() &&
-	    CFStringCompare((CFStringRef)key, CFSTR("DisplayBrightness"), 0) == kCFCompareEqualTo) {
-		float value = -1.0f;
+	if (key != NULL && prop != NULL && CFGetTypeID((CFTypeRef)key) == CFStringGetTypeID()) {
+		CFStringRef k = (CFStringRef)key;
 		CFTypeID type = CFGetTypeID((CFTypeRef)prop);
 
-		if (type == CFDictionaryGetTypeID()) {
-			const void *number = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("Brightness"));
-			if (number != NULL && CFGetTypeID((CFTypeRef)number) == CFNumberGetTypeID()) {
-				CFNumberGetValue((CFNumberRef)number, kCFNumberFloatType, &value);
+		if (CFStringCompare(k, CFSTR("DisplayBrightness"), 0) == kCFCompareEqualTo) {
+			float value = -1.0f;
+			if (type == CFDictionaryGetTypeID()) {
+				const void *number = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("Brightness"));
+				if (number != NULL && CFGetTypeID((CFTypeRef)number) == CFNumberGetTypeID()) {
+					CFNumberGetValue((CFNumberRef)number, kCFNumberFloatType, &value);
+				}
+			} else if (type == CFNumberGetTypeID()) {
+				CFNumberGetValue((CFNumberRef)prop, kCFNumberFloatType, &value);
 			}
-		} else if (type == CFNumberGetTypeID()) {
-			CFNumberGetValue((CFNumberRef)prop, kCFNumberFloatType, &value);
-		}
-		if (value >= 0.0f && value <= 1.0f) {
-			thyme_apply_brightness(value, "BrightnessSystemInternal");
-			return YES;
+			if (value >= 0.0f && value <= 1.0f) {
+				thyme_apply_brightness(value, "BrightnessSystemInternal");
+				return YES;
+			}
+		} else if (CFStringCompare(k, CFSTR("DisplayBrightnessFactorWithFade"), 0) == kCFCompareEqualTo ||
+		    CFStringCompare(k, CFSTR("DisplayBrightnessFactor"), 0) == kCFCompareEqualTo) {
+			float factor = -1.0f;
+			if (type == CFNumberGetTypeID()) {
+				CFNumberGetValue((CFNumberRef)prop, kCFNumberFloatType, &factor);
+			} else if (type == CFDictionaryGetTypeID()) {
+				const void *n = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("BrightnessFactor"));
+				if (n == NULL) n = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("DisplayBrightnessFactor"));
+				if (n == NULL) n = CFDictionaryGetValue((CFDictionaryRef)prop, CFSTR("Factor"));
+				if (n != NULL && CFGetTypeID((CFTypeRef)n) == CFNumberGetTypeID()) {
+					CFNumberGetValue((CFNumberRef)n, kCFNumberFloatType, &factor);
+				}
+			}
+			if (factor >= 0.0f && factor <= 1.0f) {
+				thyme_apply_backlight_factor(factor, "BrightnessSystemInternal");
+				return YES;
+			}
 		}
 	}
 	return ok;

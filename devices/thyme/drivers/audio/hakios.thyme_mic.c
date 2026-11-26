@@ -2045,7 +2045,12 @@ listen(bool for_darwin)
 					uint32_t n = got - i < 240 ? got - i : 240;
 
 					for (uint32_t j = 0; j < n; j++) {
-						stereo[2 * j] = stereo[2 * j + 1] = mono[i + j];
+						if (channels >= 2) {
+							stereo[2 * j] = samples[(i + j) * channels];
+							stereo[2 * j + 1] = samples[(i + j) * channels + 1];
+						} else {
+							stereo[2 * j] = stereo[2 * j + 1] = mono[i + j];
+						}
 					}
 					hakios_audio_record_fed(stereo, n);
 				}

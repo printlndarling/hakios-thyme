@@ -10,10 +10,12 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
 
 typedef struct { float minimum, maximum, preferred; } hakios_frr_t;
 
@@ -83,7 +85,19 @@ __attribute__((constructor))
 static void hakios_hfr_init(void) {
     setenv("CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION", "0", 1);
     if (hfr_boot_disabled()) return;
-    fprintf(stderr, "hakios: hfr 90Hz active in %s\n", getprogname() ? getprogname() : "?");
+    {
+        char msg[128];
+        int len = snprintf(msg, sizeof(msg), "hakios: hfr 90Hz active in %s\n", getprogname() ? getprogname() : "?");
+        if (len > 0) {
+            int fd = open("/dev/console", O_WRONLY | O_NOCTTY);
+            if (fd >= 0) {
+                (void)write(fd, msg, (size_t)len);
+                close(fd);
+            } else {
+                fprintf(stderr, "%s", msg);
+            }
+        }
+    }
     Class dl = objc_getClass("CADisplayLink");
     if (dl) {
         Method m;

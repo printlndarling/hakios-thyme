@@ -1618,6 +1618,21 @@ sound_thread(__unused void *parameter, __unused wait_result_t result)
 
 		announce("UMI protected speaker test: OTP trims, board limits, firmware and a capped test tone");
 		if (!umi_speaker_prepare() || !umi_speaker_start() || !umi_speaker_volume(below, 50)) goto out;
+		if (test_channel == 3) {
+			say("sound: UMI SPEAKER STEREO TEST: %u s LEFT only, 2 s silence, %u s RIGHT only, %u.%03u dB under unity\n",
+			    test_seconds, test_seconds, below / 8, below % 8 * 125);
+			test_channel = 1;
+			say("sound: UMI SPEAKER TONE NOW: %u s LEFT ONLY (1 kHz)\n", test_seconds);
+			ok = play(test_seconds * 1000, true);
+			if (ok) {
+				sleep_ms(2000);
+				test_channel = 2;
+				say("sound: UMI SPEAKER TONE NOW: %u s RIGHT ONLY (1 kHz)\n", test_seconds);
+				ok = play(test_seconds * 1000, true);
+			}
+			test_channel = 3;
+			goto out;
+		}
 		say("sound: UMI SPEAKER TONE NOW: %u s, 1 kHz at -20 dBFS on %s, %u.%03u dB under unity\n",
 		    test_seconds, test_channel == 1 ? "the left channel only" : test_channel == 2 ? "the right channel only" :
 		    "both channels", below / 8, below % 8 * 125);
@@ -1721,7 +1736,7 @@ hakios_sound_dsp_up(void)
 	PE_parse_boot_argn("sound_secs", &seconds, sizeof(seconds));
 	PE_parse_boot_argn("sound_below", &below, sizeof(below));
 	PE_parse_boot_argn("sound_channel", &test_channel, sizeof(test_channel));
-	if (test_channel > 2) {
+	if (test_channel > 3) {
 		test_channel = 0;
 	}
 	if (below > 2048) below = 2048;

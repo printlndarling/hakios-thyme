@@ -63,7 +63,8 @@ extern void loader_log_putc(char c);
 static vm_offset_t gcc_map, dispcc_map, dsi0;
 static bool brightness_ready;
 static int brightness_permille = THYME_BL_DEFAULT_PERMILLE;
-static uint32_t brightness_last_level;
+static int backlight_factor = 1000;
+static uint32_t brightness_last_level = ~0u;
 static unsigned brightness_logs;
 
 /*
@@ -555,12 +556,42 @@ dsi_probe(void)
 	}
 }
 
+static void
+apply_backlight_locked(const char *tag)
+{
+	uint32_t level;
+
+	if (backlight_factor <= 0) {
+		level = 0;
+	} else {
+		int eff = (brightness_permille * backlight_factor + 500) / 1000;
+		level = permille_to_level(eff);
+	}
+	if (level != brightness_last_level) {
+		bool ok = false;
+		for (unsigned attempt = 0; attempt < 3 && !ok; attempt++) {
+			if (attempt != 0) {
+				delay_for_interval(5, NSEC_PER_MSEC);
+			}
+			ok = send_backlight(level);
+		}
+		bool was_zero = (brightness_last_level == 0);
+		if (ok) {
+			brightness_last_level = level;
+		}
+		if (brightness_logs < 48 || !ok || level == 0 || was_zero) {
+			brightness_logs++;
+			tell("display: THYME backlight %s bright=%d factor=%d -> DCS 0x51 level %u (%s)\n",
+			    tag, brightness_permille, backlight_factor, level, ok ? "ok" : "skipped");
+		}
+	}
+}
+
 static int
 sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2,
     struct sysctl_req *req)
 {
 	int value = brightness_permille, error;
-	uint32_t level;
 
 	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
 	if (error != 0 || req->newptr == 0) {
@@ -574,19 +605,7 @@ sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unuse
 	}
 	lck_mtx_lock(&brightness_mtx);
 	brightness_permille = value;
-	level = permille_to_level(value);
-	if (level != brightness_last_level) {
-		bool ok = send_backlight(level);
-
-		if (ok) {
-			brightness_last_level = level;
-		}
-		if (brightness_logs < 12 || !ok) {
-			brightness_logs++;
-			tell("display: THYME backlight %d permille -> DCS 0x51 level %u (%s)\n",
-			    value, level, ok ? "ok" : "skipped");
-		}
-	}
+	apply_backlight_locked("slider");
 	lck_mtx_unlock(&brightness_mtx);
 	return 0;
 }
@@ -594,6 +613,33 @@ sysctl_brightness(__unused struct sysctl_oid *oidp, __unused void *arg1, __unuse
 SYSCTL_PROC(_kern_hakios, OID_AUTO, brightness,
     CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
     sysctl_brightness, "I", "display brightness in permille (0..1000)");
+
+static int
+sysctl_backlight_factor(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2,
+    struct sysctl_req *req)
+{
+	int value = backlight_factor, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value < 0) {
+		value = 0;
+	}
+	if (value > 1000) {
+		value = 1000;
+	}
+	lck_mtx_lock(&brightness_mtx);
+	backlight_factor = value;
+	apply_backlight_locked("factor");
+	lck_mtx_unlock(&brightness_mtx);
+	return 0;
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, backlight_factor,
+    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
+    sysctl_backlight_factor, "I", "display backlight factor in permille (0=off..1000=full)");
 
 void
 hakios_brightness_init(void)
