@@ -440,9 +440,9 @@ static const struct camera {
 	int             formats[2][3];  /* sensor width, height, frames a second of "Photo" and of a video format */
 } cameras[2] = {
 	{ 1, "Back Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:0", false, 4.0, 1.8, 1.22, 65.0,
-	  { 1.0f, 1.0f }, 10, 1.0f, 0, { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },     /* "Photo", "Video-60" */
+	  { 1.0f, 1.0f }, 4, 1.0f, 0, { { 4032, 3024, 30 }, { 4224, 2376, 60 } } },      /* "Photo", "Video-60" */
 	{ 2, "Front Camera", "com.apple.avfoundation.avcapturedevice.built-in_video:1", true, 2.87, 2.2, 1.0, 70.0,
-	  { 1.015f, 1.0f }, 12, 1.18f, 1200, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } }, /* "Photo", "Video-30" */
+	  { 1.015f, 1.0f }, 4, 1.18f, 1200, { { 3088, 2320, 30 }, { 3840, 2160, 30 } } }, /* "Photo", "Video-30" */
 };
 
 /* Where each camera's focus last settled, by the kernel's sensor number. A
@@ -461,6 +461,7 @@ struct stream {
 	CFDictionaryRef metadata;       /* the last frame's (frame_metadata()), for a buffer that has none of its own */
 	pthread_mutex_t metadata_lock;  /* (not `lock': AddAttachmentsToSampleBuffer may come while a frame is given out) */
 	unsigned        stills_wanted;  /* photographs asked for by StillImageCaptureNow, not yet given */
+	unsigned        still_af_wait;  /* frames waited for an active AF search to settle before snapping */
 	unsigned        flash_mode;     /* FlashMode: 0 off, 1 on, 2 automatic */
 	bool            flash_fired;    /* the torch is on for the photograph being given */
 	float           last_lux;       /* the last frame's lux index, for the automatic flash */
@@ -650,10 +651,17 @@ af_window(struct stream *s, CFTypeRef value)
 	}
 	x0 = x0 < 0 ? 0 : x0 + width > 1 ? 1 - width : x0;
 	y0 = y0 < 0 ? 0 : y0 + height > 1 ? 1 - height : y0;
-	s->af_window[0] = (float)x0;
-	s->af_window[1] = (float)y0;
-	s->af_window[2] = (float)(x0 + width);
-	s->af_window[3] = (float)(y0 + height);
+	if (s->camera != NULL && s->camera->turned) {
+		s->af_window[0] = (float)(1.0 - (x0 + width));
+		s->af_window[1] = (float)(1.0 - (y0 + height));
+		s->af_window[2] = (float)(1.0 - x0);
+		s->af_window[3] = (float)(1.0 - y0);
+	} else {
+		s->af_window[0] = (float)x0;
+		s->af_window[1] = (float)y0;
+		s->af_window[2] = (float)(x0 + width);
+		s->af_window[3] = (float)(y0 + height);
+	}
 }
 
 static OSStatus
@@ -961,7 +969,8 @@ md_put(CFMutableDictionaryRef m, int key, CFTypeRef value)
 
 /* the frame's metadata, as H10ISP's stream gives them (see md_names) */
 static CFDictionaryRef
-frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const struct isp_stats *st, CFStringRef port)
+frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const struct isp_stats *st, CFStringRef port,
+    bool af_busy, bool af_locked)
 {
 	CFMutableDictionaryRef m;
 	double exposure = f->exposure_lines * (double)f->line_ns / 1e9, analog = f->gain_unity ? (double)f->gain / f->gain_unity : 1;
@@ -983,13 +992,13 @@ frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const
 	md_put(m, MD_FRAME_RATE, number_f(fps));
 	md_put(m, MD_LUX, number_i((int64_t)(lux + 0.5)));
 	md_put(m, MD_SNR, number_f(40 - 10 * log10(total < 1 ? 1 : total)));
-	md_put(m, MD_AF_STATUS, number_i(0));
-	md_put(m, MD_FOCUSING, number_i(0));
+	md_put(m, MD_AF_STATUS, number_i(af_busy ? 2 : 4));
+	md_put(m, MD_FOCUSING, number_i(af_busy ? 1 : 0));
 	md_put(m, MD_AE_STABLE, CFRetain(kCFBooleanTrue));
 	md_put(m, MD_AE_LOCKED, CFRetain(kCFBooleanFalse));
 	md_put(m, MD_AWB_STABLE, CFRetain(kCFBooleanTrue));
 	md_put(m, MD_AWB_LOCKED, CFRetain(kCFBooleanFalse));
-	md_put(m, MD_AF_LOCKED, CFRetain(kCFBooleanFalse));
+	md_put(m, MD_AF_LOCKED, CFRetain(af_locked ? kCFBooleanTrue : kCFBooleanFalse));
 	/*
 	 * The zoom the picture was made with: the source node takes it for what the ISP applied
 	 * (-[BWMultiStreamCameraSourceNode _ispAppliedZoomFactorFromSampleBufferMetadataDictionary:outputIndex:])
@@ -1142,18 +1151,26 @@ colour_temperature(const struct isp *isp)
  * of the curve.
  */
 enum { AF_WATCH, AF_STEADY, AF_CLIMB, AF_SWEEP, AF_FINE_SEARCH, AF_SETTLE };
-#define AF_NEAR         16              /* (off the stop at 0) */
-#define AF_FAR          3072            /* (the AK7377's twelve bits; the fridge at ~2 m is sharp near 1023) */
-#define AF_STEP         96
-#define AF_FINE         24
+/*
+ * AK7377 travel in 12-bit units (written << 4): lower codes are infinity (~900-1150 for 2 m+),
+ * higher codes are macro (module region max is 10-bit 900 -> 12-bit 3600).
+ */
+#define AF_NEAR         256
+#define AF_FAR          3600
+#define AF_STEP         192
+#define AF_FINE         32
+#define AF_MOVE_MAX     384
 
 struct af {
 	int             state;
 	uint32_t        at, target;     /* where the lens was told to go; where it is going a step at a time */
 	unsigned        wait;           /* frames before the next measurement */
-	int             way;            /* +1 nearer, -1 further */
+	int             way;            /* +1 macro-ward, -1 infinity-ward */
 	bool            turned;
-	unsigned        worse;          /* steps in a row less sharp than the sharpest */
+	unsigned        worse;          /* steps in a row well under the peak */
+	unsigned        sweep_steps;    /* points measured during current sweep */
+	bool            had_rise;       /* sharpness rose above the sweep's start: a real peak was seen */
+	float           sweep_first;    /* sharpness at the first point of the sweep */
 	uint32_t        start, best, fine_to;
 	float           best_sharpness;
 	float           min_sharpness;          /* (the sweep's least: a travel with no peak is not a focus) */
@@ -1175,8 +1192,8 @@ af_go(int device, struct af *af, uint32_t target)
 	struct hakios_camera_command c = { .command = HAKIOS_CAMERA_FOCUS };
 
 	af->target = target < AF_NEAR ? AF_NEAR : target > AF_FAR ? AF_FAR : target;
-	c.a = af->at < af->target ? (af->target - af->at > AF_STEP ? af->at + AF_STEP : af->target) :
-	    (af->at - af->target > AF_STEP ? af->at - AF_STEP : af->target);
+	c.a = af->at < af->target ? (af->target - af->at > AF_MOVE_MAX ? af->at + AF_MOVE_MAX : af->target) :
+	    (af->at - af->target > AF_MOVE_MAX ? af->at - AF_MOVE_MAX : af->target);
 	af->at = c.a;
 	/*
 	 * The lens settles in a few milliseconds; what is spoilt is the frame being exposed while it moved
@@ -1293,6 +1310,9 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			af->best_sharpness = -1;
 			af->min_sharpness = 1e9f;
 			af->worse = 0;
+			af->sweep_steps = 0;
+			af->had_rise = false;
+			af->sweep_first = 0;
 			af->steps = 0;
 			af->way = af->at - AF_NEAR < AF_FAR - af->at ? 1 : -1;
 			af_go(device, af, af->way > 0 ? AF_NEAR : AF_FAR);     /* (walked there a step at a time) */
@@ -1342,41 +1362,50 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			af->best_sharpness = -1;
 			af->min_sharpness = 1e9f;
 			af->worse = 0;
+			af->sweep_steps = 0;
+			af->had_rise = false;
+			af->sweep_first = 0;
 			af->steps = 0;
 			af->way = af->at - AF_NEAR < AF_FAR - af->at ? 1 : -1;
 			af_go(device, af, af->way > 0 ? AF_NEAR : AF_FAR);
 			return;
 		}
 		af->state = AF_FINE_SEARCH;
-		af->fine_to = af->best + 2 * AF_FINE > AF_FAR ? AF_FAR : af->best + 2 * AF_FINE;
-		af_go(device, af, af->best > 2 * AF_FINE + AF_NEAR ? af->best - 2 * AF_FINE : AF_NEAR);
+		af->fine_to = af->best + 5 * AF_FINE > AF_FAR ? AF_FAR : af->best + 5 * AF_FINE;
+		af_go(device, af, af->best > 5 * AF_FINE + AF_NEAR ? af->best - 5 * AF_FINE : AF_NEAR);
 		return;
 	}
 	case AF_SWEEP:
 		say("focus: sweep: %u %.4f", af->at, sharpness);
+		if (af->sweep_steps == 0) {
+			af->sweep_first = sharpness;
+		}
+		af->sweep_steps++;
 		if (sharpness < af->min_sharpness) {
 			af->min_sharpness = sharpness;
 		}
 		if (sharpness > af->best_sharpness) {
+			if (af->sweep_steps > 1 && sharpness > af->sweep_first * 1.20f) {
+				af->had_rise = true;
+			}
 			af->best = af->at;
 			af->best_sharpness = sharpness;
 			af->worse = 0;
-		} else if (sharpness < af->best_sharpness * 0.85f) {
+		} else if (af->had_rise && af->best_sharpness > af->min_sharpness * 1.40f &&
+		    sharpness < af->best_sharpness * 0.65f) {
 			af->worse++;
+		} else {
+			af->worse = 0;
 		}
-		if (af->worse < 2 && (int)af->at + af->way * AF_STEP >= AF_NEAR && (int)af->at + af->way * AF_STEP <= AF_FAR) {
+		/*
+		 * Only stop early after passing a genuine contrast peak (rose well above the start
+		 * and fell below 65% for 3 consecutive steps); never abort on a flat noise dip near
+		 * the start of travel.
+		 */
+		if (af->worse < 3 && (int)af->at + af->way * AF_STEP >= AF_NEAR && (int)af->at + af->way * AF_STEP <= AF_FAR) {
 			af_go(device, af, (uint32_t)((int)af->at + af->way * AF_STEP));
 			return;
 		}
-		/*
-		 * The travel's best within a fifth of its worst is no peak: a dim or
-		 * blank scene (its gradient is the sensor's noise at every position),
-		 * or one whose subject no position focuses. Stopping at whichever
-		 * place that noise made look sharpest left the picture soft, and the
-		 * watch could not tell (the scene that came after was sharper than it,
-		 * so nothing asked for another search): the last position a search
-		 * settled on is the better answer, and it is known to focus something.
-		 */
 		if (af->have_home && af->home != af->at && af->best_sharpness < af->min_sharpness * 1.2f) {
 			say("focus: no peak in the travel (%.4f to %.4f): back to %u", af->min_sharpness,
 			    af->best_sharpness, af->home);
@@ -1385,8 +1414,8 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 			return;
 		}
 		af->state = AF_FINE_SEARCH;
-		af->fine_to = af->best + 2 * AF_FINE > AF_FAR ? AF_FAR : af->best + 2 * AF_FINE;
-		af_go(device, af, af->best > 2 * AF_FINE + AF_NEAR ? af->best - 2 * AF_FINE : AF_NEAR);
+		af->fine_to = af->best + 5 * AF_FINE > AF_FAR ? AF_FAR : af->best + 5 * AF_FINE;
+		af_go(device, af, af->best > 5 * AF_FINE + AF_NEAR ? af->best - 5 * AF_FINE : AF_NEAR);
 		return;
 	case AF_FINE_SEARCH:
 		if (sharpness > af->best_sharpness) {
@@ -1522,57 +1551,109 @@ send_picture(int device, CVPixelBufferRef pb)
  * for one, and the frame rate rises with it), so each frame carries less light
  * and the still averages twice as many to keep the same noise.
  */
-#define STILL_FRAMES    8
-static uint8_t *still_acc;              /* uint16_t a pixel, summed */
-static uint8_t *still_packed;           /* the mean, RAW10 as the sensor gave it */
+/*
+ * Still capture without motion ghosting:
+ * - Normal lighting (< 12x analog gain) or large modes (> 32 MP): instant single-frame RAW capture
+ *   (zero unaligned multi-frame ghosting, zero handheld motion blur).
+ * - Dark scenes (>= 12x analog gain): average up to STILL_LOWLIGHT_FRAMES (3) consecutive frames
+ *   ONLY while a fast 16x12 grid motion check confirms the camera and subject are completely still;
+ *   any movement aborts averaging immediately and outputs the clean single frame.
+ */
+#define STILL_LOWLIGHT_FRAMES   3
+#define STILL_GRID_W            16
+#define STILL_GRID_H            12
+static uint16_t *still_acc;             /* summed 10-bit pixels (only allocated for low-light burst) */
+static uint8_t *still_buf;              /* packed RAW10 output when averaged */
+static const uint8_t *still_out;        /* points to either raw (1 frame) or still_buf (averaged) */
 static uint32_t still_w, still_h, still_stride;
 static unsigned still_n;
+static uint16_t still_ref_grid[STILL_GRID_H * STILL_GRID_W];
+
+static void
+still_reset(void)
+{
+	if (still_acc != NULL && still_n > 0) {
+		memset(still_acc, 0, (size_t)still_w * still_h * sizeof(uint16_t));
+	}
+	still_n = 0;
+	still_out = NULL;
+}
+
+static void
+still_sample_grid(const struct hakios_camera_frame *f, const uint8_t *raw, uint16_t out[STILL_GRID_H * STILL_GRID_W])
+{
+	for (uint32_t gy = 0; gy < STILL_GRID_H; gy++) {
+		uint32_t y = ((gy + 1) * f->height / (STILL_GRID_H + 1)) & ~1u;
+		const uint8_t *row = raw + (size_t)y * f->stride;
+
+		for (uint32_t gx = 0; gx < STILL_GRID_W; gx++) {
+			uint32_t x = ((gx + 1) * f->width / (STILL_GRID_W + 1)) & ~3u;
+			const uint8_t *g = row + (x >> 2) * 5;
+
+			out[gy * STILL_GRID_W + gx] = (uint16_t)((g[0] << 2 | (g[4] & 3)));
+		}
+	}
+}
+
+static float
+still_grid_mad(const uint16_t a[STILL_GRID_H * STILL_GRID_W], const uint16_t b[STILL_GRID_H * STILL_GRID_W])
+{
+	uint32_t sum = 0;
+
+	for (int i = 0; i < STILL_GRID_H * STILL_GRID_W; i++) {
+		int d = (int)a[i] - (int)b[i];
+
+		sum += (uint32_t)(d < 0 ? -d : d);
+	}
+	return (float)sum / (float)(STILL_GRID_H * STILL_GRID_W);
+}
 
 static bool
 still_accumulate(const struct hakios_camera_frame *f, const uint8_t *raw)
 {
 	uint32_t w = f->width, h = f->height, stride = f->stride;
+	uint32_t unity = f->gain_unity ? f->gain_unity : 32;
+	bool want_single = ((uint64_t)w * h > 32000000) || (f->gain < 12 * unity);
 
-	/*
-	 * A whole-sensor frame is the photograph itself: res0 is 12032x9024, and
-	 * its sums would be a 217 MB buffer and eight passes over it while the
-	 * capture graph waits for the picture the shutter asked for (the graph
-	 * gives a still a few seconds; the sums take longer than that on this
-	 * processor, and the process may not even be allowed the buffer).  The
-	 * downscale to the graph's 4032x3024 still already averages about nine
-	 * sensor pixels into every output pixel.  Camera.app's 12 MP modes keep
-	 * the eight-frame sums.
-	 */
-	if ((uint64_t)w * h > 32000000) {
-		static bool said;
-
-		if (!said) {
-			said = true;
-			say("the photograph is one whole-sensor frame, %ux%u (no sums at this size)", w, h);
-		}
-		still_packed = (uint8_t *)raw;   /* (the worker's frame buffer: given before the next read) */
-		still_w = w;
-		still_h = h;
-		still_stride = stride;
-		still_n = 0;
+	if (want_single && still_n == 0) {
+		still_out = raw;
+		say("the photograph is one instant sharp frame, %ux%u (gain %.1fx)", w, h, (double)f->gain / unity);
 		return true;
 	}
 	if (still_acc == NULL || still_w != w || still_h != h || still_stride != stride) {
 		free(still_acc);
-		free(still_packed);
+		free(still_buf);
 		still_acc = calloc((size_t)w * h, sizeof(uint16_t));
-		still_packed = malloc((size_t)stride * h);
+		still_buf = malloc((size_t)stride * h);
 		still_w = w;
 		still_h = h;
 		still_stride = stride;
 		still_n = 0;
-		if (still_acc == NULL || still_packed == NULL) {
-			return false;
+		if (still_acc == NULL || still_buf == NULL) {
+			still_out = raw;
+			return true;
+		}
+	}
+	uint16_t grid[STILL_GRID_H * STILL_GRID_W];
+
+	still_sample_grid(f, raw, grid);
+	if (still_n == 0) {
+		memcpy(still_ref_grid, grid, sizeof(grid));
+	} else {
+		float mad = still_grid_mad(still_ref_grid, grid);
+
+		if (mad > 10.0f) {
+			/* Motion or hand shake detected: deliver this single sharp frame instead of ghosting. */
+			say("the photograph: motion detected (mad %.1f after %u frames), taking single sharp frame", mad, still_n);
+			memset(still_acc, 0, (size_t)still_w * still_h * sizeof(uint16_t));
+			still_n = 0;
+			still_out = raw;
+			return true;
 		}
 	}
 	for (uint32_t y = 0; y < h; y++) {
 		const uint8_t *s = raw + (size_t)y * stride;
-		uint16_t *a = (uint16_t *)still_acc + (size_t)y * w;
+		uint16_t *a = still_acc + (size_t)y * w;
 
 		for (uint32_t x = 0; x < w; x += 4) {
 			const uint8_t *g = s + (x >> 2) * 5;
@@ -1582,33 +1663,28 @@ still_accumulate(const struct hakios_camera_frame *f, const uint8_t *raw)
 			}
 		}
 	}
-	if (++still_n < STILL_FRAMES) {
+	if (++still_n < STILL_LOWLIGHT_FRAMES) {
 		return false;
 	}
 	for (uint32_t y = 0; y < h; y++) {
-		const uint16_t *a = (const uint16_t *)still_acc + (size_t)y * w;
-		uint8_t *o = still_packed + (size_t)y * stride;
+		const uint16_t *a = still_acc + (size_t)y * w;
+		uint8_t *o = still_buf + (size_t)y * stride;
 
 		for (uint32_t x = 0; x < w; x += 4) {
 			uint8_t *g = o + (x >> 2) * 5;
 			uint16_t v[4];
 
 			for (int i = 0; i < 4; i++) {
-				v[i] = x + i < w ? (uint16_t)((a[x + i] + STILL_FRAMES / 2) / STILL_FRAMES) : 0;
+				v[i] = x + i < w ? (uint16_t)((a[x + i] + STILL_LOWLIGHT_FRAMES / 2) / STILL_LOWLIGHT_FRAMES) : 0;
 				g[i] = (uint8_t)(v[i] >> 2);
 			}
 			g[4] = (uint8_t)((v[0] & 3) | (v[1] & 3) << 2 | (v[2] & 3) << 4 | (v[3] & 3) << 6);
 		}
 	}
 	still_n = 0;
-	/*
-	 * The sums are the next photograph's to start from zero: left here, the second
-	 * shot of a scene adds onto the first one's total and goes out at twice the
-	 * light -- its whites clip channel by channel and the picture turns pink (the
-	 * preview, which never averages, was right all along).
-	 */
 	memset(still_acc, 0, (size_t)still_w * still_h * sizeof(uint16_t));
-	say("the photograph's %u frames averaged", STILL_FRAMES);
+	still_out = still_buf;
+	say("the photograph's %u still low-light frames averaged (gain %.1fx)", STILL_LOWLIGHT_FRAMES, (double)f->gain / unity);
 	return true;
 }
 
@@ -1627,6 +1703,7 @@ worker(void *context)
 	float lux = -1, cct = -1;
 	struct af af = { 0 };
 
+	still_reset();
 	af.home = af_home[s->camera->sensor - 1];
 	af.have_home = af.home != 0;
 	/*
@@ -1751,12 +1828,10 @@ worker(void *context)
 			af.now = true;
 			af.sweep = true;
 		}
-		if (s->frames == 1 && s->camera->sensor == 1 && !s->af_locked) {
-			/* The lens starts at the module's position; one hunt at the start,
-			 * whether or not the capture stack has asked for a focus yet. A climb
-			 * about where it is, not the whole travel: the photograph is sharp
-			 * a second sooner, and the preview is not dragged through the blur
-			 * of every position on the way to the near end.
+		if (s->frames == 3 && s->camera->sensor == 1 && !s->af_locked && af.state == AF_WATCH) {
+			/* Start one focus search once the initial AE frames settle so the first
+			 * frame is lit and the climb (falling back to a full sweep if flat) locks
+			 * onto the subject automatically.
 			 */
 			af.state = AF_STEADY;
 			af.now = true;
@@ -1765,7 +1840,9 @@ worker(void *context)
 		af_frame(device, &af, f, raw, s->af_window, s->af_locked);
 		s->frames++;
 
-		CFDictionaryRef metadata = frame_metadata(&isp, f, &st, s->port);
+		bool af_busy = f->focus != HAKIOS_CAMERA_NO_FOCUS &&
+		    (af.state == AF_CLIMB || af.state == AF_SWEEP || af.state == AF_FINE_SEARCH || af.state == AF_SETTLE);
+		CFDictionaryRef metadata = frame_metadata(&isp, f, &st, s->port, af_busy, s->af_locked);
 
 		/*
 		 * Only once the graph has started the stream. Its PixelBufferHandler blocks hand the buffer
@@ -1785,8 +1862,13 @@ worker(void *context)
 		bool still_ready = false;
 
 		if (s->graph_running && s->stills_wanted > 0) {
-			/* (a photograph: the frames are summed first, and it is made of their mean) */
-			still_ready = still_accumulate(f, raw);
+			if (af_busy && s->still_af_wait < 20) {
+				s->still_af_wait++;
+			} else {
+				still_ready = still_accumulate(f, raw);
+			}
+		} else {
+			s->still_af_wait = 0;
 		}
 		pthread_mutex_lock(&s->lock);
 		for (int i = 0; s->graph_running && i < OUTPUTS; i++) {
@@ -1805,9 +1887,10 @@ worker(void *context)
 			if (still && (s->stills_wanted == 0 || !still_ready)) {
 				continue;
 			}
-			deliver(s, out, &isp, f, still ? still_packed : raw, metadata, device);
+			deliver(s, out, &isp, f, still && still_out != NULL ? still_out : raw, metadata, device);
 			if (still) {
 				s->stills_wanted--;
+				s->still_af_wait = 0;
 				say("the photograph is given (%llu so far)", (unsigned long long)++s->stills_given);
 				if (s->flash_fired) {
 					s->flash_fired = false;
@@ -1888,6 +1971,8 @@ stream_stop(CMBaseObjectRef o)
 	    (unsigned long long)s->out[0].delivered);
 	pthread_mutex_lock(&s->lock);
 	s->graph_running = false;
+	s->stills_wanted = 0;
+	s->still_af_wait = 0;
 	for (int i = 0; i < OUTPUTS; i++) {
 		let_go(&s->out[i]);
 	}
@@ -1897,6 +1982,7 @@ stream_stop(CMBaseObjectRef o)
 		pthread_join(s->worker, NULL);
 		s->worker_started = false;
 	}
+	still_reset();
 	return 0;
 }
 
@@ -2103,23 +2189,13 @@ device_request_streams(CMBaseObjectRef o, CFArrayRef streams, CFDictionaryRef op
 		}
 	}
 	/*
-	 * Requesting a stream is this device's cue to begin producing: mediaserverd's capture graph
-	 * configures the stream (it installs the PrimaryScaler PixelBufferHandler) and then reserves the
-	 * streams through here, but it never calls the FigCaptureStream start method, so start the stream's
-	 * frame worker from the reservation. stream_start is idempotent (it no-ops when already running),
-	 * and relinquish does not stop the worker, so the reservation thrash does not tear it down.
+	 * Do NOT power up sensor hardware on reservation: BWFigCaptureDeviceVendor routinely
+	 * requests Back -> Front -> Relinquish -> Back while building or reconfiguring a capture
+	 * graph before calling stream_start(). Starting workers here caused 2-3 redundant sensor
+	 * power cycles and multi-second freezes on launch and lens switches; stream_start() starts
+	 * the exact active stream cleanly.
 	 */
-	if (streams != NULL) {
-		CFIndex n = CFArrayGetCount(streams);
-
-		for (CFIndex i = 0; i < n; i++) {
-			CMBaseObjectRef st = (CMBaseObjectRef)CFArrayGetValueAtIndex(streams, i);
-
-			if (st != NULL) {
-				(void)stream_begin(st, false);
-			}
-		}
-	}
+	(void)streams;
 	return 0;
 }
 

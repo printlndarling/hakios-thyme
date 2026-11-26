@@ -1138,7 +1138,7 @@ static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
 /* The wide's module mode the iOS session runs (cam_mode, default 3): for the logs
  * (the real_modes index is 0 "the wide" whatever the module's mode is).
  */
-static uint32_t real_mode_n = 3;
+static uint32_t real_mode_n = 1;
 
 /*
  * The wide's iOS session mode: the module file's resN, cam_mode (default 3) --
@@ -1151,10 +1151,10 @@ static void
 real_mode_from_table(void)
 {
 	static const char *const files[2] = { "camera-s5khmx-v3.tab", "camera-s5khmx-v19.tab" };
-	uint32_t mode_n = 3;
+	uint32_t mode_n = 1;
 
 	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6) {
-		mode_n = 3;
+		mode_n = 1;
 	}
 	for (int i = 0; i < 2; i++) {
 		uint64_t size = 0;
@@ -3398,7 +3398,7 @@ capture_sensor(void)
  */
 #define RING                    3
 #define PLACE_SPARE             (256u << 10)    /* room after each frame: some come longer than the mode's lines */
-#define IDLE_MS                 1000
+#define IDLE_MS                 4000
 #define FRAME_TIMEOUT_MS        1500
 #define EXPOSURE_MARGIN         40
 /* The shortest frame the UMI path's AE may ask for: 1000 lines of the wide's
@@ -3475,7 +3475,7 @@ exposure_limits(uint32_t *lines, uint32_t *gain, uint32_t *frame_lines)
 	uint32_t floor = hw_index == 2 ? frame_min_front : frame_min_rear;
 	uint32_t shortest;
 
-	if (floor > ios_mode->frame_length) {
+	if (floor > ios_mode->frame_length || ios_mode->fps_milli >= 25000) {
 		floor = ios_mode->frame_length;
 	}
 	shortest = real_source ? floor : ios_mode->frame_length;
@@ -4088,9 +4088,11 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 			return EIO;
 		}
 		b = -1;
-		for (int i = 0; i < RING; i++) {
-			if (place[i].state == PLACE_READY && place[i].sequence > ios_given && (b < 0 || place[i].sequence > place[b].sequence)) {
-				b = i;
+		if (ios_switch_to == 0) {
+			for (int i = 0; i < RING; i++) {
+				if (place[i].state == PLACE_READY && place[i].sequence > ios_given && (b < 0 || place[i].sequence > place[b].sequence)) {
+					b = i;
+				}
 			}
 		}
 		if (b >= 0) {
@@ -4147,7 +4149,10 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 	{
 		uint32_t floor = hw_index == 2 ? frame_min_front : frame_min_rear;
 
-		f.frame_lines_min = real_source ? (floor > ios_mode->frame_length ? ios_mode->frame_length : floor) : ios_mode->frame_length;
+		if (floor > ios_mode->frame_length || ios_mode->fps_milli >= 25000) {
+			floor = ios_mode->frame_length;
+		}
+		f.frame_lines_min = real_source ? floor : ios_mode->frame_length;
 	}
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
@@ -4164,11 +4169,13 @@ camdev_read(__unused dev_t dev, struct uio *uio, int ioflag)
 
 		uint64_t t0 = mach_absolute_time(), t1, t2;
 
-		/* (what the IFE wrote went past the processor's caches) */
-		for (vm_offset_t line = at & ~63ul; line < at + n; line += 64) {
-			__asm__ volatile ("dc civac, %0" : : "r" (line));
+		/* Only invalidate cache when IFE DMA wrote directly into ring (non-fake path). */
+		if (!fake) {
+			for (vm_offset_t line = at & ~63ul; line < at + n; line += 64) {
+				__asm__ volatile ("dc civac, %0" : : "r" (line));
+			}
+			__asm__ volatile ("dsb sy");
 		}
-		__asm__ volatile ("dsb sy");
 		t1 = mach_absolute_time();
 		/*
 		 * A frame may not cross to the program in one copy: this platform
@@ -4324,17 +4331,22 @@ camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		if (c.a >= sizeof(sensors) / sizeof(sensors[0])) {
 			return EINVAL;
 		}
-		if (real_source) {
-			/* The UMI path powers one sensor at a time: tell it which the
-			 * next session runs (the descriptor number is 1 back, 2 front).
-			 */
-			umi_camera_ios_set_sensor(c.a == 2);
-		}
 		lck_mtx_lock(&ios_lock);
+		if (ios_streaming && ios_switch_to == 0 && hw_index == c.a && (c.b == ~0u || c.b == ios_mode_n)) {
+			lck_mtx_unlock(&ios_lock);
+			return 0;
+		}
+		for (int i = 0; i < RING; i++) {
+			if (place[i].state == PLACE_READY) {
+				place[i].state = PLACE_FREE;
+			}
+		}
 		ios_switch_mode = c.b;
 		ios_switch_to = c.a + 1;
+		ios_wanted = true;
 		lck_mtx_unlock(&ios_lock);
 		wakeup(&ios_open);
+		wakeup(&ios_frames_done);
 		return 0;
 	}
 	return EINVAL;
@@ -4419,9 +4431,9 @@ ios_select(unsigned index, uint32_t mode_n)
 		say("camera: cam_pattern=%u: %s\n", pattern, ios_source == SOURCE_SENSOR_PATTERN ? "the sensor's colour bars (its tpgon table)" :
 		    "the CSID's colour bars");
 	}
-	/* the first exposure, until the program asks for its own: boot-args as cam=4's, else a room's */
-	ios_ask.lines = ios_mode->frame_length - EXPOSURE_MARGIN;
-	ios_ask.gain = 8 * GAIN_UNITY;
+	/* the first exposure, until the program asks for its own: moderate indoor exposure to avoid initial white-out */
+	ios_ask.lines = ios_mode->frame_length > 2 * EXPOSURE_MARGIN ? ios_mode->frame_length / 2 : ios_mode->frame_length - EXPOSURE_MARGIN;
+	ios_ask.gain = 3 * GAIN_UNITY;
 	ios_ask.frame_lines = 0;
 	(void)PE_parse_boot_argn("cam_shutter", &ios_ask.lines, sizeof(ios_ask.lines));
 	(void)PE_parse_boot_argn("cam_gain", &ios_ask.gain, sizeof(ios_ask.gain));
@@ -4458,6 +4470,9 @@ serve_ios(void)
 		}
 		if (to != 0) {
 			/* (the last session is over: everything is down) */
+			if (real_source) {
+				umi_camera_ios_set_sensor((to - 1) == 2);
+			}
 			if (!ios_select(to - 1, ios_switch_mode)) {
 				give_up("a sensor that cannot be used");
 				break;

@@ -426,7 +426,7 @@ copy_bank(void *dst,unsigned width,unsigned height,unsigned bank)
 	if(width<4||!height||width>h->width||height>h->height||width%4)return EINVAL;
 	unsigned x0=((h->width-width)/2)&~3u,y0=((h->height-height)/2)&~1u;
 	unsigned dstride=(width*10/8+15)&~15u;
-	dcache(ud.memory,ud.size);
+	dcache(ud.memory+4096+bank*ud.frame_bytes,ud.frame_bytes);
 	const uint8_t *src=(const uint8_t *)(ud.memory+4096+bank*ud.frame_bytes)+(uint64_t)y0*h->stride+x0/4*5;
 	uint8_t *out=(uint8_t *)dst;
 	for(unsigned y=0;y<height;y++)

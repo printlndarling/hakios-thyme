@@ -141,10 +141,10 @@ static void
 ureserve_for_boot_mode(unsigned *width, unsigned *height)
 {
 	static const char *const names[2] = { "camera-s5khmx-v3.tab", "camera-s5khmx-v19.tab" };
-	uint32_t mode_n = 3;
+	uint32_t mode_n = 1;
 
 	if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6) {
-		mode_n = 3;
+		mode_n = 1;
 	}
 	for (int i = 0; i < 2; ++i) {
 		uint64_t size = 0;
@@ -415,7 +415,10 @@ utab_u32(const uint8_t *p)
 #define VCM_REG_POSITION 0x00
 #define VCM_REG_CONTROL  0x02
 #define VCM_SHIFT        4
-#define VCM_OPTIMAL      343
+/* Module powerOptimalPosition is 343 in 10-bit (<<6 = 0x55c0, i.e. 1372 in 12-bit <<4);
+ * 1152 (0x4800) sits cleanly in the 1-3 m indoor focus range instead of past infinity.
+ */
+#define VCM_OPTIMAL      1152
 
 static bool
 uvcm_write_at(uint8_t address, uint8_t reg, uint8_t value)
@@ -452,15 +455,20 @@ umi_camera_ios_focus(void)
 static bool
 uvcm_position(uint32_t position)
 {
-	uint32_t data = (position << VCM_SHIFT) & 0xffff;
-	bool ok = ustart() && uput(VCM_ADDRESS) && uput(VCM_REG_POSITION) &&
-	    uput((data >> 8) & 0xff) && uput(data & 0xff);
+	uint32_t clamped = position & 0xfff;
+	uint32_t data = (clamped << VCM_SHIFT) & 0xffff;
 
-	ustop();
-	if (ok) {
-		uios_focus = position & 0xfff;
+	for (unsigned attempt = 0; attempt < 3; ++attempt) {
+		bool ok = ustart() && uput(VCM_ADDRESS) && uput(VCM_REG_POSITION) &&
+		    uput((data >> 8) & 0xff) && uput(data & 0xff);
+		ustop();
+		if (ok) {
+			uios_focus = clamped;
+			return true;
+		}
+		ums(2);
 	}
-	return ok;
+	return false;
 }
 
 /* The motor's own registers back: a write the chip took and a lens that moves are
@@ -514,10 +522,10 @@ umode_prepare(unsigned version)
 	 * S5K3T2 module one unversioned set, which its exporter writes as 0.
 	 */
 	if (ufront ? version != 0 : (version != 3 && version != 0x13)) return ENODEV;
-	unsigned mode_n = ufront ? 2 : 3;      /* the front's 1280x720 mode */
+	unsigned mode_n = ufront ? 2 : 1;      /* front 1280x720 (res2), rear 6016x4512 27MP (res1) */
 	if (uios_force_mode) mode_n = uios_force_mode;
 	else if (!PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n)) || mode_n > 6)
-		mode_n = ufront ? 2 : 3;
+		mode_n = ufront ? 2 : 1;
 	uint64_t size = 0;
 	const char *name = ufront ? "camera-s5k3t2.tab" :
 	    version == 3 ? "camera-s5khmx-v3.tab" : "camera-s5khmx-v19.tab";
@@ -1807,7 +1815,14 @@ uprobe(unsigned stage)
 		 * ring control, SAC3 with its timing, then 0x190 and 0x12c.
 		 */
 		uvcm_scan();                    /* (the bus is up now: the sensor answers) */
-		bool wrote = uvcm_write(VCM_REG_CONTROL, 0x00) && uvcm_position(VCM_OPTIMAL);
+		/* AK7377 initSettings (com.qti.sensormodule.umi_semco_s5khmx.bin) requires
+		 * >= 1 ms after waking from standby (reg 0x02 = 0x00) before position writes;
+		 * without that pause the chip NACKed every initial position write and left
+		 * the lens parked at its power-on value while uios_focus reported VCM_OPTIMAL.
+		 */
+		bool woke = uvcm_write(VCM_REG_CONTROL, 0x00);
+		ums(5);
+		bool wrote = woke && uvcm_position(VCM_OPTIMAL);
 		uint8_t mode = 0, p0 = 0, p1 = 0;
 		bool read = uvcm_read(VCM_REG_CONTROL, &mode) && uvcm_read(VCM_REG_POSITION, &p0) &&
 		    uvcm_read(VCM_REG_POSITION + 1, &p1);
