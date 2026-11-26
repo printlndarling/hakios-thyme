@@ -1,132 +1,82 @@
-# HakiOS on Xiaomi Mi 10S (thyme)
+# HakiOS — 小米 10S（`thyme`）移植版
 
 [English](README.md) · 中文 · [Українська](README.uk.md)
 
-**这是 HakiOS 的 THYME 设备分支。** 它把 Apple 开源的 Darwin 内核（XNU
-xnu-8796.121.2）运行在小米 10S（SM8250 / 骁龙 870）上，默认从内存启动，
-不修改 Android 系统和用户数据。本分支保留在真机上验证过的 THYME 驱动和
-设备修复，并有选择地合并上游的公共实现。
+**本项目为 [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel) 的小米 10S（`thyme`，骁龙 870 / SM8250-AC）长期维护分支。**
+系统默认以 RAM 方式引导 Apple 开源 Darwin/XNU 内核（`xnu-8796.121.2`），不刷写、不修改原有 Android 分区与用户数据；保留经真机验证的 `thyme` 专属驱动与修复，并选择性合并上游通用更新。
 
-带完整证据的权威状态见
-[`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)，本页只是摘要。
-只有在该构建下、在真实的小米 10S 上观察到的结果才记为 `PASS`，仅编译通过
-不算。
+> 下表所有 `PASS` 均经小米 10S 真机实测验证。完整测试日志、构建校验和及排查记录请见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)。
 
-## 状态一览
+## 目标硬件
 
-| 项目 | 状态 | 已验证内容 |
-|---|---|---|
-| 启动到 SpringBoard | **PASS** | launchd、backboardd、SpringBoard 以及设置/界面栈在冷启动 RAM 运行中到达主屏幕 |
-| 显示与界面帧节奏 | **PARTIAL** | 1080 x 2340 面板时序被接受，CoreAnimation 在需要时以 90 fps 绘制（连续四个 5 秒窗口 452、451、451、451 帧，中位帧间隔 11.1 ms）。日常场景现在请求 90 Hz（`fb_hz=90`）：本面板自己的 timing-switch 序列（F0 page 0、本模式的 B4 表、2f、26）按设备树要求以 LP 模式被接受，帧缓冲重新公布速率。面板自身的扫描率在 THYME 上仍无法回读（TE 焊盘读不到脉冲、INTF 块不安全读取），所以真正的 90 Hz 面板刷新尚未被客观证实 |
-| CPU / 调频 | **PASS** | 7 个 CPU 启动；三个 EPSS 域分别达到 1804 / 2419 / 3187 MHz |
-| GPU（Mesa/FD650 OpenGL） | **PASS** | 硬件 `hakios-gl` 帧，使用中不回落 `softpipe`；标准无线回归中 110 帧 |
-| Metal | **PARTIAL / 阻塞** | `hakios-metal` 可构建、探测通过，但第一个 render pass 仍会卡死，因此 Metal/CoreAnimation 保持关闭。上游的 Metal-on-Vulkan/Turnip 路径已合并，但仍是可选且未在 THYME 上验证 |
-| 触摸、按键、手势 | **PASS** | FTS521 触摸、按键、点击/拖动/手势；`errors=0` |
-| 亮度 | **PARTIAL** | DSI DCS 亮度命令被确认；自动亮度依赖环境光传感器 |
-| Wi-Fi（QCA6390） | **PASS** | 扫描、2.4/5 GHz WPA2 关联、四次握手、DHCP、DNS/TLS/Safari；关闭/打开恢复 |
-| 蓝牙（QCA6390，3 Mbaud） | **PASS**（发现、配对、连接、A2DP）；HFP/SCO、AVRCP、麦克风和自动重连仍未验证 | H4 传输、560 次 LE report、无传输故障；QCA responder 先于 `bluetoothd` 启动 |
-| 音频 | 扬声器和麦克风 **PASS**；振动 **PARTIAL** | 扬声器/麦克风通路有 1 kHz 声学/录音验证；振动线圈和 BEMF 已验证，iOS 触感反馈尚未 |
-| 电池、充电、温控 | **PASS** | 电量/电流/充电状态；30 分钟充电保持；温控降频和有序返回 |
-| 相机 | **PARTIAL** | 两颗相机都以 `cam=5 cam_real=1` 接入 `/dev/hakios-camera`（在日常启动参数里，相机图标常在）。S5KHMX 跑模块的 mode 3 全画幅 3008×2256，经 CSIPHY 3、CSID480、IFE-lite，10–25 帧/秒（AE 按光线请求更短帧长，最短 39 ms；两个 DMA bank，一读一帧，不冻结也不撕裂；AE 改变帧长时，等待取新旧帧长较长者，旧的、更长的 bank 不会按新的短时钟去读）。帧头标注像素对应的实际曝光，AE 约五帧收敛；切换相机只给一颗传感器上电（实测 1.7–2.4 s）。广角镜头马达是 **AKM AK7377**（I2C 0x18，位置寄存器 0x00，12 位）：开流时在模块位置附近爬坡，邻域平坦才扫全行程，冰箱上的 QA 标签与 Android 同场景裁切对照可辨（`logs/label-compare-af3.jpg`）。行程没有峰值（暗场景或空白墙面，梯度全是噪声）时，回到上次搜索停下的位置而不是停在噪声挑出的点——切回后摄的第二次会话以前就是这样变糊的；画面比停下的场景明显更清晰时重新搜索；全黑帧不参与测量。前摄 S5K3T2 跑 2592×1940（CSIPHY 4、CSID-lite 1），曝光经 SMIA group hold 中途生效（回读 0x618，亮度随增益变化）；帧长下限 1100 行（48 ms，约 20 帧/秒），模块没有对焦马达，帧头报告无对焦位置，所以前摄开启时不再去驱动后摄马达。灰世界/中性格混合、1.5% 红色校准和 1.18 饱和度负责前摄颜色（厂商调校的色彩矩阵是单位矩阵，没有可用的标定），部分灯光下仍偏冷。S5KHMX 的全分辨率模式现在也能整帧流入内存：`cam=7 cam_mode=0` 跑 res0 12032×9024（108.6 MP），每条 trio 4.11 Gbit/s——9723 个 CSI 包、ECC/CRC 全 0、正好写入 135,720,960 字节、无 SMMU 异常、一帧完整（`logs/081219-run.log`；`tools/camfull.py` 从 271,450,112 字节的记录生成 `logs/camera-full.png`）。还差捕获栈里的 108 MP 静态照片 |
-| 传感器（加速度、环境光、距离） | **进行中** | SLPI 传感器核心已能加载签名固件、退出复位并暴露 QRTR 服务；SNS 客户端和 HID 传感器服务正在接入。iOS 目前还拿不到传感器数据 |
-| 蜂窝（基带、SIM、通话/数据） | **FAIL** | MPSS/telephony 栈尚未实现 |
-| 持久化存储 | **TODO** | root 和用户数据仍在内存中；受保护的持久化设计尚未接受 |
-| 无根包管理器（Sileo） | **PARTIAL** | 离线 dpkg 安装/卸载和 Sileo 渲染通过；在线仓库安装未验证 |
-| 中文界面 | **PASS** | 简体/繁体资源和 PingFang 正常；设置语言切换后整页中文 |
-
-## 当前推进
-
-1. **传感器** —— SLPI 固件（`slpi.mdt`、`slpi.b00..b20`）已从手机 Android
-   中提取，经 TrustZone 认证并启动；GLINK `IPCRTR` 通道和 QRTR 服务列表
-   已建立。下一步是 SNS 客户端协议（先加速度计）、通过 FastRPC 提供传感器
-   registry，以及给 `backboardd` 的 IOHID 传感器服务。
-2. **相机** —— 后摄全画幅 3008×2256 已经通过 `/dev/hakios-camera` 进入
-   Camera.app（10–25 帧/秒），曝光/增益来自采集栈，颜色来自手机自己的色彩
-   矩阵和镜头阴影；前摄 2592×1940 经 CSIPHY 4、CSID-lite 1 送入同一个图，
-   切换只上电一颗传感器。自动对焦在全行程无峰值时回到上次对好的位置，画面
-   出现细节会重新搜索。接下来是前摄颜色（厂商调校没有色彩矩阵）和捕获栈的
-   108 MP 全分辨率静态照片（内核现在已能用 `cam_mode=0` 整帧采集该模式）。
-3. **蜂窝** —— 剩余最大的模块：MPSS、QMI 和 telephony 栈。
-4. **持久化存储与独立安装器** —— 采用受保护的写入路径和从 flash RAM 启动的
-   设计；在明确的授权与恢复门禁完成前不碰 Android 分区。
-
-## 已验证的 RAM 基线（2026-11-09）
-
-| 产物 | SHA-256 |
+| 模块 | 规格 |
 |---|---|
-| `hakios-kernel` | `c329d30a6f7930ee5e6f06addc4914b98483c4b02570e202372eaec47adbaf1f` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
-| `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
+| SoC / GPU | 高通骁龙 870（`SM8250-AC`）· Adreno 650 |
+| 基带 / GNSS | 外挂高通骁龙 X55（`SDX55M`，PCIe2 / MHI） |
+| 屏幕 / 触控 | 6.67 英寸 1080 × 2340 90 Hz AMOLED · FocalTech FTS521 |
+| 无线连接 | 高通 QCA6390（Wi-Fi 6 + 蓝牙 5.1） |
+| 音频 / 马达 | 双 Cirrus Logic CS35L41 立体声功放 · AW8697 线性马达 |
+| 相机 | 后置 1.08 亿像素三星 S5KHMX + AK7377 对焦马达 · 前置 2000 万 S5K3T2 |
 
-标准冷启动门禁是 `logs/014626-run.log`：两次 Wi-Fi 关联与 DHCP
-`192.168.0.114`、Safari 打开、设置里的蓝牙页显示本机以 "HakiOS Mi 10S"
-可被发现并正在扫描、`hakios-gl` 帧、无 panic
-（`logs/wirelessregress-wifi.png`、`logs/wirelessregress-bt.png`）。日常场景
-现在向面板请求 90 Hz（`fb_hz=90`）：本面板自己的 timing-switch 序列
-（F0 page 0、本模式的 B4 表、2f、26——J2 节点的，不是 J1S 节点更长的那条）
-按设备树要求以 LP 模式发送，帧缓冲重新公布被接受的速率，帧间隔落在
-11 ms 节拍上。内核同时是 servreg 应答那版（`8befdf8`）：确认通知器的状态
-指示、读取保护域失败原因、SNS 客户端请求字节与手机 HAL 完全一致；传感器
-数据流仍未打通（`devices/thyme/docs/sensors-status.md`）。更早的门禁
-`logs/184735-run.log` 仍是相机对焦、帧节奏、拍照累加器与 locator 那版
-（`938bed9`）的参考。90 fps 帧节奏检查是 `logs/115200-run.log`，
-60 Hz 长跑是 `logs/035725-run.log`。`devices/thyme/ram-baseline.conf` 是这些哈希的机器
-校验副本；`devices/thyme/ram-regress.sh` 会拒绝不一致的字节，除非显式指定
-新候选。
+## 硬件与功能状态
 
-## 构建与运行
+| 功能模块 | 状态 | 实测摘要 |
+|---|---|---|
+| 系统启动与桌面 | **PASS** | RAM 冷启动至 `launchd`、`backboardd`、SpringBoard 与设置 |
+| CPU / 调频 | **PASS** | 7 核在线，EPSS 三丛集频率达 1.80 / 2.42 / 3.19 GHz |
+| 显示与刷新率 | **PASS** | 1080 × 2340 OLED，全局 90 Hz（`fb_hz=90`）、DCS 亮度调节与锁屏灭背光 |
+| GPU（OpenGL） | **PASS** | Adreno 650 经 Mesa/Freedreno 硬件渲染（`hakios-gl`） |
+| Metal | **PARTIAL** | `hakios-metal` 可编译；系统 `MTLDevice` / VectorKit / ANGLE 应用待打通 |
+| 触控与按键 | **PASS** | FTS521 多点触控、手势、电源键与音量键正常 |
+| 音频与触感 | **PASS** | 双 CS35L41 独立左右声道扬声器、双麦克风、AW8697 CoreHaptics 正常 |
+| 相机与闪光灯 | **PASS** | 后摄 27 MP S5KHMX + AK7377 自动对焦、前摄 S5K3T2、镜头切换与 PM8150L 闪光灯 |
+| 蜂窝与通话 | **PASS** | SDX55M SIM 识别、设置页正常、4G 双栈数据与双向 VoLTE 语音（短信暂缓） |
+| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位与 SDX55M QMI LOC 1 Hz 卫星流打通；室外 3D 定位待实测 |
+| Wi-Fi（QCA6390） | **PARTIAL** | 2.4/5 GHz WPA2、DHCP/TLS 及断电恢复正常；`SystemSleep` 唤醒重连待完善 |
+| 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对与 A2DP 播放正常；HFP/AVRCP/自动重连待完善 |
+| 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |
+| 传感器（SLPI） | **PARTIAL** | SLPI 固件与 QRTR 服务已起；加速度/环境光/距离 HID 上报待打通 |
+| 中文界面 | **PASS** | 开机默认简体中文界面、苹方字体与简体拼音键盘 |
+| 包管理器（Sileo） | **PARTIAL** | 无根 Procursus `apt`/`dpkg` 在线安装可用；Sileo 队列交互待完善 |
+| 持久化存储 | **TODO** | 默认纯内存启动；受保护的闪存持久化与独立安装流程尚未启用 |
 
-开发环境以 WSL2 Ubuntu 为主：源码、Git、编译缓存和日志尽量放在 ext4，
-Windows 只用于必要的 USB/fastboot 操作。正常测试路径不刷写任何分区：内核和
-用户空间加载到内存，运行结束后手机返回 Android。
+## 后续重点
+
+- **传感器（SLPI / HID）**：打通加速度计、环境光（自动亮度）与距离传感器至 iOS。
+- **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
+- **无线与蓝牙体验**：修复 `SystemSleep` 后 Wi-Fi 自动重连，补齐蓝牙 HFP/AVRCP/重连。
+- **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
+
+## 构建与运行（RAM 启动）
+
+开发环境位于 **WSL2 Ubuntu** 原生 ext4 文件系统（Windows 仅用于 USB `adb`/`fastboot`）。常规测试全程在内存中运行，不刷写分区，测试结束后自动重启回 Android。
 
 ```sh
 make thyme_defconfig
 make kernel JOBS=16
-devices/thyme/build-root.sh
+SCENE=wirelessfull devices/thyme/build-root.sh
 devices/thyme/ram-regress.sh
 ```
 
-厂商固件、Darwin 用户空间和大型 system image 都是本地文件，已被 Git 忽略；
-需要从手机和 IPSW 中提取什么，见
-[`devices/thyme/README.md`](devices/thyme/README.md)；硬件证据、测试方法和
-未完成项见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)。
+- **固件与 IPSW 准备**：厂商固件与 Darwin 用户空间均为本地文件且已忽略，准备步骤见 [`devices/thyme/README.md`](devices/thyme/README.md)。
+- **蜂窝 / GNSS 启动**：请使用 `XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img`（支持 1023 字符启动参数与 `/baseband` 设备树节点）。
+- **详细记录与基线**：完整真机证据见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 与 [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf)。
 
-## 上游
+## 上游与相关仓库
 
-本分支跟踪
-[hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) 的公共
-内核、引导加载器、用户空间和工具，把 THYME 专属工作放在
-`devices/thyme/`。上游 main `63fc2b4` 已合并；Metal-on-Vulkan/Turnip 路径
-是可选功能（`TURNIP=1 M2V=1`、`metal_m2v=1`），不属于日用镜像。设备专属
-修改不会推送到上游。
+本分支跟踪 [`oosexgang/hakios-xnu-kernel`](https://github.com/oosexgang/hakios-xnu-kernel) 的通用内核、引导器、用户空间与工具链更新，小米 10S 专属适配集中维护于 `devices/thyme/`。
 
-## 仓库与致谢
-
-| 仓库 | 内容 |
+| 仓库 | 说明 |
 |---|---|
-| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | **公共部分**：内核移植、所有公共驱动、引导加载器、用户空间、工具、本文档以及 `devices/qemu` |
-| [`hakios-metal/`](hakios-metal) | 通过内核的 GPU 驱动，在 Adreno 上实现 Metal 的命令模型 |
-| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G：defconfig、状态、UEFI 平台、固件脚本及其 SoC 层（Qualcomm SC7280 系列） |
-| [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768) | Infinix Hot 20（MediaTek Helio G85）：实验性移植，有自己的引导加载器。不在本仓库的清单中 |
-| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | 启动引导加载器的固件：带有 HakiOS 启动路径、横幅和名称的 Mu-Silicium，以及 HakiOS 的 U-Boot |
-| [hackios-web](https://github.com/oosexgang/hackios-web) | 网站 |
-| [hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland) | 旧仓库：只为保留链接而存在的指向。用户空间现在在这里的 `userland/` |
+| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | 上游公共内核移植、驱动、引导器、用户空间与工具 |
+| [`hakios-metal/`](hakios-metal) | 基于内核 GPU 驱动的 Adreno Metal 命令层 |
+| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G（SC7280）设备适配 |
+| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | HakiOS 所用 Mu-Silicium UEFI 与 U-Boot 引导固件 |
+| [hackios-web](https://github.com/oosexgang/hackios-web) | 项目官网 |
 
-本仓库不包含任何 Apple 的软件或厂商固件。Darwin 用户空间由用户从自己获取
-的 IPSW 中布置；固件来自用户自己的手机。Apple 的服务（激活、Apple ID、
-iCloud、App Store）不受支持，也不是目标。
+## 法律声明与致谢
 
-XNU 补丁及其派生文件使用 Apple Public Source License 2.0
-（[LICENSE.APSL](LICENSE.APSL)），其余使用 MIT（[LICENSE](LICENSE)），
-以文件头为准。第三方声明：[NOTICE](NOTICE)、
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)、
-[COMPLIANCE.md](COMPLIANCE.md)；分发边界见 [LEGAL.md](LEGAL.md)。以上不构成
-法律意见。
-
-HakiOS 是独立研究项目，**与 Apple 无关联、未获其背书**；“Darwin”、“iPhone”、
-“XNU”和“Apple”仅用于说明代码所对接的对象。
-
-感谢上游 HakiOS 团队，以及公开逆向 SLPI/SNS 和 FastRPC 协议的人们（参见
-[`tools/`](tools) 与 `devices/thyme/CHECKLIST.md` 中的传感器笔记）。
+- **不包含 Apple 或厂商闭源固件**：用户空间由用户自行提供的 IPSW 解包，固件从用户自有设备提取。不支持且不以 Apple 服务（激活、Apple ID、iCloud、App Store / FairPlay DRM）为目标。
+- **开源协议**：XNU 补丁及其派生代码遵循 [APSL 2.0](LICENSE.APSL)，其余原创代码遵循 [MIT](LICENSE)。详见 [NOTICE](NOTICE)、[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)、[COMPLIANCE.md](COMPLIANCE.md) 与 [LEGAL.md](LEGAL.md)。
+- **免责声明**：本项目为独立研究项目，**与 Apple 无任何关联或背书关系**。
+- **致谢**：感谢 HakiOS 上游团队以及高通 SLPI/QMI 开源逆向社区。

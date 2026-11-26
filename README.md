@@ -1,158 +1,82 @@
-# HakiOS on the Xiaomi Mi 10S (thyme)
+# HakiOS on Xiaomi Mi 10S (`thyme`)
 
 English · [中文](README.zh.md) · [Українська](README.uk.md)
 
-**This is the THYME device fork of [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel).**
-It runs Apple's open-source Darwin kernel (XNU xnu-8796.121.2) on the Xiaomi
-Mi 10S (SM8250 / Snapdragon 870), from RAM first, and leaves the Android
-installation and its data untouched. The fork keeps the THYME drivers and the
-device fixes verified on the physical phone, and merges upstream common work
-selectively.
+**Device fork of [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel) for the Xiaomi Mi 10S (`thyme`, Snapdragon 870 / SM8250-AC).**
+Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM without modifying Android or user partitions, keeping verified `thyme` hardware drivers alongside selectively merged upstream improvements.
 
-The authoritative, evidence-backed status is
-[`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md); this page is the
-summary. A `PASS` there means observed on the physical Mi 10S in the named
-build, not merely compiled.
+> Every `PASS` below is verified on a physical Xiaomi Mi 10S. Full test logs, build hashes, and technical notes live in [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
 
-## Status at a glance
+## Target Hardware
 
-| Area | Status | What is verified |
-|---|---|---|
-| Boot to SpringBoard | **PASS** | launchd, backboardd, SpringBoard and the settings/UI stack reach the home screen from a cold RAM boot |
-| Display and UI pacing | **PARTIAL** | 1080 x 2340 panel timing accepted and CoreAnimation paces to 90 fps when asked (452, 451, 451, 451 frames in four five-second windows, 11.1 ms median). The daily scene now requests 90 Hz (`fb_hz=90`): this panel's own timing-switch sequence (F0 page 0, its B4 table, 2f, 26) is accepted in the LP mode the tree asks for, and the framebuffer announces the rate. The panel's own scan rate is still not readable on THYME (the TE pin is not routed and the INTF block is unsafe), and the single push-rate measurement (~59 a second) predates the LP-mode fix, so a genuine 90 Hz panel refresh is not yet proven |
-| CPU / DVFS | **PASS** | 7 CPUs start; all three EPSS domains reach 1804 / 2419 / 3187 MHz |
-| GPU (OpenGL via Mesa/FD650) | **PASS** | hardware `hakios-gl` frames, no `softpipe` during use; 110 frames in the latest wireless run |
-| Metal | **PARTIAL / blocked** | `hakios-metal` probes and builds; the first render pass still hangs, so Metal/CoreAnimation stays off. Upstream's Metal-on-Vulkan/Turnip path is merged but opt-in and untested on THYME |
-| Touch, keys, gestures | **PASS** | FTS521 touch, buttons, tap/drag/gesture handling; `errors=0` |
-| Brightness | **PARTIAL** | DSI DCS brightness is acknowledged; automatic brightness waits for the ambient-light sensor path |
-| Wi-Fi (QCA6390) | **PASS** | scan, 2.4/5 GHz WPA2 join, four-way handshake, DHCP, DNS/TLS/Safari; power off/on recovery; the link stays up across display sleep (200 fetched before and after a 25 s screen-off, same address) |
-| Bluetooth (QCA6390, 3 Mbaud) | **PASS** for discovery, pairing, connection and A2DP; open for HFP/SCO, AVRCP, microphone and automatic reconnect | H4 transport, 560 LE reports, no transport faults; the QCA responder starts before `bluetoothd` |
-| Audio | **PASS** speaker and microphone; haptics **PARTIAL** | speaker/mic paths run with an audible/recorded 1 kHz check; the vibration coil and BEMF are verified, iOS haptics feedback is not |
-| Battery, charging, thermal | **PASS** | percentage/current/charging state; 30-minute charging endurance; thermal caps and orderly return |
-| Camera | **PARTIAL** | both cameras stream into `/dev/hakios-camera` with `cam=5 cam_real=1` (in the daily boot args, so the Camera icon is always there). The S5KHMX runs the module's mode 3 whole — 3008×2256 through CSIPHY 3, CSID480 and IFE-lite — at ten to twenty-five frames a second: the mode's own 92 ms frame, or the shorter one the capture stack's AE asks for when the light allows (39 ms at the shortest; two DMA banks, one frame per read: no frozen first frame and no torn one, and the wait is the longer of the two frame lengths either side of an AE change, so a bank written at the old, longer length is not copied on the new, shorter one's clock — the tear that showed when the phone was moved through changing light), with the capture stack's auto exposure and the phone's own colour tuning (3 colour matrices' lights, 3 lens shadings); the shutter renders 12 MP stills from eight averaged raw frames. A frame's header names the exposure its pixels were made with, so the AE settles from 8× to the room's gain in about five frames instead of ringing bright and dark; a stream asks the kernel for its own sensor before its first frame, so a rear↔front handover powers one sensor, not two (1.7–2.4 s measured, about a third of it the kernel's power-up and the rest the capture graph's reconfiguration). The wide lens's motor is an **AKM AK7377** at I2C 0x18 (the module file's `umi_ak7377_s5khmx`; its position is register 0x00, twelve bits); at stream start the capture stack's contrast autofocus climbs about the module's position and, when that neighbourhood is flat, measures the whole travel — the fridge's QA label is legible in the photograph, beside the Android crop (`logs/label-compare-af3.jpg`). A travel with no peak in it — a dim or blank scene, where the gradient is the sensor's noise at every position — goes back to the position the last search settled on instead of stopping where its own noise read sharpest: the second session after a switch used to come back soft exactly this way (`logs/233807-run.log`, the lens left at 16 with 0.009 after 69 moves), and near-black frames are no longer measured at all (a phone face down read 0.36, the sharpest number the algorithm had ever seen); a scene that turns much sharper than the one the lens settled on asks for the search again, which the old watch could not see. The front S5K3T2 runs the module's 2592×1940 mode through CSIPHY 4 and CSID-lite 1 (the CSID's PHY select is a 3-bit field: CSIPHY 4 is input 4) with its own tuning, verified in the cam=7 path; in the app its exposure applies through SMIA's group hold mid-stream (1560 lines read back `0x618`, and the frames' brightness follows the gain — `logs/215326-run.log`; `cam_front_hold=0` keeps the module's stop and start), and a 150 s session shows a real, if noisy, scene instead of a black frame (`logs/front-lit-210.png`). Its frame floor is 1100 lines (48 ms, twenty frames a second; the earlier 1600-line floor's quieter picture was bought with a preview that followed a moving hand like a stalled stream), and the module has no lens motor: its frames report no focus position, so the capture stack no longer drives the rear's motor while the front streams. The grey-world/neutral-cell blend, a 1.5% red calibration and a 1.18 saturation (its vendor tuning's colour matrix is identity, so there is no calibration to read) bring the front's colours to the Android camera's on the same walls; other lights still drift, and a proper matrix for the front is not in the vendor tuning. The S5KHMX's full-resolution mode streams whole as well: `cam=7 cam_mode=0` runs res0 12032×9024 (108.6 MP) through the same path at 4.11 Gbit/s a trio — 9723 CSI packets, no ECC/CRC errors, exactly 135,720,960 bytes written, no SMMU fault, one whole frame (`logs/081219-run.log`; `tools/camfull.py` made `logs/camera-full.png` from the 271,450,112-byte recording). The capture stack's 108 MP still is the next step |
-| Sensors (accelerometer, ALS, proximity) | **IN PROGRESS** | the SLPI sensor core now loads its signed firmware, comes out of reset and exposes its QRTR services; the SNS client and a HID sensor service are being brought up. No sensor reaches iOS yet |
-| Cellular (modem, SIM, calls/data) | **FAIL** | the MPSS/telephony stack is not implemented |
-| Persistent storage | **TODO** | the root and user data are RAM-backed; a guarded persistent-storage design is not accepted yet |
-| Rootless package manager (Sileo) | **PARTIAL** | offline dpkg install/remove and Sileo rendering pass; online repository install is not verified |
-| Chinese UI | **PASS** | Simplified/Traditional Chinese resources and PingFang render; the Settings language gate switches the whole page |
-
-## What is being worked on now
-
-1. **Sensors** — the SLPI firmware (`slpi.mdt`, `slpi.b00..b20`) is pulled from
-   the phone's Android, authenticated by TrustZone and started; the GLINK
-   `IPCRTR` channel and the QRTR service list are up. The next steps are the
-   SNS client protocol (the accelerometer first), the sensor registry served
-   over FastRPC, and an IOHID sensor service for `backboardd`.
-2. **Real camera capture** — the S5KHMX's frames reach Camera.app through
-   `/dev/hakios-camera` (`cam=5 cam_real=1`) at the frame length its AE asks
-   for — ten to twenty-five frames a second — the whole 3008×2256 sensor mode,
-   with exposure/gain from the capture stack and
-   the phone's own colour matrices and lens shading; the S5K3T2 front camera
-   streams 2592×1940 through CSIPHY 4 and CSID-lite 1, and the app switches
-   between them with one sensor power-up per handover; the front's exposure
-   applies through SMIA's group hold mid-stream. A frame's header names the exposure it
-   was made with, so the AE settles instead of ringing, and the shutter renders
-   stills from four averaged raw frames. The wide lens's AK7377 autofocus
-   climbs about the module's position and sweeps the whole travel when the
-   scene is outside it; a travel with no peak goes back to the last position
-   it settled on, and a scene that gains detail asks for the search again.
-   The front's frame floor is 1100 lines (twenty frames a second) for a
-   preview that follows a moving hand, short of a faster binned mode. The
-   next pieces are the front's colour (its vendor tuning has no colour
-   matrix) and the capture stack's full-resolution (108 MP) still, whose
-   sensor mode the kernel now streams whole with `cam_mode=0`.
-3. **Cellular** — the largest remaining block: MPSS, QMI and the telephony
-   stack.
-4. **Persistent storage and a standalone installer** — designed around a
-   guarded write path and RAM-boot-from-flash, without touching Android until
-   an explicit authorization and recovery gate exists.
-
-## Verified RAM baseline (9 November 2026)
-
-| Artifact | SHA-256 |
+| Component | Specification |
 |---|---|
-| `hakios-kernel` | `c329d30a6f7930ee5e6f06addc4914b98483c4b02570e202372eaec47adbaf1f` |
-| `out/thyme-boot/root-wirelessfull.apfs` | `8f5bc2aaa51f57beef172359ffb13e3625b45f50e0369bf19e9cea47279f9683` |
-| `devices/thyme/prebuilt/system.apfs` | `4f0f3f8b1ba017ed96016883127761ea65c7d070be791fb49789c2fdace5ab48` |
-| `devices/thyme/prebuilt/xnu-usb.img` | `2d662c991a5abacc9f229d3b9d556665959fbda16ec2887f357b7dea56400e10` |
+| SoC / GPU | Qualcomm Snapdragon 870 (`SM8250-AC`) · Adreno 650 |
+| Modem / GNSS | External Qualcomm Snapdragon X55 (`SDX55M`) over PCIe2 / MHI |
+| Display / Touch | 6.67" 1080 × 2340 90 Hz AMOLED · FocalTech FTS521 |
+| Wireless | Qualcomm QCA6390 (Wi-Fi 6 + Bluetooth 5.1) |
+| Audio / Haptics | Dual Cirrus Logic CS35L41 stereo amps · AW8697 LRA |
+| Cameras | Rear 108 MP Samsung S5KHMX + AK7377 VCM AF · Front 20 MP S5K3T2 |
 
-The canonical cold-boot gate is `logs/014626-run.log`: two Wi-Fi joins with
-DHCP `192.168.0.114`, Safari opened, the Settings/Bluetooth screen showing the
-phone discoverable as "HakiOS Mi 10S" while it scans, `hakios-gl` frames, and
-no panic (`logs/wirelessregress-wifi.png`, `logs/wirelessregress-bt.png`).
-The daily scene now paces at the panel's 90 Hz (`fb_hz=90`): this panel's own
-timing-switch sequence (F0 page 0, its B4 table, 2f, 26 — the J2 node's, not
-the J1S nodes' longer one) is sent in the LP mode the tree asks for, the
-framebuffer announces the accepted rate, and the frame intervals cluster at
-the 11 ms beat. The kernel is also the servreg-ack build (`8befdf8`): the
-notifier's state indications are answered, its protection-domain-failure
-reports are read, and the SNS client's request bytes match the phone's HAL;
-the sensor stream itself is still open
-(`devices/thyme/docs/sensors-status.md`). The earlier gate,
-`logs/184735-run.log`, remains the reference for the camera-focus, pacing,
-still-accumulator and locator build (`938bed9`).
-The 90 fps pacing check is
-`logs/115200-run.log`; the 60 Hz soak is `logs/035725-run.log`.
-`devices/thyme/ram-baseline.conf` is the machine-checked
-copy of these hashes; `devices/thyme/ram-regress.sh` refuses other bytes unless
-a new candidate is explicit.
+## Hardware & Feature Status
 
-## Building and running
+| Subsystem | Status | Summary |
+|---|---|---|
+| Boot & SpringBoard | **PASS** | Cold RAM boot to `launchd`, `backboardd`, SpringBoard, and Settings |
+| CPU / DVFS | **PASS** | 7 cores active; EPSS scaling up to 1.80 / 2.42 / 3.19 GHz |
+| Display & Refresh | **PASS** | 1080 × 2340 OLED, global 90 Hz (`fb_hz=90`), DCS brightness & lock blanking |
+| GPU (OpenGL) | **PASS** | Hardware Adreno 650 rendering via Mesa/Freedreno (`hakios-gl`) |
+| Metal | **PARTIAL** | `hakios-metal` builds; system `MTLDevice` / VectorKit / ANGLE apps pending |
+| Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
+| Audio & Haptics | **PASS** | Dual CS35L41 stereo L/R speakers, dual mics, AW8697 CoreHaptics |
+| Camera & Torch | **PASS** | Rear 27 MP S5KHMX + AK7377 AF, front S5K3T2, lens switching, PM8150L flash |
+| Cellular & VoLTE | **PASS** | SDX55M SIM, Settings UI, 4G LTE dual-stack data, two-way VoLTE voice (SMS deferred) |
+| Location & GNSS | **PARTIAL** | Settings UI/toggle, Wi-Fi fixes & SDX55M QMI LOC 1 Hz SV active; outdoor 3D fix pending |
+| Wi-Fi (QCA6390) | **PARTIAL** | 2.4/5 GHz WPA2, DHCP/TLS & power recovery; `SystemSleep` auto-wake open |
+| Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing & A2DP playback; HFP/AVRCP/reconnect open |
+| Battery & Thermal | **PASS** | Fuel gauge, USB charging telemetry, thermal throttling & low-battery guard |
+| Sensors (SLPI) | **PARTIAL** | SLPI firmware & QRTR services up; accelerometer/ALS/proximity HID delivery open |
+| Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts & Pinyin keyboard |
+| Package Manager | **PARTIAL** | Rootless Procursus `apt`/`dpkg` online installs work; Sileo UI queue open |
+| Persistent Storage | **TODO** | RAM-boot only by default; guarded flash storage & installer not enabled |
 
-The development environment is WSL2 Ubuntu; the source, Git, build caches and
-logs live on ext4, and Windows is used only for USB/fastboot where needed.
-Nothing is flashed by the normal test path: the kernel and user space are
-loaded into RAM and the phone returns to Android afterwards.
+## Current Priorities
+
+- **Sensors (SLPI / HID)**: Deliver accelerometer, ambient-light (auto-brightness), and proximity events to iOS.
+- **Outdoor GNSS & Cellular Polish**: Verify open-sky 3D satellite fixes via `umi_gnssd` and SMS when needed.
+- **Wireless Power & Audio**: Wi-Fi auto-reconnect after `SystemSleep`; Bluetooth HFP/AVRCP/reconnect.
+- **Graphics & Persistence**: System `MTLDevice` support for third-party apps; safe, opt-in persistent storage.
+
+## Building & Running (RAM Boot)
+
+Development runs in **WSL2 Ubuntu** on native ext4 (Windows is used only for USB `adb`/`fastboot`). Normal testing never flashes or modifies phone partitions and automatically returns the phone to Android.
 
 ```sh
 make thyme_defconfig
 make kernel JOBS=16
-devices/thyme/build-root.sh
+SCENE=wirelessfull devices/thyme/build-root.sh
 devices/thyme/ram-regress.sh
 ```
 
-The vendor firmware, the Darwin user space and the big system image are local
-and Git-ignored; see [`devices/thyme/README.md`](devices/thyme/README.md) for
-what has to be pulled from the phone and an IPSW, and
-[`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) for the hardware
-evidence, test recipes and open items.
+- **Firmware & IPSW setup**: Vendor firmware and Darwin userland are local and Git-ignored — see [`devices/thyme/README.md`](devices/thyme/README.md).
+- **Cellular / GNSS boots**: Use `XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img` (1023-char cmdline with `/baseband` DT node).
+- **Detailed evidence & baselines**: See [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) and [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf).
 
-## Upstream
+## Upstream & Related Repositories
 
-This fork tracks [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel)
-for the common kernel, loader, user space and tools, and keeps THYME-only work
-in `devices/thyme/`. Upstream main `63fc2b4` is merged; the Metal-on-Vulkan/
-Turnip path is opt-in (`TURNIP=1 M2V=1`, `metal_m2v=1`) and is not part of the
-daily-driver image. The device-specific work is never pushed upstream.
+This fork tracks [`oosexgang/hakios-xnu-kernel`](https://github.com/oosexgang/hakios-xnu-kernel) for shared kernel, loader, userland, and tooling changes while isolating Mi 10S work under `devices/thyme/`.
 
-## Repositories and credits
-
-| Repository | Contents |
+| Repository | Description |
 |---|---|
-| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | **common**: the kernel port, every common driver, the loader, user space, the tools, this documentation, and `devices/qemu` |
-| [`hakios-metal/`](hakios-metal) | Metal's command model on the Adreno, through the kernel's GPU driver |
-| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G: its defconfig, status, UEFI platform, firmware script, and its SoC's layer (Qualcomm SC7280 family) |
-| [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768) | Infinix Hot 20 (MediaTek Helio G85): an experimental port with its own loader. Not in this repository's manifest |
-| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | the firmware that starts the loader: Mu-Silicium with HakiOS's boot path, banner and name, and HakiOS's U-Boot |
-| [hackios-web](https://github.com/oosexgang/hackios-web) | the website |
-| [hackios-xnu-userland](https://github.com/oosexgang/hackios-xnu-userland) | old: a pointer kept for its links. User space is `userland/` here |
+| [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel) | Upstream common kernel port, drivers, loader, userland, and tools |
+| [`hakios-metal/`](hakios-metal) | Metal command layer on Adreno via the kernel GPU driver |
+| [hakios-sm7325](https://github.com/oosexgang/hakios-sm7325) | POCO X5 Pro 5G (SC7280) device port |
+| [hakios-uefi](https://github.com/oosexgang/hakios-uefi) | Mu-Silicium UEFI and U-Boot bootloaders for HakiOS |
+| [hackios-web](https://github.com/oosexgang/hackios-web) | Project website |
 
-Nothing of Apple's and no vendor firmware is in this repository. The Darwin
-user space, if used, is laid out from an IPSW the user provides; firmware
-comes off the user's own phone. Apple's services (activation, Apple ID,
-iCloud, the App Store) are not supported and not a goal.
+## Legal & Credits
 
-The XNU patch and the files derived from it are under the Apple Public Source
-License 2.0 ([LICENSE.APSL](LICENSE.APSL)); the rest is MIT
-([LICENSE](LICENSE)), as the file headers say. Third parties: [NOTICE](NOTICE),
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md),
-[COMPLIANCE.md](COMPLIANCE.md). What is and is not distributed:
-[LEGAL.md](LEGAL.md). None of this is legal advice.
-
-HakiOS is an independent research project. It is **not affiliated with or
-endorsed by Apple**; "Darwin", "iPhone", "XNU" and "Apple" are named only to
-describe what the code works with.
-
-Thanks to the upstream HakiOS team and to the people who reverse-engineered
-the SLPI/SNS and FastRPC protocols in the open (see
-[`tools/`](tools) and the sensor notes in `devices/thyme/CHECKLIST.md`).
+- **No Apple or vendor blobs** are distributed in this repository; users supply their own IPSW and extract firmware from their own device. Apple services (Activation, Apple ID, iCloud, App Store / FairPlay DRM) are not supported.
+- **Licenses**: XNU patches and derivatives are licensed under [APSL 2.0](LICENSE.APSL); original code is [MIT](LICENSE). See [NOTICE](NOTICE), [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), [COMPLIANCE.md](COMPLIANCE.md), and [LEGAL.md](LEGAL.md).
+- **Disclaimer**: Independent research project, **not affiliated with or endorsed by Apple**.
+- **Thanks**: Upstream HakiOS maintainers and the open-source Qualcomm/SLPI/QMI reverse-engineering community.
