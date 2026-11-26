@@ -45,6 +45,7 @@
 #include <sys/errno.h>
 #include <sys/kauth.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/uio_internal.h>
@@ -2034,6 +2035,10 @@ say_sleepstate(uint32_t value)
  * own power, and our request for the rails is given back; at 2.2 s it adds "sleepstate_see".
  * Asked to stop, it acknowledges within 25 ms (0x10e), and it starts again in the same session.
  */
+static uint32_t fastrpc_early;           /* boot-arg fastrpc_early: the listener as the link opens, not after the QRTR listen */
+static uint64_t dsp_boot_started;        /* timestamp (us) when TrustZone let the sensor DSP out of reset */
+static uint64_t fastrpc_registered_us;   /* us after dsp_boot_started when adsp_default_listener_register returned */
+
 static bool
 step_start(void)
 {
@@ -2048,6 +2053,7 @@ step_start(void)
 		return false;
 	}
 	PE_parse_boot_argn("slpi_wait", &wait_seconds, sizeof(wait_seconds));
+	PE_parse_boot_argn("fastrpc_early", &fastrpc_early, sizeof(fastrpc_early));
 	bzero(&last, sizeof(last));
 	have = dsp_words(&last);
 	announce("listen for the sensor DSP's doorbells, ask RPMh for its rails, tell the always-on processor that its image is "
@@ -2073,7 +2079,8 @@ step_start(void)
 	}
 	result = scm("to authenticate the sensor DSP's image and start it", SCM_PAS_AUTH_AND_RESET, SCM_ONE_VALUE, PAS_SLPI, 0, 0,
 	    &answer);
-	doorbell.since = started = now_us();
+	doorbell.since = dsp_boot_started = started = now_us();
+	fastrpc_registered_us = 0;
 	image_written = false;
 	if (result != 0 || answer != 0) {
 		printf("slpi: %u: TRUSTZONE DOES NOT START THE SENSOR DSP: the call returns %d, its answer is %#llx\n", step, result,
@@ -2129,6 +2136,11 @@ step_start(void)
 			if (state & DSP_FATAL) {
 				printf("slpi: %u: THE SENSOR DSP SAYS IT HAS GIVEN UP\n", step);
 				show_crash_reason();
+				break;
+			}
+			if (fastrpc_early && ready_at != 0 && handed_over) {
+				printf("slpi: %u: fastrpc_early: leaving watch at +%llu.%03llu ms so adsp_default_listener precedes SNS_REG_INIT\n",
+				    step, (now - started) / 1000, (now - started) % 1000);
 				break;
 			}
 		}
@@ -2915,7 +2927,7 @@ qrtr_input(const uint8_t *data, uint32_t length)
 		return;
 	}
 	qrtr_in++;
-	if (sns_enabled) {
+	if (sns_enabled && qrtr_in <= 40) {
 		printf("slpi: qrtr: < type %u from %u:%u to %u:%u, %u bytes\n", header.type, header.from_node, header.from_port,
 		    header.to_node, header.to_port, header.size);
 	}
@@ -2963,11 +2975,103 @@ qrtr_input(const uint8_t *data, uint32_t length)
 #define SNS_SERVICE             400u            /* QRTR service 400 (0x190): the SNS client */
 #define SNS_MSG_SUID_REQ        512u            /* SNS_SUID_MSGID_SNS_SUID_REQ */
 #define SNS_MSG_SENSOR_CONFIG   513u            /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_CONFIG */
+#define SNS_MSG_ON_CHANGE_CFG   514u            /* SNS_STD_SENSOR_MSGID_SNS_STD_ON_CHANGE_CONFIG */
 #define SNS_MSG_SUID_EVENT      768u            /* SNS_SUID_MSGID_SNS_SUID_EVENT */
+#define SNS_MSG_PROXIMITY_EVENT 769u            /* SNS_PROXIMITY_MSGID_SNS_PROXIMITY_EVENT */
 #define SNS_MSG_SENSOR_EVENT    1025u           /* SNS_STD_SENSOR_MSGID_SNS_STD_SENSOR_EVENT */
 
-static uint8_t sns_suid[16];
-static bool sns_have_suid, sns_have_registry;
+static uint8_t sns_suid[16], sns_als_suid[16], sns_prox_suid[16];
+static uint8_t sns_gyro_live_suid[16], sns_mag_suid[16], sns_press_suid[16];
+static bool sns_have_suid, sns_have_registry, sns_have_als, sns_have_prox;
+static bool sns_have_gyro, sns_have_mag, sns_have_press;
+static bool sns_accel_configured, sns_als_configured, sns_prox_configured;
+static bool sns_gyro_configured, sns_mag_configured, sns_press_configured;
+
+/*
+ * Fixed-point sensor snapshot exported via kern.hakios.sensor_state for backboardd
+ * (userland/src/inject.c) to dispatch virtual IOHIDEvent services. Pure integer
+ * representation avoids kernel floating-point ABI issues.
+ */
+struct hakios_sensor_state {
+	uint32_t version;           /* 2 */
+	uint32_t flags;             /* bit0=accel, bit1=als, bit2=prox, bit3=gyro, bit4=mag, bit5=pressure */
+	uint64_t accel_seq;
+	int32_t  accel_mmps2[3];    /* milli-m/s^2 (1 g ~= 9807) */
+	uint32_t accel_pad;
+	uint64_t als_seq;
+	int32_t  als_mlux;          /* milli-lux (1 lux = 1000) */
+	int32_t  als_raw;
+	uint64_t prox_seq;
+	uint32_t prox_near;         /* 0 = FAR, 1 = NEAR */
+	uint32_t prox_raw;
+	uint64_t gyro_seq;
+	int32_t  gyro_mradps[3];    /* milli-rad/s */
+	uint32_t gyro_pad;
+	uint64_t mag_seq;
+	int32_t  mag_mut[3];        /* milli-uT */
+	uint32_t mag_pad;
+	uint64_t pressure_seq;
+	int32_t  pressure_mhpa;     /* milli-hPa (sea level ~= 1013250) */
+	uint32_t pressure_pad;
+};
+
+static LCK_MTX_DECLARE(sensor_state_lock, &slpi_lock_group);
+static struct hakios_sensor_state sensor_state = { .version = 2 };
+static uint32_t sns_als_samples, sns_prox_samples, sns_gyro_samples, sns_mag_samples, sns_press_samples, sns_qmi_ind_logged;
+
+SYSCTL_DECL(_kern_hakios);
+
+static int
+sysctl_sensor_state(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	struct hakios_sensor_state snap;
+
+	lck_mtx_lock(&sensor_state_lock);
+	snap = sensor_state;
+	lck_mtx_unlock(&sensor_state_lock);
+	return SYSCTL_OUT(req, &snap, sizeof(snap));
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, sensor_state,
+    CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_ANYBODY | CTLFLAG_LOCKED,
+    0, 0, sysctl_sensor_state, "S,hakios_sensor_state",
+    "Latest SLPI accelerometer, ambient-light, and proximity sensor snapshot");
+
+/* Pure-integer IEEE-754 single-precision float -> milli-units (value * 1000). */
+static int32_t
+ieee754_to_milli(uint32_t bits)
+{
+	uint32_t sign = bits >> 31;
+	int exp_raw = (int)((bits >> 23) & 0xffu);
+	uint32_t frac = bits & 0x7fffffu;
+	uint64_t scaled;
+	int exp, shift;
+
+	if (exp_raw == 0) {
+		return 0;
+	}
+	if (exp_raw == 0xff) {
+		return sign ? -2000000000 : 2000000000;
+	}
+	exp = exp_raw - 127;
+	if (exp > 20) {
+		return sign ? -2000000000 : 2000000000;
+	}
+	scaled = (uint64_t)(frac | 0x800000u) * 1000ull;
+	shift = 23 - exp;
+	if (shift >= 64) {
+		return 0;
+	}
+	if (shift > 0) {
+		scaled >>= shift;
+	} else if (shift < 0) {
+		scaled <<= -shift;
+	}
+	if (scaled > 2000000000ull) {
+		scaled = 2000000000ull;
+	}
+	return sign ? -(int32_t)scaled : (int32_t)scaled;
+}
 
 /*
  * The accelerometer's SUID as the phone's own DSP reports it to
@@ -3344,21 +3448,34 @@ out:
 }
 
 static void
-sns_config(void)
+sns_config_rate(const uint8_t suid[16], float hz, const char *what)
 {
 	uint8_t inner[8];
 	uint8_t *p = inner;
 
-	p = sns_float(p, 1, 10.0f);     /* samples a second */
-	sns_qmi_send(SNS_MSG_SENSOR_CONFIG, sns_suid, inner, (uint32_t)(p - inner));
-	printf("slpi: sns: asked the accelerometer for 10 samples a second\n");
+	p = sns_float(p, 1, hz);     /* samples a second */
+	sns_qmi_send(SNS_MSG_SENSOR_CONFIG, suid, inner, (uint32_t)(p - inner));
+	printf("slpi: sns: enabled %s at %u Hz\n", what, (unsigned)hz);
 }
 
 static void
-sns_sensor_event(const uint8_t *data, uint32_t length)
+sns_config(void)
+{
+	sns_config_rate(sns_suid, 20.0f, "accelerometer");
+}
+
+static void
+sns_config_on_change(const uint8_t suid[16], const char *what)
+{
+	sns_qmi_send(SNS_MSG_ON_CHANGE_CFG, suid, NULL, 0);
+	printf("slpi: sns: enabled %s (on-change msg %u)\n", what, SNS_MSG_ON_CHANGE_CFG);
+}
+
+static void
+sns_sensor_event(const uint8_t event_suid[16], const uint8_t *data, uint32_t length)
 {
 	const uint8_t *at = data, *end = data + length;
-	float values[8];
+	uint32_t raw_bits[8];
 	unsigned count = 0;
 
 	while (at < end) {
@@ -3366,9 +3483,21 @@ sns_sensor_event(const uint8_t *data, uint32_t length)
 		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
 
 		if (field == 1 && wire == 5 && at + 4 <= end && count < 8) {
-			memcpy(&values[count], at, 4);
+			memcpy(&raw_bits[count], at, 4);
 			count++;
 			at += 4;
+		} else if (field == 1 && wire == 2) {
+			/* proto3 packed repeated float */
+			uint64_t n = sns_read_varint(&at, end);
+
+			if (n > (uint64_t)(end - at)) {
+				break;
+			}
+			for (uint64_t off = 0; off + 4 <= n && count < 8; off += 4) {
+				memcpy(&raw_bits[count], at + off, 4);
+				count++;
+			}
+			at += n;
 		} else if (wire == 0) {
 			(void)sns_read_varint(&at, end);
 		} else if (wire == 1) {
@@ -3384,8 +3513,152 @@ sns_sensor_event(const uint8_t *data, uint32_t length)
 			break;
 		}
 	}
-	if (count >= 3 && sns_samples < 20) {
-		printf("slpi: sns: accelerometer %u: %.4f %.4f %.4f\n", ++sns_samples, values[0], values[1], values[2]);
+	if (count == 0) {
+		return;
+	}
+	if (sns_have_suid && memcmp(event_suid, sns_suid, 16) == 0 && count >= 3) {
+		int32_t x = ieee754_to_milli(raw_bits[0]);
+		int32_t y = ieee754_to_milli(raw_bits[1]);
+		int32_t z = ieee754_to_milli(raw_bits[2]);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 1u;
+		sensor_state.accel_seq++;
+		sensor_state.accel_mmps2[0] = x;
+		sensor_state.accel_mmps2[1] = y;
+		sensor_state.accel_mmps2[2] = z;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_samples < 8) {
+			printf("slpi: sns: accelerometer %u: mm/s^2=(%d, %d, %d)\n", ++sns_samples, x, y, z);
+		} else {
+			sns_samples++;
+		}
+	} else if (sns_have_als && memcmp(event_suid, sns_als_suid, 16) == 0) {
+		int32_t mlux = ieee754_to_milli(raw_bits[0]);
+		int32_t raw = count >= 2 ? ieee754_to_milli(raw_bits[1]) / 1000 : 0;
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 2u;
+		sensor_state.als_seq++;
+		sensor_state.als_mlux = mlux;
+		sensor_state.als_raw = raw;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_als_samples < 10) {
+			printf("slpi: sns: ambient_light %u: mlux=%d raw=%d\n", ++sns_als_samples, mlux, raw);
+		} else {
+			sns_als_samples++;
+		}
+	} else if (sns_have_prox && memcmp(event_suid, sns_prox_suid, 16) == 0) {
+		int32_t v0 = ieee754_to_milli(raw_bits[0]);
+		uint32_t near = (v0 > 0 && v0 <= 1000) ? 1u : 0u;
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 4u;
+		sensor_state.prox_seq++;
+		sensor_state.prox_near = near;
+		sensor_state.prox_raw = (uint32_t)(v0 >= 0 ? v0 : 0);
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_prox_samples < 10) {
+			printf("slpi: sns: proximity(std) %u: v0=%d near=%u\n", ++sns_prox_samples, v0, near);
+		} else {
+			sns_prox_samples++;
+		}
+	} else if (sns_have_gyro && memcmp(event_suid, sns_gyro_live_suid, 16) == 0 && count >= 3) {
+		int32_t gx = ieee754_to_milli(raw_bits[0]);
+		int32_t gy = ieee754_to_milli(raw_bits[1]);
+		int32_t gz = ieee754_to_milli(raw_bits[2]);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 8u;
+		sensor_state.gyro_seq++;
+		sensor_state.gyro_mradps[0] = gx;
+		sensor_state.gyro_mradps[1] = gy;
+		sensor_state.gyro_mradps[2] = gz;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_gyro_samples < 6) {
+			printf("slpi: sns: gyro %u: mrad/s=(%d, %d, %d)\n", ++sns_gyro_samples, gx, gy, gz);
+		} else {
+			sns_gyro_samples++;
+		}
+	} else if (sns_have_mag && memcmp(event_suid, sns_mag_suid, 16) == 0 && count >= 3) {
+		int32_t mx = ieee754_to_milli(raw_bits[0]);
+		int32_t my = ieee754_to_milli(raw_bits[1]);
+		int32_t mz = ieee754_to_milli(raw_bits[2]);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 16u;
+		sensor_state.mag_seq++;
+		sensor_state.mag_mut[0] = mx;
+		sensor_state.mag_mut[1] = my;
+		sensor_state.mag_mut[2] = mz;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_mag_samples < 6) {
+			printf("slpi: sns: mag %u: muT=(%d, %d, %d)\n", ++sns_mag_samples, mx, my, mz);
+		} else {
+			sns_mag_samples++;
+		}
+	} else if (sns_have_press && memcmp(event_suid, sns_press_suid, 16) == 0) {
+		int32_t mhpa = ieee754_to_milli(raw_bits[0]);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sensor_state.flags |= 32u;
+		sensor_state.pressure_seq++;
+		sensor_state.pressure_mhpa = mhpa;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_press_samples < 6) {
+			printf("slpi: sns: pressure %u: mhPa=%d\n", ++sns_press_samples, mhpa);
+		} else {
+			sns_press_samples++;
+		}
+	}
+}
+
+static void
+sns_proximity_event(const uint8_t event_suid[16], const uint8_t *data, uint32_t length)
+{
+	const uint8_t *at = data, *end = data + length;
+	uint32_t ptype = 0, raw_adc = 0;
+
+	(void)event_suid;
+	while (at < end) {
+		uint64_t key = sns_read_varint(&at, end);
+		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
+
+		if (field == 1 && wire == 0) {
+			ptype = (uint32_t)sns_read_varint(&at, end);
+		} else if (field == 2 && wire == 0) {
+			raw_adc = (uint32_t)sns_read_varint(&at, end);
+		} else if (field == 2 && wire == 5 && at + 4 <= end) {
+			memcpy(&raw_adc, at, 4);
+			at += 4;
+		} else if (wire == 0) {
+			(void)sns_read_varint(&at, end);
+		} else if (wire == 1) {
+			at += 8;
+		} else if (wire == 2) {
+			uint64_t n = sns_read_varint(&at, end);
+
+			if (n > (uint64_t)(end - at)) {
+				break;
+			}
+			at += n;
+		} else if (wire == 5 && at + 4 <= end) {
+			at += 4;
+		} else {
+			break;
+		}
+	}
+	lck_mtx_lock(&sensor_state_lock);
+	sensor_state.flags |= 4u;
+	sensor_state.prox_seq++;
+	sensor_state.prox_near = (ptype == 1u) ? 1u : 0u;
+	sensor_state.prox_raw = raw_adc;
+	lck_mtx_unlock(&sensor_state_lock);
+	if (sns_prox_samples < 10) {
+		printf("slpi: sns: proximity %u: type=%u (%s) raw=%u\n", ++sns_prox_samples, ptype,
+		    ptype == 1u ? "NEAR" : "FAR", raw_adc);
+	} else {
+		sns_prox_samples++;
 	}
 }
 
@@ -3393,9 +3666,11 @@ static void
 sns_suid_event(const uint8_t *data, uint32_t length)
 {
 	const uint8_t *at = data, *end = data + length;
-	uint8_t suid[16] = { 0 };
+	uint8_t suids[4][16];
+	unsigned suid_count = 0;
 	char name[32] = "";
 
+	bzero(suids, sizeof(suids));
 	while (at < end) {
 		uint64_t key = sns_read_varint(&at, end);
 		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
@@ -3412,6 +3687,7 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 		} else if (field == 2 && wire == 2) {
 			uint64_t n = sns_read_varint(&at, end);
 			const uint8_t *send = at + n;
+			uint8_t cur[16] = { 0 };
 
 			while (at < send) {
 				uint64_t k = sns_read_varint(&at, send);
@@ -3419,14 +3695,17 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 
 				if (w == 1 && at + 8 <= send) {
 					if (f == 1) {
-						memcpy(suid, at, 8);
+						memcpy(cur, at, 8);
 					} else if (f == 2) {
-						memcpy(suid + 8, at, 8);
+						memcpy(cur + 8, at, 8);
 					}
 					at += 8;
 				} else {
 					break;
 				}
+			}
+			if (suid_count < 4) {
+				memcpy(suids[suid_count++], cur, 16);
 			}
 			at = send;
 		} else if (wire == 0) {
@@ -3445,26 +3724,73 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 		}
 	}
 	if (name[0] != 0) {
-		printf("slpi: sns: \"%s\" has SUID %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n", name,
-		    suid[15], suid[14], suid[13], suid[12], suid[11], suid[10], suid[9], suid[8], suid[7], suid[6], suid[5],
-		    suid[4], suid[3], suid[2], suid[1], suid[0]);
-		/*
-		 * An event with the name only is the DSP's answer when its registry
-		 * has no such sensor: the SUID would be all zeros, and a config sent
-		 * to it is answered result 5. Nothing is learned from it.
-		 */
+		uint8_t chosen[16] = { 0 };
 		bool have = false;
 
-		for (unsigned i = 0; i < sizeof(suid); i++) {
-			have |= suid[i] != 0;
+		for (unsigned idx = 0; idx < suid_count; idx++) {
+			const uint8_t *s = suids[idx];
+			bool nonzero = false;
+
+			for (unsigned i = 0; i < 16; i++) {
+				nonzero |= s[i] != 0;
+			}
+			printf("slpi: sns: \"%s\"[%u] has SUID %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+			    name, idx, s[15], s[14], s[13], s[12], s[11], s[10], s[9], s[8], s[7], s[6], s[5], s[4], s[3], s[2],
+			    s[1], s[0]);
+			if (!nonzero) {
+				continue;
+			}
+			/* Prefer front TCS3701 when multiple ALS/proximity sensors are reported. */
+			if (!have || memcmp(s, "amsTCS3701", 10) == 0) {
+				memcpy(chosen, s, 16);
+				have = true;
+			}
 		}
 		if (!have) {
 			return;
 		}
 		if (strcmp(name, "accel") == 0) {
-			memcpy(sns_suid, suid, sizeof(sns_suid));
+			memcpy(sns_suid, chosen, sizeof(sns_suid));
 			sns_have_suid = true;
-			sns_config();
+			if (!sns_accel_configured) {
+				sns_accel_configured = true;
+				sns_config();
+			}
+		} else if (strcmp(name, "ambient_light") == 0) {
+			memcpy(sns_als_suid, chosen, sizeof(sns_als_suid));
+			sns_have_als = true;
+			if (!sns_als_configured) {
+				sns_als_configured = true;
+				sns_config_on_change(sns_als_suid, "ambient_light");
+			}
+		} else if (strcmp(name, "gyro") == 0) {
+			memcpy(sns_gyro_live_suid, chosen, sizeof(sns_gyro_live_suid));
+			sns_have_gyro = true;
+			if (!sns_gyro_configured) {
+				sns_gyro_configured = true;
+				sns_config_rate(sns_gyro_live_suid, 20.0f, "gyroscope");
+			}
+		} else if (strcmp(name, "mag") == 0) {
+			memcpy(sns_mag_suid, chosen, sizeof(sns_mag_suid));
+			sns_have_mag = true;
+			if (!sns_mag_configured) {
+				sns_mag_configured = true;
+				sns_config_rate(sns_mag_suid, 10.0f, "magnetometer");
+			}
+		} else if (strcmp(name, "pressure") == 0) {
+			memcpy(sns_press_suid, chosen, sizeof(sns_press_suid));
+			sns_have_press = true;
+			if (!sns_press_configured) {
+				sns_press_configured = true;
+				sns_config_rate(sns_press_suid, 1.0f, "barometer");
+			}
+		} else if (strcmp(name, "proximity") == 0) {
+			memcpy(sns_prox_suid, chosen, sizeof(sns_prox_suid));
+			sns_have_prox = true;
+			if (!sns_prox_configured) {
+				sns_prox_configured = true;
+				sns_config_on_change(sns_prox_suid, "proximity");
+			}
 		} else if (strcmp(name, "registry") == 0) {
 			sns_have_registry = true;
 		} else if (sns_ask_name[0] != 0 && strcmp(name, sns_ask_name) == 0) {
@@ -3477,12 +3803,36 @@ static void
 sns_event(const uint8_t *data, uint32_t length)
 {
 	const uint8_t *at = data, *end = data + length;
+	uint8_t event_suid[16] = { 0 };
 
 	while (at < end) {
 		uint64_t key = sns_read_varint(&at, end);
 		uint32_t field = (uint32_t)(key >> 3), wire = (uint32_t)(key & 7);
 
-		if (field == 2 && wire == 2) {
+		if (field == 1 && wire == 2) {
+			uint64_t n = sns_read_varint(&at, end);
+
+			if (n > (uint64_t)(end - at)) {
+				break;
+			}
+			const uint8_t *s = at, *se = at + n;
+			while (s < se) {
+				uint64_t k = sns_read_varint(&s, se);
+				uint32_t f = (uint32_t)(k >> 3), w = (uint32_t)(k & 7);
+
+				if (w == 1 && s + 8 <= se) {
+					if (f == 1) {
+						memcpy(event_suid, s, 8);
+					} else if (f == 2) {
+						memcpy(event_suid + 8, s, 8);
+					}
+					s += 8;
+				} else {
+					break;
+				}
+			}
+			at += n;
+		} else if (field == 2 && wire == 2) {
 			uint64_t n = sns_read_varint(&at, end);
 			const uint8_t *e = at, *ee = at + n;
 			uint32_t msg_id = 0;
@@ -3521,8 +3871,10 @@ sns_event(const uint8_t *data, uint32_t length)
 			if (msg_id == SNS_MSG_SUID_EVENT && payload != NULL) {
 				sns_suid_event(payload, payload_length);
 			} else if (msg_id == SNS_MSG_SENSOR_EVENT && payload != NULL) {
-				sns_sensor_event(payload, payload_length);
-			} else if (msg_id != 0) {
+				sns_sensor_event(event_suid, payload, payload_length);
+			} else if (msg_id == SNS_MSG_PROXIMITY_EVENT && payload != NULL) {
+				sns_proximity_event(event_suid, payload, payload_length);
+			} else if (msg_id != 0 && sns_qmi_ind_logged < 32) {
 				printf("slpi: sns: event %u, %u bytes\n", msg_id, payload_length);
 			}
 			at += n;
@@ -3571,7 +3923,7 @@ sns_input(const uint8_t *data, uint32_t length)
 	resp_msg = note != NULL ? note->msg : sns_last_msg;
 	resp_suid = note != NULL ? note->suid : sns_last_suid;
 	resp_group = note != NULL ? note->group : sns_last_group;
-	if (sns_enabled) {
+	if (sns_enabled && (message != 0x22 || sns_qmi_ind_logged++ < 25)) {
 		printf("slpi: sns: < QMI %u, %u bytes:", message, length);
 		for (uint32_t i = 0; i < length && i < 40; i++) {
 			printf(" %02x", data[i]);
@@ -4218,18 +4570,41 @@ sns_start(void)
 		sns_config();
 	} else {
 		/* the sensor process may still be initialising at three seconds: ask again for a while */
-		for (unsigned attempt = 0; attempt < 10 && !(sns_have_registry && sns_have_suid &&
-		    (sns_ask_name[0] == 0 || sns_have_ask_name)); attempt++) {
-			sns_ask("registry");
-			sns_ask("accel");
-			if (sns_ask_name[0] != 0) {
+		for (unsigned attempt = 0; attempt < 8 && !(sns_have_registry && sns_have_suid && sns_have_gyro &&
+		    sns_have_mag && sns_have_als && sns_have_press &&
+		    (sns_have_prox || attempt >= 2) && (sns_ask_name[0] == 0 || sns_have_ask_name)); attempt++) {
+			if (!sns_have_registry) {
+				sns_ask("registry");
+			}
+			if (!sns_have_suid) {
+				sns_ask("accel");
+			}
+			if (!sns_have_gyro) {
+				sns_ask("gyro");
+			}
+			if (!sns_have_mag) {
+				sns_ask("mag");
+			}
+			if (!sns_have_als) {
+				sns_ask("ambient_light");
+			}
+			if (!sns_have_press) {
+				sns_ask("pressure");
+			}
+			if (!sns_have_prox && attempt < 2) {
+				sns_ask("proximity");
+			}
+			if (sns_ask_name[0] != 0 && !sns_have_ask_name) {
 				sns_ask(sns_ask_name);
 			}
-			sleep_ms(2000);
+			sleep_ms(1500);
 		}
 	}
-	printf("slpi: sns: registry %s, accelerometer %s\n", sns_have_registry ? "ANSWERED" : "silent",
-	    sns_have_suid ? "ANSWERED" : "silent");
+	printf("slpi: sns: registry %s, accel %s, gyro %s, mag %s, ambient_light %s, pressure %s, proximity %s\n",
+	    sns_have_registry ? "ANSWERED" : "silent", sns_have_suid ? "ANSWERED" : "silent",
+	    sns_have_gyro ? "ANSWERED" : "silent", sns_have_mag ? "ANSWERED" : "silent",
+	    sns_have_als ? "ANSWERED" : "silent", sns_have_press ? "ANSWERED" : "silent",
+	    sns_have_prox ? "ANSWERED" : "silent");
 	if (sns_ask_name[0] != 0) {
 		printf("slpi: sns: \"%s\" %s\n", sns_ask_name, sns_have_ask_name ? "ANSWERED" : "silent");
 	}
@@ -5126,7 +5501,7 @@ static uint32_t fastrpc_open_after;      /* boot-arg fastrpc_open_after: send it
 static uint32_t fastrpc_open_pd = 0xffffffff; /* boot-arg fastrpc_open_pd: the PD of that open (unset: fastrpc_pd) */
 static uint32_t fastrpc_attach0;         /* boot-arg fastrpc_attach0: the guest-OS attach (PD 0) before the listener */
 static uint32_t fastrpc_attach_client;   /* boot-arg fastrpc_attach_client: the client session of the sensors attach */
-static uint32_t fastrpc_early;           /* boot-arg fastrpc_early: the listener as the link opens, not after the QRTR listen */
+/* fastrpc_early declared above step_start() */
 static uint32_t fastrpc_attach_tid;      /* boot-arg fastrpc_attach_tid: the DSP thread the sensors attach runs on */
 static uint32_t fastrpc_close;           /* boot-arg fastrpc_close: close the default listener's control handle after registering */
 static uint32_t fastrpc_phone;           /* boot-arg fastrpc_phone: the phone daemon's order: attach, init2, next2, then open and register */
@@ -5195,7 +5570,7 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
 
 #define FASTRPC_FILE_SLOTS      32
 #define FASTRPC_DIR_SLOTS       4
-#define FASTRPC_DIR_NAMES       96
+#define FASTRPC_DIR_NAMES       256
 #define FASTRPC_DIR_NAME_LEN    96
 #define FASTRPC_FILE_LIMIT      (512 * 1024)
 #define FASTRPC_OUT_LIMIT       1024
@@ -5203,9 +5578,10 @@ fastrpc_listener_poll(uint64_t physical, uint32_t shared_offset, bool shared, ui
  * 4 KB at a time (fread 0x1000), so the old 1 KB cap left every skel load
  * with a truncated reply (logs/233427-run.log: 1048 bytes for a 4 KB read). */
 #define FASTRPC_OUT_MAX         (8u << 10)
-#define FASTRPC_STORE_FILES     64
+#define FASTRPC_STORE_FILES     256
 #define FASTRPC_STORE_PATH      192
 #define FASTRPC_STORE_LIMIT     (4 * 1024 * 1024)
+#define FASTRPC_FILE_NOTES      32
 
 /* AEEStdErr.h: the DSP's codes are AEE_EOFFSET (0x80000400) plus the number. */
 #define AEE_EBADPARM            0x8000040Eu
@@ -5243,14 +5619,74 @@ static uint32_t fastrpc_next_fd = 100;
  * these reads say.
  */
 struct fastrpc_file_note {
-	char path[48];
+	char path[64];
 	int ok;
 	uint32_t size;
 };
-static struct fastrpc_file_note fastrpc_file_notes[8];
+static struct fastrpc_file_note fastrpc_file_notes[FASTRPC_FILE_NOTES];
 static uint32_t fastrpc_file_notes_at, fastrpc_file_notes_total, fastrpc_file_fails;
 static uint32_t fastrpc_module_opens, fastrpc_apps_std_calls;
 static char fastrpc_last_module[32];
+
+static const char *const sns_config_files[] = {
+	"ak991x_dri_0.json", "bmp285_0.json", "lsm6dso_0.json", "sm8250_ak991x_0.json",
+	"sm8250_bmp285_0.json", "sm8250_lsm6dso_0.json", "sm8250_power_0.json", "sm8250_sx933x_0.json",
+	"sm8250_tcs3408.json", "sm8250_tcs3701.json", "sm8250_tsl2540.json", "sm8250_vl53l1_tof_0.json",
+	"sns_amd.json", "sns_amd_sw_disabled.json", "sns_amd_sw_enabled.json", "sns_aod.json",
+	"sns_aont.json", "sns_ccd.json", "sns_ccd_v2_walk.json", "sns_ccd_v3_walk.json",
+	"sns_cm.json", "sns_dae.json", "sns_dbtap.json", "sns_device_orient.json",
+	"sns_diag_filter.json", "sns_dpc.json", "sns_fmv.json", "sns_geomag_rv.json",
+	"sns_gyro_cal.json", "sns_mag_cal.json", "sns_mag_cal_legacy.json", "sns_nonui.json",
+	"sns_oem13.json", "sns_pedometer.json", "sns_rmd.json", "sns_rotv.json",
+	"sns_sar_algo.json", "sns_screen_down.json", "sns_smd.json", "sns_tilt.json",
+	"sns_tilt_sw_disabled.json", "sns_tilt_sw_enabled.json", "sns_tilt_to_wake.json", "sns_wrist_pedo.json",
+	"sx933x_0.json", "tcs3408.json", "tcs3701.json", "tsl2540.json",
+	"vl53l1_tof_0.json",
+};
+
+#define FASTRPC_CREATED_DIRS    16
+static char fastrpc_created_dirs[FASTRPC_CREATED_DIRS][FASTRPC_STORE_PATH];
+static uint32_t fastrpc_created_dir_count;
+
+static void
+fastrpc_strip_slash(char *path)
+{
+	size_t n = strlen(path);
+
+	while (n > 1 && path[n - 1] == '/') {
+		path[--n] = 0;
+	}
+}
+
+static bool
+fastrpc_is_sensor_dir(const char *path)
+{
+	static const char *const dirs[] = {
+		"/fw",
+		"/fw/sensors",
+		"/fw/sensors/config",
+		"/fw/sensors/persist",
+		"/fw/sensors/persist/registry",
+		"/fw/sensors/persist/registry/registry",
+		"/fw/sensors/adsp",
+		"/fw/sensors/soc0",
+	};
+	char clean[FASTRPC_STORE_PATH];
+
+	strlcpy(clean, path, sizeof(clean));
+	fastrpc_strip_slash(clean);
+	for (unsigned i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+		if (strcmp(clean, dirs[i]) == 0) {
+			return true;
+		}
+	}
+	for (uint32_t i = 0; i < fastrpc_created_dir_count; i++) {
+		if (strcmp(clean, fastrpc_created_dirs[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 static void
 fastrpc_note_file(const char *path, int ok, uint32_t size)
@@ -5260,7 +5696,7 @@ fastrpc_note_file(const char *path, int ok, uint32_t size)
 	strlcpy(n->path, path, sizeof(n->path));
 	n->ok = ok;
 	n->size = size;
-	fastrpc_file_notes_at = (fastrpc_file_notes_at + 1) % 8;
+	fastrpc_file_notes_at = (fastrpc_file_notes_at + 1) % FASTRPC_FILE_NOTES;
 	fastrpc_file_notes_total++;
 	if (!ok) {
 		fastrpc_file_fails++;
@@ -5505,14 +5941,57 @@ fastrpc_root_read(const char *path, uint64_t limit, uint32_t *size)
 	return data;
 }
 
+/*
+ * Mi 10S OLED panel sysfs attributes read by the under-OLED TCS3701 ALS/proximity
+ * driver inside SLPI (captured read-only from Android /sys/class/... on 2026-11-26).
+ */
+extern int hakios_display_backlight_level_2047(void) __attribute__((weak));
+
+static const char *
+fastrpc_sysfs_value(const char *path)
+{
+	static char brightness_buf[16];
+	static const struct {
+		const char *path, *value;
+	} table[] = {
+		{ "/sys/class/drm/card0-DSI-1/panel_info", "panel_name=mdss_dsi_j2s_mp_42_02_0a_dsc_cmd\n" },
+		{ "/sys/class/backlight/panel0-backlight/max_brightness", "2047\n" },
+		{ "/sys/class/drm/card0-DSI-1/dynamic_fps", "90\n" },
+	};
+
+	if (strcmp(path, "/sys/class/backlight/panel0-backlight/brightness") == 0) {
+		int lvl = hakios_display_backlight_level_2047 != NULL ? hakios_display_backlight_level_2047() : 1228;
+
+		snprintf(brightness_buf, sizeof(brightness_buf), "%d\n", lvl);
+		return brightness_buf;
+	}
+	for (unsigned i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+		if (strcmp(path, table[i].path) == 0) {
+			return table[i].value;
+		}
+	}
+	return NULL;
+}
+
 /* A file of the DSP's filesystem: what it wrote this boot first, then the scene. */
 static uint8_t *
 fastrpc_file_data(const char *path, uint32_t *size)
 {
 	uint8_t *data = fastrpc_store_read(path, size);
+	const char *sysfs_val;
 
 	if (data != NULL) {
 		return data;
+	}
+	if ((sysfs_val = fastrpc_sysfs_value(path)) != NULL) {
+		size_t length = strlen(sysfs_val);
+		uint8_t *copy = kalloc_data(length + 1, Z_WAITOK | Z_ZERO);
+
+		if (copy != NULL) {
+			memcpy(copy, sysfs_val, length);
+			*size = (uint32_t)length;
+			return copy;
+		}
 	}
 	if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
 		return fastrpc_soc0_read(path + sizeof("/fw/sensors/soc0/") - 1, size);
@@ -6188,7 +6667,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		result = 0;
 		break;
 	}
-	case 29: {                         /* mkdir: the store needs no directories */
+	case 29: {                         /* mkdir: remember virtual dir so subsequent stat() sees S_IFDIR */
 		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
 		char path[FASTRPC_STORE_PATH];
 
@@ -6199,14 +6678,19 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
 			snprintf(path, sizeof(path), "%s", name);
 		}
+		fastrpc_strip_slash(path);
+		if (!fastrpc_is_sensor_dir(path) && fastrpc_created_dir_count < FASTRPC_CREATED_DIRS) {
+			strlcpy(fastrpc_created_dirs[fastrpc_created_dir_count++], path, FASTRPC_STORE_PATH);
+		}
 		printf("slpi: fastrpc: apps_std: mkdir %s\n", path);
 		result = 0;
 		break;
 	}
 	case 26: {                         /* opendir */
 		const char *name = in[1].size != 0 ? fastrpc_string(&in[1]) : NULL;
-		char path[160];
+		char path[160], redwood_path[192];
 		int slot;
+		uint32_t count = 0;
 
 		if (name == NULL || numbers == NULL) {
 			result = (int32_t)AEE_EBADPARM;
@@ -6215,6 +6699,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
 			snprintf(path, sizeof(path), "%s", name);
 		}
+		fastrpc_strip_slash(path);
 		for (slot = 0; slot < FASTRPC_DIR_SLOTS && fastrpc_dirs[slot].used; slot++) {
 			;
 		}
@@ -6222,15 +6707,53 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			result = (int32_t)AEE_ENOMEMORY;
 			break;
 		}
+		bzero(&fastrpc_dirs[slot], sizeof(fastrpc_dirs[slot]));
 		fastrpc_dirs[slot].used = true;
 		fastrpc_dirs[slot].fd = fastrpc_next_fd++;
-		fastrpc_dirs[slot].count = fastrpc_root_dir(path, fastrpc_dirs[slot].names, FASTRPC_DIR_NAMES);
+		if (strcmp(path, "/fw/sensors/persist/registry/registry") == 0) {
+			for (unsigned i = 0; i < sizeof(sns_registry_files) / sizeof(sns_registry_files[0]) && count < FASTRPC_DIR_NAMES; i++) {
+				strlcpy(fastrpc_dirs[slot].names[count++], sns_registry_files[i], FASTRPC_DIR_NAME_LEN);
+			}
+			static const char prefix[] = "/fw/sensors/persist/registry/registry/";
+			size_t plen = sizeof(prefix) - 1;
+			for (unsigned i = 0; i < FASTRPC_STORE_FILES && count < FASTRPC_DIR_NAMES; i++) {
+				if (!fastrpc_store[i].used || strncmp(fastrpc_store[i].path, prefix, plen) != 0) {
+					continue;
+				}
+				const char *base = fastrpc_store[i].path + plen;
+				if (base[0] == 0 || strchr(base, '/') != NULL) {
+					continue;
+				}
+				bool dup = false;
+				for (uint32_t j = 0; j < count; j++) {
+					if (strcmp(fastrpc_dirs[slot].names[j], base) == 0) {
+						dup = true;
+						break;
+					}
+				}
+				if (!dup) {
+					strlcpy(fastrpc_dirs[slot].names[count++], base, FASTRPC_DIR_NAME_LEN);
+				}
+			}
+		} else if (strcmp(path, "/fw/sensors/config") == 0) {
+			for (unsigned i = 0; i < sizeof(sns_config_files) / sizeof(sns_config_files[0]) && count < FASTRPC_DIR_NAMES; i++) {
+				strlcpy(fastrpc_dirs[slot].names[count++], sns_config_files[i], FASTRPC_DIR_NAME_LEN);
+			}
+		} else {
+			count = fastrpc_root_dir(path, fastrpc_dirs[slot].names, FASTRPC_DIR_NAMES);
+			if (count == 0 && strncmp(path, "/fw/", 4) == 0) {
+				snprintf(redwood_path, sizeof(redwood_path), "/redwood%s", path);
+				count = fastrpc_root_dir(redwood_path, fastrpc_dirs[slot].names, FASTRPC_DIR_NAMES);
+			}
+		}
+		fastrpc_dirs[slot].count = count;
 		fastrpc_dirs[slot].at = 0;
 		{
 			uint64_t fd = fastrpc_dirs[slot].fd;
 
 			memcpy(numbers, &fd, sizeof(fd));
 		}
+		fastrpc_note_file(path, 1, count);
 		printf("slpi: fastrpc: apps_std: opened %s, %u entries\n", path, fastrpc_dirs[slot].count);
 		result = 0;
 		break;
@@ -6238,9 +6761,10 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 	case 28: {                         /* readdir */
 		uint64_t fd = 0;
 		struct fastrpc_dir_slot *dir;
+		/* slpi.b15 apps_std_readdir (0xb22d9cf4): 0x104-byte {inode, name[256]} followed by uint32_t is_eof at +0x104 (total 0x108) */
 		struct {
 			uint32_t inode;
-			char name[255];
+			char name[256];
 			uint32_t is_eof;
 		} __attribute__((packed)) *entry = (void *)out[0].data;
 
@@ -6280,7 +6804,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		break;
 	}
 	case 31: {                         /* stat */
-		char name[160], path[160];
+		char name[160], path[160], redwood_path[192];
 		vfs_context_t context = vfs_context_kernel();
 		vnode_t vnode = NULLVP;
 		struct vnode_attr attributes;
@@ -6300,23 +6824,99 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 		if (fastrpc_path(name, path, sizeof(path)) == NULL) {
 			snprintf(path, sizeof(path), "%s", name);
 		}
+		stats->tsz = sizeof(*stats);
 		{
 			struct fastrpc_store_file *store = fastrpc_store_find(path);
 
 			if (store != NULL) {
 				stats->dev = 0;
-				stats->ino = 0;
+				stats->ino = 1;
 				stats->mode = 0100666;      /* S_IFREG | rw-rw-rw- */
 				stats->nlink = 1;
 				stats->size = store->size;
+				fastrpc_note_file(path, 1, store->size);
 				printf("slpi: fastrpc: apps_std: stat %s: the store's %u bytes\n", path, store->size);
 				result = 0;
 				break;
 			}
 		}
-		if (vnode_lookup(path, 0, &vnode, context) != 0) {
-			printf("slpi: fastrpc: apps_std: stat %s: not there\n", path);
-			result = (int32_t)AEE_EFAILED;
+		if (fastrpc_is_sensor_dir(path)) {
+			stats->dev = 0;
+			stats->ino = 2;
+			stats->mode = 0040755;          /* S_IFDIR | rwxr-xr-x */
+			stats->nlink = 2;
+			stats->size = 4096;
+			fastrpc_note_file(path, 1, 4096);
+			printf("slpi: fastrpc: apps_std: stat %s: directory\n", path);
+			result = 0;
+			break;
+		}
+		{
+			const char *sysfs_val = fastrpc_sysfs_value(path);
+
+			if (sysfs_val != NULL) {
+				stats->dev = 0;
+				stats->ino = 40;
+				stats->mode = 0100444;
+				stats->nlink = 1;
+				stats->size = strlen(sysfs_val);
+				fastrpc_note_file(path, 1, (uint32_t)stats->size);
+				printf("slpi: fastrpc: apps_std: stat %s: sysfs %llu bytes\n", path, stats->size);
+				result = 0;
+				break;
+			}
+		}
+		if (strncmp(path, "/fw/sensors/soc0/", sizeof("/fw/sensors/soc0/") - 1) == 0) {
+			const char *key = path + sizeof("/fw/sensors/soc0/") - 1;
+			bool matched = false;
+
+			for (unsigned i = 0; i < sizeof(fastrpc_soc0) / sizeof(fastrpc_soc0[0]); i++) {
+				if (strcmp(key, fastrpc_soc0[i].name) == 0) {
+					stats->dev = 0;
+					stats->ino = 3 + i;
+					stats->mode = 0100444;
+					stats->nlink = 1;
+					stats->size = strlen(fastrpc_soc0[i].value);
+					fastrpc_note_file(path, 1, (uint32_t)stats->size);
+					printf("slpi: fastrpc: apps_std: stat %s: soc0 %llu bytes\n", path, stats->size);
+					result = 0;
+					matched = true;
+					break;
+				}
+			}
+			if (matched) {
+				break;
+			}
+		}
+		if (strncmp(path, "/fw/sensors/", sizeof("/fw/sensors/") - 1) == 0) {
+			uint64_t image_size = 0;
+			const uint8_t *image = hakios_image_file("fw", path + sizeof("/fw/") - 1, &image_size, NULL);
+
+			if (image != NULL) {
+				stats->dev = 0;
+				stats->ino = 100;
+				stats->mode = 0100644;      /* S_IFREG | rw-r--r-- */
+				stats->nlink = 1;
+				stats->size = image_size;
+				fastrpc_note_file(path, 1, (uint32_t)image_size);
+				printf("slpi: fastrpc: apps_std: stat %s: image %llu bytes\n", path, image_size);
+				result = 0;
+				break;
+			}
+		}
+		if (rootvnode == NULLVP || vnode_lookup(path, 0, &vnode, context) != 0) {
+			vnode = NULLVP;
+			if (rootvnode != NULLVP && strncmp(path, "/fw/", 4) == 0) {
+				snprintf(redwood_path, sizeof(redwood_path), "/redwood%s", path);
+				if (vnode_lookup(redwood_path, 0, &vnode, context) != 0) {
+					vnode = NULLVP;
+				}
+			}
+		}
+		if (vnode == NULLVP) {
+			fastrpc_note_file(path, 0, 0);
+			printf("slpi: fastrpc: apps_std: stat %s: not there (ENOENT)\n", path);
+			result = 2; /* ENOENT: platform_fs.c assigns retval directly to errno */
 			break;
 		}
 		VATTR_INIT(&attributes);
@@ -6330,6 +6930,7 @@ fastrpc_serve(uint32_t handle, uint32_t sc, const uint8_t *blob, uint32_t length
 			stats->mode = (uint32_t)attributes.va_mode;
 			stats->nlink = 1;
 			stats->size = attributes.va_data_size;
+			fastrpc_note_file(path, 1, (uint32_t)attributes.va_data_size);
 			printf("slpi: fastrpc: apps_std: stat %s: %llu bytes\n", path, attributes.va_data_size);
 			result = 0;
 		}
@@ -6903,27 +7504,54 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (!fastrpc_grow_after) {
 		fastrpc_offer_heap(physical, shared_offset, shared, packet);
 	}
-	if (fastrpc_pd == 0) {
-		/* the plain sscrpcd instance: attachguestos, i.e. the root PD (the phone runs one of each) */
-		fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
-		    "INIT_ATTACH (guest OS, phone)");
-	} else {
-		fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client,
-		    "INIT_ATTACH_SNS (phone)");
+	{
+		unsigned max_tries = fastrpc_early ? 200u : 1u;
+		bool attached = false;
+
+		for (unsigned t = 0; t < max_tries; t++) {
+			if (fastrpc_pd == 0) {
+				attached = fastrpc_pd_call(0, 0x10000, 0x100, physical, shared_offset, shared, packet, fastrpc_client,
+				    "INIT_ATTACH (guest OS, phone)");
+			} else {
+				attached = fastrpc_pd_call(0, 0x10000, 0x102, physical, shared_offset, shared, packet, fastrpc_client,
+				    "INIT_ATTACH_SNS (phone)");
+			}
+			if (attached && fastrpc_call_retval == 0) {
+				if (t > 0) {
+					printf("slpi: fastrpc: attach succeeded on early retry %u at +%llu.%03llu ms\n", t + 1,
+					    (now_us() - dsp_boot_started) / 1000, (now_us() - dsp_boot_started) % 1000);
+				}
+				break;
+			}
+			sleep_ms(5);
+		}
 	}
 	if (fastrpc_grow_after) {
 		/* the PD exists now: the DSP may take a heap that it refused before the attach */
 		fastrpc_offer_heap(physical, shared_offset, shared, packet);
 	}
-	memset(packet, 0, 4096);
-	lengths[0] = 0;
-	sources[0] = NULL;
-	size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
-	if (shared) {
-		fastrpc_smem_put(shared_offset, packet, size);
-	}
-	if (!fastrpc_call(fastrpc_client, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 10000, "adsp_listener_init2 (phone)")) {
-		return;
+	{
+		unsigned max_tries = fastrpc_early ? 100u : 1u;
+		bool inited = false;
+
+		for (unsigned t = 0; t < max_tries; t++) {
+			memset(packet, 0, 4096);
+			lengths[0] = 0;
+			sources[0] = NULL;
+			size = fastrpc_build(packet, physical, physical, 0, lengths, sources);
+			if (shared) {
+				fastrpc_smem_put(shared_offset, packet, size);
+			}
+			inited = fastrpc_call(fastrpc_client, 3, 0x03000000, 0x400 | fastrpc_pd, physical, size, 10000,
+			    "adsp_listener_init2 (phone)");
+			if (inited && fastrpc_call_retval == 0) {
+				break;
+			}
+			sleep_ms(5);
+		}
+		if (!inited || fastrpc_call_retval != 0) {
+			return;
+		}
 	}
 	if (fastrpc_phone == 1) {
 		/* the phone's racy order: the thread starts first, then the main thread opens; the DSP
@@ -6932,7 +7560,13 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 		fastrpc_listener_start();
 		sleep_ms(200);
 	}
-	handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+	handle = 0;
+	for (unsigned t = 0; t < (fastrpc_early ? 100u : 1u) && handle == 0; t++) {
+		handle = fastrpc_open_name("adsp_default_listener", physical, shared_offset, packet, reply, 5000);
+		if (handle == 0 && fastrpc_early) {
+			sleep_ms(10);
+		}
+	}
 	if (handle == 0) {
 		printf("slpi: fastrpc: the phone order: the default listener did not open\n");
 		return;
@@ -6942,7 +7576,12 @@ fastrpc_phone_chain(uint64_t physical, uint32_t shared_offset, bool shared, uint
 	if (shared) {
 		fastrpc_smem_put(shared_offset, packet, size);
 	}
-	fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000, "adsp_default_listener_register (phone)");
+	if (fastrpc_call(fastrpc_client, handle, 0, 0x300 | fastrpc_pd, physical, size, 5000,
+	    "adsp_default_listener_register (phone)") && fastrpc_call_retval == 0 && dsp_boot_started != 0) {
+		fastrpc_registered_us = now_us() - dsp_boot_started;
+		printf("slpi: fastrpc: adsp_default_listener registered at +%llu.%03llu ms after DSP start\n",
+		    fastrpc_registered_us / 1000, fastrpc_registered_us % 1000);
+	}
 	if (fastrpc_phone == 2) {
 		/* everything is registered first, then the thread waits: the DSP serves no control call
 		 * behind an outstanding next2, so this order is the one that always completes. */
@@ -7103,7 +7742,7 @@ fastrpc_first_calls(uint32_t stage)
 	 * about the FastRPC chain: skip it and name the reason, so a later log is
 	 * not read as a chain result when the DSP was not up at all.
 	 */
-	if (qrtr_hellos == 0) {
+	if (!fastrpc_early && qrtr_hellos == 0) {
 		printf("slpi: fastrpc: the DSP never said hello over QRTR; the chain is skipped\n");
 		return;
 	}
@@ -8289,6 +8928,20 @@ link_stop(void)
 		printf("\n");
 		printf("slpi: sns: %u responses with result 0, %u with another (last %u); registry %u of %u written\n",
 		    sns_ok_count, sns_bad_count, sns_last_result, sns_registry_written, sns_registry_total);
+		{
+			struct hakios_sensor_state snap;
+
+			lck_mtx_lock(&sensor_state_lock);
+			snap = sensor_state;
+			lck_mtx_unlock(&sensor_state_lock);
+			printf("slpi: sensors: flags=%#x accel(suid=%d seq=%llu mm/s^2=%d,%d,%d) gyro(suid=%d seq=%llu mrad/s=%d,%d,%d) mag(suid=%d seq=%llu muT=%d,%d,%d) als(suid=%d seq=%llu mlux=%d raw=%d) press(suid=%d seq=%llu mhPa=%d) prox(suid=%d seq=%llu near=%u raw=%u)\n",
+			    snap.flags, sns_have_suid, snap.accel_seq, snap.accel_mmps2[0], snap.accel_mmps2[1], snap.accel_mmps2[2],
+			    sns_have_gyro, snap.gyro_seq, snap.gyro_mradps[0], snap.gyro_mradps[1], snap.gyro_mradps[2],
+			    sns_have_mag, snap.mag_seq, snap.mag_mut[0], snap.mag_mut[1], snap.mag_mut[2],
+			    sns_have_als, snap.als_seq, snap.als_mlux, snap.als_raw,
+			    sns_have_press, snap.pressure_seq, snap.pressure_mhpa,
+			    sns_have_prox, snap.prox_seq, snap.prox_near, snap.prox_raw);
+		}
 		if (sns_cm_result_seen) {
 			printf("slpi: sns: sns_cm write result %u\n", sns_cm_result);
 		} else {
@@ -8340,15 +8993,16 @@ link_stop(void)
 			    r->suid[4], r->suid[5], r->suid[6], r->suid[7], r->suid[8], r->suid[9], r->suid[10],
 			    r->suid[11], r->suid[12], r->suid[13], r->suid[14], r->suid[15]);
 		}
-		uint32_t count = fastrpc_file_notes_total < 8 ? fastrpc_file_notes_total : 8;
-		uint32_t first = (fastrpc_file_notes_at + 8 - count) % 8;
+		uint32_t count = fastrpc_file_notes_total < FASTRPC_FILE_NOTES ? fastrpc_file_notes_total : FASTRPC_FILE_NOTES;
+		uint32_t first = (fastrpc_file_notes_at + FASTRPC_FILE_NOTES - count) % FASTRPC_FILE_NOTES;
 
-		printf("slpi: fastrpc: %u module opens (last \"%s\"), %u apps_std calls\n", fastrpc_module_opens,
+		printf("slpi: fastrpc: registered at +%llu.%03llu ms; %u module opens (last \"%s\"), %u apps_std calls\n",
+		    fastrpc_registered_us / 1000, fastrpc_registered_us % 1000, fastrpc_module_opens,
 		    fastrpc_last_module, fastrpc_apps_std_calls);
 		printf("slpi: fastrpc: %u file requests, %u failed; the last %u:\n", fastrpc_file_notes_total,
 		    fastrpc_file_fails, count);
 		for (uint32_t i = 0; i < count; i++) {
-			struct fastrpc_file_note *n = &fastrpc_file_notes[(first + i) % 8];
+			struct fastrpc_file_note *n = &fastrpc_file_notes[(first + i) % FASTRPC_FILE_NOTES];
 
 			printf("slpi: fastrpc: %s %s (%u bytes)\n", n->ok ? "read" : "FAILED", n->path, n->size);
 		}
@@ -8461,10 +9115,12 @@ step_link(void)
 		return false;
 	}
 	thread_deallocate(thread);
-	for (unsigned ms = 0; ms < 5000 && !glink.channel[CHANNEL_QRTR].open && !glink.broken; ms++) {
+	for (unsigned ms = 0; ms < 5000 && (!glink.channel[CHANNEL_QRTR].open || (fastrpc_early && !glink.channel[CHANNEL_FASTRPC].open)) && !glink.broken; ms++) {
 		sleep_ms(1);
 	}
-	sleep_ms(50);
+	if (!fastrpc_early) {
+		sleep_ms(50);
+	}
 	printf("slpi: %u: %llu ms after our version: versions %s (features %#x); the channel \"IPCRTR\" is %s, \"apr_audio_svc\" %s; "
 	    "the DSP also opened \"%s\" \"%s\" \"%s\" \"%s\"\n", step, (now_us() - began) / 1000, glink.agreed ? "agreed" :
 	    "NOT AGREED", glink.features, glink.channel[CHANNEL_QRTR].open ? "OPEN" : "NOT OPEN",

@@ -56,9 +56,11 @@ static void request(xpc_connection_t peer,xpc_object_t message)
     const char *script=arguments && xpc_get_type(arguments)==&_xpc_type_dictionary ?
         xpc_dictionary_get_string(arguments,"script") : NULL;
     int result=ENOTSUP;
-    /* Firmware and NVM initialization were both completed by XNU before launchd. */
+    /* Firmware and NVM initialization were both completed by XNU before launchd.
+     * QCA6390 in-band sleep (IBS) is handled directly by the kernel UART driver,
+     * so acknowledge deepsleep alongside boot/init instead of returning ENOTSUP. */
     if(command && script && !strcmp(command,"RunBuiltinScript") &&
-        (!strcmp(script,"boot") || !strcmp(script,"init")))
+        (!strcmp(script,"boot") || !strcmp(script,"init") || !strcmp(script,"deepsleep")))
         result=controller_ready();
     fprintf(stderr,"UMI BlueTool: command=%.48s script=%.48s result=%d\n",
         command?command:"(missing)",script?script:"(missing)",result);

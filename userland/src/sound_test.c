@@ -350,10 +350,17 @@ session_diagnostic(void)
 		printf("sound_test: session:   %s\n", text(((id (*)(id, SEL, unsigned long))objc_msgSend)(categories,
 		    sel_registerName("objectAtIndex:"), i)));
 	}
+	id *playrec_symbol = dlsym(RTLD_DEFAULT, "AVAudioSessionCategoryPlayAndRecord");
+	id playrec = playrec_symbol ? *playrec_symbol : (id)CFSTR("AVAudioSessionCategoryPlayAndRecord");
+
 	report_category(session, "Playback/default/no options", playback, mode, 0);
 	report_category(session, "Playback/default/A2DP", playback, mode, 0x20);
 	report_category(session, "Playback/default/HFP", playback, mode, 0x04);
 	report_category(session, "Playback/default/A2DP+HFP", playback, mode, 0x24);
+	report_category(session, "PlayAndRecord/default/no options", playrec, mode, 0);
+	report_category(session, "PlayAndRecord/default/A2DP", playrec, mode, 0x20);
+	report_category(session, "PlayAndRecord/default/HFP", playrec, mode, 0x04);
+	report_category(session, "PlayAndRecord/default/A2DP+HFP", playrec, mode, 0x24);
 	report_category(session, "Playback/default/no options (restore)", playback, mode, 0);
 	route();
 	return 0;

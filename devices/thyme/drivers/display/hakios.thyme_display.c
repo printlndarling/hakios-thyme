@@ -681,6 +681,25 @@ sysctl_backlight_factor(__unused struct sysctl_oid *oidp, __unused void *arg1, _
 	return 0;
 }
 
+/* Effective OLED backlight level scaled to Android's 0..2047 range (for SLPI under-OLED ALS). */
+int hakios_display_backlight_level_2047(void);
+int
+hakios_display_backlight_level_2047(void)
+{
+	int eff;
+
+	if (backlight_factor <= 0) {
+		return 0;
+	}
+	eff = (brightness_permille * backlight_factor + 500) / 1000;
+	if (eff < 0) {
+		eff = 0;
+	} else if (eff > 1000) {
+		eff = 1000;
+	}
+	return (eff * 2047 + 500) / 1000;
+}
+
 
 /*
  * SM8250 DPU 6.0 command-mode TE synchronization (INTF_1 at 0x0ae6b800).

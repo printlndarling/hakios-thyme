@@ -6645,3 +6645,27 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `out/thyme-boot/root-wifisleepwake.apfs` (48,988,160 B; sum 65,950,080 B < 66,060,288 B) | `533b28cde9ba6a4c922c8ae5fb3dad5ef3573605506f05ea04c63ca7c9f41a24` |
 | `logs/171727-run.log` (Spontaneous AP deauth 2.68 s kernel auto-rejoin + power/leave HTTPS `200 OK`) | `9f05475e28a500c95ff9c2018a826364447c7319cb55ca50e842afb0872ab417` |
 | `logs/173008-run.log` (Full 65 s lock/wake -> post-wake HTTPS `200 OK` + power/leave + `CN` locale `PASS`) | `e2438360013e557038bba977b058128a2217d3da7094dbd7f3df6d3d46766d8c` |
+
+### SLPI 5-Sensor End-to-End Bring-Up (`PASS`) & Bluetooth `BlueTool`/`AVAudioSession` Fixes (2026-11-26)
+
+- **SLPI FastRPC & Sensor PD Root-Cause Fixes (`devices/thyme/drivers/sensor/hakios.thyme_slpi.c`, `devices/thyme/drivers/display/hakios.thyme_display.c`, `userland/build.sh`)**:
+  - Exiting `step_start()` immediately on `DSP_READY | DSP_HANDOVER` (avoiding the 3,000 ms spin) and bringing up `fastrpc_early` before `SNS_REG_INIT` (~290 ms window) reduced `adsp_default_listener` registration to `+141.854 ms` (`+147.598 ms` in `logs/174603-run.log`).
+  - Added image-backed `apps_std` `stat` (`31`) and `opendir` (`26`) returning POSIX `ENOENT (2)` on miss, fixed `apps_std_readdir` `char name[256]` struct offset (`is_eof` at `+0x104` instead of `+0x103`), served Mi 10S under-OLED TCS3701 sysfs nodes (`panel_info`, `max_brightness`, `dynamic_fps`, and dynamic `hakios_display_backlight_level_2047()`), and exported pure-integer `ieee754_to_milli()` sensor snapshots via `kern.hakios.sensor_state` (`version = 2`).
+  - Staged `fw-slpi/slpi.*` into `sysroot/fw/` on `SYSTEM=1` builds in `userland/build.sh`.
+- **Virtual IOHIDService Delivery in `backboardd` (`userland/src/inject.c`)**:
+  - Spawned `sensor_thread` polling `kern.hakios.sensor_state` and creating virtual `IOHIDService` instances for `HakiOS accelerometer` (`0xff00/0x0003`), `HakiOS ambient light` (`0xff00/0x0004`), `HakiOS magnetometer` (`0xff00/0x0006`), and `HakiOS gyroscope` (`0xff00/0x0009`), using disassembled iOS 16.5 `IOKit` signatures (`IOHIDEventCreateAmbientLightSensorEvent(NULL, ts, lux, 0)`, `IOHIDEventCreateAccelerometerEvent`, `IOHIDEventCreateGyroEvent`, `IOHIDEventCreateCompassEvent`).
+- **Live Verification (`logs/174603-run.log`, `logs/180216-run.log`, `logs/181653-run.log`, zero panics, zero SMMU faults, returned cleanly to Android)**:
+  - `55/55` SNS responses with `result 0`, `0` refusals (`logs/181653-run.log`).
+  - Live hardware readings delivered to `backboardd` with `ok=1`: `accel` (LSM6DSO, `1,440` samples, `g=(-0.024, -0.918, -0.410)`), `gyro` (LSM6DSO, `1,440` samples with `GyroProperties` / `GyroExtLevelTriggerSync`, `dps=(0.115, -0.344, 1.432)`), `mag` (AK0991x, `563` samples, `uT=(7.58, 55.29, 160.50)`), `ambient_light` (under-OLED TCS3701, `lux=163 -> 148`, `raw=136 -> 124`), and `barometer` (BMP285, `56` samples, `957.65 hPa`).
+  - Android `dumpsys sensorservice` on `5290780a` confirms Mi 10S has no SLPI IR proximity sensor (`Xiaomi Proximity` is ultrasonic over ADSP).
+- **Bluetooth `BlueTool` / H4 / `AVAudioSession` Fixes (`userland/src/umi_bluetool.c`, `devices/thyme/drivers/bluetooth/hakios.thyme_bluetooth.c`, `userland/src/sound_test.c`)**:
+  - Updated `umi_bluetool.c` to accept `RunBuiltinScript` `script="deepsleep"` via `controller_ready()` (replacing `result=45` `ENOTSUP`, since QCA6390 IBS is handled by kernel UART).
+  - Reset `waking=false` on H4 generation change in `hakios.thyme_bluetooth.c` and fixed the transport summary format string to include SCO (`bt_tx_packets[3]`) counters.
+  - Updated `userland/src/sound_test.c` (`rc.jobs.slpibt`) to test `PlayAndRecord` alongside `Playback`: live log (`logs/181653-run.log`) confirms `PlayAndRecord` accepts `A2DP` (`0x20`), `HFP` (`0x04`), and `A2DP+HFP` (`0x24`) (`yes`), while `Playback`-only refuses those options (`OSStatus -50`).
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (16,964,312 B, 5 SLPI sensors + dynamic OLED backlight + BT H4 fix) | `691ee1a53b745a766acc93248e0fa10b037e3191b9ec2cd34109dca58be8e3b2` |
+| `logs/174603-run.log` (SLPI Stage 1: `+147.598 ms` FastRPC, `31/31` SNS `result 0`, `lsm6dso` stream) | `5ecc76b92a66d8c577b99d7e3df73e54ff6a77a32d782c8a11c3583c7cdc71d0` |
+| `logs/180216-run.log` (SLPI Stage 2: `+141.854 ms` FastRPC, accel + OLED sysfs ALS -> `backboardd`) | `5143b4ba7d60682b6e97b1c656bec516030304641ec2a907a1b85da370f87f41` |
+| `logs/181653-run.log` (SLPI 5-sensor `55/55` SNS `result 0` -> `backboardd` HID + `PlayAndRecord` HFP/A2DP `yes`) | `7161c7ade72d2446f78da02b841e7504b8541b84645276bac5d89fab9324fde2` |

@@ -602,7 +602,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
         bool fault=bt_control_fault;
         if(generation!=bt_control_generation) {
             generation=bt_control_generation;
-            memset(&tx,0,sizeof(tx)); receive_length=0; commands=0;
+            memset(&tx,0,sizeof(tx)); receive_length=0; commands=0; waking=false;
         }
         while(unit && !fault && !tx.complete && bt_tx_head!=bt_tx_tail) {
             uint8_t byte=bt_tx_queue[bt_tx_tail++&(BT_TX_QUEUE_SIZE-1)];
@@ -754,7 +754,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
             transport_ticks=0;
             hakios_tl("UMI BT: transport status=%#x rx=%#x irq=%#x awake=%u words=%llu bytes=%llu frames=%llu "
                 "events=%llu le-events=%llu le-reports=%llu le-types=%llu/%llu/%llu/%llu/%llu "
-                "le-named=%llu tx=%llu/%llu cmd=%llu acl=%llu/%llu completed=%llu/%llu "
+                "le-named=%llu cmd=%llu/%llu acl=%llu/%llu sco=%llu/%llu completed=%llu/%llu "
                 "tx-us=%llu tx-max-us=%llu high=%u queue=%u queue-err=%d enqueue-errors=%u\n",
                 bt_read(bt_control_uart,0x40),bt_read(bt_control_uart,0x804),
                 bt_read(bt_control_uart,0x640),bt_host_awake,
@@ -763,6 +763,7 @@ static void bt_control_worker(void *unused,wait_result_t result)
                 bt_le_report_types[0],bt_le_report_types[1],bt_le_report_types[2],
                 bt_le_report_types[3],bt_le_report_types[4],bt_le_named_entries,
                 bt_tx_packets[1],bt_tx_bytes[1],bt_tx_packets[2],bt_tx_bytes[2],
+                bt_tx_packets[3],bt_tx_bytes[3],
                 bt_completed_events,bt_completed_packets,
                 bt_tx_nanos/1000,bt_tx_max_nanos/1000,bt_tx_high_water,
                 queued_packets,queue_error,

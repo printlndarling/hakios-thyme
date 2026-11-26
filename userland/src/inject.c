@@ -948,6 +948,16 @@ extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocat
     uint32_t options);
 extern IOHIDEventRef IOHIDEventCreateKeyboardEvent(CFAllocatorRef allocator, uint64_t time, uint32_t usage_page, uint32_t usage,
     Boolean down, uint32_t options);
+extern IOHIDEventRef IOHIDEventCreateAccelerometerEvent(CFAllocatorRef allocator, uint64_t time, double x, double y, double z,
+    uint32_t options);
+extern IOHIDEventRef IOHIDEventCreateGyroEvent(CFAllocatorRef allocator, uint64_t time, double x, double y, double z,
+    uint32_t options);
+extern IOHIDEventRef IOHIDEventCreateCompassEvent(CFAllocatorRef allocator, uint64_t time, double x, double y, double z,
+    uint32_t options);
+extern IOHIDEventRef IOHIDEventCreateAmbientLightSensorEvent(CFAllocatorRef allocator, uint64_t time, uint32_t level,
+    uint32_t options);
+extern IOHIDEventRef IOHIDEventCreateProximtyEvent(CFAllocatorRef allocator, uint64_t time, uint32_t detection_mask,
+    uint32_t options);
 extern void IOHIDEventAppendEvent(IOHIDEventRef parent, IOHIDEventRef child, uint32_t options);
 extern void IOHIDEventSetIntegerValue(IOHIDEventRef event, uint32_t field, CFIndex value);
 
@@ -1268,6 +1278,169 @@ micros(uint64_t absolute)
 	return absolute * timebase.numer / timebase.denom / 1000;
 }
 
+struct hakios_sensor_state {
+	uint32_t version;
+	uint32_t flags;
+	uint64_t accel_seq;
+	int32_t  accel_mmps2[3];
+	uint32_t accel_pad;
+	uint64_t als_seq;
+	int32_t  als_mlux;
+	int32_t  als_raw;
+	uint64_t prox_seq;
+	uint32_t prox_near;
+	uint32_t prox_raw;
+	uint64_t gyro_seq;
+	int32_t  gyro_mradps[3];
+	uint32_t gyro_pad;
+	uint64_t mag_seq;
+	int32_t  mag_mut[3];
+	uint32_t mag_pad;
+	uint64_t pressure_seq;
+	int32_t  pressure_mhpa;
+	uint32_t pressure_pad;
+};
+
+static void *
+sensor_thread(void *arg)
+{
+	IOHIDEventSystemClientRef client = (IOHIDEventSystemClientRef)arg;
+	IOHIDServiceClientRef accel_svc = NULL, als_svc = NULL, prox_svc = NULL, gyro_svc = NULL, mag_svc = NULL;
+	uint64_t last_accel = 0, last_als = 0, last_prox = 0, last_gyro = 0, last_mag = 0, last_press = 0;
+	unsigned accel_logged = 0, als_logged = 0, prox_logged = 0, gyro_logged = 0, mag_logged = 0, press_logged = 0;
+
+	pthread_setname_np("redwood sensors");
+	for (;;) {
+		struct hakios_sensor_state st;
+		size_t sz = sizeof(st);
+
+		if (sysctlbyname("kern.hakios.sensor_state", &st, &sz, NULL, 0) != 0 || sz != sizeof(st) ||
+		    st.version != 2 || st.flags == 0) {
+			usleep(250000);
+			continue;
+		}
+		if ((st.flags & 1u) && accel_svc == NULL) {
+			accel_svc = make_service(client, "HakiOS accelerometer", 0xff00, 0x0003, false);
+			say("hakios: sensor: accelerometer HID service %p\n", (void *)accel_svc);
+		}
+		if ((st.flags & 2u) && als_svc == NULL) {
+			als_svc = make_service(client, "HakiOS ambient light", 0xff00, 0x0004, false);
+			say("hakios: sensor: ambient_light HID service %p\n", (void *)als_svc);
+		}
+		if ((st.flags & 4u) && prox_svc == NULL) {
+			prox_svc = make_service(client, "HakiOS proximity", 0xff00, 0x000c, false);
+			say("hakios: sensor: proximity HID service %p\n", (void *)prox_svc);
+		}
+		if ((st.flags & 8u) && gyro_svc == NULL) {
+			gyro_svc = make_service(client, "HakiOS gyroscope", 0xff00, 0x0009, false);
+			say("hakios: sensor: gyroscope HID service %p\n", (void *)gyro_svc);
+		}
+		if ((st.flags & 16u) && mag_svc == NULL) {
+			mag_svc = make_service(client, "HakiOS magnetometer", 0xff00, 0x0006, false);
+			say("hakios: sensor: magnetometer HID service %p\n", (void *)mag_svc);
+		}
+		if (accel_svc != NULL && st.accel_seq != last_accel) {
+			/* Convert m/s^2 (milli-units) to g in Apple HID frame (flat face-up = -1g on Z). */
+			double gx = (double)st.accel_mmps2[0] / -9806.65;
+			double gy = (double)st.accel_mmps2[1] / -9806.65;
+			double gz = (double)st.accel_mmps2[2] / -9806.65;
+			IOHIDEventRef ev = IOHIDEventCreateAccelerometerEvent(NULL, mach_absolute_time(), gx, gy, gz, 0);
+
+			if (ev != NULL) {
+				IOHIDEventSetIntegerValue(ev, FIELD_IS_BUILT_IN, 1);
+				Boolean ok = IOHIDVirtualServiceClientDispatchEvent(accel_svc, ev);
+				CFRelease(ev);
+				if (accel_logged < 5) {
+					accel_logged++;
+					say("hakios: sensor: accel HID #%llu ok=%d g=(%.3f, %.3f, %.3f)\n",
+					    (unsigned long long)st.accel_seq, ok ? 1 : 0, gx, gy, gz);
+				}
+			}
+			last_accel = st.accel_seq;
+		}
+		if (gyro_svc != NULL && st.gyro_seq != last_gyro) {
+			/* Convert milli-rad/s to deg/s for Apple IOHIDEventCreateGyroEvent. */
+			double dx = (double)st.gyro_mradps[0] * 0.0572957795;
+			double dy = (double)st.gyro_mradps[1] * 0.0572957795;
+			double dz = (double)st.gyro_mradps[2] * 0.0572957795;
+			IOHIDEventRef ev = IOHIDEventCreateGyroEvent(NULL, mach_absolute_time(), dx, dy, dz, 0);
+
+			if (ev != NULL) {
+				IOHIDEventSetIntegerValue(ev, FIELD_IS_BUILT_IN, 1);
+				Boolean ok = IOHIDVirtualServiceClientDispatchEvent(gyro_svc, ev);
+				CFRelease(ev);
+				if (gyro_logged < 5) {
+					gyro_logged++;
+					say("hakios: sensor: gyro HID #%llu ok=%d dps=(%.3f, %.3f, %.3f)\n",
+					    (unsigned long long)st.gyro_seq, ok ? 1 : 0, dx, dy, dz);
+				}
+			}
+			last_gyro = st.gyro_seq;
+		}
+		if (mag_svc != NULL && st.mag_seq != last_mag) {
+			double ux = (double)st.mag_mut[0] / 1000.0;
+			double uy = (double)st.mag_mut[1] / 1000.0;
+			double uz = (double)st.mag_mut[2] / 1000.0;
+			IOHIDEventRef ev = IOHIDEventCreateCompassEvent(NULL, mach_absolute_time(), ux, uy, uz, 0);
+
+			if (ev != NULL) {
+				IOHIDEventSetIntegerValue(ev, FIELD_IS_BUILT_IN, 1);
+				Boolean ok = IOHIDVirtualServiceClientDispatchEvent(mag_svc, ev);
+				CFRelease(ev);
+				if (mag_logged < 5) {
+					mag_logged++;
+					say("hakios: sensor: mag HID #%llu ok=%d uT=(%.2f, %.2f, %.2f)\n",
+					    (unsigned long long)st.mag_seq, ok ? 1 : 0, ux, uy, uz);
+				}
+			}
+			last_mag = st.mag_seq;
+		}
+		if (als_svc != NULL && st.als_seq != last_als) {
+			uint32_t lux = st.als_mlux > 0 ? (uint32_t)(st.als_mlux / 1000) : 0;
+			IOHIDEventRef ev = IOHIDEventCreateAmbientLightSensorEvent(NULL, mach_absolute_time(), lux, 0);
+
+			if (ev != NULL) {
+				IOHIDEventSetIntegerValue(ev, FIELD_IS_BUILT_IN, 1);
+				IOHIDEventSetIntegerValue(ev, (12u << 16) | 1u, st.als_raw);
+				Boolean ok = IOHIDVirtualServiceClientDispatchEvent(als_svc, ev);
+				CFRelease(ev);
+				if (als_logged < 5) {
+					als_logged++;
+					say("hakios: sensor: als HID #%llu ok=%d lux=%u (mlux=%d raw=%d)\n",
+					    (unsigned long long)st.als_seq, ok ? 1 : 0, lux, st.als_mlux, st.als_raw);
+				}
+			}
+			last_als = st.als_seq;
+		}
+		if (prox_svc != NULL && st.prox_seq != last_prox) {
+			uint32_t mask = st.prox_near ? 0x40u : 0u;
+			IOHIDEventRef ev = IOHIDEventCreateProximtyEvent(NULL, mach_absolute_time(), mask, 0);
+
+			if (ev != NULL) {
+				IOHIDEventSetIntegerValue(ev, FIELD_IS_BUILT_IN, 1);
+				Boolean ok = IOHIDVirtualServiceClientDispatchEvent(prox_svc, ev);
+				CFRelease(ev);
+				if (prox_logged < 5) {
+					prox_logged++;
+					say("hakios: sensor: prox HID #%llu ok=%d near=%u raw=%u\n",
+					    (unsigned long long)st.prox_seq, ok ? 1 : 0, st.prox_near, st.prox_raw);
+				}
+			}
+			last_prox = st.prox_seq;
+		}
+		if ((st.flags & 32u) && st.pressure_seq != last_press) {
+			if (press_logged < 5) {
+				press_logged++;
+				say("hakios: sensor: barometer #%llu hPa=%.2f\n",
+				    (unsigned long long)st.pressure_seq, (double)st.pressure_mhpa / 1000.0);
+			}
+			last_press = st.pressure_seq;
+		}
+		usleep(50000);
+	}
+	return NULL;
+}
+
 static void *
 input_thread(__unused void *arg)
 {
@@ -1312,6 +1485,13 @@ input_thread(__unused void *arg)
 	}
 	say("hakios: input: touch screen service %p, buttons %p\n", (void *)screen, (void *)buttons);
 	dispatch_semaphore_signal(input_services_made); /* see wait_for_als_arrival() */
+	if (client != NULL) {
+		pthread_t sthread;
+
+		if (pthread_create(&sthread, NULL, sensor_thread, client) == 0) {
+			pthread_detach(sthread);
+		}
+	}
 	if (screen == NULL) {
 		return NULL;
 	}

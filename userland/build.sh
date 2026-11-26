@@ -1038,6 +1038,12 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		mkdir -p sysroot/fw
 		cp ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] sysroot/fw/
 	fi
+	# the sensor DSP's firmware (~7.8 MB): lives in /fw of system.apfs so daily-driver boots
+	# can run slpi=1 alongside adsp=1 without overflowing the 64 MiB small-image payload budget
+	if [ -f ../fw-slpi/slpi.mdt ]; then
+		mkdir -p sysroot/fw
+		cp ../fw-slpi/slpi.mdt ../fw-slpi/slpi.b[0-9][0-9] sysroot/fw/
+	fi
 	# MPSS firmware is much too large for the small boot image. Keep it in the system APFS,
 	# only when explicitly requested, after checking every loadable segment against this DTB.
 	# This stages the files; a separate XNU MPSS driver is still required to start the modem.

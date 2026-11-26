@@ -33,18 +33,17 @@
 | 蜂窝与通话 | **PASS** | SDX55M 4G LTE 双栈数据与双向 VoLTE 语音（当前 `Mav17` 仅 4G，5G 需 `Mav20`） |
 | 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测精准蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
 | Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏休眠唤醒、AP 踢下线与断电自动重连 |
-| 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对与 A2DP 播放正常；HFP/AVRCP/自动重连待完善 |
+| 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对、A2DP 播放、BlueTool 休眠与 PlayAndRecord HFP/A2DP 会话正常；耳机 HFP/AVRCP 实测待补 |
 | 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |
-| 传感器（SLPI） | **PARTIAL** | SLPI 固件与 QRTR 服务已起；加速度/环境光/距离 HID 上报待打通 |
+| 传感器（SLPI） | **PASS** | LSM6DSO 加速度/陀螺仪、AK0991x 磁力计、TCS3701 屏下光感已接入 backboardd HID，BMP285 气压计在线（距离为 ADSP 超声波） |
 | 中文界面 | **PASS** | 开机默认简体中文界面、苹方字体与简体拼音键盘 |
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内/无根源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
 | 持久化存储 | **TODO** | 默认纯内存启动；受保护的闪存持久化与独立安装流程尚未启用 |
 
 ## 后续重点
 
-- **传感器（SLPI / HID）**：打通加速度计、环境光（自动亮度）与距离传感器至 iOS。
 - **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
-- **蓝牙体验完善**：补齐蓝牙 HFP/SCO 通话音频、AVRCP 媒体控制与断连自动重连。
+- **蓝牙体验与 USB 设备连接**：实测蓝牙耳机 HFP/SCO 与 AVRCP；推进 SM8250 `DWC3` USB Gadget / `usbmux` / `lockdownd`（用于电脑端爱思助手 / iTunes 连接）。
 - **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
 
 ## 构建与运行（RAM 启动）

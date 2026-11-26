@@ -1,0 +1,6 @@
+# Combined SLPI 5-sensor HID + Bluetooth audio session & BlueTool verification gate.
+/redwood/bin/rwtouch wait 35
+/redwood/bin/sound_test hal
+/redwood/bin/sound_test sessions
+/redwood/bin/battery_test open prefs:root=Bluetooth
+/redwood/bin/rwtouch wait 45

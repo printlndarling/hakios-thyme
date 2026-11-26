@@ -33,18 +33,17 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Cellular & VoLTE | **PASS** | SDX55M 4G LTE dual-stack data, VoLTE voice, Settings UI (`Mav17`; 5G NR requires `Mav20`) |
 | Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (verified in Baidu Maps) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
-| Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing & A2DP playback; HFP/AVRCP/reconnect open |
+| Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing, A2DP playback, BlueTool deepsleep & PlayAndRecord HFP/A2DP sessions; headset HFP/AVRCP open |
 | Battery & Thermal | **PASS** | Fuel gauge, USB charging telemetry, thermal throttling & low-battery guard |
-| Sensors (SLPI) | **PARTIAL** | SLPI firmware & QRTR services up; accelerometer/ALS/proximity HID delivery open |
+| Sensors (SLPI) | **PASS** | LSM6DSO accel & gyro, AK0991x mag, TCS3701 under-OLED ALS -> backboardd HID + BMP285 barometer (prox is ADSP ultrasonic) |
 | Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts & Pinyin keyboard |
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
 | Persistent Storage | **TODO** | RAM-boot only by default; guarded flash storage & installer not enabled |
 
 ## Current Priorities
 
-- **Sensors (SLPI / HID)**: Deliver accelerometer, ambient-light (auto-brightness), and proximity events to iOS.
 - **Outdoor GNSS & Cellular Polish**: Verify open-sky 3D satellite fixes via `umi_gnssd` and SMS when needed.
-- **Bluetooth Audio & Reconnect**: Bluetooth HFP/SCO, AVRCP controls, and deliberate headset auto-reconnect.
+- **Bluetooth Headset & USB Gadget**: Live paired-headset HFP/SCO & AVRCP tests; SM8250 `DWC3` USB gadget + `usbmux` + `lockdownd` for PC tools (i4Tools/iTunes).
 - **Graphics & Persistence**: System `MTLDevice` support for third-party apps; safe, opt-in persistent storage.
 
 ## Building & Running (RAM Boot)
