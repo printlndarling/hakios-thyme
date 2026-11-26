@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-SCENE=${SCENE:-wirelessfull}
+SCENE=${SCENE:-daily}
 RC_JOBS=${RC_JOBS:-rc.jobs.$SCENE}
 cd "$ROOT/userland"
 

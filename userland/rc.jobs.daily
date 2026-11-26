@@ -1,0 +1,6 @@
+# Daily-driver boot jobs: Location Services on and silent Wi-Fi/DHCP setup,
+# with no automated Safari, Settings, or synthetic touch demo actions.
+/redwood/bin/loc_test enable
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
+/redwood/bin/loc_test

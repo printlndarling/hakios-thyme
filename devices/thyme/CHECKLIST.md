@@ -18,14 +18,14 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 
 | Hardware / Component | DTB / Silicon Identity | Priority | Status | Current Scope & Gaps |
 |---|---|---|---|---|
-| CPU Cluster (7/8 cores) | Snapdragon 870 (`SM8250-AC`) Silver/Gold/Prime | P1 | **PASS** | `bootcpu=7 cpus=7`, EPSS DVFS up to `1.80 / 2.42 / 3.19 GHz` (`cpufreq=1`, `thermal=1`) |
+| CPU Cluster (7/8 cores) | Snapdragon 870 (`SM8250-AC`) Silver/Gold/Prime | P1 | **PASS** | `bootcpu=7 cpus=7`, EPSS runtime CPU DVFS (`ml_cpu_idle_time()` scaling e.g. `3187->844 MHz`, `2419->710 MHz` in `logs/024327-run.log`) + `thermal=1` cap |
 | CPU0 (8th Core) | Silver core 0 | P1 | **TODO** | `xnuloader/loader.c` deliberately reserves core 0 for UEFI/EL3 firmware under `bootcpu=7 cpus=7` RAM boot |
 | GPU (OpenGL ES) | Adreno 650 (`0x06050002`) + GMU | P0 | **PASS** | Hardware rendering via Mesa/Freedreno (`hakios-gl`) |
 | GPU (System Metal) | Adreno 650 (`hakios-metal` + `HakiosMetalCA`) | P0 | **PARTIAL** | Compiles and initializes in probes (`CA`); full `metal_all=1` / VectorKit / ANGLE stability open |
 | Display & Refresh | 6.67" 1080×2340 OLED (`j2s_mp_42_02_0a_dsc_cmd`) | P0 | **PASS** | Hardware `89.08 Hz` TE-synced (`INTF_1`, `0%` missed scans), DCS brightness, lock blanking |
 | Touchscreen | FocalTech `FTS521` | P0 | **PASS** | Multi-touch, edge/home gestures, coordinate/latency logging (`touch_lat=1`) |
 | Physical Keys | Power / Volume +/- (`hakios.thyme_keys`) | P0 | **PASS** | Short/long press, screenshot chord, reboot/wake sequence |
-| Speakers & Earpiece | Dual `CS35L41` (`0x40` bottom + `0x42` top RCV) | P0 | **PASS** | Independent stereo L/R channels, ADSP `0x1004` TERT_MI2S, VoLTE call audio |
+| Speakers & Earpiece | Dual `CS35L41` (`0x40` bottom + `0x42` top RCV) | P0 | **PASS** | Independent stereo L/R channels, ADSP `0x1004` TERT_MI2S, VoLTE audio, 15s quiet keep-alive + 5x 500 ms retry recovery (`logs/024327-run.log`) |
 | Microphones | Dual onboard mics (`mic=4`) | P0 | **PASS** | Dual-mic capture & VoLTE voice uplink active |
 | Linear Haptics | `AW8697` LRA | P1 | **PASS** | CoreHaptics transient taps + continuous waveform |
 | Main Rear Camera + AF | 108 MP `S5KHMX` (`27 MP` Tetracell) + `AK7377` VCM | P1 | **PASS** | Live ~26 fps preview, adaptive AF, 5×5 Malvar-He-Cutler ISP, sharp stills (`cam_mode=1`) |
@@ -33,7 +33,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Camera Flash | `PM8150L` WLED/Torch | P1 | **PASS** | Torch & shutter flash (`torch=3`) |
 | Camera OIS | `qcom,ois@1` | P1 | **TODO** | Hardware node present in DTB; XNU OIS driver not implemented |
 | Aux Cameras (Ultrawide / Macro / Depth) | Rear secondary CCI/CSIPHY sensors | P2 | **TODO** | Only rear wide (`S5KHMX`) + front (`S5K3T2`) driven; ultrawide, macro & depth unimplemented |
-| Cellular Modem (4G / VoLTE) | External `SDX55M` over `PCIe2 / MHI` | P0 | **PASS** | China Broadnet `46015` 4G LTE dual-stack data & bidirectional VoLTE calls (`10099`) |
+| Cellular Modem (4G / VoLTE) | External `SDX55M` over `PCIe2 / MHI` | P0 | **PASS** | China Broadnet `46015` 4G LTE dual-stack + VoLTE (`10099`); `pcie2_mhi=2` native `AppleBaseband` (22 services) + `CommCenter[31]` active (`logs/024327-run.log`) |
 | 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` Band n41) | P1 | **TODO** | Kernel `NAS5G` reads `mode=0x50`; iOS userland emulates `Mav17` (4G-only); needs `Mav20` bridge + 2nd SIM slot |
 | GNSS Receiver | `SDX55M QMI LOC 0x10` + `umi_gnssd` | P0 | **PARTIAL** | Wi-Fi CoreLocation (`+/-52..92 m`, Baidu Maps `PASS`) & `START=0` SV stream active; outdoor 3D fix pending |
 | Wi-Fi | `QCA6390` (`PCIe0 / MHI / ath11k`) | P0 | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s sleep/wake, AP deauth & power auto-rejoin |
@@ -78,7 +78,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 
 | Subsystem | Verified (`PASS`) | Remaining for Complete Daily Use (`TODO` / `PARTIAL`) |
 |---|---|---|
-| **Cellular** | 4G LTE dual-stack data, `46015` operator, Settings UI | 5G SA/NSA (`Mav20`), Dual-SIM DSDS + data switch, SMS & OTP verification, USSD, Airplane Mode radio toggle |
+| **Cellular** | 4G LTE dual-stack data, `46015` operator, `pcie2_mhi=2` native `CommCenter` + `AppleBaseband` | 5G SA/NSA (`Mav20`), Dual-SIM DSDS + data switch, SMS & OTP verification, USSD |
 | **Voice Calls** | Outgoing VoLTE (`10099`), earpiece + bottom speaker, dual mic | Incoming ring & lockscreen wakeup, live earpiece/speakerphone switch mid-call, uplink ANC tuning |
 | **Wi-Fi** | Wi-Fi 6/5 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s blank wake, AP deauth & power rejoin | WPA3-SAE, hidden SSID, Personal Hotspot sharing, 8h deep-sleep keepalive |
 | **Bluetooth** | 3 Mbaud H4, scan/pair, A2DP audio, `BlueTool deepsleep`, `PlayAndRecord` HFP/A2DP session | Paired-headset live HFP/SCO call audio, AVRCP media keys, battery level reporting, BT HID keyboards/mice |
@@ -95,7 +95,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Layer | Scope & Status |
 |---|---|
 | **Security & Privacy** | TCC/App permissions prompts (`PARTIAL` — Location prompt verified); Keychain persistence, lockscreen passcode/passcode encryption, `goodix` FOD BiometricKit, kernel MAC/sandbox completeness (`TODO` without SEP/flash) |
-| **Install & Storage** | RAM-boot via `boot-hakios-ram.bat` (`PASS`); guarded dual-boot UFS userdata partition, standalone bootloader (no PC USB), recovery mode, OTA/update, backup/wipe, crash-safe APFS (`TODO`) |
+| **Install & Storage** | Detached `boot-hakios-ram.bat` daily RAM boot (`--follow` optional, `SCENE=daily`, `PASS`); guarded dual-boot UFS userdata partition, standalone bootloader, recovery mode, OTA/update, backup/wipe, crash-safe APFS (`TODO`) |
 | **Background Services** | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` running (`PASS`); background audio soak, alarm/timer wake from deep sleep, local notifications (`TODO`) |
 | **Networking** | IPv4/IPv6 dual-stack, DNS, HTTPS TLS (`PASS`); VPN (`utun`/`NEPacketTunnel`), HTTP/SOCKS proxy config, per-app cellular data firewall, Personal Hotspot (`TODO`) |
 | **System Interaction** | Simplified Chinese UI, Pinyin keyboard, control/notification center, app switcher (`PASS`); screenshot button chord polish, screen recording, orientation auto-rotate verification with live accel/gyro HID (`PARTIAL`), accessibility |
@@ -134,6 +134,16 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch U1 Field-Test Fixes (2026-11-27, `logs/024327-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `baabb30643b4`, `system.apfs` `ec88c4a5757a`, `result: returned 1441823 0`):
+
+- **Cellular & Native `CommCenter` (`pcie2_mhi=2`)**: Switched `boot-hakios-ram.sh` from `pcie2_mhi=1` to `pcie2_mhi=2` so `xnuloader` emits `/baseband` (`Mav17`, `63 MB`), `AppleBaseband` publishes all `22 of 22` services (`pdp_ip0..3` mux 1..4), and `com.apple.CommCenter[31]` + `CommCenterMobileHelper[67]` run without `error = 138` (`SetConfig taken`).
+- **Thermal Reduction / Runtime CPU DVFS**: Added 200 ms `cpufreq_dvfs_thread()` using `ml_cpu_idle_time()` in `hakios.thyme_cpufreq.c` while preserving `hakios_cpufreq_cap()` thermal ceilings; verified live transitions (`group 2 -> 1977 -> 3187 -> 844 MHz`, `group 1 -> 1574 -> 710 MHz`, `kern.hakios.cpu_dvfs_switches`).
+- **CS35L41 Audio Keep-Alive & Retry Recovery**: Raised `QUIET_BEFORE_OFF_US` to `15 s`, widened wake window to `500 ms`, and replaced single-error permanent `given_up` latching with 5-attempt / `500 ms` retry hysteresis in `hakios.thyme_sound.c`.
+- **Clean Daily Startup & Detached Launcher**: Added `userland/rc.jobs.daily` (default `SCENE=daily` in `devices/thyme/build-root.sh`, only `loc_test` + Wi-Fi/DHCP setup, no Safari/`prefs:`/`rwtouch` redirects), `XL_DETACH=1` in `xl`, and detached default mode (`loader_return_after=0`, optional `--follow`) in `boot-hakios-ram.sh`.
+- **Temp BaiduMap Preinstall (`BAIDUMAP=1`)**: Added opt-in `BAIDUMAP=1` extraction + signing in `userland/build.sh` staging `BaiduMap.app` (`367 MB`) at `/Applications/BaiduMap.app` in `system.apfs`.
 
 ## The Settings Location row, and Wi-Fi location in Maps (2026-11-16)
 

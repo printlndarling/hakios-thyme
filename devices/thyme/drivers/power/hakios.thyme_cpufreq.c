@@ -20,8 +20,11 @@
 #include <pexpert/pexpert.h>
 #include <sys/hakios.input.h>
 #include <sys/hakios.board.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
+
+SYSCTL_DECL(_kern_hakios);
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
@@ -90,7 +93,15 @@ domain_of(uint32_t phys_id)
 /* each group's registers and the highest row of its table, once raised: for the thermal service's caps */
 static vm_offset_t epss_base[EPSS_DOMAINS];
 static int epss_top[EPSS_DOMAINS] = { -1, -1, -1 };
+static int epss_thermal_cap[EPSS_DOMAINS] = { -1, -1, -1 };
+static int epss_cur_row[EPSS_DOMAINS] = { -1, -1, -1 };
 static uint32_t epss_khz[EPSS_DOMAINS][EPSS_TABLE_ROWS];
+static bool cpufreq_dvfs_active;
+static int cpu_dvfs_switches;
+
+SYSCTL_INT(_kern_hakios, OID_AUTO, cpu_dvfs_switches,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cpu_dvfs_switches, 0,
+    "Number of runtime SM8250 EPSS CPU DVFS transitions");
 
 static void
 raise_domain(uint32_t domain, uint32_t cores)
@@ -112,6 +123,8 @@ raise_domain(uint32_t domain, uint32_t cores)
 	}
 	epss_base[domain] = base;
 	epss_top[domain] = (int)top;
+	epss_thermal_cap[domain] = (int)top;
+	epss_cur_row[domain] = (int)top;
 	was = *(volatile uint32_t *)(base + EPSS_PERF_STATE);
 	*(volatile uint32_t *)(base + EPSS_PERF_STATE) = top;
 	delay_for_interval(20, NSEC_PER_MSEC);
@@ -152,7 +165,121 @@ hakios_cpufreq_cap(uint32_t domain, int row)
 	if (row > epss_top[domain]) {
 		row = epss_top[domain];
 	}
+	epss_thermal_cap[domain] = row;
+	if (!cpufreq_dvfs_active || epss_cur_row[domain] > row) {
+		epss_cur_row[domain] = row;
+		*(volatile uint32_t *)(epss_base[domain] + EPSS_PERF_STATE) = (uint32_t)row;
+	}
+}
+
+static int
+cpufreq_idle_row(uint32_t domain, int cap)
+{
+	int idle_row = cap / 3;
+
+	for (int r = 0; r <= cap; r++) {
+		if (epss_khz[domain][r] >= 600000) {
+			idle_row = r;
+			break;
+		}
+	}
+	return idle_row <= cap ? idle_row : cap;
+}
+
+static void
+cpufreq_set_row(uint32_t domain, int row)
+{
+	int cap = epss_thermal_cap[domain];
+
+	if (cap < 0) {
+		return;
+	}
+	if (row < 0) {
+		row = 0;
+	}
+	if (row > cap) {
+		row = cap;
+	}
+	if (row == epss_cur_row[domain]) {
+		return;
+	}
+	epss_cur_row[domain] = row;
 	*(volatile uint32_t *)(epss_base[domain] + EPSS_PERF_STATE) = (uint32_t)row;
+	cpu_dvfs_switches++;
+	if (cpu_dvfs_switches <= 12) {
+		tell("cpufreq: dvfs: group %u -> row %d (%u MHz)\n", domain, row,
+		    epss_khz[domain][row] / 1000);
+	}
+}
+
+static void
+cpufreq_dvfs_thread(void *arg __unused, wait_result_t wr __unused)
+{
+	const ml_topology_info_t *topology = ml_get_topology_info();
+	uint64_t idle_before[MAX_CPUS] = { 0 }, then = mach_absolute_time();
+	uint32_t quiet_ticks[EPSS_DOMAINS] = { 0 };
+
+	for (unsigned int i = 0; i < topology->num_cpus && i < MAX_CPUS; i++) {
+		(void)ml_cpu_idle_time((int)i, &idle_before[i]);
+	}
+
+	for (;;) {
+		uint32_t max_busy[EPSS_DOMAINS] = { 0 };
+		uint64_t now, dt;
+
+		delay_for_interval(200, NSEC_PER_MSEC);
+		now = mach_absolute_time();
+		dt = now > then ? now - then : 1;
+		then = now;
+
+		for (unsigned int i = 0; i < topology->num_cpus && i < MAX_CPUS; i++) {
+			uint64_t idle = 0, didle, busy;
+			uint32_t pct, domain = domain_of(topology->cpus[i].phys_id);
+
+			if (!ml_cpu_idle_time((int)i, &idle)) {
+				continue;
+			}
+			didle = idle > idle_before[i] ? idle - idle_before[i] : 0;
+			idle_before[i] = idle;
+			busy = dt > didle ? dt - didle : 0;
+			pct = (uint32_t)(100 * busy / dt);
+			if (pct > 100) {
+				pct = 100;
+			}
+			if (domain < EPSS_DOMAINS && pct > max_busy[domain]) {
+				max_busy[domain] = pct;
+			}
+		}
+
+		for (uint32_t d = 0; d < EPSS_DOMAINS; d++) {
+			int cap = epss_thermal_cap[d];
+			int idle_r, mid_r, target = epss_cur_row[d];
+
+			if (epss_top[d] < 0 || cap < 0) {
+				continue;
+			}
+			idle_r = cpufreq_idle_row(d, cap);
+			mid_r = (idle_r + cap) / 2;
+
+			if (max_busy[d] >= 65) {
+				quiet_ticks[d] = 0;
+				target = cap;
+			} else if (max_busy[d] >= 30) {
+				quiet_ticks[d] = 0;
+				if (target < mid_r) {
+					target = mid_r;
+				}
+			} else if (max_busy[d] < 15) {
+				quiet_ticks[d]++;
+				if (quiet_ticks[d] >= 2) {
+					target = (epss_cur_row[d] > mid_r) ? mid_r : idle_r;
+				}
+			} else {
+				quiet_ticks[d] = 0;
+			}
+			cpufreq_set_row(d, target);
+		}
+	}
 }
 
 /*
@@ -634,6 +761,21 @@ hakios_cpufreq_init(void)
 		}
 	}
 	printf("cpufreq: on core %u a loop ran at %u, now at %u\n", here, before, loop_speed());
+	{
+		uint32_t dvfs = 1;
+
+		PE_parse_boot_argn("cpufreq_dvfs", &dvfs, sizeof(dvfs));
+		if (dvfs != 0) {
+			thread_t dvfs_thread;
+
+			cpufreq_dvfs_active = true;
+			if (kernel_thread_start(cpufreq_dvfs_thread, NULL, &dvfs_thread) == KERN_SUCCESS) {
+				thread_deallocate(dvfs_thread);
+			} else {
+				cpufreq_dvfs_active = false;
+			}
+		}
+	}
 	/* membench has its own variable: when the boot-arg is absent, the cpufreq value (2 means on) must not start the benchmark */
 	/* membench=1: run the memory benchmark after CPU probing (2 runs it on a background thread) */
 	PE_parse_boot_argn("membench", &membench, sizeof(membench));

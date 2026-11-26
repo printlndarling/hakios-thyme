@@ -300,6 +300,12 @@ run() { # run <oem command> <label>
 	fi
 	local live=; live_loader && live=1
 	fb $1 >/dev/null
+	if [ "${XL_DETACH:-0}" = 1 ]; then
+		sleep 2
+		result=$(FB_TIMEOUT=15 fb getvar result 2>/dev/null | grep '^result:')
+		echo "xl: ${result:-result: launched} (detached)"
+		return 0
+	fi
 	if [ -n "$live" ] && [ "$1" != "oem selftest" ]; then
 		# the loader goes on answering: ask every two seconds until the result is no longer "running".
 		# XL_FOLLOW=N: fetch the log as it stands every N seconds as well, so that a phone that

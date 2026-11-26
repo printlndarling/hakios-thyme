@@ -1219,7 +1219,7 @@ play(uint32_t ms, bool amplifiers)
  */
 #define RING_FRAMES             32768           /* 0.68 s; a power of two, the indices run on and wrap */
 #define SILENCE                 8               /* samples no larger than this are silence (as hakios.audio.c's) */
-#define QUIET_BEFORE_OFF_US     3000000ull
+#define QUIET_BEFORE_OFF_US     15000000ull
 
 static int16_t ring[RING_FRAMES * 2];
 static volatile uint32_t ring_head, ring_tail;  /* frames: written by the sink, taken by the feeder */
@@ -1435,8 +1435,8 @@ static void
 watch(void)
 {
 	bool on = false, given_up = false, muted = false;
-	uint64_t last_look = 0, last_monitor = 0;
-	uint32_t starts = 0, changes = 0, generation = 0, extra = 0, monitor = 0, monitor_looks = 0;
+	uint64_t last_look = 0, last_monitor = 0, retry_after = 0;
+	uint32_t starts = 0, changes = 0, generation = 0, extra = 0, monitor = 0, monitor_looks = 0, fail_streak = 0;
 
 	guard_level(below);                     /* (from the first sample on: see guard_off()) */
 
@@ -1462,20 +1462,36 @@ watch(void)
 			} else if (on && !speaker_set_volume(sound_attenuation(extra), 1)) {
 				guard_off(true);
 				on = false;
-				given_up = true;
+				fail_streak++;
+				if (fail_streak >= 5) {
+					given_up = true;
+				} else {
+					retry_after = now + 500000ull;
+				}
 			} else if (!given_up) {
+				if (on) {
+					fail_streak = 0;
+				}
 				guard_level(sound_attenuation(extra));
 			}
 		}
-		if (!on && !given_up && !muted && sounded != 0 && now - sounded < 100000) {
+		if (!on && !given_up && !muted && sounded != 0 && now >= retry_after && now >= sounded && now - sounded < 500000) {
 			say_when("iOS plays: the amplifiers are started");
 			starts++;
 			ios_peak = 0;
 			if (!speaker_start() || !speaker_set_volume(sound_attenuation(extra), 1)) {
-				say("sound: THE AMPLIFIERS DID NOT START; iOS's sound goes on to the DSP, unheard\n");
+				fail_streak++;
 				guard_off(true);
-				given_up = true;
+				if (fail_streak >= 5) {
+					say("sound: THE AMPLIFIERS DID NOT START (%u failures); iOS's sound goes on to the DSP, unheard\n",
+					    fail_streak);
+					given_up = true;
+				} else {
+					say("sound: amplifier start failed (%u/5), retrying after 500 ms\n", fail_streak);
+					retry_after = now + 500000ull;
+				}
 			} else {
+				fail_streak = 0;
 				on = true;
 				guard_on = true;
 				last_look = now_us();
@@ -1486,8 +1502,8 @@ watch(void)
 				    "them %u ms after it was made, behind the periods queued at the DSP\n", (last_look - sounded) / 1000,
 				    PERIODS * PERIOD_FRAMES / 48);
 			}
-		} else if (on && now - sounded > QUIET_BEFORE_OFF_US) {
-			say_when("three seconds of silence: the amplifiers are stopped");
+		} else if (on && now > sounded && now - sounded > QUIET_BEFORE_OFF_US) {
+			say_when("15 seconds of silence: the amplifiers are stopped");
 			say("sound: what iOS wrote while they were on peaked at %u%% of full scale (%u)\n", ios_peak * 100 / 32768,
 			    ios_peak);
 			guard_off(false);
@@ -1498,18 +1514,28 @@ watch(void)
 			if (!(umi_profile ? umi_speaker_healthy() : hakios_speaker_healthy())) {
 				guard_off(true);
 				on = false;
-				given_up = true;
-			} else if (!umi_profile && now - last_monitor >= 1000000) {
-				/* the amplifiers' temperature and the battery as they see it, every second: a reduction if Android's table asks for one */
-				uint32_t wanted;
+				fail_streak++;
+				if (fail_streak >= 5) {
+					say("sound: amplifier health check failed (%u/5), giving up\n", fail_streak);
+					given_up = true;
+				} else {
+					say("sound: amplifier health check failed (%u/5), retrying after 500 ms\n", fail_streak);
+					retry_after = now + 500000ull;
+				}
+			} else {
+				fail_streak = 0;
+				if (!umi_profile && now - last_monitor >= 1000000) {
+					/* the amplifiers' temperature and the battery as they see it, every second: a reduction if Android's table asks for one */
+					uint32_t wanted;
 
-				last_monitor = now;
-				wanted = hakios_speaker_monitor(monitor_looks++ % 10 == 0);
-				if (wanted != monitor) {
-					say("sound: the amplifiers' watch asks for %u.%03u dB less (it was %u.%03u)\n", wanted / 8, wanted % 8 * 125,
-					    monitor / 8, monitor % 8 * 125);
-					monitor = wanted;
-					hakios_guard_monitor(monitor);
+					last_monitor = now;
+					wanted = hakios_speaker_monitor(monitor_looks++ % 10 == 0);
+					if (wanted != monitor) {
+						say("sound: the amplifiers' watch asks for %u.%03u dB less (it was %u.%03u)\n", wanted / 8, wanted % 8 * 125,
+						    monitor / 8, monitor % 8 * 125);
+						monitor = wanted;
+						hakios_guard_monitor(monitor);
+					}
 				}
 			}
 		}
