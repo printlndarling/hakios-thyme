@@ -1,0 +1,18 @@
+# Wi-Fi real display/system sleep + wake + power-cycle + link-drop verification scene.
+# Paired with kernel boot args: press_power=80 press_power_gap=65
+# 1. Join Wi-Fi, verify IPv4, DNS, and HTTPS 200 OK before sleep.
+# 2. Do NOT hold sleep_hold — at t=80 s the kernel fires a real hardware power-button press
+#    to lock and blank the screen (DCS 0x51 level 0) for 65 s, letting iOS/backboardd/powerd
+#    enter real sleep, then at t=145 s the kernel fires the second hardware power-button press
+#    to wake the display and system.
+# 3. After wake (t~155 s): verify en0 stays/recovers associated + IPv4 + DNS + HTTPS 200 OK.
+# 4. Exercise radio power cycle (power 0 -> power 1, kernel standing auto-rejoin) + HTTPS.
+# 5. Exercise link drop (leave, keepalive auto-rejoin) + HTTPS.
+/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
+/redwood/bin/net_test waitaddr en0 30 resolve www.apple.com fetch https://www.apple.com/library/test/success.html
+/redwood/bin/net_test wait 120
+/redwood/bin/net_test show waitaddr en0 30 resolve www.apple.com fetch https://www.apple.com/library/test/success.html
+/redwood/bin/net_test power 0 wait 4 power 1 wait 10
+/redwood/bin/net_test show waitaddr en0 30 fetch https://www.apple.com/library/test/success.html
+/redwood/bin/net_test leave wait 12
+/redwood/bin/net_test show waitaddr en0 30 fetch https://www.apple.com/library/test/success.html

@@ -510,7 +510,15 @@ linuxkpi_ieee80211_beacon_loss(struct ieee80211_vif *vif)
 void
 linuxkpi_ieee80211_connection_loss(struct ieee80211_vif *vif)
 {
-	printf("lx: the driver reports the connection lost\n");
+	struct lx_radio *radio = the_radio;
+
+	lx_tell("lx: the driver reports the connection lost\n");
+	if (radio != NULL && radio->vif == vif && radio->joined) {
+		radio->joined = false;
+		radio->last_error = ETIMEDOUT;
+		lx_os_net_link(0);
+		lx_os_station_lost(ETIMEDOUT);
+	}
 }
 
 /* (the driver's recovery after its firmware has died, which nothing here goes through) */

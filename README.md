@@ -32,7 +32,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Camera & Torch | **PASS** | Rear 27 MP S5KHMX + AK7377 AF, front S5K3T2, lens switching, PM8150L flash |
 | Cellular & VoLTE | **PASS** | SDX55M 4G LTE dual-stack data, VoLTE voice, Settings UI (`Mav17`; 5G NR requires `Mav20`) |
 | Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (verified in Baidu Maps) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
-| Wi-Fi (QCA6390) | **PARTIAL** | 2.4/5 GHz WPA2, DHCP/TLS & power recovery; `SystemSleep` auto-wake open |
+| Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
 | Bluetooth (QCA6390) | **PARTIAL** | 3 Mbaud H4, discovery, pairing & A2DP playback; HFP/AVRCP/reconnect open |
 | Battery & Thermal | **PASS** | Fuel gauge, USB charging telemetry, thermal throttling & low-battery guard |
 | Sensors (SLPI) | **PARTIAL** | SLPI firmware & QRTR services up; accelerometer/ALS/proximity HID delivery open |
@@ -44,7 +44,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 
 - **Sensors (SLPI / HID)**: Deliver accelerometer, ambient-light (auto-brightness), and proximity events to iOS.
 - **Outdoor GNSS & Cellular Polish**: Verify open-sky 3D satellite fixes via `umi_gnssd` and SMS when needed.
-- **Wireless Power & Audio**: Wi-Fi auto-reconnect after `SystemSleep`; Bluetooth HFP/AVRCP/reconnect.
+- **Bluetooth Audio & Reconnect**: Bluetooth HFP/SCO, AVRCP controls, and deliberate headset auto-reconnect.
 - **Graphics & Persistence**: System `MTLDevice` support for third-party apps; safe, opt-in persistent storage.
 
 ## Building & Running (RAM Boot)

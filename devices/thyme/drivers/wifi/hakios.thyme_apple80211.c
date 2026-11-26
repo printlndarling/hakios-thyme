@@ -201,6 +201,9 @@ static LCK_GRP_DECLARE(apple80211_lock_group, "hakios-apple80211");
 static LCK_MTX_DECLARE(apple80211_lock, &apple80211_lock_group);
 static unsigned result_next;                    /* which of what the last scan heard a SCAN_RESULT request gets next */
 static uint32_t join_result;                    /* of the last join asked for: 0 while it runs, then Apple80211's number */
+static char country_code[4] = "CN";             /* ISO 3166-1 alpha-2 country code (matches regdb.bin) */
+static uint32_t last_deauth_reason;
+static uint8_t last_deauth_bssid[6];
 
 /* ---- channels ---------------------------------------------------------------------------------------- */
 
@@ -363,6 +366,35 @@ get(struct apple80211req *request)
 		error = give(request, answer, sizeof(*answer));
 		kfree_data(answer, sizeof(*answer));
 		return error;
+	}
+	case 51: {                              /* ISO 3166-1 alpha-2 country code (3 bytes on get, or 8 bytes with version) */
+		char cc[4];
+
+		lck_mtx_lock(&apple80211_lock);
+		memcpy(cc, country_code, sizeof(cc));
+		lck_mtx_unlock(&apple80211_lock);
+		if (request->req_len >= 8) {
+			struct {
+				uint32_t version;
+				char cc[4];
+			} answer = { .version = 1, .cc = { cc[0], cc[1], 0, 0 } };
+			return give(request, &answer, sizeof(answer));
+		}
+		return give(request, cc, 3);
+	}
+	case 29: {                              /* last involuntary deauth reason + peer BSSID (16 bytes) */
+		struct {
+			uint32_t version;
+			uint32_t reason;
+			uint8_t ea[6];
+			uint8_t pad[2];
+		} answer = { .version = 1 };
+
+		lck_mtx_lock(&apple80211_lock);
+		answer.reason = last_deauth_reason;
+		memcpy(answer.ea, last_deauth_bssid, sizeof(answer.ea));
+		lck_mtx_unlock(&apple80211_lock);
+		return give(request, &answer, sizeof(answer));
 	}
 	case 21:                                /* how the last join went (0: not over yet) */
 		lck_mtx_lock(&apple80211_lock);
@@ -598,6 +630,32 @@ set(const struct apple80211req *request, char *said, size_t said_size)
 	}
 	case 10:
 		return set_scan(request, said, said_size);
+	case 51: {                              /* COUNTRY_CODE: 8-byte {version, cc[3], pad} or raw 2-3 byte ISO code */
+		uint8_t buf[8] = { 0 };
+		size_t n = request->req_len < sizeof(buf) ? request->req_len : sizeof(buf);
+		int error;
+		char c0 = 0, c1 = 0;
+
+		if (n < 2 || (error = copyin(request->req_data, buf, n)) != 0) {
+			return n < 2 ? EINVAL : error;
+		}
+		if (n >= 6 && buf[4] >= 'A' && buf[4] <= 'Z' && buf[5] >= 'A' && buf[5] <= 'Z') {
+			c0 = (char)buf[4];
+			c1 = (char)buf[5];
+		} else if (buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] >= 'A' && buf[1] <= 'Z') {
+			c0 = (char)buf[0];
+			c1 = (char)buf[1];
+		}
+		if (c0 != 0 && c1 != 0) {
+			lck_mtx_lock(&apple80211_lock);
+			country_code[0] = c0;
+			country_code[1] = c1;
+			country_code[2] = '\0';
+			lck_mtx_unlock(&apple80211_lock);
+			snprintf(said, said_size, " (country: %c%c)", c0, c1);
+		}
+		return 0;
+	}
 	default:
 		return EOPNOTSUPP;
 	}
@@ -650,13 +708,23 @@ hakios_apple80211_event(enum hakios_sta_event event, int status)
 		post(EVENT_ASSOC_DONE, NULL, 0);
 		break;
 	case HAKIOS_STA_LINK: {
-		struct apple80211_link_changed link = { .down = status != 1, .involuntary = status != 1 && status != 0,
-			                                .reason = status != 1 && status != 0 ? 4 : 0 };      /* (4: gone, not asked) */
+		bool involuntary = status != 1 && status != 0;
+		struct apple80211_link_changed link = {
+			.down = status != 1,
+			.involuntary = involuntary,
+			.reason = involuntary ? (status == ETIMEDOUT ? 2u : 1u) : 0u,  /* 1: Deauth, 2: BeaconLoss (4 is SystemSleep) */
+		};
 		struct hakios_sta_state *state = kalloc_data(sizeof(*state), Z_WAITOK | Z_ZERO);
 
 		if (state != NULL) {
 			hakios_sta_state(state);
 			link.rssi = status == 1 ? state->bss.rssi : 0;
+			if (involuntary) {
+				lck_mtx_lock(&apple80211_lock);
+				last_deauth_reason = (status == ETIMEDOUT) ? 4u : 3u;
+				memcpy(last_deauth_bssid, state->bss.bssid, sizeof(last_deauth_bssid));
+				lck_mtx_unlock(&apple80211_lock);
+			}
 			kfree_data(state, sizeof(*state));
 		}
 		post(EVENT_SSID_CHANGED, NULL, 0);

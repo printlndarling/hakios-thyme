@@ -32,7 +32,7 @@
 | 相机与闪光灯 | **PASS** | 后摄 27 MP S5KHMX + AK7377 自动对焦、前摄 S5K3T2、镜头切换与 PM8150L 闪光灯 |
 | 蜂窝与通话 | **PASS** | SDX55M 4G LTE 双栈数据与双向 VoLTE 语音（当前 `Mav17` 仅 4G，5G 需 `Mav20`） |
 | 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测精准蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
-| Wi-Fi（QCA6390） | **PARTIAL** | 2.4/5 GHz WPA2、DHCP/TLS 及断电恢复正常；`SystemSleep` 唤醒重连待完善 |
+| Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏休眠唤醒、AP 踢下线与断电自动重连 |
 | 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对与 A2DP 播放正常；HFP/AVRCP/自动重连待完善 |
 | 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |
 | 传感器（SLPI） | **PARTIAL** | SLPI 固件与 QRTR 服务已起；加速度/环境光/距离 HID 上报待打通 |
@@ -44,7 +44,7 @@
 
 - **传感器（SLPI / HID）**：打通加速度计、环境光（自动亮度）与距离传感器至 iOS。
 - **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
-- **无线与蓝牙体验**：修复 `SystemSleep` 后 Wi-Fi 自动重连，补齐蓝牙 HFP/AVRCP/重连。
+- **蓝牙体验完善**：补齐蓝牙 HFP/SCO 通话音频、AVRCP 媒体控制与断连自动重连。
 - **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
 
 ## 构建与运行（RAM 启动）

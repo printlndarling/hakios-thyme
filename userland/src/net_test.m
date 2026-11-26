@@ -842,20 +842,58 @@ link_event(int fd)
 	return (int)event->event_code;
 }
 
+/* Query en0 radio power (Apple80211 POWER 19): 1 on, 0 off, -1 unknown/gone. */
+static int
+wifi_radio_power(void)
+{
+	struct {
+		uint32_t version, radios, state[4];
+	} answer;
+	struct apple80211req request = { .name = "en0", .type = 19, .length = sizeof(answer), .data = &answer };
+	int s = socket(AF_INET, SOCK_DGRAM, 0), on = -1;
+
+	if (s < 0) {
+		return -1;
+	}
+	memset(&answer, 0, sizeof(answer));
+	if (ioctl(s, SIOCGA80211, &request) == 0) {
+		on = answer.state[0] ? 1 : 0;
+	}
+	close(s);
+	return on;
+}
+
+/* Query en0 station state (Apple80211 STATE 13): 4 RUN, 2 JOINING, 1 SCAN, 0 INIT, -1 error. */
+static int
+wifi_link_state(void)
+{
+	struct apple80211req request = { .name = "en0", .type = 13 };
+	int s = socket(AF_INET, SOCK_DGRAM, 0), state = -1;
+
+	if (s < 0) {
+		return -1;
+	}
+	if (ioctl(s, SIOCGA80211, &request) == 0) {
+		state = request.value;
+	}
+	close(s);
+	return state;
+}
+
 /*
- * keepalive [FILE] [SECONDS]: the scenes join the network once, and nothing joins it again. When
- * the system sleeps (wifid logs the link down "due to SystemSleep") and wakes, wifid has no
- * network of ours among its preferences to re-join, so the radio stays down until the next boot.
- * This loop is that missing re-join: it reads the kernel's link events; when the link goes away
- * and is still away five seconds later, it joins the network of FILE again. The wait tells a
- * real loss from the moment a join of ours takes the link down and puts it back (about 300 ms).
- * A join that does not take is retried on the next loss event, not in a tight loop.
+ * keepalive [FILE] [SECONDS]: read the kernel's data-link events and keep en0 associated and
+ * addressed across link drops and sleep/wake. On KEV_DL_LINK_OFF, wait 5 s so the kernel's own
+ * standing-network auto-rejoin (2 s) gets first shot without double-joining; if the link is still
+ * down and the radio is powered on, rejoin FILE and ensure en0 has an IPv4 lease. If a rejoin
+ * fails transiently (e.g. while powered off during sleep), retry on periodic wakeups once radio
+ * power is back on instead of blocking forever for another link-off event.
  */
 static void
 keepalive(const char *path, unsigned seconds)
 {
 	FILE *probe;
 	int fd;
+	int want_recovery = 0;
 
 	probe = fopen(path, "r");
 	if (probe == NULL) {
@@ -881,30 +919,99 @@ keepalive(const char *path, unsigned seconds)
 		FD_ZERO(&read_set);
 		FD_SET(fd, &read_set);
 		selected = select(fd + 1, &read_set, NULL, NULL, &timeout);
-		if (selected <= 0) {
-			continue;
-		}
-		if (link_event(fd) != KEV_DL_LINK_OFF) {
-			continue;
-		}
-		sleep(5);                        /* a join of ours takes the link down and back in ~300 ms */
-		{
-			int came_back = 0, code;
-
-			while ((code = link_event(fd)) >= 0) {
-				if (code == KEV_DL_LINK_ON) {
-					came_back = 1;
-				}
-			}
-			if (came_back) {
+		if (selected < 0) {
+			if (errno == EINTR) {
 				continue;
 			}
+			sleep(5);
+			continue;
 		}
-		printf("net_test: keepalive: the link is gone; joining %s again\n", path);
-		joinfile(path);
-		sleep(seconds < 60 ? 60 : seconds);
-		while (link_event(fd) >= 0) {    /* and whatever the join itself made */
-			;
+		if (selected > 0) {
+			int saw_off = 0, saw_on = 0, code;
+
+			while ((code = link_event(fd)) >= 0) {
+				if (code == KEV_DL_LINK_OFF) {
+					saw_off = 1;
+				} else if (code == KEV_DL_LINK_ON) {
+					saw_on = 1;
+				}
+			}
+			if (saw_on && !saw_off) {
+				want_recovery = 0;
+				continue;
+			}
+			if (!saw_off) {
+				continue;
+			}
+			sleep(5);                /* give kernel standing auto-rejoin / normal bounce time */
+			{
+				int came_back = 0;
+
+				while ((code = link_event(fd)) >= 0) {
+					if (code == KEV_DL_LINK_ON) {
+						came_back = 1;
+					}
+				}
+				if (came_back) {
+					want_recovery = 0;
+					continue;
+				}
+			}
+			want_recovery = 1;
+		}
+		if (!want_recovery) {
+			continue;
+		}
+		{
+			int power = wifi_radio_power();
+			int state = wifi_link_state();
+
+			if (power == 0) {
+				/* Radio is intentionally off (Settings switch or sleep); wait for power-on. */
+				continue;
+			}
+			if (state == 2) {
+				/* Kernel standing auto-rejoin is already running; let it finish. */
+				sleep(5);
+				state = wifi_link_state();
+			}
+			if (state == 4) {
+				/* Associated again (e.g. kernel auto-rejoin succeeded); ensure IPv4 is present. */
+				if (!show("en0", true)) {
+					sleep(3);
+					if (!show("en0", true)) {
+						printf("net_test: keepalive: link is up without IPv4; requesting DHCP\n");
+						dhcp("en0");
+					}
+				}
+				want_recovery = 0;
+				continue;
+			}
+			if (power < 0) {
+				continue;
+			}
+			printf("net_test: keepalive: the link is gone; joining %s again\n", path);
+			joinfile(path);
+			while (link_event(fd) >= 0) {
+				;
+			}
+			if (wifi_link_state() == 4) {
+				for (int w = 0; w < 5 && !show("en0", true); w++) {
+					sleep(1);
+				}
+				if (!show("en0", true)) {
+					printf("net_test: keepalive: joined without IPv4; requesting DHCP\n");
+					dhcp("en0");
+				}
+				want_recovery = 0;
+				sleep(seconds < 30 ? 30 : seconds);
+				while (link_event(fd) >= 0) {
+					;
+				}
+			} else {
+				/* Join failed transiently; keep want_recovery = 1 and retry on next timeout. */
+				sleep(seconds < 15 ? 15 : seconds);
+			}
 		}
 	}
 }

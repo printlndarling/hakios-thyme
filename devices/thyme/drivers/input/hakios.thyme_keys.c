@@ -50,7 +50,7 @@ static vm_offset_t arb_core, arb_cnfg, arb_observer;
 static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID;
 static bool keys_started;
 static int keys_sleep_chan;
-static uint32_t press_ms = 150, press_left;
+static uint32_t press_ms = 150, press_gap = 10, press_left;
 static thread_call_t press_call;
 
 static uint32_t
@@ -189,7 +189,7 @@ press_step(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
 	if (down) {
 		clock_interval_to_deadline(press_ms, NSEC_PER_MSEC, &deadline);
 	} else if (--press_left > 0) {
-		clock_interval_to_deadline(10, NSEC_PER_SEC, &deadline);
+		clock_interval_to_deadline(press_gap, NSEC_PER_SEC, &deadline);
 	} else {
 		return;
 	}
@@ -206,12 +206,13 @@ press_power_init(void)
 		return;
 	}
 	PE_parse_boot_argn("press_power_ms", &press_ms, sizeof(press_ms));
+	PE_parse_boot_argn("press_power_gap", &press_gap, sizeof(press_gap));
 	press_left = 2;
 	press_call = thread_call_allocate(press_step, NULL);
 	clock_interval_to_deadline(seconds, NSEC_PER_SEC, &deadline);
 	thread_call_enter_delayed(press_call, deadline);
 	hakios_tl("UMI keys: press_power: power will be pressed for %u ms at %u s and %u s\n",
-	    press_ms, seconds, seconds + 10);
+	    press_ms, seconds, seconds + press_gap);
 }
 
 void
