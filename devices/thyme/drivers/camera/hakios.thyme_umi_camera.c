@@ -10,9 +10,16 @@
 #include <sys/errno.h>
 #include <sys/hakios.input.h>
 #include <sys/hakios.camera.h>
+#include <sys/sysctl.h>
 #include <kern/clock.h>
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
+
+SYSCTL_DECL(_kern_hakios);
+static int ois_chip_id = -1;
+SYSCTL_INT(_kern_hakios, OID_AUTO, ois_chip_id,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &ois_chip_id, 0,
+    "Rear camera OIS controller CCI 0x1c ID/status register");
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
@@ -389,6 +396,17 @@ usensor_read(uint16_t reg, uint16_t *value)
 	uint8_t hi = 0, lo = 0;
 	bool ok = ustart() && uput(uslave) && uput((uint8_t)(reg >> 8)) && uput((uint8_t)reg) &&
 	    ustart() && uput(uslave | 1) && uget(&hi, true) && uget(&lo, false);
+	ustop();
+	*value = (uint16_t)((uint16_t)hi << 8 | lo);
+	return ok;
+}
+
+static bool
+uois_read16(uint8_t addr8, uint16_t reg, uint16_t *value)
+{
+	uint8_t hi = 0, lo = 0;
+	bool ok = ustart() && uput(addr8) && uput((uint8_t)(reg >> 8)) && uput((uint8_t)reg) &&
+	    ustart() && uput(addr8 | 1) && uget(&hi, true) && uget(&lo, false);
 	ustop();
 	*value = (uint16_t)((uint16_t)hi << 8 | lo);
 	return ok;
@@ -1827,6 +1845,18 @@ uprobe(unsigned stage)
 		    uvcm_read(VCM_REG_POSITION + 1, &p1);
 		hakios_tl("UMI camera: lens motor initialised (AK7377 at %#x): writes %s, control %#x position %#x%02x (%s)\n",
 		    VCM_ADDRESS, wrote ? "taken" : "REFUSED", mode, p0, p1, read ? "read back" : "NO ANSWER");
+		{
+			uint16_t r0 = 0, r2 = 0, r4 = 0, r6 = 0, r7000 = 0;
+			bool ok0 = uois_read16(0x1cu, 0x0000u, &r0);
+
+			(void)uois_read16(0x1cu, 0x0002u, &r2);
+			(void)uois_read16(0x1cu, 0x0004u, &r4);
+			(void)uois_read16(0x1cu, 0x0006u, &r6);
+			(void)uois_read16(0x1cu, 0x7000u, &r7000);
+			ois_chip_id = ok0 ? (int)r0 : -1;
+			hakios_tl("UMI ois: 0x1c ok=%d r0=%#x r2=%#x r4=%#x r6=%#x r7000=%#x\n",
+			    ok0 ? 1 : 0, r0, r2, r4, r6, r7000);
+		}
 		uint32_t focus_pos = 0xffffffff;
 		if (PE_parse_boot_argn("cam_focus", &focus_pos, sizeof(focus_pos)) && focus_pos != 0xffffffff) {
 			(void)uvcm_position(focus_pos & 0xfff);

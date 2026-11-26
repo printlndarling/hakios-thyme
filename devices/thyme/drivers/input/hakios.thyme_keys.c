@@ -54,7 +54,7 @@ SYSCTL_DECL(_kern_hakios);
 #define UMI_TLMM_SOUTH_PA     0x0f500000UL
 #define UMI_TLMM_SOUTH_SIZE   0x00060000UL
 #define UMI_TLMM_NORTH_PA     0x0f900000UL
-#define UMI_TLMM_NORTH_SIZE   0x00010000UL
+#define UMI_TLMM_NORTH_SIZE   0x00080000UL
 #define UMI_HALL_GPIO_PIN     14u
 #define UMI_QUP1_SDA_PIN      4u
 #define UMI_QUP1_SCL_PIN      5u
@@ -62,6 +62,9 @@ SYSCTL_DECL(_kern_hakios);
 #define UMI_QUP15_SCL_PIN     45u
 #define UMI_QUP16_SDA_PIN     48u
 #define UMI_QUP16_SCL_PIN     49u
+#define UMI_NFC_VEN_PIN       83u
+#define UMI_NFC_FIRM_PIN      110u
+#define UMI_NFC_IRQ_PIN       111u
 
 #define UMI_WDT_PA            0x17c10000UL
 #define UMI_WDT_CTL           0x08u
@@ -86,8 +89,11 @@ static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_
 static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts;
-static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id, nfc_present;
+static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
+static int nfc_present, nfc_nci_ver, usbc_audio_id, usbc_switch_status;
 static uint32_t rtc_boot_seconds;
+static int64_t umi_rtc_epoch_offset;
+static bool umi_rtc_synced;
 static uint32_t press_ms = 150, press_gap = 10, press_left;
 static thread_call_t press_call;
 
@@ -121,6 +127,15 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, wlc_chip_id,
 SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_present,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &nfc_present, 0,
     "NFC controller nq-nci@0x28 I2C ACK state (1=present)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_nci_ver,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &nfc_nci_ver, 0,
+    "NFC controller NCI protocol version from CORE_RESET");
+SYSCTL_INT(_kern_hakios, OID_AUTO, usbc_audio_id,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &usbc_audio_id, 0,
+    "USB-C audio switch fsa4480@0x42 chip ID register (0x00)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, usbc_switch_status,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &usbc_switch_status, 0,
+    "USB-C audio switch fsa4480@0x42 status registers (st1<<8 | st0)");
 
 static uint32_t
 keys_reg(vm_offset_t base, uint32_t offset)
@@ -249,6 +264,24 @@ sysctl_umi_rtc_seconds(__unused struct sysctl_oid *oidp, __unused void *arg1, __
 SYSCTL_PROC(_kern_hakios, OID_AUTO, umi_rtc_seconds,
     CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
     sysctl_umi_rtc_seconds, "I", "PM8150 SPMI hardware RTC seconds (thyme)");
+
+static int
+sysctl_umi_rtc_unix_time(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2,
+    struct sysctl_req *req)
+{
+	uint32_t secs = 0;
+	uint64_t value;
+
+	if (!rtc_ready || !umi_rtc_synced || !umi_rtc_read(&secs)) {
+		return ENXIO;
+	}
+	value = (uint64_t)((int64_t)secs + umi_rtc_epoch_offset);
+	return SYSCTL_OUT(req, &value, sizeof(value));
+}
+
+SYSCTL_PROC(_kern_hakios, OID_AUTO, umi_rtc_unix_time,
+    CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_ANYBODY | CTLFLAG_LOCKED, NULL, 0,
+    sysctl_umi_rtc_unix_time, "Q", "PM8150 SPMI RTC synchronized Unix epoch seconds (thyme)");
 
 static void
 thyme_qrng_init(void)
@@ -669,6 +702,36 @@ i2c_probe_addr(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7)
 	return ok;
 }
 
+static bool
+i2c_write_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
+    const uint8_t *buf, unsigned count)
+{
+	bool ok;
+
+	i2c_start(tlmm, sda, scl);
+	ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)(addr7 << 1));
+	for (unsigned i = 0; ok && i < count; i++) {
+		ok = i2c_write_byte(tlmm, sda, scl, buf[i]);
+	}
+	i2c_stop(tlmm, sda, scl);
+	return ok;
+}
+
+static bool
+i2c_read_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
+    uint8_t *buf, unsigned count)
+{
+	bool ok;
+
+	i2c_start(tlmm, sda, scl);
+	ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)((addr7 << 1) | 1u));
+	for (unsigned i = 0; ok && i < count; i++) {
+		buf[i] = i2c_read_byte(tlmm, sda, scl, i + 1 < count);
+	}
+	i2c_stop(tlmm, sda, scl);
+	return ok;
+}
+
 /* Read-only SM8250 watchdog status probe (qcom,wdt@17c10000). */
 static void
 thyme_wdt_probe(void)
@@ -718,7 +781,17 @@ thyme_charger_probe(void)
 			hakios_tl("UMI fastchg: bq25970@0x66 NACK\n");
 		}
 		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x00u, false, &fsa_id, 1)) {
-			hakios_tl("UMI usbc_audio: fsa4480@0x42 id=%#x\n", fsa_id);
+			uint8_t en = 0, sel = 0, st0 = 0, st1 = 0, jack = 0;
+
+			(void)i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x04u, false, &en, 1);
+			(void)i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x05u, false, &sel, 1);
+			(void)i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x06u, false, &st0, 1);
+			(void)i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x07u, false, &st1, 1);
+			(void)i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x17u, false, &jack, 1);
+			usbc_audio_id = (int)fsa_id;
+			usbc_switch_status = ((int)st1 << 8) | (int)st0;
+			hakios_tl("UMI usbc_audio: fsa4480@0x42 id=%#x en=%#x sel=%#x st=%#x/%#x jack=%#x\n",
+			    fsa_id, en, sel, st0, st1, jack);
 		}
 		i2c_bus_release(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io);
 	}
@@ -742,12 +815,82 @@ thyme_charger_probe(void)
 	}
 
 	north_tlmm = ml_io_map(UMI_TLMM_NORTH_PA, UMI_TLMM_NORTH_SIZE);
-	if (i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
-		bool ok = i2c_probe_addr(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u);
+	if (north_tlmm != 0) {
+		uint32_t ven_cfg = tlmm_cfg_rd(north_tlmm, UMI_NFC_VEN_PIN);
+		uint32_t ven_io = tlmm_io_rd(north_tlmm, UMI_NFC_VEN_PIN);
+		uint32_t firm_cfg = tlmm_cfg_rd(north_tlmm, UMI_NFC_FIRM_PIN);
+		uint32_t firm_io = tlmm_io_rd(north_tlmm, UMI_NFC_FIRM_PIN);
+		uint32_t irq_cfg = tlmm_cfg_rd(north_tlmm, UMI_NFC_IRQ_PIN);
+		uint32_t irq_io = tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN);
+		bool ven_toggled = false;
 
-		nfc_present = ok ? 1 : 0;
-		hakios_tl("UMI nfc: nq-nci@0x28 %s\n", ok ? "ACK" : "NACK");
-		i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
+		hakios_tl("UMI nfc: pins ven(83)=%#x/%#x firm(110)=%#x/%#x irq(111)=%#x/%#x\n",
+		    ven_cfg, ven_io, firm_cfg, firm_io, irq_cfg, irq_io);
+		if (ven_cfg == 0) {
+			hakios_tl("UMI nfc: gpio83 VEN cfg=0 (RAZ/suspended); skip toggling\n");
+		} else {
+			/* Drive FIRM=0, then pulse VEN LOW (10 ms) -> HIGH (25 ms) for clean NCI mode wake. */
+			tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, 0);
+			tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, (firm_cfg & ~0x3cu) | 0x200u);
+			tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, 0);
+			tlmm_cfg_wr(north_tlmm, UMI_NFC_VEN_PIN, (ven_cfg & ~0x3cu) | 0x200u);
+			delay_for_interval(10, NSEC_PER_MSEC);
+			tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, 2u);
+			delay_for_interval(25, NSEC_PER_MSEC);
+			ven_toggled = true;
+		}
+		if (i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
+			static const uint8_t nci_reset[4] = { 0x20, 0x00, 0x01, 0x01 };
+			bool ok = i2c_probe_addr(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u);
+
+			nfc_present = ok ? 1 : 0;
+			hakios_tl("UMI nfc: nq-nci@0x28 %s%s\n", ok ? "ACK" : "NACK",
+			    ven_toggled ? " (VEN pulsed)" : "");
+			if (ok) {
+				bool tx_ok = i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+				    0x28u, nci_reset, sizeof(nci_reset));
+
+				if (tx_ok) {
+					uint8_t rsp[16] = { 0 };
+					unsigned waited = 0;
+
+					while (waited < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
+						delay_for_interval(1, NSEC_PER_MSEC);
+						waited++;
+					}
+					if (waited >= 50) {
+						delay_for_interval(20, NSEC_PER_MSEC);
+					}
+					if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+					    0x28u, rsp, sizeof(rsp))) {
+						if (rsp[0] == 0x40 && rsp[1] == 0x00 && rsp[2] >= 2) {
+							nfc_nci_ver = (int)rsp[4];
+						}
+						hakios_tl("UMI nfc: CORE_RESET rsp (%u ms irq=%u): %02x %02x %02x %02x %02x %02x\n",
+						    waited, tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u,
+						    rsp[0], rsp[1], rsp[2], rsp[3], rsp[4], rsp[5]);
+						if ((tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) != 0) {
+							uint8_t ntf[16] = { 0 };
+
+							if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+							    0x28u, ntf, sizeof(ntf))) {
+								hakios_tl("UMI nfc: CORE_RESET ntf: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+								    ntf[0], ntf[1], ntf[2], ntf[3], ntf[4], ntf[5], ntf[6], ntf[7]);
+							}
+						}
+					}
+				} else {
+					hakios_tl("UMI nfc: CORE_RESET_CMD write NACK\n");
+				}
+			}
+			i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
+		}
+		if (ven_toggled) {
+			tlmm_io_wr(north_tlmm, UMI_NFC_VEN_PIN, ven_io & 2u);
+			tlmm_cfg_wr(north_tlmm, UMI_NFC_VEN_PIN, ven_cfg);
+			tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_io & 2u);
+			tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_cfg);
+		}
 	}
 }
 
@@ -823,9 +966,17 @@ umi_keys_init(void)
 				if ((rtype == 0x07u || rtype == 0x06u) && rsub == 0x01u && (rctrl & 0x80u) != 0) {
 					rtc_apid = ap;
 					if (umi_rtc_read(&rtc_boot_seconds)) {
+						uint64_t epoch = 0;
+
 						rtc_ready = true;
 						hakios_tl("UMI rtc: PM8150 RTC ready ppid=%#x apid=%u seconds=%u\n",
 						    rtc_candidates[c], rtc_apid, rtc_boot_seconds);
+						if (PE_parse_boot_argn("epoch", &epoch, sizeof(epoch)) && epoch > 1700000000ULL) {
+							umi_rtc_epoch_offset = (int64_t)epoch - (int64_t)rtc_boot_seconds;
+							umi_rtc_synced = true;
+							hakios_tl("UMI rtc: synced unix=%llu (rtc=%u offset=%lld)\n",
+							    epoch, rtc_boot_seconds, umi_rtc_epoch_offset);
+						}
 						break;
 					}
 				}

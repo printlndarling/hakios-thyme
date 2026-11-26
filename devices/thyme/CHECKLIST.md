@@ -46,7 +46,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
 | Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
-| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **TODO** | QUP1 NORTH TLMM `gpio4/5` verified idle-high (`cfg=0x1 io=0x1`); `0x28` NACK without VEN/enable GPIO; NCI stack `TODO` |
+| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **TODO** | QUP1 `gpio4/5` (`io=0x1`) & `gpio83/110/111` (`VEN=0x200/0x3`) mapped/pulsed; `0x28` NACK (PMIC NFC LDO/clock likely off in UEFI); NCI stack `TODO` |
 | IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
@@ -55,7 +55,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | USB only used in UEFI loader; no XNU `DWC3` gadget, `usbmux`, or `lockdownd` (PC i4Tools/iTunes blocked) |
 | USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | **PARTIAL** | Read-only partition access (`PASS` for modem EFS/devcfg); guarded writable persistence (`ufs_write=1`) not enabled |
-| Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI `PPID 0x60`) | P1 | **PARTIAL** | PM8150 SPMI RTC hardware counter `PASS` (`kern.hakios.umi_rtc_seconds`, live 1 Hz tick `delta=2 s` in `logs/222034-run.log`); Unix epoch offset sync & alarm wake `TODO` |
+| Real-Time Clock (RTC) | `qcom,pm8150_rtc` (SPMI `PPID 0x60`) | P1 | **PASS** | PM8150 SPMI RTC counter (`kern.hakios.umi_rtc_seconds`, `delta=2 s`) + `epoch=` Unix sync (`kern.hakios.umi_rtc_unix_time=1795721417`, `logs/033017-run.log`); alarm wake `TODO` |
 | Software / UI / Packages | Simplified Chinese UI + Sileo + TrollStore + TrollApps | P1 | **PASS** | Cold boots `zh-Hans`, PingFang, Pinyin, Sileo (11 CN repos), TrollStore (`ldid`), TrollApps (6 CN repos) |
 
 ### 2. SoC Low-Level Capabilities (`SM8250-AC`)
@@ -86,7 +86,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | **Camera** | 27 MP rear `S5KHMX` (`AK7377` AF), front `S5K3T2`, lens switch, flash/torch | `OIS` stabilization, `108 MP` full-res mode, video recording with audio, slow-motion, HDR, live QR scan |
 | **Display** | `89.08 Hz` `INTF_1` TE sync (`0` missed), DCS brightness slider, lock blanking | Dynamic `60/90 Hz` UI switching, `auto-brightness` closed-loop tuning from ALS lux, True Tone/Night Shift, AOD |
 | **Touch** | Multi-touch, gestures, lock/home swipe | Palm rejection, edge-grip tuning, double-tap-to-wake (DT2W) during deep sleep |
-| **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004`, `fsa4480@0x42` USB-C switch ACK (`id=0x9`) | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
+| **Audio** | Dual `CS35L41` L/R stereo + earpiece, dual mics, ADSP `0x1004`, `fsa4480@0x42` USB-C switch (`id=0x9 en=0x98 sel=0x18 st=0x5/0 jack=0x1`, `logs/033017-run.log`) | USB-C digital/analog headset routing, Bluetooth HFP/A2DP automatic switch, video-audio A/V sync measurement |
 | **Battery & Thermal** | Fuel gauge, USB charge, `bq25970@0x66` ADC telemetry (`part=0x16 VBUS/VAC/VBAT/IBUS`), `battery_stop=40` guard, CPU EPSS thermal throttling | Active QC/PD/33W & 30W wireless charge control, battery health calibration, charge-full cutoff, off-mode charging UI, multi-zone thermal policy |
 | **Sensors** | `LSM6DSO` accel+gyro, `AK0991x` mag, `TCS3701` front ALS + `TSL2540` rear ALS (`37.1 lux`) -> `backboardd` HID, `BMP285` barometer, `device_orient` (`PASS` `state=0`), `pedometer` (`suid=1`, stationary `0`) | Walk-test `pedometer` steps, ADSP ultrasonic proximity screen-off on call, Hall `GPIO14` (`cfg=0 io=0` RAZ), raise-to-wake, back-tap |
 
@@ -134,6 +134,15 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 3 Autonomous Audit (2026-11-27, `logs/033017-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `3008e95abefa`, `result: returned 1441823 0`):
+
+- **PM8150 SPMI RTC Unix Sync**: Added `epoch=` boot-arg offset sync and live `kern.hakios.umi_rtc_unix_time` (`uint64_t`) sysctl in `hakios.thyme_keys.c`; verified `UMI rtc: synced unix=1795721417 (rtc=28413334 offset=1767308083)` and `delta=2 s` tick (`logs/033017-run.log`).
+- **USB-C Audio Switch (`fsa4480@0x42`) Extended Telemetry**: Added live register readouts (`en=0x98 sel=0x18 st=0x5/0 jack=0x1`) plus `kern.hakios.usbc_audio_id` and `kern.hakios.usbc_switch_status` sysctls.
+- **NFC (`nq-nci@0x28`) VEN/FIRM/IRQ & NCI Probe**: Expanded `UMI_TLMM_NORTH_SIZE` to `0x80000`, read `ven(83)=0x200/0x3 firm(110)=0x1/0 irq(111)=0x1/0`, pulsed `VEN`, and probed `0x28` (`NACK (VEN pulsed)` — likely PMIC NFC supply/clock gated by UEFI); added raw I2C NCI `CORE_RESET` handshake ready for powered probe.
+- **Camera OIS (`0x1c`) Probe Hook**: Added 16-bit read-only `uois_read16()` probe and `kern.hakios.ois_chip_id` sysctl in `hakios.thyme_umi_camera.c` (runs when rear camera opens).
 
 ## Batch U2 Field-Test Fixes (2026-11-27, `logs/030913-run.log`, `logs/031720-run.log`)
 
