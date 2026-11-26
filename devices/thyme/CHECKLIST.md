@@ -46,7 +46,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
 | Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
-| NFC Controller | `qcom,nq-nci` | P1 | **TODO** | No XNU NCI driver or userland routing |
+| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **TODO** | QUP1 NORTH TLMM `gpio4/5` verified idle-high (`cfg=0x1 io=0x1`); `0x28` NACK without VEN/enable GPIO; NCI stack `TODO` |
 | IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
@@ -63,8 +63,8 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Capability | Priority | Status | Notes |
 |---|---|---|---|
 | All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
-| CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **TODO** | Display blanking (`DCS 0x51=0` + `Main will unblank`) works (`logs/173008-run.log`), but SoC `WFI`/PSCI deep power collapse not implemented |
-| GPU Dynamic Frequency Scaling (DVFS) | P1 | **TODO** | Fixed/GMU initialization clock; dynamic DCVS/thermal GPU scaling unimplemented |
+| CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **PARTIAL** | XNU `machine_idle()` `WFI`/`WFE` active on all idle cores; display blanking (`DCS 0x51=0`) works (`logs/173008-run.log`); PSCI `CPU_SUSPEND` deep power collapse `TODO` |
+| GPU Dynamic Frequency Scaling (DVFS) | P1 | **PASS** | Adreno 650 GMU HFI runtime OPP switching (`305 / 441 / 587 MHz`, `31` live transitions in `logs/231618-run.log`), `kern.hakios.gpu_*` sysctls, nominal restore on exit |
 | VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` unimplemented; browser/player video decodes in CPU software |
 | VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
@@ -6851,3 +6851,19 @@ All fixes and app tests below were verified live via RAM boot (`./xl`, `XL_BOOT_
 | `hakios-kernel` (16,983,832 B, Batch 1B: `ambient_light_back` + WDT & charger I2C telemetry) | `045bfac1b62fcfa5fbf651dd2d4f159ff781651a6c4fa62fbe52928acb0057c5` |
 | `userland/root.apfs` (48,992,256 B; total `65,976,088 B < 66,060,288 B`) | `5aaf9e9466e299b94f93df12897f9742690d3f56042678bc206d0ed940e2a75f` |
 | `logs/223423-run.log` (Batch 1B live 100 s verification: SLPI `flags=0x17b` + `rear_als` + `bq25970` + `fsa4480` + `wdt`) | `c19c688089f2a56c523a548e7bdd9851f88fd023ad9f083668f19da55ed618d1` |
+
+### Batch 2A: Adreno 650 GPU Dynamic Frequency Scaling (`PASS`), CPU `WFI` Audit & NFC QUP1 Probe (2026-11-26)
+
+- **Adreno 650 GPU Dynamic Frequency Scaling (DVFS) (`PASS`)** (`devices/thyme/drivers/gpu/hakios.thyme_adreno.c`):
+  - Added mutex-protected GMU HFI `gpu_dvfs_thread()` (`250 ms` cadence with hysteresis over stock Mi 10S OPPs `305 / 400 / 441.6 / 525 / 587 MHz`) driven by live `hakios_gpu_submit()` activity and exported `kern.hakios.gpu_freq_mhz`, `kern.hakios.gpu_perf_level`, and `kern.hakios.gpu_dvfs_switches`.
+  - Drains `gpu_dvfs_thread` inside `hakios_adreno_stop()` prior to locking `gGPULock` and restores nominal `587 MHz` (`level 5`) before `gpu_block_stop()` `HFI_PREPARE_SLUMBER`.
+  - Verified live in `logs/231618-run.log`: `adreno: dvfs: active at 587 MHz`, scaled `587 -> 441 -> 305 MHz` when idle and `441 -> 587 MHz` on burst (`submits_delta=58`), completing `31` switches and clean shutdown (`adreno: dvfs: final freq=587 MHz (level 5), switches=31`) with zero GPU/SMMU faults, alongside `SLPI` `flags=0x17b` (`rear_als seq=42`).
+- **NFC (`qcom,nq-nci@0x28`) QUP1 Read-Only Probe & CPU `WFI` Audit (`PARTIAL` / `TODO`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`, `xnu-src/xnu-8796.121.2/osfmk/arm64/machine_routines.c`):
+  - Generalized TLMM open-drain I2C helpers across SOUTH and NORTH (`0x0f900000`) tiles; verified QUP1 `gpio4/gpio5` idle-high (`cfg=0x1/0x1 io=0x1/0x1`), while `nq-nci@0x28` NACKed without VEN/enable GPIO (`kern.hakios.nfc_present=0`).
+  - Confirmed `machine_idle()` already executes ARM64 `WFE`/`WFI` (`Idle_context()`) across idle cores (`PARTIAL`); deep SoC power collapse (`PSCI CPU_SUSPEND`) remains `TODO`.
+
+| File | SHA-256 |
+|---|---|
+| `hakios-kernel` (17,001,720 B, Batch 2A: Adreno 650 GPU DVFS + NFC QUP1 probe) | `d517c7160f15270ffb15e39747699919ef3baca7b334ee9ff01e7b21f8cdd939` |
+| `userland/root.apfs` (48,992,256 B; total `65,993,976 B < 66,060,288 B`) | `5aaf9e9466e299b94f93df12897f9742690d3f56042678bc206d0ed940e2a75f` |
+| `logs/231618-run.log` (Batch 2A live 100 s verification: 31 GPU DVFS switches + SLPI `flags=0x17b` + NFC bus1) | `0c945b5753693fcab36e330eea0c9a7661a47d7d773f82a288874c4219ba4c87` |

@@ -96,18 +96,41 @@
  * vendor kernel agrees on every offset used here, and is the only source for the frequency counter.
  */
 #include <kern/clock.h>
+#include <kern/locks.h>
+#include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <mach/vm_param.h>
 #include <pexpert/pexpert.h>
 #include <sys/hakios.input.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
 extern uint64_t kvtophys(vm_offset_t va);       /* pmap_paddr_t */
+extern kern_return_t thread_terminate(thread_t);
+
+SYSCTL_DECL(_kern_hakios);
+
+static LCK_GRP_DECLARE(adreno_lck_grp, "hakios.adreno");
+static LCK_MTX_DECLARE(gpu_hfi_lock, &adreno_lck_grp);
+
+static volatile bool gpu_dvfs_running, gpu_dvfs_stopping;
+static volatile uint32_t gpu_dvfs_submits;
+static int gpu_freq_mhz, gpu_perf_level, gpu_dvfs_switches;
+
+SYSCTL_INT(_kern_hakios, OID_AUTO, gpu_freq_mhz,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &gpu_freq_mhz, 0,
+    "Current Adreno 650 GMU core frequency (MHz)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, gpu_perf_level,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &gpu_perf_level, 0,
+    "Current Adreno 650 GMU OPP level index");
+SYSCTL_INT(_kern_hakios, OID_AUTO, gpu_dvfs_switches,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &gpu_dvfs_switches, 0,
+    "Number of runtime Adreno 650 GMU DVFS transitions");
 
 static uint32_t last_step, skip_steps, pause_ms = 2200, fine, watch_seconds = 20;
 static uint32_t step;                   /* the one being performed */
@@ -2547,6 +2570,8 @@ step_core_power(void)
 		vote[2] = 1;
 	}
 	core_khz = speeds[vote[2]].khz;
+	gpu_freq_mhz = (int)(core_khz / 1000);
+	gpu_perf_level = (int)vote[2];
 	printf("adreno: %u: the speed wanted: %u MHz\n", step, core_khz / 1000);
 	announce("send the GMU its tables (speeds and supply levels, bus votes), \"start\", and the speed wanted; "
 	    "from here on it casts votes in RPMh by itself");
@@ -3369,6 +3394,7 @@ gpu_block_stop(void)
 void
 hakios_adreno_quiesce(void)
 {
+	gpu_dvfs_stopping = true;
 	if (cx_off) {
 		return;
 	}
@@ -3462,6 +3488,7 @@ hakios_gpu_stop(void)
 	if (gpu_kept) {
 		uint32_t waited = 0;
 
+		gpu_dvfs_stopping = true;
 		gpu_kept = false;                       /* (nothing more is taken) */
 		quiet = false;
 		/*
@@ -3474,6 +3501,19 @@ hakios_gpu_stop(void)
 			waited++;
 		}
 		core_stuck = !hakios_gpu_done(gpu_fence);
+		if (core_is_on && gmu_talks && umi_a650 && gpu_perf_level != 5) {
+			uint32_t nominal[4] = { 0, 1, 5, HFI_NO_INDEX };
+
+			lck_mtx_lock(&gpu_hfi_lock);
+			if (hfi_send("gpu dvfs nominal", HFI_GX_BW_PERF_VOTE, nominal, 4)) {
+				core_khz = 587000;
+				gpu_freq_mhz = 587;
+				gpu_perf_level = 5;
+			}
+			lck_mtx_unlock(&gpu_hfi_lock);
+		}
+		printf("adreno: dvfs: final freq=%d MHz (level %d), switches=%d\n",
+		    gpu_freq_mhz, gpu_perf_level, gpu_dvfs_switches);
 		printf("adreno: the run is about to end: the GPU is given back (%s after %u us)\n",
 		    core_stuck ? "STILL AT WORK" : "it had finished what it was given", 100 * waited);
 		gpu_block_stop();
@@ -3486,6 +3526,10 @@ hakios_adreno_stop(void)
 	uint32_t dirty = 0;
 
 	if (gpu_kept && !(PE_parse_boot_argn("adreno_dirty", &dirty, sizeof(dirty)) && dirty)) {
+		gpu_dvfs_stopping = true;
+		for (uint32_t w = 0; w < 1000 && gpu_dvfs_running; w++) {
+			sleep_ms(1);
+		}
 		HakiosGPUStop();
 	}
 }
@@ -3758,6 +3802,7 @@ hakios_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t cou
 	ring(0);
 	ring(gpu_fence);
 	ring_send();
+	gpu_dvfs_submits++;
 	return gpu_fence;
 }
 
@@ -4029,6 +4074,71 @@ start_by_itself(void)
 	return true;
 }
 
+/* Dynamic GPU OPP scaling thread over GMU HFI_GX_BW_PERF_VOTE (umi_a650 stock levels 1..5). */
+static void
+gpu_dvfs_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	static const uint32_t level_khz[6] = { 0, 305000, 400000, 441600, 525000, 587000 };
+	uint32_t cur_level = (uint32_t)gpu_perf_level;
+	uint32_t last_submits = gpu_dvfs_submits;
+	uint32_t idle_ticks = 0;
+
+	if (cur_level < 1 || cur_level > 5) {
+		cur_level = 5;
+	}
+	printf("adreno: dvfs: active at %u MHz (level %u, levels 305..587 MHz)\n",
+	    level_khz[cur_level] / 1000, cur_level);
+	while (!gpu_dvfs_stopping) {
+		sleep_ms(250);
+		if (gpu_dvfs_stopping) {
+			break;
+		}
+		uint32_t now_submits = gpu_dvfs_submits;
+		uint32_t delta = now_submits - last_submits;
+		uint32_t target = cur_level;
+
+		last_submits = now_submits;
+		if (delta >= 4) {
+			idle_ticks = 0;
+			target = 5;
+		} else if (delta >= 1) {
+			idle_ticks = 0;
+			target = (cur_level == 5) ? 5 : 3;
+		} else {
+			idle_ticks++;
+			if (idle_ticks >= 4) {
+				target = 1;
+			} else if (idle_ticks >= 2 && cur_level == 5) {
+				target = 3;
+			}
+		}
+		if (target == cur_level) {
+			continue;
+		}
+		lck_mtx_lock(&gpu_hfi_lock);
+		if (!gpu_dvfs_stopping && core_is_on && gmu_talks && cx_should_be_stopped) {
+			uint32_t vote[4] = { 0, 1, target, HFI_NO_INDEX };
+			uint32_t prev = cur_level;
+
+			if (hfi_send("gpu dvfs", HFI_GX_BW_PERF_VOTE, vote, 4)) {
+				cur_level = target;
+				core_khz = level_khz[cur_level];
+				gpu_freq_mhz = (int)(core_khz / 1000);
+				gpu_perf_level = (int)cur_level;
+				gpu_dvfs_switches++;
+				if (gpu_dvfs_switches <= 16) {
+					printf("adreno: dvfs: %u -> %u MHz (level %u -> %u, submits_delta=%u)\n",
+					    level_khz[prev] / 1000, level_khz[cur_level] / 1000,
+					    prev, cur_level, delta);
+				}
+			}
+		}
+		lck_mtx_unlock(&gpu_hfi_lock);
+	}
+	gpu_dvfs_running = false;
+	thread_terminate(current_thread());
+}
+
 /*
  * Called while the system starts, before there is a root file system, and the start waits: for
  * as long as the steps and the watch after them last, nothing else writes to the log, so that
@@ -4109,6 +4219,22 @@ hakios_adreno_init(void)
 			quiet = true;
 			printf("adreno: THE GPU STAYS ON for the system to draw with: the service HakiosGPU\n");
 			HakiosGPUStart();
+			{
+				uint32_t dvfs_en = 1;
+
+				(void)PE_parse_boot_argn("gpu_dvfs", &dvfs_en, sizeof(dvfs_en));
+				if (dvfs_en != 0 && umi_a650 && core_is_on && gmu_talks) {
+					thread_t dvfs_thr;
+
+					gpu_dvfs_stopping = false;
+					gpu_dvfs_running = true;
+					if (kernel_thread_start(gpu_dvfs_thread, NULL, &dvfs_thr) == KERN_SUCCESS) {
+						thread_deallocate(dvfs_thr);
+					} else {
+						gpu_dvfs_running = false;
+					}
+				}
+			}
 			return;
 		}
 		if (!by_itself) {

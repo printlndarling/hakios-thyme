@@ -53,7 +53,11 @@ SYSCTL_DECL(_kern_hakios);
 
 #define UMI_TLMM_SOUTH_PA     0x0f500000UL
 #define UMI_TLMM_SOUTH_SIZE   0x00060000UL
+#define UMI_TLMM_NORTH_PA     0x0f900000UL
+#define UMI_TLMM_NORTH_SIZE   0x00010000UL
 #define UMI_HALL_GPIO_PIN     14u
+#define UMI_QUP1_SDA_PIN      4u
+#define UMI_QUP1_SCL_PIN      5u
 #define UMI_QUP15_SDA_PIN     44u
 #define UMI_QUP15_SCL_PIN     45u
 #define UMI_QUP16_SDA_PIN     48u
@@ -77,12 +81,12 @@ SYSCTL_DECL(_kern_hakios);
 #define OBS_ERRORS            0x0eu
 #define OBS_READ_LONG         (1u << 27)
 
-static vm_offset_t arb_core, arb_cnfg, arb_observer, south_tlmm, hall_gpio;
+static vm_offset_t arb_core, arb_cnfg, arb_observer, south_tlmm, north_tlmm, hall_gpio;
 static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_NO_APID;
 static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts;
-static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
+static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id, nfc_present;
 static uint32_t rtc_boot_seconds;
 static uint32_t press_ms = 150, press_gap = 10, press_left;
 static thread_call_t press_call;
@@ -114,6 +118,9 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, fastchg_ibus_ma,
 SYSCTL_INT(_kern_hakios, OID_AUTO, wlc_chip_id,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &wlc_chip_id, 0,
     "Wireless 30W charger IC idtp9415 chip ID (0x9415)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, nfc_present,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &nfc_present, 0,
+    "NFC controller nq-nci@0x28 I2C ACK state (1=present)");
 
 static uint32_t
 keys_reg(vm_offset_t base, uint32_t offset)
@@ -467,40 +474,40 @@ keys_spin_us(uint32_t us)
 }
 
 static inline uint32_t
-tlmm_cfg_rd(unsigned pin)
+tlmm_cfg_rd(vm_offset_t tlmm, unsigned pin)
 {
-	return keys_reg(south_tlmm, pin * 0x1000u);
+	return keys_reg(tlmm, pin * 0x1000u);
 }
 
 static inline uint32_t
-tlmm_io_rd(unsigned pin)
+tlmm_io_rd(vm_offset_t tlmm, unsigned pin)
 {
-	return keys_reg(south_tlmm, pin * 0x1000u + 4u);
+	return keys_reg(tlmm, pin * 0x1000u + 4u);
 }
 
 static inline void
-tlmm_cfg_wr(unsigned pin, uint32_t val)
+tlmm_cfg_wr(vm_offset_t tlmm, unsigned pin, uint32_t val)
 {
-	keys_write(south_tlmm, pin * 0x1000u, val);
+	keys_write(tlmm, pin * 0x1000u, val);
 }
 
 static inline void
-tlmm_io_wr(unsigned pin, uint32_t val)
+tlmm_io_wr(vm_offset_t tlmm, unsigned pin, uint32_t val)
 {
-	keys_write(south_tlmm, pin * 0x1000u + 4u, val);
+	keys_write(tlmm, pin * 0x1000u + 4u, val);
 }
 
 static void
-i2c_line(unsigned pin, bool high)
+i2c_line(vm_offset_t tlmm, unsigned pin, bool high)
 {
-	tlmm_io_wr(pin, 0);
-	tlmm_cfg_wr(pin, 3u | (high ? 0u : 0x200u));
+	tlmm_io_wr(tlmm, pin, 0);
+	tlmm_cfg_wr(tlmm, pin, 3u | (high ? 0u : 0x200u));
 }
 
 static bool
-i2c_level(unsigned pin)
+i2c_level(vm_offset_t tlmm, unsigned pin)
 {
-	return (tlmm_io_rd(pin) & 1u) != 0;
+	return (tlmm_io_rd(tlmm, pin) & 1u) != 0;
 }
 
 static void
@@ -509,17 +516,18 @@ i2c_half_bit(void)
 	keys_spin_us(5);
 }
 
-/* Take open-drain control of a SOUTH-tile TLMM I2C pair only if both lines are mapped and idle-high. */
+/* Take open-drain control of a TLMM I2C pair only if both lines are mapped and idle-high. */
 static bool
-i2c_bus_take(unsigned bus_id, unsigned sda, unsigned scl, uint32_t saved_cfg[2], uint32_t saved_io[2])
+i2c_bus_take(vm_offset_t tlmm, unsigned bus_id, unsigned sda, unsigned scl,
+    uint32_t saved_cfg[2], uint32_t saved_io[2])
 {
-	if (south_tlmm == 0) {
+	if (tlmm == 0) {
 		return false;
 	}
-	uint32_t cfg_sda = tlmm_cfg_rd(sda);
-	uint32_t io_sda = tlmm_io_rd(sda);
-	uint32_t cfg_scl = tlmm_cfg_rd(scl);
-	uint32_t io_scl = tlmm_io_rd(scl);
+	uint32_t cfg_sda = tlmm_cfg_rd(tlmm, sda);
+	uint32_t io_sda = tlmm_io_rd(tlmm, sda);
+	uint32_t cfg_scl = tlmm_cfg_rd(tlmm, scl);
+	uint32_t io_scl = tlmm_io_rd(tlmm, scl);
 
 	hakios_tl("UMI i2c: bus%u gpio%u/%u cfg=%#x/%#x io=%#x/%#x\n",
 	    bus_id, sda, scl, cfg_sda, cfg_scl, io_sda, io_scl);
@@ -535,14 +543,14 @@ i2c_bus_take(unsigned bus_id, unsigned sda, unsigned scl, uint32_t saved_cfg[2],
 	saved_cfg[1] = cfg_scl;
 	saved_io[0] = io_sda;
 	saved_io[1] = io_scl;
-	i2c_line(sda, true);
-	i2c_line(scl, true);
+	i2c_line(tlmm, sda, true);
+	i2c_line(tlmm, scl, true);
 	i2c_half_bit();
-	if (!i2c_level(sda) || !i2c_level(scl)) {
-		tlmm_io_wr(sda, saved_io[0] & 2u);
-		tlmm_io_wr(scl, saved_io[1] & 2u);
-		tlmm_cfg_wr(sda, saved_cfg[0]);
-		tlmm_cfg_wr(scl, saved_cfg[1]);
+	if (!i2c_level(tlmm, sda) || !i2c_level(tlmm, scl)) {
+		tlmm_io_wr(tlmm, sda, saved_io[0] & 2u);
+		tlmm_io_wr(tlmm, scl, saved_io[1] & 2u);
+		tlmm_cfg_wr(tlmm, sda, saved_cfg[0]);
+		tlmm_cfg_wr(tlmm, scl, saved_cfg[1]);
 		hakios_tl("UMI i2c: bus%u stuck low after release; restored\n", bus_id);
 		return false;
 	}
@@ -550,98 +558,114 @@ i2c_bus_take(unsigned bus_id, unsigned sda, unsigned scl, uint32_t saved_cfg[2],
 }
 
 static void
-i2c_bus_release(unsigned sda, unsigned scl, const uint32_t saved_cfg[2], const uint32_t saved_io[2])
+i2c_bus_release(vm_offset_t tlmm, unsigned sda, unsigned scl,
+    const uint32_t saved_cfg[2], const uint32_t saved_io[2])
 {
-	tlmm_io_wr(sda, saved_io[0] & 2u);
-	tlmm_io_wr(scl, saved_io[1] & 2u);
-	tlmm_cfg_wr(sda, saved_cfg[0]);
-	tlmm_cfg_wr(scl, saved_cfg[1]);
+	tlmm_io_wr(tlmm, sda, saved_io[0] & 2u);
+	tlmm_io_wr(tlmm, scl, saved_io[1] & 2u);
+	tlmm_cfg_wr(tlmm, sda, saved_cfg[0]);
+	tlmm_cfg_wr(tlmm, scl, saved_cfg[1]);
 }
 
 static void
-i2c_start(unsigned sda, unsigned scl)
+i2c_start(vm_offset_t tlmm, unsigned sda, unsigned scl)
 {
-	i2c_line(sda, true);
-	i2c_line(scl, true);
+	i2c_line(tlmm, sda, true);
+	i2c_line(tlmm, scl, true);
 	i2c_half_bit();
-	i2c_line(sda, false);
+	i2c_line(tlmm, sda, false);
 	i2c_half_bit();
-	i2c_line(scl, false);
+	i2c_line(tlmm, scl, false);
 	i2c_half_bit();
 }
 
 static void
-i2c_stop(unsigned sda, unsigned scl)
+i2c_stop(vm_offset_t tlmm, unsigned sda, unsigned scl)
 {
-	i2c_line(sda, false);
+	i2c_line(tlmm, sda, false);
 	i2c_half_bit();
-	i2c_line(scl, true);
+	i2c_line(tlmm, scl, true);
 	i2c_half_bit();
-	i2c_line(sda, true);
+	i2c_line(tlmm, sda, true);
 	i2c_half_bit();
 }
 
 static bool
-i2c_bit(unsigned sda, unsigned scl, bool out)
+i2c_bit(vm_offset_t tlmm, unsigned sda, unsigned scl, bool out)
 {
 	bool in;
 
-	i2c_line(sda, out);
+	i2c_line(tlmm, sda, out);
 	i2c_half_bit();
-	i2c_line(scl, true);
-	for (unsigned stretched = 0; !i2c_level(scl) && stretched < 100; stretched++) {
+	i2c_line(tlmm, scl, true);
+	for (unsigned stretched = 0; !i2c_level(tlmm, scl) && stretched < 100; stretched++) {
 		i2c_half_bit();
 	}
 	i2c_half_bit();
-	in = i2c_level(sda);
-	i2c_line(scl, false);
+	in = i2c_level(tlmm, sda);
+	i2c_line(tlmm, scl, false);
 	return in;
 }
 
 static bool
-i2c_write_byte(unsigned sda, unsigned scl, uint8_t byte)
+i2c_write_byte(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t byte)
 {
 	for (int bit = 7; bit >= 0; bit--) {
-		(void)i2c_bit(sda, scl, ((byte >> bit) & 1u) != 0);
+		(void)i2c_bit(tlmm, sda, scl, ((byte >> bit) & 1u) != 0);
 	}
-	return !i2c_bit(sda, scl, true);
+	return !i2c_bit(tlmm, sda, scl, true);
 }
 
 static uint8_t
-i2c_read_byte(unsigned sda, unsigned scl, bool more)
+i2c_read_byte(vm_offset_t tlmm, unsigned sda, unsigned scl, bool more)
 {
 	uint8_t byte = 0;
 
 	for (int bit = 7; bit >= 0; bit--) {
-		byte = (uint8_t)((byte << 1) | (i2c_bit(sda, scl, true) ? 1u : 0u));
+		byte = (uint8_t)((byte << 1) | (i2c_bit(tlmm, sda, scl, true) ? 1u : 0u));
 	}
-	(void)i2c_bit(sda, scl, !more);
+	(void)i2c_bit(tlmm, sda, scl, !more);
 	return byte;
 }
 
 /* Strictly read-only I2C register block read (8-bit or 16-bit BE register address). */
 static bool
-i2c_read_regs(unsigned sda, unsigned scl, uint8_t addr7, uint16_t reg, bool reg16_be,
+i2c_read_regs(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7, uint16_t reg, bool reg16_be,
     uint8_t *buf, unsigned count)
 {
 	bool ok;
 
-	i2c_start(sda, scl);
-	ok = i2c_write_byte(sda, scl, (uint8_t)(addr7 << 1));
+	i2c_start(tlmm, sda, scl);
+	ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)(addr7 << 1));
 	if (ok && reg16_be) {
-		ok = i2c_write_byte(sda, scl, (uint8_t)(reg >> 8));
+		ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)(reg >> 8));
 	}
 	if (ok) {
-		ok = i2c_write_byte(sda, scl, (uint8_t)(reg & 0xffu));
+		ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)(reg & 0xffu));
 	}
 	if (ok) {
-		i2c_start(sda, scl);
-		ok = i2c_write_byte(sda, scl, (uint8_t)((addr7 << 1) | 1u));
+		i2c_start(tlmm, sda, scl);
+		ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)((addr7 << 1) | 1u));
 	}
 	for (unsigned i = 0; ok && i < count; i++) {
-		buf[i] = i2c_read_byte(sda, scl, i + 1 < count);
+		buf[i] = i2c_read_byte(tlmm, sda, scl, i + 1 < count);
 	}
-	i2c_stop(sda, scl);
+	i2c_stop(tlmm, sda, scl);
+	return ok;
+}
+
+/* Non-destructive I2C address presence check via read address + 1-byte NACK + STOP. */
+static bool
+i2c_probe_addr(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7)
+{
+	bool ok;
+
+	i2c_start(tlmm, sda, scl);
+	ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)((addr7 << 1) | 1u));
+	if (ok) {
+		(void)i2c_read_byte(tlmm, sda, scl, false);
+	}
+	i2c_stop(tlmm, sda, scl);
 	return ok;
 }
 
@@ -665,18 +689,18 @@ thyme_wdt_probe(void)
 	hakios_tl("UMI wdt: 0x17c10000 ctl=%#x sts=%#x bark=%u bite=%u\n", ctl, sts, bark, bite);
 }
 
-/* Strictly read-only I2C telemetry probe for wired 33W (bq25970) and wireless 30W (idtp9415/ln8282). */
+/* Strictly read-only I2C telemetry probe for wired 33W (bq25970), wireless 30W (idtp9415/ln8282) & NFC (nq-nci). */
 static void
 thyme_charger_probe(void)
 {
 	uint32_t saved_cfg[2], saved_io[2];
 
-	if (i2c_bus_take(15, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io)) {
+	if (i2c_bus_take(south_tlmm, 15, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io)) {
 		uint8_t part = 0, adc[10] = { 0 }, fsa_id = 0;
 
-		if (i2c_read_regs(UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x13u, false, &part, 1)) {
+		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x13u, false, &part, 1)) {
 			fastchg_part = (int)part;
-			if (i2c_read_regs(UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x16u, false, adc, sizeof(adc))) {
+			if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x16u, false, adc, sizeof(adc))) {
 				int ibus = (int)(((uint16_t)adc[0] << 8) | adc[1]);
 				int vbus = (int)(((uint16_t)adc[2] << 8) | adc[3]);
 				int vac  = (int)(((uint16_t)adc[4] << 8) | adc[5]);
@@ -693,16 +717,16 @@ thyme_charger_probe(void)
 		} else {
 			hakios_tl("UMI fastchg: bq25970@0x66 NACK\n");
 		}
-		if (i2c_read_regs(UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x00u, false, &fsa_id, 1)) {
+		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x00u, false, &fsa_id, 1)) {
 			hakios_tl("UMI usbc_audio: fsa4480@0x42 id=%#x\n", fsa_id);
 		}
-		i2c_bus_release(UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io);
+		i2c_bus_release(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io);
 	}
 
-	if (i2c_bus_take(16, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, saved_cfg, saved_io)) {
+	if (i2c_bus_take(south_tlmm, 16, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, saved_cfg, saved_io)) {
 		uint8_t idt[4] = { 0 }, ln_id = 0;
 
-		if (i2c_read_regs(UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, 0x3bu, 0x0000u, true, idt, sizeof(idt))) {
+		if (i2c_read_regs(south_tlmm, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, 0x3bu, 0x0000u, true, idt, sizeof(idt))) {
 			uint16_t chip = (uint16_t)idt[0] | ((uint16_t)idt[1] << 8);
 
 			wlc_chip_id = (int)chip;
@@ -711,10 +735,19 @@ thyme_charger_probe(void)
 		} else {
 			hakios_tl("UMI wlc: idtp9415@0x3b NACK\n");
 		}
-		if (i2c_read_regs(UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, 0x55u, 0x00u, false, &ln_id, 1)) {
+		if (i2c_read_regs(south_tlmm, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, 0x55u, 0x00u, false, &ln_id, 1)) {
 			hakios_tl("UMI wlc: ln8282@0x55 id=%#x\n", ln_id);
 		}
-		i2c_bus_release(UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, saved_cfg, saved_io);
+		i2c_bus_release(south_tlmm, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, saved_cfg, saved_io);
+	}
+
+	north_tlmm = ml_io_map(UMI_TLMM_NORTH_PA, UMI_TLMM_NORTH_SIZE);
+	if (i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
+		bool ok = i2c_probe_addr(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u);
+
+		nfc_present = ok ? 1 : 0;
+		hakios_tl("UMI nfc: nq-nci@0x28 %s\n", ok ? "ACK" : "NACK");
+		i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
 	}
 }
 
