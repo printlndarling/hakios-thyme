@@ -1131,8 +1131,8 @@ static struct ctab_mode real_modes[2] = {
 	 */
 	{ .width = 3008, .height = 2256, .x = 0, .y = 0, .lanes = 3, .cphy = 1, .settle = 19,
 	  .pixel_clock = 412530000, .line_length = 16032, .frame_length = 2373, .fps_milli = 10850, .data_type = 0x2b },
-	{ .width = 2592, .height = 1940, .lanes = 4, .cphy = 0, .settle = 19,
-	  .pixel_clock = 248320000, .line_length = 10880, .frame_length = 2064, .fps_milli = 11060, .data_type = 0x2b },
+	{ .width = 1280, .height = 720, .lanes = 4, .cphy = 0, .settle = 19,
+	  .pixel_clock = 240000000, .line_length = 5664, .frame_length = 992, .fps_milli = 42718, .data_type = 0x2b },
 };
 static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
 /* The wide's module mode the iOS session runs (cam_mode, default 3): for the logs

@@ -1864,9 +1864,11 @@ mic_dev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		}
 		ring_primed = true;
 	}
-	if (avail < want) {
+	if (avail == 0) {
 		ring_dry++;
 		ring_primed = false;
+	} else if (avail < want) {
+		ring_dry++;
 	}
 	while (want > 0 && avail > 0 && error == 0) {
 		uint64_t at = ring_read % RING_FRAMES, n = want < avail ? want : avail;

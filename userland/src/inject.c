@@ -1148,6 +1148,14 @@ make_service(IOHIDEventSystemClientRef client, const char *product, int page, in
 	if (display) {
 		CFDictionarySetValue(properties, CFSTR("DisplayIntegrated"), kCFBooleanTrue);
 	}
+	if (page == 0xff00 && usage == 0x0006) {
+		CFNumberRef ri = number(20000);
+
+		if (ri != NULL) {
+			CFDictionarySetValue(properties, CFSTR("ReportInterval"), ri);
+			CFRelease(ri);
+		}
+	}
 	/* the dictionary stays: it is what service_copy_property() answers from */
 	made->properties = properties;
 	for (int attempt = 1; attempt <= 20; attempt++) {
@@ -1319,6 +1327,8 @@ sensor_thread(void *arg)
 	uint64_t last_rear_als = 0, last_step = 0, last_orient = 0;
 	unsigned accel_logged = 0, als_logged = 0, prox_logged = 0, gyro_logged = 0, mag_logged = 0, press_logged = 0;
 	unsigned rear_als_logged = 0, step_logged = 0, orient_logged = 0;
+	bool mag_mm_init = false, mag_bias_logged = false;
+	double mag_min[3] = { 0 }, mag_max[3] = { 0 };
 
 	pthread_setname_np("redwood sensors");
 	for (;;) {
@@ -1392,6 +1402,35 @@ sensor_thread(void *arg)
 			double ux = (double)st.mag_mut[0] / 1000.0;
 			double uy = (double)st.mag_mut[1] / 1000.0;
 			double uz = (double)st.mag_mut[2] / 1000.0;
+			double norm = sqrt(ux * ux + uy * uy + uz * uz);
+			if (!mag_mm_init) {
+				mag_mm_init = true;
+				mag_min[0] = mag_max[0] = ux;
+				mag_min[1] = mag_max[1] = uy;
+				mag_min[2] = mag_max[2] = uz;
+			} else {
+				if (ux < mag_min[0]) mag_min[0] = ux;
+				if (ux > mag_max[0]) mag_max[0] = ux;
+				if (uy < mag_min[1]) mag_min[1] = uy;
+				if (uy > mag_max[1]) mag_max[1] = uy;
+				if (uz < mag_min[2]) mag_min[2] = uz;
+				if (uz > mag_max[2]) mag_max[2] = uz;
+			}
+			if (norm > 95.0) {
+				double sx = mag_max[0] - mag_min[0];
+				double sy = mag_max[1] - mag_min[1];
+				double sz = mag_max[2] - mag_min[2];
+				if (sx >= 20.0 && sy >= 20.0) {
+					ux -= 0.5 * (mag_max[0] + mag_min[0]);
+					uy -= 0.5 * (mag_max[1] + mag_min[1]);
+					if (sz >= 20.0) {
+						uz -= 0.5 * (mag_max[2] + mag_min[2]);
+					}
+				} else if (!mag_bias_logged) {
+					mag_bias_logged = true;
+					say("hakios: sensor: mag norm=%.1f uT (>95 uT, awaiting mag_cal or rotation)\n", norm);
+				}
+			}
 			IOHIDEventRef ev = IOHIDEventCreateCompassEvent(NULL, mach_absolute_time(), ux, uy, uz, 0);
 
 			if (ev != NULL) {
@@ -1472,7 +1511,7 @@ sensor_thread(void *arg)
 			}
 			last_orient = st.orient_seq;
 		}
-		usleep(50000);
+		usleep(20000);
 	}
 	return NULL;
 }

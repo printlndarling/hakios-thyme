@@ -22,7 +22,7 @@ isp_init(struct isp *isp)
 {
 	memset(isp, 0, sizeof(*isp));
 	isp->wb[0] = isp->wb[1] = isp->wb[2] = 1;
-	isp->wb_state[0] = isp->wb_state[1] = 1;
+	isp->wb_state[0] = isp->wb_state[1] = 1.6f;
 	isp->wb_bias[0] = isp->wb_bias[1] = 1;
 	isp->sat = 1;
 	isp->digital = 1;
@@ -67,7 +67,7 @@ cell(const uint8_t *top, size_t stride, uint32_t cx, int v[4])
 float
 isp_sharpness(const struct hakios_camera_frame *f, const uint8_t *raw, float x0, float y0, float x1, float y1, float *level)
 {
-	enum { MAX_BLOCKS = 1024 };
+	enum { MAX_BLOCKS = 256 };
 	uint32_t cells_w = f->width / 2, cells_h = f->height / 2;
 	uint32_t cx0 = (uint32_t)(x0 * cells_w), cx1 = (uint32_t)(x1 * cells_w), cy0 = (uint32_t)(y0 * cells_h),
 	    cy1 = (uint32_t)(y1 * cells_h);
@@ -517,7 +517,7 @@ isp_awb(struct isp *isp, const struct isp_stats *s)
 	 * seconds), the rest a little of the way at a time so a passing colour
 	 * does not pull the white point.
 	 */
-	float w = isp->wb_frames < 8 ? 0.35f : 0.1f;
+	float w = isp->wb_frames == 0 ? 1.0f : isp->wb_frames < 8 ? 0.35f : 0.1f;
 
 	isp->wb_state[0] = isp->wb_state[0] * (1 - w) + r * w;
 	isp->wb_state[1] = isp->wb_state[1] * (1 - w) + b * w;

@@ -2983,13 +2983,13 @@ qrtr_input(const uint8_t *data, uint32_t length)
 #define SNS_MSG_PEDOMETER_EVENT     1028u       /* SNS_PEDOMETER_MSGID_SNS_STEP_EVENT */
 
 static uint8_t sns_suid[16], sns_als_suid[16], sns_prox_suid[16];
-static uint8_t sns_gyro_live_suid[16], sns_mag_suid[16], sns_press_suid[16];
+static uint8_t sns_gyro_live_suid[16], sns_mag_suid[16], sns_mag_cal_suid[16], sns_press_suid[16];
 static uint8_t sns_rear_als_suid[16], sns_pedo_suid[16], sns_orient_suid[16];
 static bool sns_have_suid, sns_have_registry, sns_have_als, sns_have_prox;
-static bool sns_have_gyro, sns_have_mag, sns_have_press;
+static bool sns_have_gyro, sns_have_mag, sns_have_mag_cal, sns_have_mag_bias, sns_have_press;
 static bool sns_have_rear_als, sns_have_pedo, sns_have_orient;
 static bool sns_accel_configured, sns_als_configured, sns_prox_configured;
-static bool sns_gyro_configured, sns_mag_configured, sns_press_configured;
+static bool sns_gyro_configured, sns_mag_configured, sns_mag_cal_configured, sns_press_configured;
 static bool sns_rear_als_configured, sns_pedo_configured, sns_orient_configured;
 
 /*
@@ -3031,7 +3031,8 @@ struct hakios_sensor_state {
 
 static LCK_MTX_DECLARE(sensor_state_lock, &slpi_lock_group);
 static struct hakios_sensor_state sensor_state = { .version = 3 };
-static uint32_t sns_als_samples, sns_prox_samples, sns_gyro_samples, sns_mag_samples, sns_press_samples;
+static int32_t sns_mag_bias_mut[3];
+static uint32_t sns_als_samples, sns_prox_samples, sns_gyro_samples, sns_mag_samples, sns_mag_cal_samples, sns_press_samples;
 static uint32_t sns_rear_als_samples, sns_pedo_samples, sns_orient_samples, sns_qmi_ind_logged;
 
 SYSCTL_DECL(_kern_hakios);
@@ -3596,9 +3597,12 @@ sns_sensor_event(const uint8_t event_suid[16], const uint8_t *data, uint32_t len
 			sns_gyro_samples++;
 		}
 	} else if (sns_have_mag && memcmp(event_suid, sns_mag_suid, 16) == 0 && count >= 3) {
-		int32_t mx = ieee754_to_milli(raw_bits[0]);
-		int32_t my = ieee754_to_milli(raw_bits[1]);
-		int32_t mz = ieee754_to_milli(raw_bits[2]);
+		int32_t rx = ieee754_to_milli(raw_bits[0]);
+		int32_t ry = ieee754_to_milli(raw_bits[1]);
+		int32_t rz = ieee754_to_milli(raw_bits[2]);
+		int32_t mx = sns_have_mag_bias ? rx - sns_mag_bias_mut[0] : rx;
+		int32_t my = sns_have_mag_bias ? ry - sns_mag_bias_mut[1] : ry;
+		int32_t mz = sns_have_mag_bias ? rz - sns_mag_bias_mut[2] : rz;
 
 		lck_mtx_lock(&sensor_state_lock);
 		sensor_state.flags |= 16u;
@@ -3608,9 +3612,26 @@ sns_sensor_event(const uint8_t event_suid[16], const uint8_t *data, uint32_t len
 		sensor_state.mag_mut[2] = mz;
 		lck_mtx_unlock(&sensor_state_lock);
 		if (sns_mag_samples < 6) {
-			printf("slpi: sns: mag %u: muT=(%d, %d, %d)\n", ++sns_mag_samples, mx, my, mz);
+			printf("slpi: sns: mag %u: muT=(%d, %d, %d) raw=(%d, %d, %d)%s\n", ++sns_mag_samples, mx, my, mz, rx, ry, rz,
+			    sns_have_mag_bias ? " [cal]" : "");
 		} else {
 			sns_mag_samples++;
+		}
+	} else if (sns_have_mag_cal && memcmp(event_suid, sns_mag_cal_suid, 16) == 0 && count >= 3) {
+		int32_t bx = ieee754_to_milli(raw_bits[0]);
+		int32_t by = ieee754_to_milli(raw_bits[1]);
+		int32_t bz = ieee754_to_milli(raw_bits[2]);
+
+		lck_mtx_lock(&sensor_state_lock);
+		sns_mag_bias_mut[0] = bx;
+		sns_mag_bias_mut[1] = by;
+		sns_mag_bias_mut[2] = bz;
+		sns_have_mag_bias = true;
+		lck_mtx_unlock(&sensor_state_lock);
+		if (sns_mag_cal_samples < 6) {
+			printf("slpi: sns: mag_cal %u: bias_muT=(%d, %d, %d)\n", ++sns_mag_cal_samples, bx, by, bz);
+		} else {
+			sns_mag_cal_samples++;
 		}
 	} else if (sns_have_press && memcmp(event_suid, sns_press_suid, 16) == 0) {
 		int32_t mhpa = ieee754_to_milli(raw_bits[0]);
@@ -3907,7 +3928,14 @@ sns_suid_event(const uint8_t *data, uint32_t length)
 			sns_have_mag = true;
 			if (!sns_mag_configured) {
 				sns_mag_configured = true;
-				sns_config_rate(sns_mag_suid, 10.0f, "magnetometer");
+				sns_config_rate(sns_mag_suid, 25.0f, "magnetometer");
+			}
+		} else if (strcmp(name, "mag_cal") == 0) {
+			memcpy(sns_mag_cal_suid, chosen, sizeof(sns_mag_cal_suid));
+			sns_have_mag_cal = true;
+			if (!sns_mag_cal_configured) {
+				sns_mag_cal_configured = true;
+				sns_config_on_change(sns_mag_cal_suid, "mag_cal");
 			}
 		} else if (strcmp(name, "pressure") == 0) {
 			memcpy(sns_press_suid, chosen, sizeof(sns_press_suid));
@@ -4023,7 +4051,11 @@ sns_event(const uint8_t *data, uint32_t length)
 			}
 			if (msg_id == SNS_MSG_SUID_EVENT && payload != NULL) {
 				sns_suid_event(payload, payload_length);
-			} else if (msg_id == SNS_MSG_SENSOR_EVENT && payload != NULL) {
+			} else if ((msg_id == SNS_MSG_SENSOR_EVENT ||
+			    (sns_have_mag_cal && memcmp(event_suid, sns_mag_cal_suid, 16) == 0)) && payload != NULL) {
+				if (msg_id != SNS_MSG_SENSOR_EVENT && sns_mag_cal_samples == 0) {
+					printf("slpi: sns: mag_cal event msg_id=%u bytes=%u\n", msg_id, payload_length);
+				}
 				sns_sensor_event(event_suid, payload, payload_length);
 			} else if (msg_id == SNS_MSG_PROXIMITY_EVENT && payload != NULL) {
 				sns_proximity_event(event_suid, payload, payload_length);
@@ -4742,6 +4774,9 @@ sns_start(void)
 			}
 			if (!sns_have_mag) {
 				sns_ask("mag");
+			}
+			if (!sns_have_mag_cal) {
+				sns_ask("mag_cal");
 			}
 			if (!sns_have_als) {
 				sns_ask("ambient_light");

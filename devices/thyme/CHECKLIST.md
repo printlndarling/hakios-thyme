@@ -26,10 +26,10 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Touchscreen | FocalTech `FTS521` | P0 | **PASS** | Multi-touch, edge/home gestures, coordinate/latency logging (`touch_lat=1`) |
 | Physical Keys | Power / Volume +/- (`hakios.thyme_keys`) | P0 | **PASS** | Short/long press, screenshot chord, reboot/wake sequence |
 | Speakers & Earpiece | Dual `CS35L41` (`0x40` bottom + `0x42` top RCV) | P0 | **PASS** | Independent stereo L/R channels, ADSP `0x1004` TERT_MI2S, VoLTE audio, 15s quiet keep-alive + 5x 500 ms retry recovery (`logs/024327-run.log`) |
-| Microphones | Dual onboard mics (`mic=4`) | P0 | **PASS** | Dual-mic capture & VoLTE voice uplink active |
+| Microphones | Dual onboard mics (`mic=4`) | P0 | **PASS** | Dual-mic capture, VoLTE uplink, & `VoiceMemos` `0 reads short` continuous capture (`23.80 s`, `logs/031720-run.log`) |
 | Linear Haptics | `AW8697` LRA | P1 | **PASS** | CoreHaptics transient taps + continuous waveform |
-| Main Rear Camera + AF | 108 MP `S5KHMX` (`27 MP` Tetracell) + `AK7377` VCM | P1 | **PASS** | Live ~26 fps preview, adaptive AF, 5×5 Malvar-He-Cutler ISP, sharp stills (`cam_mode=1`) |
-| Front Camera | 20 MP `S5K3T2` | P1 | **PASS** | Live switch & capture |
+| Main Rear Camera + AF | 108 MP `S5KHMX` (`cam_mode=5` `1080p` / `27 MP`) + `AK7377` VCM | P1 | **PASS** | Live ~51 fps preview (`1920x1080`, `3899` frames `logs/030913-run.log`), adaptive AF (`AF_WATCH` 1/3 skip), frame-0 AWB (`1.6f`), 5×5 ISP stills |
+| Front Camera | 20 MP `S5K3T2` | P1 | **PASS** | Live switch & capture; configured `res2` (`1280x720 @ 42.7 fps`) in `hakios.thyme_umi_camera.c` / `hakios.thyme_camera.c` |
 | Camera Flash | `PM8150L` WLED/Torch | P1 | **PASS** | Torch & shutter flash (`torch=3`) |
 | Camera OIS | `qcom,ois@1` | P1 | **TODO** | Hardware node present in DTB; XNU OIS driver not implemented |
 | Aux Cameras (Ultrawide / Macro / Depth) | Rear secondary CCI/CSIPHY sensors | P2 | **TODO** | Only rear wide (`S5KHMX`) + front (`S5K3T2`) driven; ultrawide, macro & depth unimplemented |
@@ -40,7 +40,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Bluetooth | `QCA6390` (UART `3 Mbaud` H4) | P1 | **PARTIAL** | Scan, pair, A2DP audio, `BlueTool deepsleep`, `PlayAndRecord` HFP/A2DP `yes`; live headset HFP/AVRCP open |
 | Accelerometer | `LSM6DSO` over SLPI QRTR | P1 | **PASS** | 20 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Gyroscope | `LSM6DSO` over SLPI QRTR | P1 | **PASS** | 20 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
-| Magnetometer / Compass | `AK0991x` over SLPI QRTR | P1 | **PASS** | 10 Hz stream -> `backboardd` virtual `IOHIDService` (`ok=1`) |
+| Magnetometer / Compass | `AK0991x` over SLPI QRTR | P1 | **PASS** | 25 Hz SLPI + `mag_cal` (`msg_id=1022`), 50 Hz `inject.c` HID (`ReportInterval=20000`) + dynamic rotation bias centering (`norm > 95 uT`), `Compass[211]` (`logs/030913-run.log`) |
 | Front Ambient Light (ALS) | Under-OLED `TCS3701` over SLPI + live backlight sysfs | P1 | **PASS** | Live lux (`224 -> 59 lux`) -> `backboardd` virtual `IOHIDService` (`ok=1`) |
 | Barometer | `BMP285` over SLPI QRTR | P2 | **PASS** | Continuous pressure telemetry (`957–962 hPa`) |
 | Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
@@ -134,6 +134,14 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch U2 Field-Test Fixes (2026-11-27, `logs/030913-run.log`, `logs/031720-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `6ed64103c961`, `result: returned 1441823 0`):
+
+- **Rear Camera Smooth Preview & AWB Tuning**: Switched `devices/thyme/ram.args` `cam_mode=1` (`6016x4512`) -> `cam_mode=5` (`1920x1080` binned @ `65.5 fps`), initialized `camera_isp.c` `wb_state` to `1.6f` with frame-0 instant lock (`w=1.0f`) and `MAX_BLOCKS=256`, and throttled steady `AF_WATCH` sharpness checks to 1 in 3 frames in `camera_device.c`. Verified `S5KHMX` `mode 5 (1920x1080)` streaming smoothly at ~51 fps in userspace (`frame 2` -> `frame 1200` in `23.5 s`, reaching `frame 3899`, `logs/030913-run.log`). Front camera (`S5K3T2`) updated to `res2` (`1280x720 @ 42.7 fps`) in `hakios.thyme_umi_camera.c` and `hakios.thyme_camera.c` (user interactive flip test pending).
+- **Compass & SLPI Magnetometer Calibration**: Added `"mag_cal"` SUID subscription + `msg_id=1022` bias subtraction in `hakios.thyme_slpi.c` (raised `mag` to `25 Hz`), raised `inject.c` sensor poll to `50 Hz` (`usleep(20000)`), set `ReportInterval=20000` on `mag_svc`, and added dynamic rotation min/max hard-iron centering when `norm > 95 uT`. Verified `mag_cal` enabled (`SUID 1aadaaf8...`, `msg_id=1022`) and `Compass[211]` launching cleanly (`logs/030913-run.log`).
+- **Microphone Continuous Capture & `VoiceMemos` Stability**: Stopped resetting `ring_primed` on partial reads (`avail > 0`) in `hakios.thyme_mic.c`, added 16-sample fade-to-zero on short reads in `audio_plugin.c`, and added `VoiceMemos` to `libhakios.app.dylib` in `userland/build.sh` (plus `BaiduMap.app/PlugIns/*.appex/*` chmod+sign fix). Verified `VoiceMemos[235]` running cleanly across Record/Stop tap sequence and `/dev/hakios-mic` capturing `23.80 s asked for, 23.61 s from kernel, 0 reads short` (`logs/031720-run.log`).
 
 ## Batch U1 Field-Test Fixes (2026-11-27, `logs/024327-run.log`)
 

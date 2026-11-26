@@ -834,6 +834,7 @@ set_property_data(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t
 static int mic = -1;
 static UInt64 mic_frames, mic_heard, mic_short;
 static int mic_peak;
+static int16_t mic_last_sample;
 
 static void
 codec_open(void)
@@ -841,6 +842,7 @@ codec_open(void)
 	mic = open("/dev/hakios-mic", O_RDONLY | O_NONBLOCK);
 	mic_frames = mic_heard = mic_short = 0;
 	mic_peak = 0;
+	mic_last_sample = 0;
 	say("hakios: audio: the microphone is listened to (/dev/hakios-mic: %s)\n", mic < 0 ? strerror(errno) : "open");
 }
 
@@ -871,8 +873,20 @@ codec_read(int16_t *samples, UInt32 frames)
 
 		mic_peak = v > mic_peak ? v : mic_peak;
 	}
+	if (have > 0) {
+		mic_last_sample = samples[have - 1];
+	}
 	if (have < frames) {
-		memset(samples + have, 0, (size_t)(frames - have) * 2);
+		UInt32 rem = frames - have;
+		UInt32 fade = rem < 16 ? rem : 16;
+
+		for (UInt32 i = 0; i < fade; i++) {
+			samples[have + i] = (int16_t)((int32_t)mic_last_sample * (int32_t)(fade - 1 - i) / (int32_t)fade);
+		}
+		if (rem > fade) {
+			memset(samples + have + fade, 0, (size_t)(rem - fade) * 2);
+		}
+		mic_last_sample = 0;
 		mic_short += mic_heard > 0;
 	}
 	mic_frames += frames;

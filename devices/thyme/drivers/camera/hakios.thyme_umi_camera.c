@@ -1337,11 +1337,10 @@ umi_camera_ios_start(unsigned width, unsigned height)
 	}
 	if (width < 64 || height < 64 || width > 16384 || height > 16384 || width % 4) return EINVAL;
 	/* The rear runs the module file's resN the boot asked for: cam_mode
-	 * (default 3, 3008x2256; 0 is the whole 12032x9024 sensor, and camera.c
-	 * sizes the ring and the headers from the same table entry).  The
-	 * S5K3T2's 2592x1940 mode 1 is the app's front stream.
+	 * (5 is 1920x1080 binned @ 65 fps; 3 is 3008x2256; 0 is 12032x9024).
+	 * The front S5K3T2 runs mode 2 (1280x720 @ 42.7 fps) for smooth preview.
 	 */
-	uios_force_mode = ufront ? 1 : 0;
+	uios_force_mode = ufront ? 2 : 0;
 	int error = uprobe(8);
 	uios_force_mode = 0;
 	if (error) {

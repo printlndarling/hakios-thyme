@@ -1184,6 +1184,7 @@ struct af {
 	bool            sweep;          /* ... and the whole travel measured */
 	float           sum_sharpness, sum_level;
 	unsigned        measured;
+	unsigned        watch_skip;
 };
 
 static void
@@ -1226,6 +1227,9 @@ af_frame(int device, struct af *af, const struct hakios_camera_frame *f, const u
 	}
 	if (af->at != af->target) {
 		af_go(device, af, af->target);          /* (the next step of a longer way) */
+		return;
+	}
+	if (af->state == AF_WATCH && !af->now && (++af->watch_skip % 3) != 0) {
 		return;
 	}
 	sharpness = isp_sharpness(f, raw, window[0], window[1], window[2], window[3], &level);
