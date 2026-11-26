@@ -13,11 +13,14 @@
 #include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
+#include <miscfs/devfs/devfs.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
+#include <sys/conf.h>
 #include <sys/hakios.input.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include <sys/uio.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern kern_return_t thread_terminate(thread_t);
@@ -65,6 +68,10 @@ SYSCTL_DECL(_kern_hakios);
 #define UMI_NFC_VEN_PIN       83u
 #define UMI_NFC_FIRM_PIN      110u
 #define UMI_NFC_IRQ_PIN       111u
+#define UMI_IR_MOSI_PIN       116u
+#define UMI_FOD_PWR_PIN       10u
+#define UMI_FOD_IRQ_PIN       23u
+#define UMI_FOD_RST_PIN       24u
 
 #define UMI_WDT_PA            0x17c10000UL
 #define UMI_WDT_CTL           0x08u
@@ -90,7 +97,7 @@ static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts;
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
-static int nfc_present, nfc_nci_ver, usbc_audio_id, usbc_switch_status;
+static int nfc_present, nfc_nci_ver, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static uint32_t rtc_boot_seconds;
 static int64_t umi_rtc_epoch_offset;
 static bool umi_rtc_synced;
@@ -136,6 +143,12 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, usbc_audio_id,
 SYSCTL_INT(_kern_hakios, OID_AUTO, usbc_switch_status,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &usbc_switch_status, 0,
     "USB-C audio switch fsa4480@0x42 status registers (st1<<8 | st0)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, ir_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &ir_ready, 0,
+    "IR blaster gpio116 NEC TX /dev/hakios-ir status (1=ready)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, ir_tx_count,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &ir_tx_count, 0,
+    "Number of IR NEC frames transmitted via /dev/hakios-ir");
 
 static uint32_t
 keys_reg(vm_offset_t base, uint32_t offset)
@@ -718,6 +731,17 @@ i2c_write_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
 }
 
 static bool
+i2c_probe_write_addr(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7)
+{
+	bool ok;
+
+	i2c_start(tlmm, sda, scl);
+	ok = i2c_write_byte(tlmm, sda, scl, (uint8_t)(addr7 << 1));
+	i2c_stop(tlmm, sda, scl);
+	return ok;
+}
+
+static bool
 i2c_read_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
     uint8_t *buf, unsigned count)
 {
@@ -731,6 +755,73 @@ i2c_read_raw(vm_offset_t tlmm, unsigned sda, unsigned scl, uint8_t addr7,
 	i2c_stop(tlmm, sda, scl);
 	return ok;
 }
+
+static void
+ir_carrier_us(unsigned us)
+{
+	unsigned cycles = us / 26u;
+
+	for (unsigned c = 0; c < cycles; c++) {
+		tlmm_io_wr(north_tlmm, UMI_IR_MOSI_PIN, 2u);
+		keys_spin_us(9);
+		tlmm_io_wr(north_tlmm, UMI_IR_MOSI_PIN, 0u);
+		keys_spin_us(17);
+	}
+}
+
+static void
+ir_send_nec(uint32_t code)
+{
+	uint32_t saved_cfg, saved_io;
+
+	if (north_tlmm == 0 || !ir_ready) {
+		return;
+	}
+	saved_cfg = tlmm_cfg_rd(north_tlmm, UMI_IR_MOSI_PIN);
+	saved_io = tlmm_io_rd(north_tlmm, UMI_IR_MOSI_PIN);
+	tlmm_io_wr(north_tlmm, UMI_IR_MOSI_PIN, 0u);
+	tlmm_cfg_wr(north_tlmm, UMI_IR_MOSI_PIN, (saved_cfg & ~0x3cu) | 0x200u);
+
+	ir_carrier_us(9000);
+	keys_spin_us(4500);
+	for (unsigned bit = 0; bit < 32; bit++) {
+		ir_carrier_us(562);
+		keys_spin_us(((code >> bit) & 1u) ? 1687u : 562u);
+	}
+	ir_carrier_us(562);
+
+	tlmm_io_wr(north_tlmm, UMI_IR_MOSI_PIN, saved_io & 2u);
+	tlmm_cfg_wr(north_tlmm, UMI_IR_MOSI_PIN, saved_cfg);
+	ir_tx_count++;
+}
+
+static int
+ir_dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	uint32_t code = 0;
+	int err;
+
+	if (uio_resid(uio) < (user_ssize_t)sizeof(code)) {
+		return EINVAL;
+	}
+	err = uiomove((caddr_t)&code, sizeof(code), uio);
+	if (err == 0) {
+		ir_send_nec(code);
+	}
+	return err;
+}
+
+static int
+ir_dev_nop(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+{
+	return 0;
+}
+
+static const struct cdevsw ir_cdevsw = {
+	.d_open = ir_dev_nop, .d_close = ir_dev_nop, .d_read = eno_rdwrt, .d_write = ir_dev_write,
+	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
+	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0,
+};
 
 /* Read-only SM8250 watchdog status probe (qcom,wdt@17c10000). */
 static void
@@ -841,47 +932,86 @@ thyme_charger_probe(void)
 		}
 		if (i2c_bus_take(north_tlmm, 1, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io)) {
 			static const uint8_t nci_reset[4] = { 0x20, 0x00, 0x01, 0x01 };
-			bool ok = i2c_probe_addr(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, 0x28u);
+			bool tx_ok = false;
 
-			nfc_present = ok ? 1 : 0;
-			hakios_tl("UMI nfc: nq-nci@0x28 %s%s\n", ok ? "ACK" : "NACK",
-			    ven_toggled ? " (VEN pulsed)" : "");
-			if (ok) {
-				bool tx_ok = i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+			for (unsigned attempt = 0; attempt < 3 && !tx_ok; attempt++) {
+				tx_ok = i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
 				    0x28u, nci_reset, sizeof(nci_reset));
-
-				if (tx_ok) {
-					uint8_t rsp[16] = { 0 };
-					unsigned waited = 0;
-
-					while (waited < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
-						delay_for_interval(1, NSEC_PER_MSEC);
-						waited++;
-					}
-					if (waited >= 50) {
-						delay_for_interval(20, NSEC_PER_MSEC);
-					}
-					if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
-					    0x28u, rsp, sizeof(rsp))) {
-						if (rsp[0] == 0x40 && rsp[1] == 0x00 && rsp[2] >= 2) {
-							nfc_nci_ver = (int)rsp[4];
-						}
-						hakios_tl("UMI nfc: CORE_RESET rsp (%u ms irq=%u): %02x %02x %02x %02x %02x %02x\n",
-						    waited, tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u,
-						    rsp[0], rsp[1], rsp[2], rsp[3], rsp[4], rsp[5]);
-						if ((tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) != 0) {
-							uint8_t ntf[16] = { 0 };
-
-							if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
-							    0x28u, ntf, sizeof(ntf))) {
-								hakios_tl("UMI nfc: CORE_RESET ntf: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-								    ntf[0], ntf[1], ntf[2], ntf[3], ntf[4], ntf[5], ntf[6], ntf[7]);
-							}
-						}
-					}
-				} else {
-					hakios_tl("UMI nfc: CORE_RESET_CMD write NACK\n");
+				if (!tx_ok) {
+					delay_for_interval(15, NSEC_PER_MSEC);
 				}
+			}
+			nfc_present = tx_ok ? 1 : 0;
+			hakios_tl("UMI nfc: nq-nci@0x28 write %s%s\n", tx_ok ? "ACK" : "NACK",
+			    ven_toggled ? " (VEN pulsed)" : "");
+			if (tx_ok) {
+				uint8_t rsp[16] = { 0 };
+				unsigned waited = 0;
+
+				while (waited < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
+					delay_for_interval(1, NSEC_PER_MSEC);
+					waited++;
+				}
+				if (waited >= 50) {
+					delay_for_interval(20, NSEC_PER_MSEC);
+				}
+				if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+				    0x28u, rsp, sizeof(rsp))) {
+					if (rsp[0] == 0x40 && rsp[1] == 0x00 && rsp[2] >= 2) {
+						nfc_nci_ver = (int)rsp[4];
+					}
+					hakios_tl("UMI nfc: CORE_RESET rsp (%u ms irq=%u): %02x %02x %02x %02x %02x %02x\n",
+					    waited, tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u,
+					    rsp[0], rsp[1], rsp[2], rsp[3], rsp[4], rsp[5]);
+					for (unsigned w = 0; w < 30 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0; w++) {
+						delay_for_interval(1, NSEC_PER_MSEC);
+					}
+					if ((tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) != 0) {
+						uint8_t ntf[16] = { 0 };
+
+						if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+						    0x28u, ntf, sizeof(ntf))) {
+							if (ntf[0] == 0x60 && ntf[1] == 0x00 && ntf[2] >= 4) {
+								nfc_nci_ver = (int)ntf[5];
+							}
+							hakios_tl("UMI nfc: CORE_RESET ntf: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+							    ntf[0], ntf[1], ntf[2], ntf[3], ntf[4], ntf[5], ntf[6], ntf[7]);
+						}
+					}
+					/* Send NCI 2.0 or 1.x CORE_INIT_CMD to verify controller initialization. */
+					uint8_t nci_init[5] = { 0x20, 0x01, 0x02, 0x00, 0x00 };
+					unsigned init_len = (nfc_nci_ver != 0 && nfc_nci_ver < 0x20) ? 3u : 5u;
+
+					if (init_len == 3u) {
+						nci_init[2] = 0x00;
+					}
+					if (i2c_write_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+					    0x28u, nci_init, init_len)) {
+						uint8_t init_rsp[24] = { 0 };
+						unsigned iw = 0;
+
+						while (iw < 50 && (tlmm_io_rd(north_tlmm, UMI_NFC_IRQ_PIN) & 1u) == 0) {
+							delay_for_interval(1, NSEC_PER_MSEC);
+							iw++;
+						}
+						if (i2c_read_raw(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN,
+						    0x28u, init_rsp, sizeof(init_rsp))) {
+							hakios_tl("UMI nfc: CORE_INIT rsp (%u ms): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+							    iw, init_rsp[0], init_rsp[1], init_rsp[2], init_rsp[3],
+							    init_rsp[4], init_rsp[5], init_rsp[6], init_rsp[7]);
+						}
+					}
+				}
+			} else {
+				uint8_t found = 0;
+
+				for (uint8_t a = 0x28u; a <= 0x2bu; a++) {
+					if (i2c_probe_write_addr(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, a)) {
+						found = a;
+						break;
+					}
+				}
+				hakios_tl("UMI nfc: QUP1 write scan 0x28..0x2b -> %#x\n", found);
 			}
 			i2c_bus_release(north_tlmm, UMI_QUP1_SDA_PIN, UMI_QUP1_SCL_PIN, saved_cfg, saved_io);
 		}
@@ -891,6 +1021,37 @@ thyme_charger_probe(void)
 			tlmm_io_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_io & 2u);
 			tlmm_cfg_wr(north_tlmm, UMI_NFC_FIRM_PIN, firm_cfg);
 		}
+		/* IR Blaster (ir-spi@0 on QUP2 gpio115..118, MOSI gpio116) */
+		{
+			uint32_t c115 = tlmm_cfg_rd(north_tlmm, 115u);
+			uint32_t c116 = tlmm_cfg_rd(north_tlmm, UMI_IR_MOSI_PIN);
+			uint32_t i116 = tlmm_io_rd(north_tlmm, UMI_IR_MOSI_PIN);
+			uint32_t c117 = tlmm_cfg_rd(north_tlmm, 117u);
+			uint32_t c118 = tlmm_cfg_rd(north_tlmm, 118u);
+
+			hakios_tl("UMI ir: pins 115..118 cfg=%#x/%#x(io=%#x)/%#x/%#x\n",
+			    c115, c116, i116, c117, c118);
+			if (c116 != 0 || i116 != 0) {
+				int major = cdevsw_add(-1, &ir_cdevsw);
+
+				if (major >= 0 &&
+				    devfs_make_node(makedev(major, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "hakios-ir") != NULL) {
+					ir_ready = 1;
+					hakios_tl("UMI ir: /dev/hakios-ir ready (38 kHz NEC TX on gpio116)\n");
+				}
+			}
+		}
+	}
+	if (south_tlmm != 0) {
+		uint32_t fpwr_cfg = tlmm_cfg_rd(south_tlmm, UMI_FOD_PWR_PIN);
+		uint32_t fpwr_io = tlmm_io_rd(south_tlmm, UMI_FOD_PWR_PIN);
+		uint32_t firq_cfg = tlmm_cfg_rd(south_tlmm, UMI_FOD_IRQ_PIN);
+		uint32_t firq_io = tlmm_io_rd(south_tlmm, UMI_FOD_IRQ_PIN);
+		uint32_t frst_cfg = tlmm_cfg_rd(south_tlmm, UMI_FOD_RST_PIN);
+		uint32_t frst_io = tlmm_io_rd(south_tlmm, UMI_FOD_RST_PIN);
+
+		hakios_tl("UMI fod: pins pwr(10)=%#x/%#x irq(23)=%#x/%#x rst(24)=%#x/%#x\n",
+		    fpwr_cfg, fpwr_io, firq_cfg, firq_io, frst_cfg, frst_io);
 	}
 }
 

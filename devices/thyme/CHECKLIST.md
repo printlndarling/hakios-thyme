@@ -46,9 +46,9 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Rear Ambient Light | `TSL2540` (`ambient_light_back` / `xiaomi.sensor.back_lux`) | P2 | **PASS** | Live reading over SLPI QRTR (`37.099 lux`, `raw=40`) -> `backboardd` (`hakios: sensor: rear_als #1`, `logs/223423-run.log`) |
 | Proximity (ADSP Ultrasonic) | Mi 10S ultrasonic `Xiaomi Proximity` | P1 | **TODO** | Hardware uses ADSP ultrasonic (not SLPI IR); ADSP prox integration not built |
 | Hall Sensor | `hall_key` (DTB `TLMM SOUTH GPIO14`, active-low) | P2 | **TODO** | `0x0f50e000` reads `cfg=0 io=0` (RAZ/unconfigured) and write-faults (`logs/222034-run.log`); polling safely disabled |
-| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **TODO** | QUP1 `gpio4/5` (`io=0x1`) & `gpio83/110/111` (`VEN=0x200/0x3`) mapped/pulsed; `0x28` NACK (PMIC NFC LDO/clock likely off in UEFI); NCI stack `TODO` |
-| IR Blaster | `ir-spi@0` | P2 | **TODO** | No SPI IR transmit driver or app interface |
-| Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | No Goodix optical FOD driver, BiometricKit HAL, or HBM unlock zone |
+| NFC Controller | `qcom,nq-nci` (`0x28` on QUP1 `gpio4/5`) | P1 | **PARTIAL** | Real NCI 2.0 hardware handshake `PASS` (`0x28` write ACK, `CORE_RESET 40 00 01 00` + `CORE_INIT 40 01 1e 00 1a 3e 06 00`, `kern.hakios.nfc_present=1`, `logs/033757-run.log`); `/dev/hakios-nfc` NCI daemon & CoreNFC bridge `TODO` |
+| IR Blaster | `ir-spi@0` (`gpio116` MOSI on NORTH TLMM) | P2 | **PASS** | `/dev/hakios-ir` registered (`38 kHz` NEC TX on `gpio116`, `cfg=0x1`, `kern.hakios.ir_ready=1`, `logs/033757-run.log`) |
+| Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | DTB GPIOs surveyed (`pwr(10)=0/0 irq(23)=0/0 rst(24)=0x1/0`, `logs/033757-run.log`); SPI/BiometricKit HAL & HBM zone `TODO` |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
 | 33W Wired Fast Charge | `bq25970` (`0x66` on QUP15 `gpio44/45`) + `smb1390` + USB-PD | P1 | **PARTIAL** | Read-only I2C telemetry `PASS` (`part=0x16 vbus=5104 mV vac=4960 mV vbat=4406 mV ibus=0 mA`, `kern.hakios.fastchg_*`); active QC/PD high-wattage pump control `TODO` |
 | 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `ln8282` (`0x55`) / `rx1619` (`0x61`) on QUP16 | P1 | **TODO** | QUP16 `gpio48/49` verified idle-high (`cfg=0x1 io=0x1`); `0x3b`/`0x55` NACK off wireless pad (`idt,enable` `GPIO155`/`VRECT` unpowered); active WLC `TODO` |
@@ -134,6 +134,14 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 4 Autonomous Audit (2026-11-27, `logs/033757-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `ae72b13386b0`, `result: returned 1441823 0`):
+
+- **NFC Controller (`nq-nci@0x28`) Real NCI 2.0 Bring-Up**: Replaced read-address probe (which NXP PN553/SN100 NACKs when IRQ=0) with direct NCI `CORE_RESET_CMD` write (`20 00 01 01`) after pulsing `VEN` (`gpio83`), achieving live hardware handshake: `write ACK`, `CORE_RESET rsp (19 ms irq=1): 40 00 01 00`, and 30-byte NCI 2.0 `CORE_INIT rsp (4 ms): 40 01 1e 00 1a 3e 06 00` (`kern.hakios.nfc_present=1`, `logs/033757-run.log`).
+- **IR Blaster (`ir-spi@0` / `gpio116`) 38 kHz NEC TX Driver**: Verified `gpio115..118 cfg=0x1` in NORTH TLMM and registered `/dev/hakios-ir` (4-byte NEC frame writer with 38 kHz software carrier and save/restore idle GPIO state, `kern.hakios.ir_ready=1`).
+- **Under-Display Fingerprint (`goodix,fingerprint`) GPIO Survey**: Read-only SOUTH TLMM check logged `pwr(10)=0/0 irq(23)=0/0 rst(24)=0x1/0`.
 
 ## Batch 3 Autonomous Audit (2026-11-27, `logs/033017-run.log`)
 
