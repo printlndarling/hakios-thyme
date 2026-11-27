@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 526 symbols in 19 groups; 46 are set, 37 of them drivers built in.
+# 565 symbols in 19 groups; 46 are set, 37 of them drivers built in.
 #
 
 #
@@ -67,7 +67,7 @@ CONFIG_HAKIOS_BUTTONS=y
 # QMI messages over the IPC router: how the Wi-Fi firmware's service and the modem's are spoken to [hakios.qmi.c]
 CONFIG_HAKIOS_QMI=y
 
-# the modem (modem=1): started, its file systems served from the flash, the IPA's data path as en1, the SIM and the ... [hakios.mpss.c, hakios.cell.c, hakios.nas.c, hakios.ipa.c; requires CONFIG_HAKIOS_QMI, CONFIG_HAKIOS_UFS]
+# the modem (modem=1): started, its file systems served from the flash, the IPA's data path as en1, the SIM and the ... [hakios.mpss.c, hakios.cell.c, hakios.ipa.c; requires CONFIG_HAKIOS_QMI, CONFIG_HAKIOS_UFS]
 CONFIG_HAKIOS_MODEM=y
 
 # QEMU's virtio network device as the link behind en0 (virtio_net=1). QEMU only [hakios.virtio_net.c]
@@ -121,7 +121,7 @@ CONFIG_HAKIOS_THYME_HAPTIC=y
 # ST FTS521 over the THYME I2C GPIOs and PM8150 power/volume keys (touchscreen=1, buttons=1). This replaces GOODIX and ... [hakios.thyme_touch.c, hakios.thyme_touch_boost.c, hakios.thyme_rpmh.c, hakios.thyme_keys.c]
 CONFIG_HAKIOS_THYME_INPUT=y
 
-# the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and GDSC, the PHY's own sequence from the phone's DTB, ... [hakios.thyme_pcie2.c]
+# the Mi 10S's modem on PCIe2 (0002:01:00.0): its GCC clocks and GDSC, the PHY's own sequence from the phone's DTB, ... [hakios.thyme_pcie2.c, hakios.thyme_baseband.cpp]
 CONFIG_HAKIOS_THYME_MODEM_PCIE=y
 
 # THYME board address overrides, EPSS/RPMh CPU frequency control and TSENS thermal governors (cpufreq=1, thermal=1). [hakios.thyme_board.c, hakios.thyme_cpufreq.c, hakios.thyme_thermal.c]
@@ -186,7 +186,7 @@ CONFIG_HAKIOS_THYME_WIFI=y
 # CONFIG_XPCPROXY_IDVERSION is not set
 
 #
-# Storage and APFS (44)
+# Storage and APFS (45)
 #
 
 # the phone's storage: 1 a survey, read only; 2 the loader's block service, through which the kernel reads it (the ...
@@ -285,6 +285,9 @@ CONFIG_UFS=2
 # the file in it, by path from the volume's root
 # CONFIG_APFS_WRITE_PATH is not set
 
+# read by hakios.ufs.c (kernel)
+# CONFIG_MDM_DUMP is not set
+
 # what one request through the loader costs, by size
 # CONFIG_UFS_BENCH is not set
 
@@ -322,7 +325,7 @@ CONFIG_UFS=2
 # CONFIG_VIRTIO_BLK is not set
 
 #
-# Touch and buttons (13)
+# Touch and buttons (17)
 #
 
 # the touch screen, and the power and volume buttons
@@ -334,8 +337,14 @@ CONFIG_TOUCHSCREEN=y
 # read by hakios.buttons.c (kernel)
 # CONFIG_BUTTONS_STEPS is not set
 
+# read by hakios.thyme_keys.c (kernel)
+# CONFIG_CDSP is not set
+
 # a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the ...
 # CONFIG_PRESS_POWER is not set
+
+# read by hakios.thyme_keys.c (kernel)
+# CONFIG_PRESS_POWER_GAP is not set
 
 # read by hakios.buttons.c, hakios.thyme_keys.c (kernel)
 # CONFIG_PRESS_POWER_MS is not set
@@ -361,11 +370,17 @@ CONFIG_TOUCHSCREEN=y
 # select FTS521 scan mode, where N is 0x01 or 0x20
 # CONFIG_UMIFTS_SCAN is not set
 
+# read by hakios.thyme_keys.c (kernel)
+# CONFIG_VENUS is not set
+
 # read by hakios.virtio_input.c (kernel)
 # CONFIG_VIRTIO_INPUT is not set
 
+# read by hakios.thyme_keys.c (kernel)
+# CONFIG_WDT is not set
+
 #
-# GPU and display (84)
+# GPU and display (90)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -419,8 +434,20 @@ CONFIG_GPU=y
 # the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
 # CONFIG_FB_CA_HZ is not set
 
+# leave what is drawn into the panel's memory in this processor's cache, as this driver did before
+# CONFIG_FB_CLEAN is not set
+
 # which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
 # CONFIG_FB_DIFF is not set
+
+# the pixels of one row of a layer, as the layer's memory holds them (a pixel is 0xAARRGGBB in these words, BGRA in ...
+# CONFIG_FB_DUMP is not set
+
+# after the first, another sample every E seconds -- a band that comes and goes is followed frame after frame
+# CONFIG_FB_DUMP_EVERY is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FB_DUMP_TIMES is not set
 
 # the picture is scaled to the panel nearest neighbour, as it once was
 # CONFIG_FB_FILTER is not set
@@ -439,6 +466,9 @@ CONFIG_GPU=y
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_QUEUE is not set
+
+# read by hakios.thyme_display.c (kernel)
+# CONFIG_FB_TE_SYNC is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_THREADS is not set
@@ -557,6 +587,9 @@ CONFIG_GPU=y
 # read by hakios.gpu.cpp, hakios.thyme_gpu.cpp (kernel)
 # CONFIG_GPU_CACHED is not set
 
+# read by hakios.thyme_adreno.c (kernel)
+# CONFIG_GPU_DVFS is not set
+
 # read by hakios.adreno.c, hakios.thyme_adreno.c (kernel)
 # CONFIG_GPU_EXACT is not set
 
@@ -663,7 +696,7 @@ CONFIG_SOUND=4
 # read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
 # CONFIG_ADSP_STEP is not set
 
-# select THYME's 37 MiB ADSP PAS memory range (compatibility switch)
+# read by hakios.thyme_adsp.c, hakios.thyme_sound.c (kernel)
 # CONFIG_ADSP_UMI is not set
 
 # read by hakios.adsp.c, hakios.thyme_adsp.c (kernel)
@@ -1106,7 +1139,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UMI_HAPTIC is not set
 
 #
-# Chip, thermal and PMIC (19)
+# Chip, thermal and PMIC (20)
 #
 
 # read the chip's identity from the firmware's shared memory: kern.hakios.soc_* (SoC number, revision, board)
@@ -1123,6 +1156,9 @@ CONFIG_MODEM_AGAIN=y
 
 # list every block of the power-management chips the SPMI arbiter shows, and read the PMIC's clock; read only
 # CONFIG_PMIC is not set
+
+# read by hakios.thyme_cpufreq.c (kernel)
+# CONFIG_CPUFREQ_DVFS is not set
 
 # every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py ...
 # CONFIG_CPULOAD is not set
@@ -1183,11 +1219,14 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_NET_DHCP is not set
 
 #
-# Security stand-ins (1)
+# Security stand-ins (2)
 #
 
 # read by kern_minimac.c (kernel)
 # CONFIG_PRIVS is not set
+
+# read by kern_minimac.c (kernel)
+# CONFIG_SBX is not set
 
 #
 # Debugging (6)
@@ -1212,7 +1251,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_USTACKS_TNAME is not set
 
 #
-# Loader (4)
+# Loader (6)
 #
 
 # read by loader.c (loader)
@@ -1221,6 +1260,12 @@ CONFIG_MODEM_AGAIN=y
 # read by loader.c (loader)
 # CONFIG_GAMUT is not set
 
+# read by hakios.thyme_pcie2.c, loader.c (kernel and loader)
+# CONFIG_PCIE2_CC is not set
+
+# read by hakios.thyme_pcie2.c, loader.c (kernel and loader)
+# CONFIG_PCIE2_MHI is not set
+
 # read by loader.c (loader)
 # CONFIG_SERIAL is not set
 
@@ -1228,8 +1273,17 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (135)
+# User space (159)
 #
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG__PCIE2_CALL is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG__PCIE2_CALLTYPE is not set
+
+# read by inject_hfr.c (user space)
+# CONFIG_ANIM_MAX is not set
 
 # read by inject_app.c (user space)
 # CONFIG_APPPROF is not set
@@ -1278,6 +1332,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by hakios.thyme_umi_camera.c (kernel)
 # CONFIG_CAM_GAIN2 is not set
+
+# read by hakios.thyme_umi_camera.c (kernel)
+# CONFIG_CAM_OIS_PROBE is not set
 
 # the UMI modes the sessions run, whole -- the wide's mode 3 at 3008x2256 and the front's mode 1 at 2592x1940, not a ...
 # CONFIG_CAM_REAL is not set
@@ -1423,6 +1480,9 @@ CONFIG_MODEM_AGAIN=y
 # read by HakiosMetalCA.m (user space)
 # CONFIG_METAL_ALL is not set
 
+# applications only, the programs installed under /var/containers/Bundle/Application -- an app
+# CONFIG_METAL_APPS is not set
+
 # this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window ...
 # CONFIG_METAL_DEFER is not set
 
@@ -1466,6 +1526,12 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_PCIE2_BHI_BAD is not set
 
 # read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_CARDSUB is not set
+
+# sample BHI_EXECENV and BHI_STATUS every millisecond for the first 500 ms after the doorbell, logging every change
+# CONFIG_PCIE2_EETRACE is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_EXID is not set
 
 # read by hakios.thyme_pcie2.c (kernel)
@@ -1474,8 +1540,26 @@ CONFIG_MODEM_AGAIN=y
 # hand the PBL a size other than the file's
 # CONFIG_PCIE2_IMGSZ is not set
 
+# the accepted leg f0 itself (APN "ims", profile 2, mux 4, 0x32 = 0xff) runs family 4 first instead of 6; the captured
+# CONFIG_PCIE2_IMS_F0V4 is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_IMS_V4 is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_IMSDCM_ASK_FAMILY is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_IMSDCM_KEEP_ASK is not set
+
+# run 205643's stack asked the daemon (0x20) without ever sending its bind (0x21), so the bound/ready gates
+# CONFIG_PCIE2_IMSDCM_NOBIND is not set
+
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_INB is not set
+
+# where in the DT's pool the modem finds the image
+# CONFIG_PCIE2_IOVA is not set
 
 # leave the endpoint's PERST alone
 # CONFIG_PCIE2_KEEP is not set
@@ -1483,8 +1567,26 @@ CONFIG_MODEM_AGAIN=y
 # leave the MHI registers exactly as Android does before the load
 # CONFIG_PCIE2_MHIRAW is not set
 
+# the vendor's md_enable_dma order -- the GIC MBI page in the same context, then the endpoint's MSI.
+# CONFIG_PCIE2_MSI is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_NO_SMS is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_NR is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_PDC_CMCC is not set
+
+# the CMCC selection stays for the whole boot
+# CONFIG_PCIE2_PDC_KEEP is not set
+
 # read by hakios.thyme_pcie2.c (kernel)
 # CONFIG_PCIE2_PERST is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_PERST_EARLY is not set
 
 # the vendor's order -- the link is up first (the controller driver proves the endpoint), then the ESOC power-on
 # CONFIG_PCIE2_PON_LATE is not set
@@ -1506,6 +1608,15 @@ CONFIG_MODEM_AGAIN=y
 
 # the value written to BHI_IMGTXDB. The sentinel 0x1234567 was only ever a way to see the doorbell answer; the PBL ...
 # CONFIG_PCIE2_TXDB is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_UISWITCH is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_WIN_BASE is not set
+
+# read by hakios.thyme_pcie2.c (kernel)
+# CONFIG_PCIE2_WIN_STOP is not set
 
 # the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
 # CONFIG_ROOT_APFS is not set
@@ -1626,6 +1737,12 @@ CONFIG_MODEM_AGAIN=y
 
 # the system's own "Reduce Transparency" and "Reduce Motion" (Settings, Accessibility), for this
 # CONFIG_UI_LITE is not set
+
+# read by hakios.thyme_baseband.cpp (kernel)
+# CONFIG_UMI_RTPOK is not set
+
+# read by hakios.thyme_baseband.cpp (kernel)
+# CONFIG_UMI_VOPS is not set
 
 # read by init.c (user space)
 # CONFIG_VAR_HFS is not set

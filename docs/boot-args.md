@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **504 arguments**: 429 read by the kernel, 14 by the loader, 72 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **531 arguments**: 455 read by the kernel, 16 by the loader, 73 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (89)
+## GPU and display (91)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -39,6 +39,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fb_measure` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_MEASURE` |  |
 | `fb_pri` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_PRI` |  |
 | `fb_queue` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_QUEUE` |  |
+| `fb_te_sync` | K | `hakios.thyme_display.c` | `CONFIG_FB_TE_SYNC` |  |
 | `fb_threads` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_THREADS` |  |
 | `fbheight` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBHEIGHT` |  |
 | `fbscale` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSCALE` |  |
@@ -79,6 +80,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `glwait` | U | `eagl.c` | `CONFIG_GLWAIT` |  |
 | `gpu` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU` |  |
 | `gpu_cached` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_CACHED` |  |
+| `gpu_dvfs` | K | `hakios.thyme_adreno.c` | `CONFIG_GPU_DVFS` |  |
 | `gpu_exact` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_EXACT` |  |
 | `gpu_keep` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_KEEP` |  |
 | `gpu_log` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_LOG` |  |
@@ -102,11 +104,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `touch_lat` | KU | `HakiosMetalCA.m`, `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `hakios.thyme_gpu.cpp`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
 | `vblur` | U | `eagl.c` | `CONFIG_VBLUR` |  |
 
-## Security stand-ins (1)
+## Security stand-ins (2)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `privs` | K | `kern_minimac.c` | `CONFIG_PRIVS` |  |
+| `sbx` | K | `kern_minimac.c` | `CONFIG_SBX` |  |
 
 ## Wi-Fi (34)
 
@@ -284,13 +287,16 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_shutter` | K | `hakios.camera.c`, `hakios.thyme_camera.c`, `hakios.thyme_umi_camera.c` | `CONFIG_CAM_SHUTTER` |  |
 | `cam_vblank` | K | `hakios.camera.c`, `hakios.thyme_camera.c` | `CONFIG_CAM_VBLANK` |  |
 
-## Touch and buttons (13)
+## Touch and buttons (18)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `buttons` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_BUTTONS` |  |
 | `buttons_steps` | K | `hakios.buttons.c` | `CONFIG_BUTTONS_STEPS` |  |
+| `cdsp` | K | `hakios.thyme_keys.c` | `CONFIG_CDSP` |  |
+| `epoch` | K | `GenericARMPE.cpp`, `hakios.thyme_keys.c` |  | xl (the host's clock) |
 | `press_power` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_PRESS_POWER` |  |
+| `press_power_gap` | K | `hakios.thyme_keys.c` | `CONFIG_PRESS_POWER_GAP` |  |
 | `press_power_ms` | K | `hakios.buttons.c`, `hakios.thyme_keys.c` | `CONFIG_PRESS_POWER_MS` |  |
 | `touch_flip` | K | `hakios.goodix.c` | `CONFIG_TOUCH_FLIP` |  |
 | `touch_poll_us` | K | `hakios.goodix.c` | `CONFIG_TOUCH_POLL_US` |  |
@@ -300,9 +306,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `umi_keys` | K | `hakios.thyme_keys.c` | `CONFIG_UMI_KEYS` |  |
 | `umi_touch` | K | `hakios.thyme_touch.c` | `CONFIG_UMI_TOUCH` |  |
 | `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
+| `venus` | K | `hakios.thyme_keys.c` | `CONFIG_VENUS` |  |
 | `virtio_input` | K | `hakios.virtio_input.c` | `CONFIG_VIRTIO_INPUT` |  |
+| `wdt` | K | `hakios.thyme_keys.c` | `CONFIG_WDT` |  |
 
-## Storage and APFS (43)
+## Storage and APFS (44)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -335,6 +343,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `apfs_write_byte` | K | `hakios.apfs_check.c` | `CONFIG_APFS_WRITE_BYTE` |  |
 | `apfs_write_len` | K | `hakios.apfs_check.c` | `CONFIG_APFS_WRITE_LEN` |  |
 | `apfs_write_path` | K | `hakios.apfs_check.c` | `CONFIG_APFS_WRITE_PATH` |  |
+| `mdm_dump` | K | `hakios.ufs.c` | `CONFIG_MDM_DUMP` |  |
 | `ufs_bench` | K | `hakios.ufs.c` | `CONFIG_UFS_BENCH` |  |
 | `ufs_check` | K | `hakios.ufs.c` | `CONFIG_UFS_CHECK` |  |
 | `ufs_native` | KL | `hakios.ufs.c`, `loader.c` | `CONFIG_UFS_NATIVE` |  |
@@ -373,11 +382,12 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `torch_secs` | K | `hakios.thyme_torch.c`, `hakios.torch.c` | `CONFIG_TORCH_SECS` |  |
 | `umi_haptic` | K | `hakios.thyme_haptic.c` | `CONFIG_UMI_HAPTIC` |  |
 
-## Chip, thermal and PMIC (20)
+## Chip, thermal and PMIC (21)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `cpufreq` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPUFREQ` |  |
+| `cpufreq_dvfs` | K | `hakios.thyme_cpufreq.c` | `CONFIG_CPUFREQ_DVFS` |  |
 | `cpuload` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_CPULOAD` |  |
 | `ddr` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR` |  |
 | `ddr_rest` | K | `hakios.cpufreq.c`, `hakios.thyme_cpufreq.c` | `CONFIG_DDR_REST` |  |
@@ -398,14 +408,13 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `thermal_tm0` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM0` |  |
 | `thermal_tm1` | K | `hakios.thermal.c` | `CONFIG_THERMAL_TM1` |  |
 
-## CPU, memory and boot (17)
+## CPU, memory and boot (16)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `applog` | K | `(patch)` | `CONFIG_APPLOG` |  |
 | `applog_name` | K | `(patch)` | `CONFIG_APPLOG_NAME` |  |
 | `bootcpu` | KL | `loader.c`, `loader_return.c` | `CONFIG_BOOTCPU` |  |
-| `epoch` | K | `GenericARMPE.cpp` |  | xl (the host's clock) |
 | `hv_wdt_pet` | K | `loader_return.c` |  | the loader, when it has armed the watchdog (the runner also passes it) |
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
 | `machine_name` | K | `GenericARMPE.cpp` | `CONFIG_MACHINE_NAME` |  |
@@ -431,21 +440,26 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ustacks_threads` | K | `user_exception_trace.c` | `CONFIG_USTACKS_THREADS` |  |
 | `ustacks_tname` | K | `user_exception_trace.c` | `CONFIG_USTACKS_TNAME` |  |
 
-## Loader (6)
+## Loader (8)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
 | `cpumask` | L | `loader.c` | `CONFIG_CPUMASK` |  |
 | `cpus` | L | `loader.c` | `CONFIG_CPUS` |  |
 | `gamut` | L | `loader.c` | `CONFIG_GAMUT` |  |
+| `pcie2_cc` | KL | `hakios.thyme_pcie2.c`, `loader.c` | `CONFIG_PCIE2_CC` |  |
+| `pcie2_mhi` | KL | `hakios.thyme_pcie2.c`, `loader.c` | `CONFIG_PCIE2_MHI` |  |
 | `serial` | L | `loader.c` | `CONFIG_SERIAL` |  |
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (145)
+## User space (161)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `_pcie2_call` | K | `hakios.thyme_pcie2.c` | `CONFIG__PCIE2_CALL` |  |
+| `_pcie2_calltype` | K | `hakios.thyme_pcie2.c` | `CONFIG__PCIE2_CALLTYPE` |  |
+| `anim_max` | U | `inject_hfr.c` | `CONFIG_ANIM_MAX` |  |
 | `appprof` | U | `inject_app.c` | `CONFIG_APPPROF` |  |
 | `appprof_secs` | U | `inject_app.c` | `CONFIG_APPPROF_SECS` |  |
 | `autounlock` | U | `inject_sb.c` | `CONFIG_AUTOUNLOCK` |  |
@@ -462,6 +476,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_front_hold` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FRONT_HOLD` |  |
 | `cam_front_lite0` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_FRONT_LITE0` |  |
 | `cam_gain2` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_GAIN2` |  |
+| `cam_ois_probe` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_OIS_PROBE` |  |
 | `cam_real` | K | `hakios.thyme_camera.c` | `CONFIG_CAM_REAL` |  |
 | `cam_shutter2` | K | `hakios.thyme_umi_camera.c` | `CONFIG_CAM_SHUTTER2` |  |
 | `cc_fade` | U | `inject_sb.c` | `CONFIG_CC_FADE` |  |
@@ -525,16 +540,25 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `pcie2_addr` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_ADDR` |  |
 | `pcie2_bhi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI` |  |
 | `pcie2_bhi_bad` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_BHI_BAD` |  |
+| `pcie2_cardsub` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_CARDSUB` |  |
 | `pcie2_eetrace` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_EETRACE` |  |
 | `pcie2_exid` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_EXID` |  |
 | `pcie2_img` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMG` |  |
 | `pcie2_imgsz` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMGSZ` |  |
+| `pcie2_ims_f0v4` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMS_F0V4` |  |
+| `pcie2_ims_v4` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMS_V4` |  |
+| `pcie2_imsdcm_ask_family` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMSDCM_ASK_FAMILY` |  |
+| `pcie2_imsdcm_keep_ask` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMSDCM_KEEP_ASK` |  |
+| `pcie2_imsdcm_nobind` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IMSDCM_NOBIND` |  |
 | `pcie2_inb` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_INB` |  |
 | `pcie2_iova` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_IOVA` |  |
 | `pcie2_keep` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_KEEP` |  |
-| `pcie2_mhi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MHI` |  |
 | `pcie2_mhiraw` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MHIRAW` |  |
 | `pcie2_msi` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_MSI` |  |
+| `pcie2_no_sms` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_NO_SMS` |  |
+| `pcie2_nr` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_NR` |  |
+| `pcie2_pdc_cmcc` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PDC_CMCC` |  |
+| `pcie2_pdc_keep` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PDC_KEEP` |  |
 | `pcie2_perst` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PERST` |  |
 | `pcie2_perst_early` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PERST_EARLY` |  |
 | `pcie2_pon_late` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_PON_LATE` |  |
@@ -544,6 +568,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `pcie2_survey` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_SURVEY` |  |
 | `pcie2_test` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_TEST` |  |
 | `pcie2_txdb` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_TXDB` |  |
+| `pcie2_uiswitch` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_UISWITCH` |  |
 | `pcie2_win_base` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_WIN_BASE` |  |
 | `pcie2_win_stop` | K | `hakios.thyme_pcie2.c` | `CONFIG_PCIE2_WIN_STOP` |  |
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
@@ -587,6 +612,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
 | `tu_debug` | U | `HakiosMetalCA.m` | `CONFIG_TU_DEBUG` |  |
 | `ui_lite` | U | `inject_sb.c` | `CONFIG_UI_LITE` |  |
+| `umi_rtpok` | K | `hakios.thyme_baseband.cpp` | `CONFIG_UMI_RTPOK` |  |
+| `umi_vops` | K | `hakios.thyme_baseband.cpp` | `CONFIG_UMI_VOPS` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |
 | `wallpaper_cache` | U | `inject_sb.c` | `CONFIG_WALLPAPER_CACHE` |  |

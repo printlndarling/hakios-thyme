@@ -1,3 +1,5 @@
+_pcie2_call	k
+_pcie2_calltype	k
 adreno	k
 adreno_blind	k
 adreno_dirty	k
@@ -21,6 +23,7 @@ adsp_return	k
 adsp_step	k
 adsp_umi	k
 adsp_wait	k
+anim_max	u
 apfs_cheap	k
 apfs_check	k
 apfs_chunk	k
@@ -86,6 +89,7 @@ cam_gain	k
 cam_gain2	k
 cam_keep_mb	k
 cam_mode	k
+cam_ois_probe	k
 cam_pattern	k
 cam_real	k
 cam_sensor	k
@@ -94,7 +98,9 @@ cam_shutter	k
 cam_shutter2	k
 cam_vblank	k
 cc_fade	u
+cdsp	k
 cpufreq	k
+cpufreq_dvfs	k
 cpuload	k
 cpumask	l
 cpus	l
@@ -155,6 +161,7 @@ fb_intf	k
 fb_measure	k
 fb_pri	k
 fb_queue	k
+fb_te_sync	k
 fb_threads	k
 fbheight	k
 fbscale	k
@@ -201,6 +208,7 @@ glwait	u
 glyes	u
 gpu	k
 gpu_cached	k
+gpu_dvfs	k
 gpu_exact	k
 gpu_keep	k
 gpu_log	k
@@ -214,6 +222,7 @@ hv_wdt_pet	k
 loader_return_after	kl
 m2v_utrace	u
 machine_name	k
+mdm_dump	k
 membench	k
 metal	ku
 metal_all	u
@@ -301,16 +310,27 @@ panel_te_rate	k
 pcie2_addr	k
 pcie2_bhi	k
 pcie2_bhi_bad	k
+pcie2_cardsub	k
+pcie2_cc	kl
 pcie2_eetrace	k
 pcie2_exid	k
 pcie2_img	k
 pcie2_imgsz	k
+pcie2_ims_f0v4	k
+pcie2_ims_v4	k
+pcie2_imsdcm_ask_family	k
+pcie2_imsdcm_keep_ask	k
+pcie2_imsdcm_nobind	k
 pcie2_inb	k
 pcie2_iova	k
 pcie2_keep	k
-pcie2_mhi	k
+pcie2_mhi	kl
 pcie2_mhiraw	k
 pcie2_msi	k
+pcie2_no_sms	k
+pcie2_nr	k
+pcie2_pdc_cmcc	k
+pcie2_pdc_keep	k
 pcie2_perst	k
 pcie2_perst_early	k
 pcie2_pon_late	k
@@ -320,6 +340,7 @@ pcie2_sid	k
 pcie2_survey	k
 pcie2_test	k
 pcie2_txdb	k
+pcie2_uiswitch	k
 pcie2_win_base	k
 pcie2_win_stop	k
 pmic	k
@@ -329,6 +350,7 @@ pmic_list	k
 pmic_modem_pon	k
 pmic_modem_pon_sid	k
 press_power	k
+press_power_gap	k
 press_power_ms	k
 privs	k
 rd	kl
@@ -345,6 +367,7 @@ return_cpu	k
 return_panic	k
 root_apfs	u
 sb_delay	u
+sbx	k
 serial	l
 servreg	k
 slpi	k
@@ -449,7 +472,9 @@ umi_bt	k
 umi_bt_probe	k
 umi_haptic	k
 umi_keys	k
+umi_rtpok	k
 umi_touch	k
+umi_vops	k
 umi_wifi_return	k
 umi_wifi_step	k
 umifts_scan	k
@@ -463,12 +488,14 @@ var_hfs	u
 var_save_ms	k
 var_store	u
 vblur	u
+venus	k
 virtio_blk	k
 virtio_input	k
 virtio_net	k
 virtio_sound	k
 wallpaper_cache	u
 wallpaper_freeze	u
+wdt	k
 wifi	k
 wifi_again	k
 wifi_ask	k

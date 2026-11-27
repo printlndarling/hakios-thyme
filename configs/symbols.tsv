@@ -1,3 +1,5 @@
+_PCIE2_CALL	arg	_pcie2_call	User space	k	hakios.thyme_pcie2.c	
+_PCIE2_CALLTYPE	arg	_pcie2_calltype	User space	k	hakios.thyme_pcie2.c	
 ADRENO	arg	adreno	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
 ADRENO_BLIND	arg	adreno_blind	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
 ADRENO_DIRTY	arg	adreno_dirty	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
@@ -18,8 +20,9 @@ ADSP_NEW	arg	adsp_new	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c
 ADSP_PAUSE	arg	adsp_pause	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
 ADSP_RETURN	arg	adsp_return	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
 ADSP_STEP	arg	adsp_step	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
-ADSP_UMI	arg	adsp_umi	Audio and battery	k	hakios.thyme_adsp.c,hakios.thyme_sound.c	select THYME's 37 MiB ADSP PAS memory range (compatibility switch)
+ADSP_UMI	arg	adsp_umi	Audio and battery	k	hakios.thyme_adsp.c,hakios.thyme_sound.c	
 ADSP_WAIT	arg	adsp_wait	Audio and battery	k	hakios.adsp.c,hakios.thyme_adsp.c	
+ANIM_MAX	arg	anim_max	User space	u	inject_hfr.c	
 APFS_CHEAP	arg	apfs_cheap	Storage and APFS	k	apfs_vfsops.c	
 APFS_CHECK	arg	apfs_check	Storage and APFS	k	hakios.apfs_check.c	walk the whole volume and print only the totals
 APFS_CHUNK	arg	apfs_chunk	Storage and APFS	k	hakios.apfs_check.c	
@@ -80,6 +83,7 @@ CAM_GAIN	arg	cam_gain	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thy
 CAM_GAIN2	arg	cam_gain2	User space	k	hakios.thyme_umi_camera.c	
 CAM_KEEP_MB	arg	cam_keep_mb	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
 CAM_MODE	arg	cam_mode	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	
+CAM_OIS_PROBE	arg	cam_ois_probe	User space	k	hakios.thyme_umi_camera.c	
 CAM_PATTERN	arg	cam_pattern	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
 CAM_REAL	arg	cam_real	User space	k	hakios.thyme_camera.c	the UMI modes the sessions run, whole -- the wide's mode 3 at 3008x2256 and the front's mode 1 at 2592x1940, not a centre crop
 CAM_SENSOR	arg	cam_sensor	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,hakios.thyme_umi_camera.c	the S5K3T2 on CSIPHY 4 (DT cam-sensor@2) instead of the S5KHMX: its own CCI pins, reset, MCLK4 (24 MHz from camcc's PLL2), power
@@ -88,6 +92,8 @@ CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c,hakios.thyme_camera.c,haki
 CAM_SHUTTER2	arg	cam_shutter2	User space	k	hakios.thyme_umi_camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c,hakios.thyme_camera.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
+CDSP	arg	cdsp	Touch and buttons	k	hakios.thyme_keys.c	
+CPUFREQ_DVFS	arg	cpufreq_dvfs	Chip, thermal and PMIC	k	hakios.thyme_cpufreq.c	
 CPULOAD	arg	cpuload	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
 CPUMASK	arg	cpumask	Loader	l	loader.c	
 DDR	arg	ddr	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
@@ -146,6 +152,7 @@ FB_INTF	arg	fb_intf	GPU and display	k	MiniIOMobileFramebuffer.cpp	the registers 
 FB_MEASURE	arg	fb_measure	GPU and display	k	MiniIOMobileFramebuffer.cpp	how often the panel is really refreshed
 FB_PRI	arg	fb_pri	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_QUEUE	arg	fb_queue	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FB_TE_SYNC	arg	fb_te_sync	GPU and display	k	hakios.thyme_display.c	
 FB_THREADS	arg	fb_threads	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBHEIGHT	arg	fbheight	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBSCALE	arg	fbscale	GPU and display	k	MiniIOMobileFramebuffer.cpp	the same 375 x 812 points drawn at two pixels a point instead of three
@@ -191,6 +198,7 @@ GLTRACE_UNIFORMS	arg	gltrace_uniforms	GPU and display	u	eagl.c	what the program 
 GLWAIT	arg	glwait	GPU and display	u	eagl.c	
 GLYES	arg	glyes	User space	u	inject.c	the renderer is made to answer that it has those functions after all
 GPU_CACHED	arg	gpu_cached	GPU and display	k	hakios.gpu.cpp,hakios.thyme_gpu.cpp	
+GPU_DVFS	arg	gpu_dvfs	GPU and display	k	hakios.thyme_adreno.c	
 GPU_EXACT	arg	gpu_exact	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
 GPU_KEEP	arg	gpu_keep	GPU and display	k	hakios.gpu.cpp,hakios.thyme_gpu.cpp	
 GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c,hakios.thyme_adreno.c	
@@ -200,6 +208,7 @@ HAPTIC_F0_TRACE	arg	haptic_f0_trace	Haptics and torch	k	hakios.thyme_haptic.c	pr
 HAPTIC_GAIN	arg	haptic_gain	Haptics and torch	k	hakios.thyme_haptic.c	diagnostic AW8697 waveform gain, capped at 0x40
 M2V_UTRACE	arg	m2v_utrace	User space	u	HakiosMetalCA.m	Turnip's GPU trace of every render pass (u_trace) into a file, printed during the run
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
+MDM_DUMP	arg	mdm_dump	Storage and APFS	k	hakios.ufs.c	
 MEMBENCH	arg	membench	Chip, thermal and PMIC	k	hakios.cpufreq.c,hakios.thyme_cpufreq.c	run the memory benchmark after CPU probing (2 runs it on a background thread)
 METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp,inject_sb.c	only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 METAL_ALL	arg	metal_all	User space	u	HakiosMetalCA.m	
@@ -281,16 +290,27 @@ PANEL_TE_RATE	arg	panel_te_rate	GPU and display	k	hakios.thyme_display.c	count t
 PCIE2_ADDR	hex	pcie2_addr	User space	k	hakios.thyme_pcie2.c	hand the PBL an address other than the file's
 PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c	
 PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	zero the real image in place, to keep the file's address and size while its content is wrong
+PCIE2_CARDSUB	arg	pcie2_cardsub	User space	k	hakios.thyme_pcie2.c	
+PCIE2_CC	arg	pcie2_cc	Loader	kl	hakios.thyme_pcie2.c,loader.c	
 PCIE2_EETRACE	arg	pcie2_eetrace	User space	k	hakios.thyme_pcie2.c	sample BHI_EXECENV and BHI_STATUS every millisecond for the first 500 ms after the doorbell, logging every change
 PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMGSZ	arg	pcie2_imgsz	User space	k	hakios.thyme_pcie2.c	hand the PBL a size other than the file's
+PCIE2_IMS_F0V4	arg	pcie2_ims_f0v4	User space	k	hakios.thyme_pcie2.c	the accepted leg f0 itself (APN "ims", profile 2, mux 4, 0x32 = 0xff) runs family 4 first instead of 6; the captured
+PCIE2_IMS_V4	arg	pcie2_ims_v4	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IMSDCM_ASK_FAMILY	arg	pcie2_imsdcm_ask_family	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IMSDCM_KEEP_ASK	arg	pcie2_imsdcm_keep_ask	User space	k	hakios.thyme_pcie2.c	
+PCIE2_IMSDCM_NOBIND	arg	pcie2_imsdcm_nobind	User space	k	hakios.thyme_pcie2.c	run 205643's stack asked the daemon (0x20) without ever sending its bind (0x21), so the bound/ready gates
 PCIE2_INB	arg	pcie2_inb	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IOVA	arg	pcie2_iova	User space	k	hakios.thyme_pcie2.c	where in the DT's pool the modem finds the image
 PCIE2_KEEP	arg	pcie2_keep	User space	k	hakios.thyme_pcie2.c	leave the endpoint's PERST alone
-PCIE2_MHI	arg	pcie2_mhi	User space	k	hakios.thyme_pcie2.c	
+PCIE2_MHI	arg	pcie2_mhi	Loader	kl	hakios.thyme_pcie2.c,loader.c	
 PCIE2_MHIRAW	arg	pcie2_mhiraw	User space	k	hakios.thyme_pcie2.c	leave the MHI registers exactly as Android does before the load
 PCIE2_MSI	arg	pcie2_msi	User space	k	hakios.thyme_pcie2.c	the vendor's md_enable_dma order -- the GIC MBI page in the same context, then the endpoint's MSI.
+PCIE2_NO_SMS	arg	pcie2_no_sms	User space	k	hakios.thyme_pcie2.c	
+PCIE2_NR	arg	pcie2_nr	User space	k	hakios.thyme_pcie2.c	
+PCIE2_PDC_CMCC	arg	pcie2_pdc_cmcc	User space	k	hakios.thyme_pcie2.c	
+PCIE2_PDC_KEEP	arg	pcie2_pdc_keep	User space	k	hakios.thyme_pcie2.c	the CMCC selection stays for the whole boot
 PCIE2_PERST	arg	pcie2_perst	User space	k	hakios.thyme_pcie2.c	
 PCIE2_PERST_EARLY	arg	pcie2_perst_early	User space	k	hakios.thyme_pcie2.c	
 PCIE2_PON_LATE	arg	pcie2_pon_late	User space	k	hakios.thyme_pcie2.c	the vendor's order -- the link is up first (the controller driver proves the endpoint), then the ESOC power-on
@@ -300,6 +320,7 @@ PCIE2_SID	arg	pcie2_sid	User space	k	hakios.thyme_pcie2.c
 PCIE2_SURVEY	arg	pcie2_survey	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TEST	arg	pcie2_test	User space	k	hakios.thyme_pcie2.c	
 PCIE2_TXDB	arg	pcie2_txdb	User space	k	hakios.thyme_pcie2.c	the value written to BHI_IMGTXDB. The sentinel 0x1234567 was only ever a way to see the doorbell answer; the PBL reads that word
+PCIE2_UISWITCH	arg	pcie2_uiswitch	User space	k	hakios.thyme_pcie2.c	
 PCIE2_WIN_BASE	hex	pcie2_win_base	User space	k	hakios.thyme_pcie2.c	
 PCIE2_WIN_STOP	arg	pcie2_win_stop	User space	k	hakios.thyme_pcie2.c	
 PMIC_CHARGE	arg	pmic_charge	Chip, thermal and PMIC	k	hakios.pmic.c	
@@ -308,6 +329,7 @@ PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, n
 PMIC_MODEM_PON	arg	pmic_modem_pon	Chip, thermal and PMIC	k	hakios.pmic.c	
 PMIC_MODEM_PON_SID	arg	pmic_modem_pon_sid	Chip, thermal and PMIC	k	hakios.pmic.c	
 PRESS_POWER	arg	press_power	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the key's own are (hakios_touch_post):
+PRESS_POWER_GAP	arg	press_power_gap	Touch and buttons	k	hakios.thyme_keys.c	
 PRESS_POWER_MS	arg	press_power_ms	Touch and buttons	k	hakios.buttons.c,hakios.thyme_keys.c	
 PRIVS	arg	privs	Security stand-ins	k	kern_minimac.c	
 RD	arg	rd	CPU, memory and boot	kl	(patch),loader.c	
@@ -323,6 +345,7 @@ REGTRACE	arg	regtrace	CPU, memory and boot	k	(patch)
 RETURN_CPU	arg	return_cpu	CPU, memory and boot	k	loader_return.c	
 RETURN_PANIC	arg	return_panic	CPU, memory and boot	k	loader_return.c	
 ROOT_APFS	arg	root_apfs	User space	u	init.c	the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
+SBX	arg	sbx	Security stand-ins	k	kern_minimac.c	
 SERIAL	arg	serial	Loader	l	loader.c	
 SERVREG	arg	servreg	User space	k	hakios.thyme_slpi.c	
 SLPI	arg	slpi	User space	k	hakios.thyme_slpi.c	
@@ -418,7 +441,9 @@ UMI_BT	arg	umi_bt	Bluetooth	k	hakios.thyme_bluetooth.c	start the THYME QCA6390 B
 UMI_BT_PROBE	arg	umi_bt_probe	Bluetooth	k	hakios.thyme_bluetooth.c	run a THYME QCA6390 Bluetooth diagnostic level
 UMI_HAPTIC	arg	umi_haptic	Haptics and torch	k	hakios.thyme_haptic.c	select the THYME AW8697 diagnostic level or the iOS actuator service
 UMI_KEYS	arg	umi_keys	Touch and buttons	k	hakios.thyme_keys.c	enable the PM8150 power and volume keys when the generic buttons arg is absent
+UMI_RTPOK	arg	umi_rtpok	User space	k	hakios.thyme_baseband.cpp	
 UMI_TOUCH	arg	umi_touch	Touch and buttons	k	hakios.thyme_touch.c	enable the THYME FTS521 path when the generic touchscreen arg is absent
+UMI_VOPS	arg	umi_vops	User space	k	hakios.thyme_baseband.cpp	
 UMI_WIFI_RETURN	arg	umi_wifi_return	Wi-Fi	k	hakios.thyme_qca6390.c	return to the loader after the step-1 Wi-Fi survey
 UMI_WIFI_STEP	arg	umi_wifi_step	Wi-Fi	k	hakios.thyme_qca6390.c	choose a THYME QCA6390 firmware diagnostic step
 UMIFTS_SCAN	arg	umifts_scan	Touch and buttons	k	hakios.thyme_touch.c	select FTS521 scan mode, where N is 0x01 or 0x20
@@ -431,11 +456,13 @@ USTACKS_TNAME	arg	ustacks_tname	Debugging	k	user_exception_trace.c
 VAR_HFS	arg	var_hfs	User space	u	init.c	
 VAR_SAVE_MS	arg	var_save_ms	Storage and APFS	k	hakios.ufs.c	
 VBLUR	arg	vblur	GPU and display	u	eagl.c	
+VENUS	arg	venus	Touch and buttons	k	hakios.thyme_keys.c	
 VIRTIO_BLK	arg	virtio_blk	Storage and APFS	k	hakios.virtio_blk.c	
 VIRTIO_INPUT	arg	virtio_input	Touch and buttons	k	hakios.virtio_input.c	
 VIRTIO_SOUND	arg	virtio_sound	Audio and battery	k	hakios.virtio_sound.c	
 WALLPAPER_CACHE	arg	wallpaper_cache	User space	u	inject_sb.c	the window that shows the wallpaper rasterized by the window server (CALayer's shouldRasterize), drawn from one texture instead of composed again
 WALLPAPER_FREEZE	arg	wallpaper_freeze	User space	u	inject_sb.c	the wallpaper as one still picture
+WDT	arg	wdt	Touch and buttons	k	hakios.thyme_keys.c	
 WIFI_AGAIN	arg	wifi_again	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	start the DSP although the one before it was shut down without having acknowledged a stop: THAT HAS RESET THE PHONE, twice of two
 WIFI_ASK	arg	wifi_ask	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	step 14 also asks that service a question (its capabilities) and writes down the beginning of an answer
 WIFI_BA	arg	wifi_ba	Wi-Fi	k	lx_80211.c	
