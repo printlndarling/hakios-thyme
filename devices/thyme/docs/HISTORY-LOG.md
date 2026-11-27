@@ -1,5 +1,24 @@
 ## Chronological Verification Logs & Evidence
 
+## Venus AXI0 gate
+
+- The stock Android `qcom,vidc@aa00000` node lists `gcc_video_axi0`
+  separately from the core and codec clocks. Xiaomi's
+  [Kona GCC driver](https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/umi-q-oss/drivers/clk/qcom/gcc-kona.c)
+  places its gate at GCC offset `0xb024`. The opt-in `venus=4` diagnostic
+  enables this gate while the MVS0C crystal path is running, then restores
+  its previous value. An inherited gate is left alone.
+- On physical thyme, the 90 s run with kernel `525fbc34b1f9` and root
+  `7d8ba86fdb50` measured the gate register at `0x80004220` before,
+  `0x4221` enabled, and `0x80004220` after restoration. It also
+  repeated the CDSP SMMU inspection and returned `1441823 0`
+  after CDSP shutdown and watchdog quiescence. Local evidence:
+  `logs/151239-run.log`, SHA-256
+  `41663f47e60ab99b76121f7b9905d927f8bdae9f93aea65d7c5b66143ed244e3`.
+  Host checks covered gate enable, timeout rollback, an inherited
+  vote, and the older mode. Interconnect traffic, PLL-backed clock
+  rates, Venus PAS execution and HFI codec work remain open.
+
 ## CDSP SMMU route survey
 
 - Thyme's Android DT assigns `cdsprpc-smd` stream `0x1001` with mask
