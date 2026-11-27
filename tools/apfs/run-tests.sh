@@ -17,7 +17,7 @@
 #
 # usage: tools/apfs/run-tests.sh [APFS-PARTITION-OR-DMG]
 
-set -u
+set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 IMAGE=${1:-${APFS_IMAGE:-}}
@@ -49,7 +49,8 @@ echo
 echo "== 1c. the C that reads file contents without the lock, on made-up runs (holes, ends inside blocks)"
 if cc -std=c11 -O2 -w -I"$HERE/host-shim" -c -o "$TMP/deflate.o" "$HDR_DIR/apfs_deflate.c" &&
 	cc -std=c11 -D_DEFAULT_SOURCE -O1 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
-	-I"$HDR_DIR" -o "$TMP/test_fetch" "$HERE/test_fetch.c" "$TMP/deflate.o" -lz -pthread; then
+	-I"$HDR_DIR" -o "$TMP/test_fetch" "$HERE/test_fetch.c" "$HDR_DIR/apfs_zbitmap.c" "$TMP/deflate.o" \
+	-lz -lcrypto -pthread; then
 	"$TMP/test_fetch" || fail=1
 else
 	echo "   would not build"

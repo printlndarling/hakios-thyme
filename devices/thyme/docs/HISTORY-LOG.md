@@ -1,5 +1,17 @@
 ## Chronological Verification Logs & Evidence
 
+## APFS and modem host regression checks (2026-11-27)
+
+- The APFS stream-fetch fixture now links the zbitmap decoder and
+  SHA-256 dependency. All nine fetch cases passed, and UDIF metadata
+  parsing passed with LZFSE installed. The selected APFS writer suite
+  passed 53 checks on local images, including write refusal and
+  simulated interrupted writes. The var-store suite passed nine tests.
+- Checked ASan/UBSan QMI suites against both the tracked shared source
+  and the thyme override. With ath11k tables, the suites passed 56,628
+  and 56,633 checks respectively. The separate NAS registration and
+  routing tests also passed. These are host checks.
+
 ## Timed daily RAM Boot with RAM-only diagnostics (2026-11-27)
 
 - The first attempt returned to Android after the loader rejected a

@@ -85,7 +85,7 @@ jobs:
           git -C /tmp/xnu apply --check "$PWD/xnu/hakios.patch"
       - name: APFS tools self-test
         run: |
-          [ -x tools/apfs/run-tests.sh ] && tools/apfs/run-tests.sh || echo "no self-test on this runner"
+          tools/apfs/run-tests.sh
       - name: SoC args generator reproduces the POCO X5 Pro values
         run: |
           sh tools/soc-args-test.sh
