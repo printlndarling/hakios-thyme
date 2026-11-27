@@ -1,5 +1,41 @@
 ## Chronological Verification Logs & Evidence
 
+## Stock CDSP process image and process-group calls
+
+- Stock Android mounts `dsp_a` read-only at `/vendor/dsp`. The
+  `cdsp=9` RAM test reads only the stock process shell through the UFS
+  driver. The reader follows the
+  [ext4 extent layout](https://www.kernel.org/doc/html/latest/filesystems/ext4/ifork.html)
+  and checks filesystem, block, directory-entry and file bounds.
+- On physical thyme with kernel `6498cc71a901`, the stock filesystem
+  used 4 KiB blocks and incompatibility flags `0x42`. The reader found
+  `cdsp/fastrpc_shell_3`, read all 896,132 bytes and verified the
+  ELF32 Hexagon header. The FNV-1a fingerprint was
+  `0x110c283af100c966`. The loader returned `1441823 0`. Local evidence:
+  `logs/154051-run.log`, SHA-256
+  `328336b818c05a25f600d453c06899832c0f348cffc806da9f8e184d06b6f577`.
+- The first `cdsp=10` attempt reused the stock
+  [INIT_CREATE method and heap sizing](https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/umi-q-oss/drivers/char/adsprpc.c).
+  The baseline capability RPC passed. INIT_CREATE reported an SMMU
+  permission fault `0x80000008` at `0x800dc080`, 128 bytes into
+  the process heap. The context restored and the kernel returned.
+  Local evidence: `logs/154531-run.log`, SHA-256
+  `d57985ad0a40a3e5d74240aa41a5d5d3f69d4d265654c9745da17ec38fd78ec6`.
+
+- The retest made only the dedicated process heap executable in the
+  DSP translation window. The arguments and image staging remained XN
+  and the window ended at the heap boundary. On kernel `7cb576d9ca1d`
+  and root `7d8ba86fdb50`, the DSP returned zero for user-PD
+  `INIT_CREATE` at context `0x201` and `INIT_RELEASE` at `0x301`.
+  Capability-query DMA still wrote all 255 words. On exit CB5/SMR6
+  restored with zero faults, the loader returned `1441823 0`, and
+  Android completed its boot. Local evidence: `logs/155033-run.log`,
+  SHA-256 `cd4a135f0054dc93f7317c212aeffccb87bc8a12f9de37e6412b23b136f11788`.
+- Host fixtures checked six ext4 images and a malformed superblock,
+  the FastRPC creation and release packets, and page-table bounds
+  and permissions across an L3 boundary. Loading and invoking a
+  workload module and integrating Core ML remain open.
+
 ## CDSP guest-session attach and release
 
 - With `cdsp=8`, thyme runs the capability query and then performs

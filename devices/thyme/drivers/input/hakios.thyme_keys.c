@@ -42,7 +42,8 @@ extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
 extern int hakios_thyme_cdsp_glink_step(unsigned, bool *, bool *) __attribute__((weak));
 extern void hakios_thyme_cdsp_smmu_inspect(void) __attribute__((weak));
-extern int hakios_thyme_cdsp_capability_probe(bool) __attribute__((weak));
+extern int hakios_thyme_cdsp_capability_probe(unsigned) __attribute__((weak));
+extern int hakios_thyme_cdsp_image_probe(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_dma_restore(void) __attribute__((weak));
 
 SYSCTL_DECL(_kern_hakios);
@@ -546,8 +547,12 @@ thyme_cdsp_glink_poll(void)
 				hakios_thyme_cdsp_smmu_inspect();
 			}
 			if (status == 1 && cdsp_glink_stage >= 7 && hakios_thyme_cdsp_capability_probe != NULL) {
-				int error = hakios_thyme_cdsp_capability_probe(cdsp_glink_stage == 8);
+				int error = hakios_thyme_cdsp_capability_probe(cdsp_glink_stage);
 				hakios_tl("UMI cdsp: FastRPC probe stage=%u result=%d\n", cdsp_glink_stage, error);
+			}
+			if (status == 1 && cdsp_glink_stage == 9 && hakios_thyme_cdsp_image_probe != NULL) {
+				int error = hakios_thyme_cdsp_image_probe();
+				hakios_tl("UMI cdsp: stock image probe result=%d\n", error);
 			}
 		} else if (cdsp_glink_stage >= 4 && negotiated && !opened) {
 			hakios_tl("UMI cdsp: FastRPC channel handshake %s\n", outcome);
@@ -2033,7 +2038,7 @@ thyme_venus_pil_boot(void)
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 8) {
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 10) {
 		if (c_en >= 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
 		    !hakios_thyme_cdsp_publish())) {
 			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");

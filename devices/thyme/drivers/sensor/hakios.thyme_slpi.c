@@ -8913,8 +8913,8 @@ out:
 	ml_io_unmap(smmu, size);
 }
 
-/* The one-shot CDSP call owns three 4 KiB translation tables and one
- * data page. Keep them wired through PAS shutdown, including on timeout.
+/* The CDSP probe owns its translation tables and argument/heap pages.
+ * Keep them wired through PAS shutdown, including on timeout.
  */
 #define CDSP_SMMU_PA 0x15000000u
 #define CDSP_SMMU_BYTES 0x100000u
@@ -9007,7 +9007,7 @@ hakios_thyme_cdsp_dma_restore(void)
  * and programming is under the same lock as the camera and Wi-Fi clients.
  */
 static bool
-cdsp_dma_attach(const uint64_t *pa)
+cdsp_dma_attach(uint64_t root_pa)
 {
 	vm_offset_t smmu = cdsp_dma.smmu;
 	uint32_t scr0 = rd(smmu), idr0 = rd(smmu + 0x20), idr1 = rd(smmu + 0x24);
@@ -9064,7 +9064,7 @@ cdsp_dma_attach(const uint64_t *pa)
 	cdsp_dma.context_saved = true;
 	settle();
 
-	uint64_t ttbr = pa[0] | ((uint64_t)bank << 48);
+	uint64_t ttbr = root_pa | ((uint64_t)bank << 48);
 	const uint32_t setup[] = {
 		0, 1u | 1u << 4 | 7u << 15, (uint32_t)ttbr, (uint32_t)(ttbr >> 32), 0, 0,
 		25u | 1u << 8 | 1u << 10 | 3u << 12 | 1u << 23, 0xf404ff44, 0
@@ -9179,13 +9179,14 @@ cdsp_rpc_reply(uint32_t tx_intent, uint32_t rx_intent, uint64_t expected_ctx, in
  * and the matching FastRPC reply have both arrived.
  */
 static int
-cdsp_rpc_call(uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_intent)
+cdsp_rpc_call(uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_intent,
+    uint32_t bytes, unsigned timeout_ms)
 {
 	struct {
 		uint32_t bytes, left;
 		struct fastrpc_msg msg;
 	} packet = { sizeof(struct fastrpc_msg), 0, { 0, 1, ctx, handle, scalars,
-	    CDSP_RPC_REMOTE_ADDR, CDSP_RPC_PAGE } };
+	    CDSP_RPC_REMOTE_ADDR, bytes } };
 	uint32_t tx_intent = cdsp_glink.remote_intent_id;
 	if (!cdsp_glink_send((struct glink_message){ GLINK_DATA, CDSP_FASTRPC_LOCAL_ID, tx_intent },
 	    (const char *)&packet, sizeof(packet))) {
@@ -9195,7 +9196,7 @@ cdsp_rpc_call(uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_inten
 	    handle, scalars, (unsigned long long)ctx, tx_intent);
 	int32_t result = 0;
 	bool sent = false, answered = false;
-	for (unsigned i = 0; i < 500; i++) {
+	for (unsigned i = 0; i < timeout_ms; i++) {
 		int reply = cdsp_rpc_reply(tx_intent, rx_intent, ctx, &result, &sent);
 		if (reply < 0) {
 			return EPROTO;
@@ -9256,7 +9257,7 @@ cdsp_rpc_guest_cycle(uint8_t *buf)
 				return EINVAL;
 			}
 			cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
-			error = cdsp_rpc_call(1, release ? 0x01010000 : 0x00010000, ctx, rx_intent);
+			error = cdsp_rpc_call(1, release ? 0x01010000 : 0x00010000, ctx, rx_intent, CDSP_RPC_PAGE, 500);
 		}
 		printf("UMI cdsp: guest client=%u %s cycle=%u result=%d\n",
 		    client, release ? "INIT_RELEASE" : "INIT_ATTACH", 1 + i / 2, error);
@@ -9267,62 +9268,150 @@ cdsp_rpc_guest_cycle(uint8_t *buf)
 	return 0;
 }
 
-int hakios_thyme_cdsp_capability_probe(bool guest_cycle);
-
-int
-hakios_thyme_cdsp_capability_probe(bool guest_cycle)
+static uint64_t
+cdsp_dma_pa(vm_offset_t va)
 {
-	if (cdsp_dma.memory || !cdsp_glink_intents_ready()) {
-		return EBUSY;
+	uint64_t pa = kvtophys(va);
+	return pa < (1ull << 40) && !(pa & (CDSP_RPC_PAGE - 1)) ? pa : 0;
+}
+
+static int
+cdsp_dma_window(uint32_t bytes, uint32_t executable_offset, uint8_t **data)
+{
+	unsigned pages = bytes / CDSP_RPC_PAGE;
+	unsigned leaves = (pages + 511) / 512;
+	vm_size_t tables = (2u + leaves) * CDSP_RPC_PAGE;
+	vm_size_t allocation = round_page(tables + bytes);
+	if (!pages || bytes % CDSP_RPC_PAGE || leaves > 6 ||
+	    executable_offset > bytes || executable_offset % CDSP_RPC_PAGE) {
+		return EINVAL;
 	}
-	if (kmem_alloc(kernel_map, &cdsp_dma.memory, 4 * CDSP_RPC_PAGE,
+	if (kmem_alloc(kernel_map, &cdsp_dma.memory, allocation,
 	    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
 		return ENOMEM;
 	}
-	uint64_t pa[4];
-	for (unsigned i = 0; i < 4; i++) {
-		pa[i] = kvtophys(cdsp_dma.memory + i * CDSP_RPC_PAGE);
-		if (pa[i] == 0 || pa[i] >= (1ull << 40) || (pa[i] & (CDSP_RPC_PAGE - 1))) {
+	uint64_t *l1 = (void *)cdsp_dma.memory;
+	uint64_t *l2 = (void *)(cdsp_dma.memory + CDSP_RPC_PAGE);
+	uint64_t root = cdsp_dma_pa((vm_offset_t)l1), next = cdsp_dma_pa((vm_offset_t)l2);
+	if (!root || !next) {
+		return EFAULT;
+	}
+	l1[CDSP_RPC_IOVA >> 30] = next | 3;
+	*data = (uint8_t *)(cdsp_dma.memory + tables);
+	for (unsigned i = 0; i < leaves; i++) {
+		uint64_t *l3 = (void *)(cdsp_dma.memory + (2u + i) * CDSP_RPC_PAGE);
+		uint64_t leaf = cdsp_dma_pa((vm_offset_t)l3);
+		if (!leaf) {
 			return EFAULT;
 		}
+		l2[i] = leaf | 3;
+		unsigned count = MIN(512u, pages - 512u * i);
+		for (unsigned j = 0; j < count; j++) {
+			uint32_t offset = (512u * i + j) * CDSP_RPC_PAGE;
+			uint64_t phys = cdsp_dma_pa((vm_offset_t)*data + offset);
+			if (!phys) {
+				return EFAULT;
+			}
+			/* Stock INIT_CREATE requests executable backing for the DSP
+			 * process heap. The IPC payload and image staging remain XN.
+			 */
+			uint64_t xn = offset < executable_offset ? (3ull << 53) : 0;
+			l3[j] = phys | 3ull | (1ull << 6) | (2ull << 8) | (1ull << 10) | (1ull << 11) | xn;
+		}
 	}
-	uint64_t *l1 = (uint64_t *)cdsp_dma.memory;
-	uint64_t *l2 = l1 + CDSP_RPC_PAGE / sizeof(*l1);
-	uint64_t *l3 = l2 + CDSP_RPC_PAGE / sizeof(*l2);
-	l1[CDSP_RPC_IOVA >> 30] = pa[1] | 3;
-	l2[0] = pa[2] | 3;
-	l3[0] = pa[3] | 3ull | (1ull << 6) | (2ull << 8) | (1ull << 10) | (1ull << 11) |
-	    (1ull << 53) | (1ull << 54);
-
-	uint8_t *buf = (uint8_t *)(l3 + CDSP_RPC_PAGE / sizeof(*l3));
-	uint32_t count = 255;
-	uint32_t lengths[] = { sizeof(count), count * sizeof(uint32_t) };
-	const void *sources[] = { &count, NULL };
-	uint32_t size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 2, lengths, sources);
-	if (size != CDSP_RPC_PAGE) {
-		return EINVAL;
-	}
-	struct fastrpc_remote_buf *args = (struct fastrpc_remote_buf *)buf;
-	uint32_t *output = (uint32_t *)(buf + (args[1].pv - CDSP_RPC_IOVA));
-	memset(output, 0xa5, lengths[1]);
-	cdsp_dma_flush(cdsp_dma.memory, 4 * CDSP_RPC_PAGE);
+	cdsp_dma_flush(cdsp_dma.memory, tables + bytes);
 
 	cdsp_dma.smmu = ml_io_map_unmappable(CDSP_SMMU_PA, CDSP_SMMU_BYTES, VM_WIMG_IO);
 	if (!cdsp_dma.smmu) {
 		return ENXIO;
 	}
 	lck_mtx_lock(&hakios_smmu_lock);
-	bool mapped = cdsp_dma_attach(pa);
+	bool mapped = cdsp_dma_attach(root);
 	if (!mapped) {
 		hakios_thyme_cdsp_dma_restore();
 	}
 	lck_mtx_unlock(&hakios_smmu_lock);
-	if (!mapped) {
-		return EIO;
+	return mapped ? 0 : EIO;
+}
+
+static int cdsp_ext_stock_shell(uint8_t **image, uint32_t *image_size);
+
+static int
+cdsp_rpc_create(uint8_t *buf, uint32_t args_size, const uint8_t *image, uint32_t length, uint32_t heap_size)
+{
+	static const char process[] = "hakios-cdsp";
+	const uint32_t client = 2;
+	const uint32_t init[] = { client, sizeof(process), length, 1, 0, 0 };
+	const struct fastrpc_phy_page heap = { CDSP_RPC_REMOTE_ADDR + args_size, heap_size };
+	const uint32_t lengths[] = { sizeof(init), sizeof(process), length, sizeof(heap) };
+	const void *sources[] = { init, process, image, &heap };
+	uint32_t size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 4, lengths, sources);
+	if (size > args_size) {
+		return EINVAL;
 	}
-	int error = cdsp_rpc_call(2, 0x00010100, CDSP_RPC_CTX, 1);
+	cdsp_dma_flush((vm_offset_t)buf, size);
+	int error = cdsp_rpc_new_intents(2);
+	if (error == 0) {
+		error = cdsp_rpc_call(1, 0x06040000, 0x201, 2, size, 5000);
+	}
+	printf("UMI cdsp: user client=%u INIT_CREATE shell=%u heap=%u result=%d\n", client, length, heap_size, error);
 	if (error) {
 		return error;
+	}
+
+	memset(buf, 0, CDSP_RPC_PAGE);
+	const uint32_t release_length = sizeof(client);
+	const void *release_arg = &client;
+	if (fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 1, &release_length, &release_arg) != CDSP_RPC_PAGE) {
+		return EINVAL;
+	}
+	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
+	error = cdsp_rpc_new_intents(3);
+	if (error == 0) {
+		error = cdsp_rpc_call(1, 0x01010000, 0x301, 3, CDSP_RPC_PAGE, 2000);
+	}
+	printf("UMI cdsp: user client=%u INIT_RELEASE result=%d\n", client, error);
+	return error;
+}
+
+int hakios_thyme_cdsp_capability_probe(unsigned stage);
+
+int
+hakios_thyme_cdsp_capability_probe(unsigned stage)
+{
+	if (cdsp_dma.memory || !cdsp_glink_intents_ready()) {
+		return EBUSY;
+	}
+	uint8_t *image = NULL, *buf;
+	uint32_t image_size = 0, args_size = CDSP_RPC_PAGE, heap_size = 0;
+	int error;
+	if (stage >= 10) {
+		error = cdsp_ext_stock_shell(&image, &image_size);
+		if (error) {
+			return error;
+		}
+		args_size = (image_size + 2 * CDSP_RPC_PAGE - 1) & ~(CDSP_RPC_PAGE - 1);
+		const uint32_t mib = 1024 * 1024;
+		heap_size = (MAX(3u * mib, 4u * image_size) + mib - 1) & ~(mib - 1);
+	}
+	error = cdsp_dma_window(args_size + heap_size, args_size, &buf);
+	if (error) {
+		goto out;
+	}
+	uint32_t count = 255;
+	uint32_t lengths[] = { sizeof(count), count * sizeof(uint32_t) };
+	const void *sources[] = { &count, NULL };
+	if (fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 2, lengths, sources) != CDSP_RPC_PAGE) {
+		error = EINVAL;
+		goto out;
+	}
+	struct fastrpc_remote_buf *args = (struct fastrpc_remote_buf *)buf;
+	uint32_t *output = (uint32_t *)(buf + (args[1].pv - CDSP_RPC_IOVA));
+	memset(output, 0xa5, lengths[1]);
+	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
+	error = cdsp_rpc_call(2, 0x00010100, CDSP_RPC_CTX, 1, CDSP_RPC_PAGE, 500);
+	if (error) {
+		goto out;
 	}
 	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
 	unsigned changed = 0;
@@ -9331,9 +9420,263 @@ hakios_thyme_cdsp_capability_probe(bool guest_cycle)
 	}
 	printf("UMI cdsp: FastRPC capability DMA wrote %u/%u words\n", changed, count);
 	if (changed != count) {
-		return EIO;
+		error = EIO;
+	} else if (stage == 8) {
+		error = cdsp_rpc_guest_cycle(buf);
+	} else if (stage >= 10) {
+		memset(buf, 0, args_size);
+		error = cdsp_rpc_create(buf, args_size, image, image_size, heap_size);
 	}
-	return guest_cycle ? cdsp_rpc_guest_cycle(buf) : 0;
+out:
+	if (image != NULL) {
+		kfree_data(image, image_size);
+	}
+	return error;
+}
+
+/* The stock CDSP userspace is in dsp_a, mounted read-only by Android
+ * as /vendor/dsp. Only extent-mapped directories and files are needed.
+ */
+struct cdsp_ext4 {
+	uint64_t size;
+	uint32_t blocks, block_size, inode_size, inodes_per_group, inode_count, desc_size;
+	uint8_t *scratch;
+};
+
+static uint32_t
+cdsp_ext32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static uint16_t
+cdsp_ext16(const uint8_t *p)
+{
+	return (uint16_t)(p[0] | (uint16_t)p[1] << 8);
+}
+
+static bool
+cdsp_ext_read(const struct cdsp_ext4 *fs, uint64_t off, void *dst, uint32_t len)
+{
+	return off <= fs->size && len <= fs->size - off &&
+	    hakios_ufs_read_partition("dsp_a", off, dst, len, NULL) == 0;
+}
+
+static bool
+cdsp_ext_mount(struct cdsp_ext4 *fs)
+{
+	uint8_t sb[352];
+	if (hakios_ufs_read_partition("dsp_a", 0, NULL, 0, &fs->size) ||
+	    !cdsp_ext_read(fs, 1024, sb, sizeof(sb)) || cdsp_ext16(sb + 56) != 0xef53) {
+		return false;
+	}
+	uint32_t log = cdsp_ext32(sb + 24), features = cdsp_ext32(sb + 96);
+	printf("UMI cdsp: dsp_a ext4 block_shift=%u incompat=%#x\n", log, features);
+	/* filetype, extents, 64bit, flex_bg, metadata checksum seed.
+	 * The partition is used as shipped, with no journal recovery.
+	 */
+	if (log > 2 || !(features & 0x40) || (features & ~0x22c2u) || cdsp_ext32(sb + 336)) {
+		return false;
+	}
+	fs->block_size = 1024u << log;
+	fs->blocks = cdsp_ext32(sb + 4);
+	fs->inode_count = cdsp_ext32(sb);
+	fs->inodes_per_group = cdsp_ext32(sb + 40);
+	fs->inode_size = cdsp_ext16(sb + 88);
+	fs->desc_size = (features & 0x80) ? cdsp_ext16(sb + 254) : 32;
+	if (!fs->blocks || !fs->inode_count || !fs->inodes_per_group || fs->inode_size < 128 ||
+	    fs->inode_size > fs->block_size || fs->block_size % fs->inode_size ||
+	    fs->desc_size < ((features & 0x80) ? 64u : 32u) || fs->desc_size > fs->block_size ||
+	    fs->block_size % fs->desc_size || cdsp_ext32(sb + 20) != (log == 0) ||
+	    (uint64_t)fs->blocks * fs->block_size > fs->size) {
+		return false;
+	}
+	fs->size = (uint64_t)fs->blocks * fs->block_size;
+	return true;
+}
+
+static bool
+cdsp_ext_inode(const struct cdsp_ext4 *fs, uint32_t ino, uint8_t *out)
+{
+	if (ino == 0 || ino > fs->inode_count) {
+		return false;
+	}
+	uint64_t group = (ino - 1) / fs->inodes_per_group;
+	uint64_t desc = (fs->block_size == 1024 ? 2048 : fs->block_size) + group * fs->desc_size;
+	uint8_t gd[64];
+	if (!cdsp_ext_read(fs, desc, gd, fs->desc_size >= 64 ? 64 : 32)) {
+		return false;
+	}
+	uint32_t table = cdsp_ext32(gd + 8);
+	if (!table || table >= fs->blocks || (fs->desc_size >= 64 && cdsp_ext32(gd + 40))) {
+		return false;
+	}
+	uint64_t offset = (uint64_t)table * fs->block_size +
+	    (uint64_t)((ino - 1) % fs->inodes_per_group) * fs->inode_size;
+	return cdsp_ext_read(fs, offset, out, 128);
+}
+
+static bool
+cdsp_ext_block(const struct cdsp_ext4 *fs, const uint8_t *inode, uint32_t logical, void *out)
+{
+	const uint8_t *node = inode + 40;
+	uint32_t bytes = 60;
+	unsigned depth = cdsp_ext16(node + 6);
+	if (!(cdsp_ext32(inode + 32) & 0x80000) || depth > 5) {
+		return false;
+	}
+	for (;;) {
+		unsigned count = cdsp_ext16(node + 2);
+		if (cdsp_ext16(node) != 0xf30a || cdsp_ext16(node + 6) != depth ||
+		    count == 0 || count > (bytes - 12) / 12) {
+			return false;
+		}
+		const uint8_t *entry = node + 12;
+		if (logical < cdsp_ext32(entry)) {
+			return false;
+		}
+		for (unsigned i = 1; i < count && cdsp_ext32(entry + 12) <= logical; i++) {
+			entry += 12;
+		}
+		uint32_t physical;
+		if (depth != 0) {
+			physical = cdsp_ext32(entry + 4);
+			if (cdsp_ext16(entry + 8) || physical == 0 || physical >= fs->blocks ||
+			    !cdsp_ext_read(fs, (uint64_t)physical * fs->block_size, fs->scratch, fs->block_size)) {
+				return false;
+			}
+			node = fs->scratch;
+			bytes = fs->block_size;
+			depth--;
+		} else {
+			physical = cdsp_ext32(entry + 8);
+			uint32_t delta = logical - cdsp_ext32(entry), len = cdsp_ext16(entry + 4);
+			if (cdsp_ext16(entry + 6) || !physical || physical >= fs->blocks ||
+			    len > 0x8000 || delta >= len || delta >= fs->blocks - physical) {
+				return false;
+			}
+			return cdsp_ext_read(fs, (uint64_t)(physical + delta) * fs->block_size, out, fs->block_size);
+		}
+	}
+}
+
+static uint32_t
+cdsp_ext_child(const struct cdsp_ext4 *fs, const uint8_t *inode, uint8_t *block, const char *name)
+{
+	uint32_t size = cdsp_ext32(inode + 4);
+	size_t len = name != NULL ? strlen(name) : 0;
+	if ((cdsp_ext16(inode) & 0xf000) != 0x4000 || size > 1024 * 1024 ||
+	    size % fs->block_size || cdsp_ext32(inode + 108)) {
+		return 0;
+	}
+	for (uint32_t i = 0; i < size / fs->block_size; i++) {
+		if (!cdsp_ext_block(fs, inode, i, block)) {
+			return 0;
+		}
+		for (uint32_t off = 0; off + 8 <= fs->block_size; ) {
+			const uint8_t *d = block + off;
+			uint32_t step = cdsp_ext16(d + 4), ino = cdsp_ext32(d);
+			if (step < 8 || (step & 3) || step > fs->block_size - off || d[6] > step - 8) {
+				return 0;
+			}
+			if (ino && name != NULL && d[6] == len && memcmp(d + 8, name, len) == 0) {
+				return ino;
+			}
+			if (ino && name == NULL && d[6] >= 13 && memcmp(d + 8, "fastrpc_shell", 13) == 0) {
+				printf("UMI cdsp: dsp_a/cdsp shell candidate %.*s\n", (int)d[6], d + 8);
+			}
+			off += step;
+		}
+	}
+	return 0;
+}
+
+static int
+cdsp_ext_stock_shell(uint8_t **image, uint32_t *image_size)
+{
+	uint8_t inode[128], *payload = NULL;
+	uint32_t size = 0;
+	uint8_t *bytes = kalloc_data(8192, Z_WAITOK);
+	if (!bytes) {
+		return ENOMEM;
+	}
+	struct cdsp_ext4 fs = { .scratch = bytes + 4096 };
+	int error = ENOENT;
+	if (!cdsp_ext_mount(&fs)) {
+		printf("UMI cdsp: dsp_a ext4 geometry unavailable or unsupported\n");
+		goto out;
+	}
+	uint32_t dir = 2;
+	if (cdsp_ext_inode(&fs, dir, inode)) {
+		dir = cdsp_ext_child(&fs, inode, bytes, "cdsp");
+	}
+	if (!cdsp_ext_inode(&fs, dir, inode)) {
+		printf("UMI cdsp: stock CDSP directory unavailable on dsp_a\n");
+		goto out;
+	}
+	const char *name = "fastrpc_shell_3";
+	uint32_t ino = cdsp_ext_child(&fs, inode, bytes, name);
+	if (!ino) {
+		printf("UMI cdsp: signed shell %s absent from dsp_a/cdsp\n", name);
+		(void)cdsp_ext_child(&fs, inode, bytes, NULL);
+		goto out;
+	}
+	if (!cdsp_ext_inode(&fs, ino, inode)) {
+		error = EIO;
+		goto out;
+	}
+	size = cdsp_ext32(inode + 4);
+	error = EINVAL;
+	if ((cdsp_ext16(inode) & 0xf000) != 0x8000 || cdsp_ext32(inode + 108) ||
+	    size < 52 || size > 2 * 1024 * 1024) {
+		goto out;
+	}
+	if (image != NULL) {
+		payload = kalloc_data(size, Z_WAITOK);
+		if (!payload) {
+			error = ENOMEM;
+			goto out;
+		}
+	}
+	uint64_t fnv = 0xcbf29ce484222325ull;
+	for (uint32_t off = 0; off < size; off += fs.block_size) {
+		if (!cdsp_ext_block(&fs, inode, off / fs.block_size, bytes)) {
+			error = EIO;
+			goto out;
+		}
+		if (off == 0 && (memcmp(bytes, "\177ELF\1\1\1", 7) || cdsp_ext16(bytes + 18) != 164)) {
+			goto out;
+		}
+		uint32_t count = MIN(fs.block_size, size - off);
+		if (payload != NULL) {
+			memcpy(payload + off, bytes, count);
+		}
+		for (uint32_t j = 0; j < count; j++) {
+			fnv = (fnv ^ bytes[j]) * 0x100000001b3ull;
+		}
+	}
+	printf("UMI cdsp: stock dsp_a/cdsp/%s read bytes=%u ELF32 Hexagon FNV64=%#llx\n",
+	    name, size, (unsigned long long)fnv);
+	error = 0;
+	if (image != NULL) {
+		*image = payload;
+		*image_size = size;
+		payload = NULL;
+	}
+out:
+	if (payload != NULL) {
+		kfree_data(payload, size);
+	}
+	kfree_data(bytes, 8192);
+	return error;
+}
+
+int hakios_thyme_cdsp_image_probe(void);
+
+int
+hakios_thyme_cdsp_image_probe(void)
+{
+	return cdsp_ext_stock_shell(NULL, NULL);
 }
 
 static vm_offset_t fastrpc_smmu_base;
