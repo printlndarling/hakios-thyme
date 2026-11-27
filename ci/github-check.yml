@@ -42,6 +42,10 @@ jobs:
           python3 tools/provenance-check.py
       - name: The provenance check itself: what it lets through and what it stops
         run: python3 tools/provenance-test.py
+      - name: Camera preview preserves chroma slice boundaries
+        run: |
+          cc -O2 -Wall -Wextra -Werror -Iuserland/src -o /tmp/hakios-camera-preview tools/camera-preview-test.c userland/src/camera_isp.c -lm
+          /tmp/hakios-camera-preview
       - name: A run sends only the soc_* values that differ from the kernel's defaults
         run: bash tools/soc-only-changes-test.sh
       - name: Configurations - defconfigs, fragments, the arguments made from them

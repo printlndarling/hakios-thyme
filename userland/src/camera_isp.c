@@ -767,7 +767,8 @@ nv12_pair(const uint8_t *rgb0, const uint8_t *rgb1, uint32_t width, uint8_t *y0,
 	 * the colour speckles from one sample to the next and the eye reads that as
 	 * noise before it reads the luma's own (the still and the preview both take it).
 	 */
-	for (uint32_t x = 2; x + 3 < 2 * width; x += 2) {
+	uint32_t uv_bytes = width + (width & 1u);
+	for (uint32_t x = 2; x + 3 < uv_bytes; x += 2) {
 		uv[x] = (uint8_t)((uv[x - 2] + 2 * uv[x] + uv[x + 2] + 2) >> 2);
 		uv[x + 1] = (uint8_t)((uv[x - 1] + 2 * uv[x + 1] + uv[x + 3] + 2) >> 2);
 	}
