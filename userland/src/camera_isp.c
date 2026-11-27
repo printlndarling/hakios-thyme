@@ -980,23 +980,20 @@ sharpen_rgb_row(uint8_t *row, uint32_t width, uint8_t *tmp, int strength, int co
 	}
 	strength = strength > 32 ? 32 : strength;
 	memcpy(tmp, row, 3 * (size_t)width);
-	for (uint32_t x = 1; x + 1 < width; x++) {
-		for (int c = 0; c < 3; c++) {
-			int mid = tmp[3 * x + c], left = tmp[3 * (x - 1) + c], right = tmp[3 * (x + 1) + c];
-			int d = mid - ((left + right + 1) >> 1);
+	/* The RGB bytes use the same filter independently, with adjacent pixels three bytes away. */
+	size_t end = 3 * (size_t)(width - 1);
 
-			if (d > coring) {
-				d -= coring;
-			} else if (d < -coring) {
-				d += coring;
-			} else {
-				continue;
-			}
-			d = d > 48 ? 48 : d < -48 ? -48 : d;
-			int v = mid + (d * strength) / 8;
+	for (size_t i = 3; i < end; i++) {
+		int mid = tmp[i], left = tmp[i - 3], right = tmp[i + 3];
+		int d = mid - ((left + right + 1) >> 1);
+		int positive = d > coring ? d - coring : 0;
+		int negative = d < -coring ? d + coring : 0;
 
-			row[3 * x + c] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
-		}
+		d = positive + negative;
+		d = d > 48 ? 48 : d < -48 ? -48 : d;
+		int v = mid + (d * strength) / 8;
+
+		row[i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
 	}
 }
 
