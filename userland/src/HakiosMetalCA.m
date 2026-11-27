@@ -3,7 +3,7 @@
  * at eb9fdf5), the one that serves CoreAnimation's window server, with what this tree adds for it: CoreAnimation's
  * shaders chosen by pipeline (hm_bitcode_for()), QuartzCore's pipeline library given a default.metallib, stand-ins for
  * functions the library lacks (hm_stand_ins), and the device shown to the window server alone (metal_all=1: all;
- * metal_apps=1: the applications under /var/containers/Bundle/Application only).
+ * metal_apps=1: installed applications and the optional Baidu Maps bundle).
  * Built instead of hakios-metal's plug-in with METAL_PLUGIN=ca (userland/build.sh); the library it needs comes from
  * tools/ca-metallib.py.
  */
@@ -2120,8 +2120,8 @@ hm_boot_arg_set(const char *what)
 	/* (hakios) the window server alone is shown the device: every other client of this image's Metal (SpringBoard
 	 * through SiriUICore, mediaserverd, ...) finds pipeline libraries made for Apple's GPUs with no default.metallib
 	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all;
-	 * metal_apps=1: applications only, the programs installed under /var/containers/Bundle/Application -- an app
-	 * that asks Metal for a device, as Carto's ANGLE does at eglInitialize(), and nothing of the system's own. */
+	 * metal_apps=1: applications installed in the data volume and the optional Baidu Maps bundle
+	 * the local image builder stages under /Applications. */
 	{
 		static int all = -1, apps = -1;
 		char args[1024] = "";
@@ -2147,9 +2147,12 @@ hm_boot_arg_set(const char *what)
 			if (strncmp(at, "/private", 8) == 0) {
 				at += 8;        /* dyld reports /private/var/... : /var is a link to /private/var */
 			}
-			application = application && strncmp(at, "/var/containers/Bundle/Application/", 35) == 0;
+			application = application &&
+			    (strncmp(at, "/var/containers/Bundle/Application/", 35) == 0 ||
+			    (strcmp(at, "/Applications/BaiduMap.app/IphoneCom") == 0 &&
+			    [[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.baidu.map"]));
 			if (!application && !window_server) {
-				HM_ONCE("%s (%s) is not an application: it keeps the road it has (metal_apps=1: /var/containers/Bundle/Application)\n",
+				HM_ONCE("%s (%s) is outside the Metal app scope (metal_apps=1)\n",
 				    name ? name : "?", path);
 				return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 			}

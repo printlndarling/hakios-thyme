@@ -87,3 +87,19 @@ a normal loader result, the kernel timer-expiry marker, and Android boot
 completion. A battery or thermal exit, a panic, or missing evidence fails the
 test. A completed timer is one uptime observation. Use the native app and
 long-term gates in the [checklist](../CHECKLIST.md) to record wider coverage.
+
+## Baidu Maps app Metal comparison
+
+For a system image that already contains the authorized `BAIDUMAP=1`
+bundle, build the comparison root on WSL2 with the CoreAnimation Metal
+plug-in, then run the staged-map scene.
+
+```sh
+SCENE=mapstaged METAL_PLUGIN=ca devices/thyme/build-root.sh
+SCENE=out/thyme-boot/root-mapstaged.apfs SOAK_METAL_APPS=1 SOAK_SECS=300 devices/thyme/soak.sh
+```
+
+The scene brings Baidu Maps to the foreground. Handle its first-launch
+choices on the phone. Compare visible map tiles and panning with the
+same build launched with `SOAK_METAL_APPS=0` and collect framebuffer
+captures after the dialogs are dismissed.
