@@ -65,10 +65,10 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
 | CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **PARTIAL** | XNU `machine_idle()` `WFI`/`WFE` active on all idle cores; display blanking (`DCS 0x51=0`) works (`logs/173008-run.log`); PSCI `CPU_SUSPEND` deep power collapse `TODO` |
 | GPU Dynamic Frequency Scaling (DVFS) | P1 | **PASS** | Adreno 650 GMU HFI runtime OPP switching (`305 / 441 / 587 MHz`, `31` live transitions in `logs/231618-run.log`), `kern.hakios.gpu_*` sysctls, nominal restore on exit |
-| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` (`0xaab0000`, `pas-id=9`) unimplemented; `modem_a` `clus=2` contains 514 VFAT LFN firmware files (`~2.B00..B07`, `logs/083127-run.log`); LFN `0x0f` decoder next to extract `venus.mdt`/`bXX` |
+| VPU Hardware Video Decode | P0 | **PARTIAL** | UFS `modem_a/image/venus.mdt` (`8220 B`, ELF `7f 45 4c 46 01 01 01 00`) & `venus.b00..` readable via `hakios_modem_fat_read()` (`logs/083725-run.log`); `pil-venus` (`pas-id=9`, `0x8ca00000`) TrustZone auth & HFI VPU decode `TODO` |
 | VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
-| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) in `modem_a` VFAT LFN (`514` files) + `dsp_a` ext4 verified (`magic=0xef53 blocks=16384`, `logs/083127-run.log`) |
+| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`, `modem_a/image/cdsp.mdt` `7660 B`, ELF `7f 45 4c 46 01 01 01 00` + `cdsp.b00..`, `logs/083725-run.log`) + `dsp_a` ext4 verified; TrustZone `pas-id=0x12` boot `TODO` |
 | NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
 | Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (`kern.hakios.qrng_ready=1`); `GCC_CE1` registers read safely (`cbcr=0x80004220/0/0x80000002/0x80000000`, `logs/083127-run.log`), `qcedev@1de0000` crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
@@ -134,6 +134,18 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 10 Autonomous Audit (2026-11-27, `logs/083725-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `b40358b23b80`, `result: returned 1437936 0`):
+
+- **VFAT LFN (`0x0f`) Firmware Loader Over `modem_a` (`venus.*` & `cdsp.*` Verified)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Added VFAT LFN decoder (`fat_lfn_feed()`, `fat_format_83()`) across sector/cluster boundaries inside `fat_find_image_dir()`, `hakios_modem_fat_read()`, and `thyme_modem_fat_scan()`.
+  - Decoded `UMI ufs_fw: root[0] 'image' attr=0x10 clus=2` and all `514` VFAT firmware files directly on-device without consuming 63 MiB RAM rootfs budget:
+    - `image/venus.mdt` (`8220 B`, `UMI ufs_fw: VENUS header (8220 B): 7f 45 4c 46 01 01 01 00`) + `venus.b00` (`692 B`), `venus.b01` (`7528 B`), `venus.b02..`
+    - `image/cdsp.mdt` (`7660 B`, `UMI ufs_fw: CDSP header (7660 B): 7f 45 4c 46 01 01 01 00`) + `cdsp.b00` (`468 B`)..`cdsp.b11` (`59156 B`)
+  - Exported `hakios_modem_fat_read(image_file, dst, max_len, out_len)` ready for TrustZone PIL authentication of `venus` (`pas-id=9`) and `cdsp` (`pas-id=0x12`), alongside `wdt=1` (`pets=16`, `UMI wdt: quiesced`).
+- **Artifacts**: `hakios-kernel` (`17,039,280 B`, sha256 `b40358b23b80958106b46a3a57b390df6062e1cba1ff1348e2608f462f0ddbec`), `userland/root.apfs` (`48,992,256 B`, sha256 `6393155cc2be9631641de8ec96657b232a117926121efd4ef70eee375ca74f99`; total `66,031,536 B < 66,060,288 B`), `logs/083725-run.log` (sha256 `95eea1d00bdadb8ba5370b828060ff2f45c69e2dcc66f57bfdf066e493894737`).
 
 ## Batch 9 Autonomous Audit (2026-11-27, `logs/083127-run.log`)
 

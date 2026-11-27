@@ -1040,14 +1040,71 @@ fat_eq_83_ci(const uint8_t d[11], const char want[11])
 }
 
 static bool
-fat_prefix_ci(const uint8_t *d, const char *pfx, unsigned n)
+fat_str_eq_ci(const char *a, const char *b)
 {
-	for (unsigned i = 0; i < n; i++) {
-		if (fat_up(d[i]) != fat_up((uint8_t)pfx[i])) {
+	while (*a && *b) {
+		if (fat_up((uint8_t)*a++) != fat_up((uint8_t)*b++)) {
+			return false;
+		}
+	}
+	return *a == 0 && *b == 0;
+}
+
+static bool
+fat_str_pfx_ci(const char *s, const char *pfx)
+{
+	while (*pfx) {
+		if (fat_up((uint8_t)*s++) != fat_up((uint8_t)*pfx++)) {
 			return false;
 		}
 	}
 	return true;
+}
+
+static bool
+fat_str_sfx_ci(const char *s, const char *sfx)
+{
+	size_t sl = strlen(s), xl = strlen(sfx);
+	return sl >= xl && fat_str_eq_ci(s + (sl - xl), sfx);
+}
+
+static void
+fat_lfn_feed(const uint8_t d[32], char lfn[160], bool *valid)
+{
+	static const uint8_t offs[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+	unsigned seq = d[0] & 0x1fu;
+
+	if ((d[0] & 0x40u) != 0) {
+		memset(lfn, 0, 160);
+		*valid = true;
+	}
+	if (!*valid || seq < 1u || seq > 12u) {
+		*valid = false;
+		return;
+	}
+	unsigned base = (seq - 1u) * 13u;
+	for (unsigned i = 0; i < 13u && base + i < 159u; i++) {
+		uint16_t ch = fat_u16(d + offs[i]);
+		if (ch == 0x0000u || ch == 0xffffu) {
+			break;
+		}
+		lfn[base + i] = (ch < 0x80u) ? (char)ch : '_';
+	}
+}
+
+static void
+fat_format_83(const uint8_t d[11], char out[16])
+{
+	unsigned p = 0, end8 = 8, end3 = 11;
+
+	while (end8 > 0 && d[end8 - 1] == ' ') end8--;
+	for (unsigned i = 0; i < end8; i++) out[p++] = (char)d[i];
+	while (end3 > 8 && d[end3 - 1] == ' ') end3--;
+	if (end3 > 8) {
+		out[p++] = '.';
+		for (unsigned i = 8; i < end3; i++) out[p++] = (char)d[i];
+	}
+	out[p] = 0;
 }
 
 struct fat_geom {
@@ -1139,30 +1196,15 @@ fat_clus_off(const struct fat_geom *g, uint32_t clus)
 	return sec * g->bps;
 }
 
-static void
-fat_name_to_83(const char *name, char out83[11])
-{
-	memset(out83, ' ', 11);
-	unsigned i = 0;
-	while (*name && *name != '.' && i < 8) {
-		out83[i++] = fat_up((uint8_t)*name++);
-	}
-	while (*name && *name != '.') name++;
-	if (*name == '.') {
-		name++;
-		i = 8;
-		while (*name && i < 11) {
-			out83[i++] = fat_up((uint8_t)*name++);
-		}
-	}
-}
-
 static bool
 fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out_clus, bool log_root)
 {
 	unsigned logged = 0;
 	uint32_t first_dir_clus = 0;
+	char lfn[160], sname[16];
+	bool lfn_valid = false;
 
+	lfn[0] = 0;
 	if (!g->is_fat32 && g->root_dir_secs > 0) {
 		uint64_t base = (uint64_t)(g->rsvd_sec + g->num_fats * g->fat_sz) * g->bps;
 		for (uint32_t s = 0; s < g->root_dir_secs; s++) {
@@ -1174,19 +1216,23 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 			}
 			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
 				const uint8_t *d = secbuf + o;
-				if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				if (d[0] == 0x00 || d[0] == 0xe5) { lfn_valid = false; continue; }
+				if ((d[11] & 0x3fu) == 0x0fu) { fat_lfn_feed(d, lfn, &lfn_valid); continue; }
+				fat_format_83(d, sname);
+				const char *fname = (lfn_valid && lfn[0] != 0) ? lfn : sname;
+				lfn_valid = false;
 				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 				uint32_t fsize = fat_u32(d + 28);
 				if (log_root && logged < 8u) {
-					hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
-					    logged, (const char *)d, d[11], fclus, fsize);
+					hakios_tl("UMI ufs_fw: root[%u] '%s' attr=%#x clus=%u size=%u\n",
+					    logged, fname, d[11], fclus, fsize);
 					logged++;
 				}
 				if ((d[11] & 0x10) != 0 && fclus >= 2u) {
 					if (first_dir_clus == 0) {
 						first_dir_clus = fclus;
 					}
-					if (fat_eq_83_ci(d, "IMAGE      ")) {
+					if (fat_str_eq_ci(fname, "image")) {
 						*out_clus = fclus;
 						return true;
 					}
@@ -1205,19 +1251,23 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 				}
 				for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
 					const uint8_t *d = secbuf + o;
-					if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+					if (d[0] == 0x00 || d[0] == 0xe5) { lfn_valid = false; continue; }
+					if ((d[11] & 0x3fu) == 0x0fu) { fat_lfn_feed(d, lfn, &lfn_valid); continue; }
+					fat_format_83(d, sname);
+					const char *fname = (lfn_valid && lfn[0] != 0) ? lfn : sname;
+					lfn_valid = false;
 					uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 					uint32_t fsize = fat_u32(d + 28);
 					if (log_root && logged < 8u) {
-						hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
-						    logged, (const char *)d, d[11], fclus, fsize);
+						hakios_tl("UMI ufs_fw: root[%u] '%s' attr=%#x clus=%u size=%u\n",
+						    logged, fname, d[11], fclus, fsize);
 						logged++;
 					}
 					if ((d[11] & 0x10) != 0 && fclus >= 2u) {
 						if (first_dir_clus == 0) {
 							first_dir_clus = fclus;
 						}
-						if (fat_eq_83_ci(d, "IMAGE      ")) {
+						if (fat_str_eq_ci(fname, "image")) {
 							*out_clus = fclus;
 							return true;
 						}
@@ -1232,6 +1282,7 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 	}
 	uint32_t sub_clus = first_dir_clus;
 	unsigned sub_logged = 0;
+	lfn_valid = false;
 	for (unsigned iter = 0; iter < 16u && sub_clus >= 2u && sub_clus < 0x0ffffff8u; iter++) {
 		uint64_t base = fat_clus_off(g, sub_clus);
 		for (uint32_t s = 0; s < g->spc; s++) {
@@ -1241,15 +1292,19 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 			}
 			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
 				const uint8_t *d = secbuf + o;
-				if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				if (d[0] == 0x00 || d[0] == 0xe5) { lfn_valid = false; continue; }
+				if ((d[11] & 0x3fu) == 0x0fu) { fat_lfn_feed(d, lfn, &lfn_valid); continue; }
+				fat_format_83(d, sname);
+				const char *fname = (lfn_valid && lfn[0] != 0) ? lfn : sname;
+				lfn_valid = false;
 				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 				uint32_t fsize = fat_u32(d + 28);
 				if (log_root && sub_logged < 8u) {
-					hakios_tl("UMI ufs_fw: sub[%u] '%.11s' attr=%#x clus=%u size=%u\n",
-					    sub_logged, (const char *)d, d[11], fclus, fsize);
+					hakios_tl("UMI ufs_fw: sub[%u] '%s' attr=%#x clus=%u size=%u\n",
+					    sub_logged, fname, d[11], fclus, fsize);
 					sub_logged++;
 				}
-				if ((d[11] & 0x10) != 0 && fclus >= 2u && fat_eq_83_ci(d, "IMAGE      ")) {
+				if ((d[11] & 0x10) != 0 && fclus >= 2u && fat_str_eq_ci(fname, "image")) {
 					*out_clus = fclus;
 					return true;
 				}
@@ -1266,12 +1321,13 @@ hakios_modem_fat_read(const char *image_file, uint8_t *dst, uint32_t max_len, ui
 {
 	struct fat_geom g;
 	uint32_t img_clus = 0;
-	char target83[11];
+	char lfn[160], sname[16];
+	bool lfn_valid = false;
 
+	lfn[0] = 0;
 	if (!fat_init_geom(&g, modem_fat_secbuf) || !fat_find_image_dir(&g, modem_fat_secbuf, &img_clus, false)) {
 		return ENOENT;
 	}
-	fat_name_to_83(image_file, target83);
 	uint32_t clus = img_clus, fclus = 0, fsize = 0;
 	bool found = false;
 	for (unsigned iter = 0; iter < 256u && clus >= 2u && clus < 0x0ffffff8u && !found; iter++) {
@@ -1282,9 +1338,14 @@ hakios_modem_fat_read(const char *image_file, uint8_t *dst, uint32_t max_len, ui
 			}
 			for (uint32_t o = 0; o + 32u <= g.bps; o += 32u) {
 				const uint8_t *d = modem_fat_secbuf + o;
-				if (d[0] == 0x00) break;
-				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f || (d[11] & 0x18) != 0) continue;
-				if (fat_eq_83_ci(d, target83)) {
+				if (d[0] == 0x00) { lfn_valid = false; break; }
+				if (d[0] == 0xe5) { lfn_valid = false; continue; }
+				if ((d[11] & 0x3fu) == 0x0fu) { fat_lfn_feed(d, lfn, &lfn_valid); continue; }
+				fat_format_83(d, sname);
+				const char *fname = (lfn_valid && lfn[0] != 0) ? lfn : sname;
+				lfn_valid = false;
+				if ((d[11] & 0x18) != 0) continue;
+				if (fat_str_eq_ci(fname, image_file)) {
 					fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 					fsize = fat_u32(d + 28);
 					found = true;
@@ -1323,7 +1384,10 @@ thyme_modem_fat_scan(void)
 {
 	struct fat_geom g;
 	uint32_t img_clus = 0;
+	char lfn[160], sname[16];
+	bool lfn_valid = false;
 
+	lfn[0] = 0;
 	if (!fat_init_geom(&g, modem_fat_secbuf)) {
 		hakios_tl("UMI ufs_fw: modem_a FAT init failed\n");
 		return;
@@ -1346,31 +1410,36 @@ thyme_modem_fat_scan(void)
 			}
 			for (uint32_t o = 0; o + 32u <= g.bps; o += 32u) {
 				const uint8_t *d = modem_fat_secbuf + o;
-				if (d[0] == 0x00) { done = true; break; }
-				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f || (d[11] & 0x18) != 0) continue;
+				if (d[0] == 0x00) { lfn_valid = false; done = true; break; }
+				if (d[0] == 0xe5) { lfn_valid = false; continue; }
+				if ((d[11] & 0x3fu) == 0x0fu) { fat_lfn_feed(d, lfn, &lfn_valid); continue; }
+				fat_format_83(d, sname);
+				const char *fname = (lfn_valid && lfn[0] != 0) ? lfn : sname;
+				lfn_valid = false;
+				if ((d[11] & 0x18) != 0) continue;
 				total++;
-				bool is_venus = fat_prefix_ci(d, "VENUS", 5u);
-				bool is_cdsp = fat_prefix_ci(d, "CDSP ", 5u);
+				bool is_venus = fat_str_pfx_ci(fname, "venus");
+				bool is_cdsp = fat_str_pfx_ci(fname, "cdsp");
 				if (is_venus || is_cdsp) {
 					uint32_t fsize = fat_u32(d + 28);
 					uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
-					if (logged < 16u) {
+					if (logged < 20u) {
 						logged++;
-						hakios_tl("UMI ufs_fw: image/%.8s.%.3s size=%u clus=%u\n",
-						    (const char *)d, (const char *)(d + 8), fsize, fclus);
+						hakios_tl("UMI ufs_fw: image/%s size=%u clus=%u\n",
+						    fname, fsize, fclus);
 					}
-					if (is_venus && (fat_prefix_ci(d + 8, "MDT", 3u) || fat_prefix_ci(d + 8, "MBN", 3u))) {
+					if (is_venus && (fat_str_sfx_ci(fname, ".mdt") || fat_str_sfx_ci(fname, ".mbn"))) {
 						venus_fw_size = (int)fsize;
 						venus_clus = fclus;
 					}
-					if (is_cdsp && (fat_prefix_ci(d + 8, "MDT", 3u) || fat_prefix_ci(d + 8, "MBN", 3u))) {
+					if (is_cdsp && (fat_str_sfx_ci(fname, ".mdt") || fat_str_sfx_ci(fname, ".mbn"))) {
 						cdsp_fw_size = (int)fsize;
 						cdsp_clus = fclus;
 					}
 				} else if (sample_logged < 8u) {
 					sample_logged++;
-					hakios_tl("UMI ufs_fw: sample[%u] %.8s.%.3s size=%u\n",
-					    sample_logged, (const char *)d, (const char *)(d + 8), fat_u32(d + 28));
+					hakios_tl("UMI ufs_fw: sample[%u] %s size=%u\n",
+					    sample_logged, fname, fat_u32(d + 28));
 				}
 			}
 		}
