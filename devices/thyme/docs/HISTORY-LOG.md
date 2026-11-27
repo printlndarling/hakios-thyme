@@ -1,5 +1,30 @@
 ## Chronological Verification Logs & Evidence
 
+## Protect the HFS data volume from raw archive writes (2026-11-27)
+
+- The raw `var_store` slots at block 2097152 overlap the HFS data
+  volume that begins at block 2042368. The kernel already excluded a
+  writable HFS mount in the same boot. The new archive claim also
+  reads the primary and alternate HFS volume signatures, so a boot
+  using the archive profile can detect volumes from previous boots.
+  A read error also denies the claim. A successful HFS mount skips
+  archive restore in init.
+- The host fixture exercised the two offsets, HFS Plus, HFSX, the
+  classic wrapper, absence of a signature, short geometry and either
+  header read failing. Clang ASan/UBSan and GCC passed. The archive
+  recovery self-test and nine reader tests passed. The arm64 thyme
+  kernel linked and the arm64 init and `var_store` binaries compiled.
+- In the default RAM profile, kernel `3245508f36da` and root
+  `203d32e585b7` reached SpringBoard with 38 init checks passing.
+  The archive watcher reported that persistence was disabled. Live
+  startup excerpt `out/thyme-boot/archive-guard.ND1xegMn/startup-evidence.log`,
+  SHA-256 `d2fc2408b229024643f9e8c7f05851e52ad7f2e18635abe12e28cbddbbf80e78`.
+  It returned on the 120 s timer, Android completed boot, and the
+  whole `logdump` partition SHA-256 matched before and after.
+  Final log `logs/soak.24Zb2ZML/kernel.log`, SHA-256
+  `b8520ed07861746ea2432b200c6081fe36801d5ca4dfb5a0c197cdbe7c09bfc8`.
+  The physical phone's writable persistence path was not exercised.
+
 ## Installation geometry and F2FS planner (2026-11-27)
 
 - Queried the attached thyme from Android using read-only operations.

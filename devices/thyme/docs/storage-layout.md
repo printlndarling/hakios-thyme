@@ -60,3 +60,16 @@ on -- a packed store and a writable HFS+ data volume. `tools/darwin-write.py` is
 writer of darwin from Android, with the GPT, by-name, bounds and read-back checks in its
 header. None of it has been exercised on thyme, and nothing here is a write plan: a write
 that changes darwin's contents needs the owner's explicit authorization.
+
+## Selecting a data format (2026-11-27)
+
+The HFS+ data volume starts at block 2042368 of `darwin` and covers the
+two raw `var_store` slots beginning at block 2097152. A device can use one
+of these data formats for this region. The kernel checks both HFS volume
+header locations before allowing a raw archive save or erase. Finding a
+header or failing to read it refuses the write claim. When init mounts
+persistent HFS+, it skips restoring a raw archive over that filesystem.
+
+The media checks and archive recovery fixtures passed on the host. The
+attached thyme has no `darwin`; a physical save, reboot and restore
+remain pending. See the [installation verification record](../../../docs/install-safe.md).
