@@ -1,5 +1,19 @@
 ## Chronological Verification Logs & Evidence
 
+## Wi-Fi shutdown during CDSP diagnostics
+
+- In `logs/113128-run.log`, the QMI driver event worker reached
+  `ath11k_core_pre_reconfigure_recovery` after radio teardown started.
+  Shutdown now sets ath11k's unregistering flag and drains queued QMI and
+  recovery work before dismantling the radios.
+- The 90 s `cdsp=4` retest with kernel `b2adc35dd11c` and root
+  `7d8ba86fdb50` completed the bidirectional FastRPC channel open and
+  shut down Wi-Fi and CDSP. The log still contains a WLAN mode-off
+  timeout. The watchdog quiesced, the loader reported `1441823 0`, and
+  the phone returned to Android. The previous panic did not recur.
+  Local evidence: `logs/143946-run.log`, SHA-256
+  `8ad4888b40c879a9c39b8e2693f9ace924d82e477f092eaff0d27cbf8822bd79`.
+
 ## CDSP GLINK transport
 
 - Thyme now allocates the AP-owned GLINK transmit ring in the CDSP-private

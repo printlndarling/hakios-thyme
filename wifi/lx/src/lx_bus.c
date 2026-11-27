@@ -939,6 +939,13 @@ lx_stop(void)
 		return;
 	}
 	driver = NULL;
+	/* Late QMI server-exit events are expected while we power the radio down.
+	 * Use ath11k's removal gate and drain work that could still use the radios. */
+	set_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags);
+	cancel_work_sync(&ab->qmi.event_work);
+	cancel_work_sync(&ab->reset_work);
+	cancel_work_sync(&ab->dump_work);
+	cancel_work_sync(&ab->restart_work);
 	lx_station_withdraw();
 	lx_station_leave();
 	ath11k_core_deinit(ab);
