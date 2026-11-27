@@ -1,5 +1,39 @@
 ## Chronological Verification Logs & Evidence
 
+## Reuse decoded Bayer rows during live camera preview (2026-11-28)
+
+- Each preview slice keeps the two decoded Bayer rows across adjacent
+  output rows and reuses lens shading gains until the source row changes.
+  The bilinear NV12 and BGRA paths use the same per-slice cache.
+- A single WSL host thread rendered the 1504×1128 rear NV12 fixture in
+  25.44 ms per frame, down from 30.35–30.71 ms. The front fixture took
+  24.54 ms, down from 27.28–27.29 ms. Eight cases per fixture covered
+  Bayer order, zoom, rotation, lens shading and both NV12 ranges. All
+  bytes matched the baseline. BGRA and eight-slice NV12 comparisons
+  also matched under ASan/UBSan, and the NV12 chroma boundary regression
+  passed. Local fixtures and output hashes are in
+  `out/thyme-boot/camera-rows.HBP7GjQm/`.
+- Built the arm64 media dylib and the standard wireless/full root scene
+  `d76a8d248df6`. The root passed component and guarded loader payload
+  checks. Both copies of the map-free system APFS kept hash
+  `83e304d77605`.
+- In a 165 s guarded RAM boot (kernel `faedd6175a35`, camera
+  switch root `89ec26da83ec`), all five rear/front sessions rendered.
+  Rear averages were 93.80, 79.28 and 81.95 ms of ISP work per frame
+  (146, 123 and 594 pictures). Front averages were 81.11 and 77.00 ms
+  (143 and 152 pictures). The previous samples were 104.40–122.46 ms
+  rear and 92.76–93.44 ms front. Thermal throttling was active during
+  the run. Each completed session reported zero pool misses, and the
+  stream guard samples showed no faults. These measurements cover ISP
+  work and require a separate manual check for perceived motion,
+  front softness, noise, colour blocks and flashes.
+- The timer returned to Android, which reported boot complete.
+  The whole `logdump` SHA-256 matched before and after. Final log
+  `logs/soak.NCgAMlT0/kernel.log`, SHA-256
+  `d12dda918119519b8e7a5f6ae568a4c5a74db28147a89b03cf3b11b15c0b10cd`.
+  Live log excerpts covering additional switch cycles are in
+  `out/thyme-boot/camera-rows.HBP7GjQm/camera-runtime-{current,late}.log`.
+
 ## NFC-A discovery and controller deactivation (2026-11-28)
 
 - Added `nfc_poll` over the existing NFC character device and a
