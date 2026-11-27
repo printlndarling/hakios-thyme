@@ -62,7 +62,7 @@ Status legend:
 | VPU Hardware Video Encode | P0 | ❌ | Depends on `pil-venus` HFI encode pipeline |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | 🚧 | SW 5×5 Malvar-He-Cutler + sharpen + AE/AF; HW IFE/IPE/HDR pending |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP` and `SLPI` operational; `cdsp=2` verified TZ startup, fresh SMP2P ready and clean shutdown |
-| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `cdsp=5` verifies GLINK negotiation, bidirectional FastRPC channel open and intent exchange. `cdsp=6` inventories the first non-secure SMMU route. DMA mapping, DSP invocation and the HVX/Core ML bridge remain. |
+| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `cdsp=7` verifies a firmware capability RPC and DMA writeback through a dedicated SMMU context. DSP compute sessions, HVX workloads and the Core ML bridge remain. |
 | Hardware Crypto & PRNG | P0 | 🚧 | `qrng@793000` TRNG -> `mc_prng` (`✅`); `GCC_CE1` read (`qcedev@1de0000` crypto pending) |
 | IOMMU / SMMU DMA Isolation | P0 | ✅ | Active SMMU contexts zero-fault across Wi-Fi, SDX55M, ADSP, GPU, SLPI |
 | Hardware Watchdog | P1 | ✅ | `wdt=1` APSS WDT (`0x17c10000`, 16 s/32 s) 4 s keepalive & panic-safe quiesce |

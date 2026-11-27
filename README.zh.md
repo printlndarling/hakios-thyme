@@ -25,7 +25,7 @@
 | 蓝牙（QCA6390） | **PASS** | 3 Mbaud H4、已实测正常连接蓝牙耳机（A2DP 音频播放）与其它手机配对、BlueTool 休眠 |
 | 电池与温控 | **PASS** | 电量读取、`bq25970` 与 `fsa4480` 10 s 遥测、USB 充电、温控限频与低电量保护正常 |
 | 传感器（SLPI） | **PASS** | LSM6DSO、50 Hz `mag_cal` 指南针、前 `TCS3701` + 后 `TSL2540` 光感、气压计、计步与朝向 |
-| CDSP / 红外 / RTC / WDT | **PASS** | `CDSP` TZ 鉴权启动、SMP2P 就绪、GLINK 协商、FastRPC 缓冲区声明交换及关闭、`/dev/hakios-ir`（38 kHz NEC）、SPMI RTC 校时、TRNG、APSS 硬件看门狗 |
+| CDSP / 红外 / RTC / WDT | **PASS** | `CDSP` TZ 鉴权启动、SMP2P 就绪、GLINK 协商、FastRPC DSP 能力查询及关闭、`/dev/hakios-ir`（38 kHz NEC）、SPMI RTC 校时、TRNG、APSS 硬件看门狗 |
 | NFC 与视频 VPU | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 握手就绪；Venus 固件准备与 MVS0C 核心时钟和 AXI0 门控可逆启停已验证，VPU 硬解待通 |
 | 中文界面与日常应用 | **PASS** | 开机默认简体中文界面、苹方字体、拼音输入法与预装百度地图 |
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |

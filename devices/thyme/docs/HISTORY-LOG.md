@@ -1,5 +1,34 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP FastRPC capability query
+
+- The opt-in `cdsp=7` path uses the established GLINK edge to query the
+  DSP utilities handle. It installs a stage-1 mapping for one 4 KiB
+  argument page, using the non-secure `0x1001/0x460` route and the stock
+  session selector. The match and translation registers must read back
+  before transmission. The call uses the layout of the
+  [Linux FastRPC capability query](https://raw.githubusercontent.com/torvalds/linux/master/drivers/misc/fastrpc.c).
+- The first 90 s attempt with kernel `3f9b2169cf70` sent the request,
+  then stopped on a firmware `DONE_REUSE` notification even though
+  reuse was negotiated off. Shutdown separately panicked because the
+  SMMU restore log used a mutex with preemption disabled. The current
+  parser consumes that notification for the pending intent without
+  reusing it. Shutdown uses loader logging and a bounded spin, and
+  restores the saved context after PAS shutdown. First attempt:
+  `logs/152134-run.log`, SHA-256
+  `bf3daaf5c99ff402e5264e0ac95b33382f910c45c8585f7f3e9ba70918cb0e8d`.
+- The 90 s retest with kernel `753ffc6392fc` and root `7d8ba86fdb50`
+  attached CB5/SMR6, matched reply context `0x100` with return code 0,
+  and observed the DSP overwrite all 255 sentinel-filled output words.
+  PAS shutdown succeeded, the saved match and context read back, and
+  the context reported no fault. The watchdog quiesced and the loader
+  returned `1441823 0`. Local evidence: `logs/152613-run.log`, SHA-256
+  `1fb356a4de2fce5aaf6c3efa2789dd32b9d03d977f179639835d2689907bcff4`.
+- Host checks exercised reply wrapping, incomplete frames, invalid
+  context/channel/intent combinations, masked SMMU conflicts, rejected
+  register writes, and sync timeout rollback. A DSP compute process,
+  execution of an HVX workload, and Core ML integration remain open.
+
 ## Venus AXI0 gate
 
 - The stock Android `qcom,vidc@aa00000` node lists `gcc_video_axi0`

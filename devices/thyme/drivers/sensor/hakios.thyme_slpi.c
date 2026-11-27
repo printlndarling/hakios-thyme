@@ -92,6 +92,7 @@ static bool leaving;                    /* on the way back to the loader after a
  * with slpi=1 only the few that say how it went (tell()), the rest to the kernel's own log.
  */
 extern void loader_log_putc(char c);
+extern void hakios_tl(const char *, ...) __printflike(1, 2);
 
 static LCK_MTX_DECLARE(say_lock, &slpi_lock_group);
 static bool quiet;
@@ -2354,7 +2355,7 @@ static struct {
 	bool fastrpc_sent, fastrpc_ack;
 	bool intent_offered, intent_requested;
 	uint16_t fastrpc_remote_id;
-	uint32_t remote_intent_size;
+	uint32_t remote_intent_size, remote_intent_id;
 } cdsp_glink;
 
 static int
@@ -2528,7 +2529,10 @@ cdsp_glink_intents(struct glink_message message, uint32_t tail, uint32_t waiting
 			largest_id = pair[1];
 		}
 	}
-	cdsp_glink.remote_intent_size = MAX(cdsp_glink.remote_intent_size, largest);
+	if (largest > cdsp_glink.remote_intent_size) {
+		cdsp_glink.remote_intent_size = largest;
+		cdsp_glink.remote_intent_id = largest_id;
+	}
 	printf("UMI cdsp: GLINK FastRPC remote intents=%u largest=%u id=%u\n", message.param2, largest, largest_id);
 	return bytes;
 }
@@ -8907,6 +8911,357 @@ hakios_thyme_cdsp_smmu_inspect(void)
 out:
 	lck_mtx_unlock(&hakios_smmu_lock);
 	ml_io_unmap(smmu, size);
+}
+
+/* The one-shot CDSP call owns three 4 KiB translation tables and one
+ * data page. Keep them wired through PAS shutdown, including on timeout.
+ */
+#define CDSP_SMMU_PA 0x15000000u
+#define CDSP_SMMU_BYTES 0x100000u
+#define CDSP_RPC_SID 0x1001u
+#define CDSP_RPC_SID_MASK 0x460u
+#define CDSP_RPC_IOVA 0x80000000ull
+#define CDSP_RPC_REMOTE_ADDR (CDSP_RPC_IOVA | (1ull << 32))
+#define CDSP_RPC_CTX 0x100ull
+#define CDSP_RPC_PAGE 4096u
+#define CDSP_RPC_FSR 0xc00001feu
+
+static const uint32_t cdsp_cb_offsets[] = { 0, 0x10, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x38, 0x3c };
+static struct {
+	vm_offset_t memory, smmu, cb, cbar, cba2r, smr, s2cr;
+	uint32_t bank, slot, old_smr, old_s2cr, old_cbar, old_cba2r;
+	uint32_t saved[sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0])];
+	bool context_saved, route_touched;
+} cdsp_dma;
+
+static void
+cdsp_dma_flush(vm_offset_t start, size_t size)
+{
+	for (vm_offset_t p = start; p < start + size; p += 64) {
+		__asm__ volatile("dc civac, %0" :: "r"(p) : "memory");
+	}
+	settle();
+}
+
+static bool
+cdsp_dma_sync(void)
+{
+	wr(cdsp_dma.cb + 0x610, cdsp_dma.bank);
+	wr(cdsp_dma.cb + 0x7f0, 0);
+	settle();
+	uint64_t deadline = now_us() + 1000;
+	do {
+		if (!(rd(cdsp_dma.cb + 0x7f4) & 1u)) {
+			return true;
+		}
+	} while (now_us() < deadline);
+	return false;
+}
+
+/* Called after the loader has stopped the peer CPUs. Do not take their lock. */
+void hakios_thyme_cdsp_dma_restore(void);
+
+void
+hakios_thyme_cdsp_dma_restore(void)
+{
+	if (!cdsp_dma.context_saved) {
+		return;
+	}
+	uint32_t fault = rd(cdsp_dma.cb + 0x58) & CDSP_RPC_FSR;
+	if (fault) {
+		hakios_tl("UMI cdsp: SMMU fault=%#x FAR=%#x:%08x syndrome=%#x\n", fault,
+		    rd(cdsp_dma.cb + 0x64), rd(cdsp_dma.cb + 0x60), rd(cdsp_dma.cb + 0x68));
+	}
+	if (cdsp_dma.route_touched) {
+		wr(cdsp_dma.smr, cdsp_dma.old_smr);
+		settle();
+		wr(cdsp_dma.s2cr, cdsp_dma.old_s2cr);
+	}
+	wr(cdsp_dma.cb, 0);
+	settle();
+	if (!cdsp_dma_sync()) {
+		hakios_tl("UMI cdsp: SMMU teardown sync timed out; context remains disabled\n");
+		return;
+	}
+	if (fault) {
+		wr(cdsp_dma.cb + 0x58, fault);
+	}
+	for (unsigned i = 1; i < sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0]); i++) {
+		wr(cdsp_dma.cb + cdsp_cb_offsets[i], cdsp_dma.saved[i]);
+	}
+	wr(cdsp_dma.cbar, cdsp_dma.old_cbar);
+	wr(cdsp_dma.cba2r, cdsp_dma.old_cba2r);
+	wr(cdsp_dma.cb, cdsp_dma.saved[0]);
+	settle();
+	bool restored = rd(cdsp_dma.smr) == cdsp_dma.old_smr && rd(cdsp_dma.s2cr) == cdsp_dma.old_s2cr &&
+	    rd(cdsp_dma.cbar) == cdsp_dma.old_cbar && rd(cdsp_dma.cba2r) == cdsp_dma.old_cba2r;
+	for (unsigned i = 0; i < sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0]); i++) {
+		restored &= rd(cdsp_dma.cb + cdsp_cb_offsets[i]) == cdsp_dma.saved[i];
+	}
+	cdsp_dma.context_saved = false;
+	hakios_tl("UMI cdsp: restored SMMU CB%u SMR%u readback=%d fault=%#x\n",
+	    cdsp_dma.bank, cdsp_dma.slot, restored, fault);
+}
+
+/* Legacy stream-match mode is the mode observed on thyme. All selection
+ * and programming is under the same lock as the camera and Wi-Fi clients.
+ */
+static bool
+cdsp_dma_attach(const uint64_t *pa)
+{
+	vm_offset_t smmu = cdsp_dma.smmu;
+	uint32_t scr0 = rd(smmu), idr0 = rd(smmu + 0x20), idr1 = rd(smmu + 0x24);
+	unsigned matches = idr0 & 0xff, contexts = idr1 & 0xff, bank = (idr1 >> 16) & 0xff;
+	unsigned pages = 2u << ((idr1 >> 28) & 7);
+	if ((scr0 & 0x409) != 0x400 || (idr0 & 0x48000000) != 0x48000000 ||
+	    (idr1 >> 31) || pages != 128 || contexts > pages || bank >= contexts) {
+		return false;
+	}
+
+	bool occupied[256] = { false };
+	unsigned slot = matches;
+	for (unsigned i = 0; i < matches; i++) {
+		uint32_t smr = rd(smmu + 0x800 + 4 * i), s2cr = rd(smmu + 0xc00 + 4 * i);
+		if (!(smr >> 31)) {
+			if (slot == matches) {
+				slot = i;
+			}
+			continue;
+		}
+		if ((((smr & 0x7fff) ^ CDSP_RPC_SID) & ~((smr >> 16 & 0x7fff) | CDSP_RPC_SID_MASK)) == 0) {
+			return false;
+		}
+		occupied[s2cr & 0xff] = true;
+	}
+	if (slot == matches) {
+		return false;
+	}
+	vm_offset_t cb = 0;
+	for (; bank < contexts; bank++) {
+		cb = smmu + (pages + bank) * CDSP_RPC_PAGE;
+		if (!occupied[bank] && !(rd(cb) & 1) && !(rd(cb + 0x58) & CDSP_RPC_FSR)) {
+			break;
+		}
+	}
+	if (bank == contexts) {
+		return false;
+	}
+
+	cdsp_dma.cb = cb;
+	cdsp_dma.bank = bank;
+	cdsp_dma.slot = slot;
+	cdsp_dma.cbar = smmu + CDSP_RPC_PAGE + bank * 4;
+	cdsp_dma.cba2r = cdsp_dma.cbar + 0x800;
+	cdsp_dma.smr = smmu + 0x800 + 4 * slot;
+	cdsp_dma.s2cr = smmu + 0xc00 + 4 * slot;
+	cdsp_dma.old_cbar = rd(cdsp_dma.cbar);
+	cdsp_dma.old_cba2r = rd(cdsp_dma.cba2r);
+	cdsp_dma.old_smr = rd(cdsp_dma.smr);
+	cdsp_dma.old_s2cr = rd(cdsp_dma.s2cr);
+	for (unsigned i = 0; i < sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0]); i++) {
+		cdsp_dma.saved[i] = rd(cb + cdsp_cb_offsets[i]);
+	}
+	cdsp_dma.context_saved = true;
+	settle();
+
+	uint64_t ttbr = pa[0] | ((uint64_t)bank << 48);
+	const uint32_t setup[] = {
+		0, 1u | 1u << 4 | 7u << 15, (uint32_t)ttbr, (uint32_t)(ttbr >> 32), 0, 0,
+		25u | 1u << 8 | 1u << 10 | 3u << 12 | 1u << 23, 0xf404ff44, 0
+	};
+	wr(cdsp_dma.cba2r, 1);
+	wr(cdsp_dma.cbar, 1u << 16 | 3u << 8 | 15u << 12);
+	for (unsigned i = 0; i < sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0]); i++) {
+		wr(cb + cdsp_cb_offsets[i], setup[i]);
+	}
+	settle();
+	if ((rd(cdsp_dma.cbar) & 0x30000) != (1u << 16) || !(rd(cdsp_dma.cba2r) & 1)) {
+		return false;
+	}
+	for (unsigned i = 1; i < sizeof(cdsp_cb_offsets) / sizeof(cdsp_cb_offsets[0]); i++) {
+		uint32_t mask = i == 1 ? 0x38017 : ~0u;
+		if ((rd(cb + cdsp_cb_offsets[i]) & mask) != setup[i]) {
+			return false;
+		}
+	}
+	if (!cdsp_dma_sync()) {
+		return false;
+	}
+	wr(cb, 1u | 1u << 1 | 1u << 2 | 1u << 5 | 1u << 8 | 1u << 12);
+	settle();
+	if (!(rd(cb) & 1)) {
+		return false;
+	}
+	uint32_t match = 1u << 31 | CDSP_RPC_SID_MASK << 16 | CDSP_RPC_SID;
+	cdsp_dma.route_touched = true;
+	settle();
+	wr(cdsp_dma.s2cr, bank | (3u << 8));
+	settle();
+	wr(cdsp_dma.smr, match);
+	settle();
+	uint32_t actual = rd(cdsp_dma.smr), route = rd(cdsp_dma.s2cr);
+	printf("UMI cdsp: SMMU CB%u SMR%u match wanted=%#x actual=%#x route=%#x\n",
+	    bank, slot, match, actual, route);
+	return actual == match && (route & 0x300ff) == bank;
+}
+
+static int
+cdsp_rpc_reply(uint32_t tx_intent, int32_t *result)
+{
+	uint32_t descriptor = cdsp_glink.descriptor;
+	uint32_t head = smem_word(descriptor + GLINK_THEIR_HEAD);
+	uint32_t tail = smem_word(descriptor + GLINK_THEIR_TAIL);
+	if (!cdsp_glink_index_ok(head) || !cdsp_glink_index_ok(tail)) {
+		return -1;
+	}
+	unsigned span = (head + CDSP_GLINK_QUEUE_SIZE - tail) % CDSP_GLINK_QUEUE_SIZE;
+	if (span == 0) {
+		return 0;
+	}
+	settle();
+	struct glink_message msg;
+	if (!smem_peek(cdsp_glink.rx + tail, &msg, sizeof(msg))) {
+		return -1;
+	}
+	int used = sizeof(msg), reply = 0;
+	if (msg.command == GLINK_DATA && msg.param1 == cdsp_glink.fastrpc_remote_id && msg.param2 == 1) {
+		uint32_t sizes[2];
+		if (span < used + sizeof(sizes)) {
+			return 0;
+		}
+		uint32_t at = (tail + used) % CDSP_GLINK_QUEUE_SIZE;
+		if (!smem_peek(cdsp_glink.rx + at, sizes, sizeof(sizes)) || sizes[1] != 0 ||
+		    sizes[0] < 12 || sizes[0] > CDSP_FASTRPC_INTENT_SIZE) {
+			return -1;
+		}
+		used += sizeof(sizes);
+		unsigned padded = (sizes[0] + 7) & ~7u;
+		if (span < used + padded) {
+			return 0;
+		}
+		uint32_t words[3];
+		for (unsigned i = 0; i < 3; i++) {
+			at = (tail + used + 4 * i) % CDSP_GLINK_QUEUE_SIZE;
+			words[i] = smem_word(cdsp_glink.rx + at);
+		}
+		used += padded;
+		uint64_t ctx = words[0] | ((uint64_t)words[1] << 32);
+		*result = (int32_t)words[2];
+		printf("UMI cdsp: FastRPC response ctx=%#llx retval=%d bytes=%u\n", (unsigned long long)ctx, *result, sizes[0]);
+		if (!cdsp_glink_send((struct glink_message){ GLINK_DONE, CDSP_FASTRPC_LOCAL_ID, 1 }, NULL, 0)) {
+			return -1;
+		}
+		reply = ctx == CDSP_RPC_CTX ? 1 : -1;
+	} else if (msg.param1 == cdsp_glink.fastrpc_remote_id && msg.command == GLINK_INTENT) {
+		used = cdsp_glink_intents(msg, tail, span);
+	} else if (msg.param1 == cdsp_glink.fastrpc_remote_id &&
+	    (msg.command == GLINK_DONE || msg.command == GLINK_DONE_REUSE) &&
+	    msg.param2 == tx_intent) {
+		/* Some firmware sends DONE_REUSE even with reuse negotiated off.
+		 * Both completions release this one-shot transfer; never reuse its intent.
+		 */
+	} else if (msg.param1 != cdsp_glink.fastrpc_remote_id ||
+	    (msg.command != GLINK_INTENT_REQUEST_ACK && msg.command != GLINK_SIGNALS)) {
+		printf("UMI cdsp: FastRPC unexpected GLINK cmd=%u channel=%u arg=%#x\n", msg.command, msg.param1, msg.param2);
+		return -1;
+	}
+	if (used <= 0) {
+		return used;
+	}
+	settle();
+	smem_poke(descriptor + GLINK_THEIR_TAIL, (tail + used) % CDSP_GLINK_QUEUE_SIZE);
+	return reply;
+}
+
+int hakios_thyme_cdsp_capability_probe(void);
+
+int
+hakios_thyme_cdsp_capability_probe(void)
+{
+	if (cdsp_dma.memory || !cdsp_glink_intents_ready()) {
+		return EBUSY;
+	}
+	if (kmem_alloc(kernel_map, &cdsp_dma.memory, 4 * CDSP_RPC_PAGE,
+	    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+		return ENOMEM;
+	}
+	uint64_t pa[4];
+	for (unsigned i = 0; i < 4; i++) {
+		pa[i] = kvtophys(cdsp_dma.memory + i * CDSP_RPC_PAGE);
+		if (pa[i] == 0 || pa[i] >= (1ull << 40) || (pa[i] & (CDSP_RPC_PAGE - 1))) {
+			return EFAULT;
+		}
+	}
+	uint64_t *l1 = (uint64_t *)cdsp_dma.memory;
+	uint64_t *l2 = l1 + CDSP_RPC_PAGE / sizeof(*l1);
+	uint64_t *l3 = l2 + CDSP_RPC_PAGE / sizeof(*l2);
+	l1[CDSP_RPC_IOVA >> 30] = pa[1] | 3;
+	l2[0] = pa[2] | 3;
+	l3[0] = pa[3] | 3ull | (1ull << 6) | (2ull << 8) | (1ull << 10) | (1ull << 11) |
+	    (1ull << 53) | (1ull << 54);
+
+	uint8_t *buf = (uint8_t *)(l3 + CDSP_RPC_PAGE / sizeof(*l3));
+	uint32_t count = 255;
+	uint32_t lengths[] = { sizeof(count), count * sizeof(uint32_t) };
+	const void *sources[] = { &count, NULL };
+	uint32_t size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 2, lengths, sources);
+	if (size != CDSP_RPC_PAGE) {
+		return EINVAL;
+	}
+	struct fastrpc_remote_buf *args = (struct fastrpc_remote_buf *)buf;
+	uint32_t *output = (uint32_t *)(buf + (args[1].pv - CDSP_RPC_IOVA));
+	memset(output, 0xa5, lengths[1]);
+	cdsp_dma_flush(cdsp_dma.memory, 4 * CDSP_RPC_PAGE);
+
+	cdsp_dma.smmu = ml_io_map_unmappable(CDSP_SMMU_PA, CDSP_SMMU_BYTES, VM_WIMG_IO);
+	if (!cdsp_dma.smmu) {
+		return ENXIO;
+	}
+	lck_mtx_lock(&hakios_smmu_lock);
+	bool mapped = cdsp_dma_attach(pa);
+	if (!mapped) {
+		hakios_thyme_cdsp_dma_restore();
+	}
+	lck_mtx_unlock(&hakios_smmu_lock);
+	if (!mapped) {
+		return EIO;
+	}
+	struct {
+		uint32_t bytes, left;
+		struct fastrpc_msg msg;
+	} packet = { sizeof(struct fastrpc_msg), 0, { 0, 1, CDSP_RPC_CTX, 2, 0x00010100,
+	    CDSP_RPC_REMOTE_ADDR, CDSP_RPC_PAGE } };
+	uint32_t tx_intent = cdsp_glink.remote_intent_id;
+	if (!cdsp_glink_send((struct glink_message){ GLINK_DATA, CDSP_FASTRPC_LOCAL_ID, tx_intent },
+	    (const char *)&packet, sizeof(packet))) {
+		return EIO;
+	}
+	printf("UMI cdsp: sent FastRPC capability query ctx=%#llx intent=%u\n",
+	    CDSP_RPC_CTX, tx_intent);
+	int32_t result = 0;
+	for (unsigned i = 0; i < 500; i++) {
+		int reply = cdsp_rpc_reply(tx_intent, &result);
+		if (reply < 0) {
+			return EPROTO;
+		}
+		if (reply == 1) {
+			if (result != 0) {
+				return EIO;
+			}
+			cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
+			unsigned changed = 0;
+			for (unsigned n = 0; n < count; n++) {
+				changed += output[n] != 0xa5a5a5a5u;
+			}
+			printf("UMI cdsp: FastRPC capability DMA wrote %u/%u words\n", changed, count);
+			return changed == count ? 0 : EIO;
+		}
+		if (rd(cdsp_dma.cb + 0x58) & CDSP_RPC_FSR) {
+			return EFAULT;
+		}
+		sleep_ms(1);
+	}
+	return ETIMEDOUT;
 }
 
 static vm_offset_t fastrpc_smmu_base;
