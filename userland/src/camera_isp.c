@@ -643,6 +643,7 @@ struct preview_column {
 
 struct preview_crop {
 	uint32_t x, y, width, height;
+	uint32_t first_cell, cell_count;
 	bool bilinear;
 };
 
@@ -651,7 +652,7 @@ static struct preview_crop
 prepare_preview(const struct isp *isp, const struct hakios_camera_frame *f, uint32_t width, uint32_t height,
     struct preview_column *columns)
 {
-	struct preview_crop area;
+	struct preview_crop area = { .cell_count = 1 };
 
 	crop(isp, f, width, height, &area.x, &area.y, &area.width, &area.height);
 	area.bilinear = area.width <= width * 2 && area.height <= height * 2;
@@ -665,14 +666,51 @@ prepare_preview(const struct isp *isp, const struct hakios_camera_frame *f, uint
 			left = left > last ? last : left;
 			columns[x] = (struct preview_column){ left, fx < (float)left ? 0 : fx - left };
 		}
+		uint32_t right = columns[width - 1].left;
+
+		right = right < last ? right + 1 : right;
+		area.first_cell = columns[0].left;
+		area.cell_count = right - area.first_cell + 1;
 	}
 	return area;
+}
+
+typedef uint16_t bayer_cell[4];
+
+struct preview_cache {
+	bayer_cell *cells[2];
+	float (*gains)[3];
+	uint32_t cell_rows[2], gain_row;
+};
+
+/* A Bayer row can be used by several output rows, and also by the next Bayer pair. */
+static const bayer_cell *
+preview_cells(struct preview_cache *cache, const struct hakios_camera_frame *f, const uint8_t *raw,
+    const struct preview_crop *area, uint32_t row)
+{
+	unsigned bank = row & 1u;
+	bayer_cell *samples = cache->cells[bank];
+
+	if (cache->cell_rows[bank] != row) {
+		const uint8_t *top = raw + (size_t)row * 2 * f->stride;
+
+		for (uint32_t x = 0; x < area->cell_count; x++) {
+			int values[4];
+
+			cell(top, f->stride, area->first_cell + x, values);
+			for (unsigned at = 0; at < 4; at++) {
+				samples[x][at] = (uint16_t)values[at];
+			}
+		}
+		cache->cell_rows[bank] = row;
+	}
+	return samples;
 }
 
 /* one line of the picture as 8-bit R, G, B */
 static void
 render_line(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, const struct preview_crop *area,
-    const struct preview_column *columns, uint32_t width, uint32_t height, uint32_t row, uint8_t *rgb)
+    const struct preview_column *columns, struct preview_cache *cache, uint32_t width, uint32_t height, uint32_t row, uint8_t *rgb)
 {
 	uint32_t cells_w = f->width / 2, cells_h = f->height / 2;
 	int r, b;
@@ -696,31 +734,28 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 		cy1 = cy0 + 1 > cells_h - 1 ? cells_h - 1 : cy0 + 1;
 		ty = fy < (float)cy0 ? 0 : fy - cy0;
 		v_at = cells_h > 1 ? (float)cy0 / (cells_h - 1) : 0;
-		const uint8_t *t0 = raw + (size_t)cy0 * 2 * f->stride, *t1 = raw + (size_t)cy1 * 2 * f->stride;
-		float gains[3] = { 1, 1, 1 };
-		uint32_t cached_left = UINT32_MAX, cached_right = UINT32_MAX;
-		int samples[4][4];
+		const bayer_cell *top = preview_cells(cache, f, raw, area, cy0);
+		const bayer_cell *bottom = preview_cells(cache, f, raw, area, cy1);
+		static const float no_shading[3] = { 1, 1, 1 };
 
+		if (isp->lsc.on && cache->gain_row != cy0) {
+			for (uint32_t x = 0; x < area->cell_count; x++) {
+				float u = cells_w > 1 ? (float)(area->first_cell + x) / (cells_w - 1) : 0;
+
+				lsc_at(isp, u, v_at, cache->gains[x]);
+			}
+			cache->gain_row = cy0;
+		}
 		for (uint32_t x = 0; x < width; x++) {
 			uint32_t cx0 = columns[x].left, cx1 = cx0 + 1 < cells_w ? cx0 + 1 : cx0;
+			cx0 -= area->first_cell;
+			cx1 -= area->first_cell;
 			float tx = columns[x].fraction, c[3] = { 0, 0, 0 };
+			const float *gains = isp->lsc.on ? cache->gains[cx0] : no_shading;
+			const uint16_t *samples[] = { top[cx0], top[cx1], bottom[cx0], bottom[cx1] };
 
-			/* An enlarged preview reuses the same Bayer cells and lens gain across adjacent pixels. */
-			if (cx0 != cached_left) {
-				cell(t0, f->stride, cx0, samples[0]);
-				cell(t1, f->stride, cx0, samples[2]);
-				if (isp->lsc.on) {
-					lsc_at(isp, cells_w > 1 ? (float)cx0 / (cells_w - 1) : 0, v_at, gains);
-				}
-				cached_left = cx0;
-			}
-			if (cx1 != cached_right) {
-				cell(t0, f->stride, cx1, samples[1]);
-				cell(t1, f->stride, cx1, samples[3]);
-				cached_right = cx1;
-			}
 			for (int k = 0; k < 4; k++) {
-				const int *v = samples[k];
+				const uint16_t *v = samples[k];
 				float w = (k & 1 ? tx : 1 - tx) * (k & 2 ? ty : 1 - ty);
 
 				c[0] += w * v[r];
@@ -820,6 +855,9 @@ isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	}
 	struct preview_column columns[width];
 	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
+	bayer_cell cells[2][area.cell_count];
+	float gains[isp->lsc.on ? area.cell_count : 1][3];
+	struct preview_cache cache = { { cells[0], cells[1] }, gains, { UINT32_MAX, UINT32_MAX }, UINT32_MAX };
 
 	if (f->gain >= 24 * unity) {
 		lift = lift > 4 ? 4 : lift;
@@ -828,8 +866,8 @@ isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	for (uint32_t row = first_row & ~1u; row < end_row && row < height; row += 2) {
 		bool second = row + 1 < height;
 
-		render_line(isp, f, raw, &area, columns, width, height, row, line[0]);
-		render_line(isp, f, raw, &area, columns, width, height, second ? row + 1 : row, line[1]);
+		render_line(isp, f, raw, &area, columns, &cache, width, height, row, line[0]);
+		render_line(isp, f, raw, &area, columns, &cache, width, height, second ? row + 1 : row, line[1]);
 		if (lift > 0) {
 			sharpen_rgb_row(line[0], width, lift_row, lift, coring);
 			sharpen_rgb_row(line[1], width, lift_row, lift, coring);
@@ -850,11 +888,14 @@ isp_render_bgra(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	}
 	struct preview_column columns[width];
 	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
+	bayer_cell cells[2][area.cell_count];
+	float gains[isp->lsc.on ? area.cell_count : 1][3];
+	struct preview_cache cache = { { cells[0], cells[1] }, gains, { UINT32_MAX, UINT32_MAX }, UINT32_MAX };
 
 	for (uint32_t row = first_row; row < end_row && row < height; row++) {
 		uint8_t *o = out + (size_t)row * stride;
 
-		render_line(isp, f, raw, &area, columns, width, height, row, line);
+		render_line(isp, f, raw, &area, columns, &cache, width, height, row, line);
 		for (uint32_t x = 0; x < width; x++) {
 			o[4 * x] = line[3 * x + 2];
 			o[4 * x + 1] = line[3 * x + 1];
