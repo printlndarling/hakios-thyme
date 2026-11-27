@@ -38,7 +38,7 @@ Status legend:
 | Front & Rear Ambient Light | `TCS3701` (under-OLED) & `TSL2540` (rear) | P1 | ✅ | Both streaming over SLPI QRTR -> `backboardd` HID |
 | Proximity (Ultrasonic) | ADSP `Xiaomi Proximity` | P1 | ❌ | Uses ADSP ultrasonic (not SLPI IR); unintegrated |
 | Hall Sensor | `hall_key` (`TLMM SOUTH GPIO14`) | P2 | ❌ | RAZ/XPU-guarded at `0x0f50e000`; polling disabled |
-| NFC Controller | `qcom,nq-nci` (`0x28` QUP1 `gpio4/5`) | P1 | 🚧 | `/dev/hakios-nfc` NCI 2.0 `CORE_RESET`/`CORE_INIT` HW handshake working; CoreNFC daemon pending |
+| NFC Controller | `qcom,nq-nci` (`0x28` QUP1 `gpio4/5`) | P1 | 🚧 | `/dev/hakios-nfc` NCI 2.0 initialization and NFC-A polling start/stop verified with [the RAM scene](docs/ram-boot.md#nfc-a-passive-polling). Physical tag activation, NDEF and CoreNFC remain open. |
 | IR Blaster | `ir-spi@0` (`gpio116`) | P2 | ✅ | `/dev/hakios-ir` 38 kHz NEC TX ready |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` | P1 | ❌ | GPIOs surveyed (`10/23/24`); SPI/BiometricKit HAL pending |
 | USB Charging & Fuel Gauge | `PM8150B` + gauge | P0 | ✅ | Live mV/mA/`%`, USB charging, `battery_stop` guard |

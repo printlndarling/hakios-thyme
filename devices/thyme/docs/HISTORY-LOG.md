@@ -1,5 +1,35 @@
 ## Chronological Verification Logs & Evidence
 
+## NFC-A discovery and controller deactivation (2026-11-28)
+
+- Added `nfc_poll` over the existing NFC character device and a
+  dedicated RAM scene. It uses passive NFC-A discovery and reports
+  only the interface, protocol and mode of RF notifications.
+  Command layout follows the
+  [AOSP NCI message definitions](https://android.googlesource.com/platform/system/nfc/+/885fe09be81cb7a23f3b33bd5b6422662168ced6/src/include/nci_defs.h).
+- On kernel `faedd6175a35` and root `0bc4f058709f`, the device
+  accepted CORE_RESET, CORE_INIT, RF_DISCOVER_MAP and RF_DISCOVER.
+  No target notification was observed. The initial RF_DEACTIVATE
+  write returned EIO. The 120 s timer returned to Android and
+  the whole `logdump` SHA-256 matched the pre-test value.
+  Log `logs/soak.FPMIuMgU/kernel.log`, SHA-256
+  `d4f4835a9a45e29fae5747a36e1f3125d38e0946d1164064f87cc561bf0414a5`.
+- Based on the [NXP NCI I2C driver](https://android.googlesource.com/kernel/common/+/ecff1109d781e1ef07f5b63658ce9429a0948f07/drivers/nfc/nxp-nci/i2c.c),
+  the scanner retries one failed write after 110 ms. Production
+  code replay under ASan/UBSan covered successful polling, a rejected
+  discover response, a truncated notification and a transient
+  deactivation write failure. The arm64 binary built and the
+  canonical build packaged it in the explicit polling scene.
+- The second 120 s run, root `3f021357f44b`, received successful
+  responses to RF_DISCOVER and RF_DEACTIVATE. The session reported
+  zero target notifications. The live excerpt is
+  `out/thyme-boot/nfc-poll.pO1bpcxa/retry-nci.log`, SHA-256
+  `77a4544c51824d50d3779e71f81dfb7d92039a8208625847e26791091c5240be`.
+  Android completed boot after the timer and `logdump` matched
+  the pre-test hash. Final log `logs/soak.ijBFOPDj/kernel.log`,
+  SHA-256 `93d4ac6b4a31386bf9dc258d18b3b12dd177299df724702f2b74e5e05c7ef5cf`.
+  A physical tag and the native CoreNFC path remain unverified.
+
 ## Preserve WDS client subscription selection (2026-11-28)
 
 - The CommCenter bridge injected a primary-subscription bind after

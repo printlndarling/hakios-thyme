@@ -88,6 +88,23 @@ completion. A battery or thermal exit, a panic, or missing evidence fails the
 test. A completed timer is one uptime observation. Use the native app and
 long-term gates in the [checklist](../CHECKLIST.md) to record wider coverage.
 
+## NFC-A passive polling
+
+Build the dedicated polling scene on WSL2 and run it with the normal
+battery, thermal and timer guards.
+
+```sh
+SCENE=nfcpoll METAL_PLUGIN=ca devices/thyme/build-root.sh
+SCENE=out/thyme-boot/root-nfcpoll.apfs SOAK_UIM_READONLY=1 SOAK_SECS=120 devices/thyme/soak.sh
+```
+
+The scene opens `/dev/hakios-nfc`, initializes NCI 2.0, runs one bounded
+passive NFC-A poll, then requests idle deactivation. It reports command
+results and any discovered technology or protocol. If a known test tag
+is available, present it near the rear NFC antenna during the polling
+window. The scene leaves tag identifiers and contents out of the log.
+The daily scene leaves this test opt-in.
+
 ## Dual-SIM inventory
 
 With two active SIMs, `SOAK_UIM_READONLY=1` observes the modem's UIM

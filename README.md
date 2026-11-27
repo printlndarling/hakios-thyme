@@ -26,7 +26,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Battery & Thermal | **PASS** | Fuel gauge, `bq25970` & `fsa4480` 10 s I2C telemetry, USB charging, thermal cap & `battery_stop` guard |
 | Sensors (SLPI) | **PASS** | LSM6DSO, `mag_cal` 50 Hz AK0991x compass, front `TCS3701` + rear `TSL2540` ALS, `BMP285` baro, pedometer, orient |
 | Hexagon CDSP / IR / RTC / WDT | **PASS** | `CDSP` TrustZone boot/shutdown, SMP2P ready, GLINK negotiation, a FastRPC capability query, guest-session attach/release, and stock compute-process create/release, an in-process ASID query and reverse-listener registration, `/dev/hakios-ir` (38 kHz NEC), SPMI RTC Unix sync, TRNG, active APSS WDT |
-| NFC (`nq-nci`) & VPU (`venus`) | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 handshake ready; Venus firmware preparation and reversible MVS0C core and AXI0 gate enable verified; hardware decode pending |
+| NFC (`nq-nci`) & VPU (`venus`) | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 starts and stops NFC-A polling on thyme. Actual tags and CoreNFC remain under test. Venus firmware preparation and reversible MVS0C core and AXI0 gate enable verified; hardware decode pending |
 | Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts and Pinyin keyboard |
 | Baidu Maps compatibility | **PARTIAL** | Roads and labels verified with [app-only Metal](devices/thyme/docs/ram-boot.md#app-only-metal). Install the app separately to test compatibility. |
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
