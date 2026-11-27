@@ -34,7 +34,11 @@ struct payload_entry { char name[16]; uint32_t size; uint32_t reserved; };
 #define RESIDENT_RD_RESERVE 0x30000000ULL         /* RAM that must remain for the kernel itself */
 #define PAGE_SIZE_MAX       0x4000ULL
 
+#ifdef LOADER_THYME
+#define LOG_POLICY          "hakios-thyme-ram-only-logs-v1"
+#else
 #define LOG_PARTITION       u"logdump"
+#endif
 #define CHECKPOINT_SELFTEST 999
 #define PANIC_LOG_SIZE      0x80000u
 #define NVRAM_BANK_SIZE     0x2000u
@@ -286,8 +290,9 @@ clean_dcache(uint64_t start, uint64_t end)
 }
 
 /* ------------------------------------------------------------------------ */
-/* Log persistence: raw write to a GPT partition (phone only)               */
+/* Run logs for USB retrieval                                               */
 
+#ifndef LOADER_THYME
 static efi_block_io *
 find_log_partition(void)
 {
@@ -324,22 +329,25 @@ find_log_partition(void)
 	return NULL;
 }
 
+#endif
+
 /*
  * The "staged" buffer holds the loader log followed by the kernel log of the
- * last run. It is what gets written to the log partition and what the host
- * fetches over USB (fastboot get_staged).
+ * last run. The host fetches it over USB (fastboot get_staged).
  */
 /* aligned for any firmware's block I/O: U-Boot's wants a buffer aligned to the block size (media->io_align) */
 static char out_buf[2 * 1024 * 1024] __attribute__((aligned(0x2000)));
 /* the storage's reads for the kernel land here (block_poll), and nothing else may be put in it */
 #define BLOCK_BUFFER_SIZE  (4u << 20)
 static uint8_t block_buffer[BLOCK_BUFFER_SIZE] __attribute__((aligned(0x2000)));
+#ifndef LOADER_THYME
 /*
  * Where the log is read back to compare it (write_logs). Not block_buffer: that is the kernel's
  * mailbox buffer, and a read-back landing in it while the kernel runs on the other core would
  * overwrite data the kernel is still copying out of it.
  */
 static uint8_t log_verify[sizeof(out_buf) + 8192] __attribute__((aligned(0x2000)));
+#endif
 static const char *staged_data = out_buf;   /* what "upload" sends: normally the log in out_buf */
 static uint64_t staged_len;
 
@@ -367,16 +375,18 @@ compose_logs(const char *klog, uint64_t klog_len)
 }
 
 static int hc_list_is_uefis(void);
+#ifndef LOADER_THYME
 static int hc_log_skips;                /* logs not written this run (said twice at most) */
+#endif
 static void hc_print_state(const char *when);
 static void hc_take_back(const char *when);
 
 static void
 write_logs(const char *klog, uint64_t klog_len)
 {
-	efi_block_io *bio = find_log_partition();
-
 	compose_logs(klog, klog_len);
+#ifndef LOADER_THYME
+	efi_block_io *bio = find_log_partition();
 	if (bio == NULL) {
 		/* No log partition (QEMU): echo the returned kernel log on the console instead. */
 		if (klog != NULL) {
@@ -420,6 +430,7 @@ write_logs(const char *klog, uint64_t klog_len)
 	print("log: %d bytes written to logdump (%x), read back %s (%x)\n", len, ws,
 	    EFI_ERROR(ws) ? "not tried" : same ? "the same" : "DIFFERENT", rs);
 	compose_logs(klog, klog_len);
+#endif
 }
 
 static void
@@ -2083,7 +2094,9 @@ block_start(void)
 		print("ufs: the kernel's own transfer list is not offered: the controller is not as UEFI keeps it\n");
 	}
 	hc_refused_reads = 0;
+#ifndef LOADER_THYME
 	hc_log_skips = 0;
+#endif
 	/* per run, like the two above: this loader stays resident across runs, and a tally carried
 	 * over from the run before is read as this one's */
 	block_writes = block_writes_refused = block_write_bytes = 0;
@@ -4556,6 +4569,9 @@ efi_main(efi_handle image, efi_system_table *st)
 	}
 #endif
 	print("platform %s\n", PLAT->name);
+#ifdef LOADER_THYME
+	print("%s\n", LOG_POLICY);
+#endif
 
 	install_exception_hook();
 	wdt_arm();

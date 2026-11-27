@@ -7,6 +7,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +29,8 @@ FILES = {
 PLATFORMS = {"Windows": "windows", "Linux": "linux", "Darwin": "darwin"}
 BOOT_ARGS_LIMIT = 607
 PAYLOAD_LIMIT = 66_060_288
+THYME_FD_SIZE = 0x300000
+RAM_LOG_POLICY = b"hakios-thyme-ram-only-logs-v1\0"
 
 
 def download(url):
@@ -90,6 +94,58 @@ def local_bundle(directory):
                          "\nSupply a prepared bundle with --bundle-dir or a trusted HTTPS --bundle-url. "
                          "See the README for how to build the private images.")
     return files
+
+
+def check_loader(path):
+    """Require a thyme USB loader that keeps diagnostics in RAM."""
+    failure = "Rebuild xnu-usb.img with the current devices/thyme/build-loader.sh for RAM-only logs"
+    with path.open("rb") as source:
+        header = source.read(44)
+        if len(header) != 44 or header[:8] != b"ANDROID!":
+            raise ValueError(failure)
+        size = struct.unpack_from("<I", header, 8)[0]
+        page, version = struct.unpack_from("<II", header, 36)
+        if version != 1 or page not in (2048, 4096, 16384) or not 0 < size <= 8 << 20:
+            raise ValueError(failure)
+        source.seek(page)
+        compressed = source.read(size)
+    if len(compressed) != size:
+        raise ValueError(failure)
+
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    blob = inflater.decompress(compressed, 8 << 20)
+    if not inflater.eof or blob[56:60] != b"ARM\x64":
+        raise ValueError(failure)
+    start = blob.find(b"XNUP", THYME_FD_SIZE, THYME_FD_SIZE + 4096)
+    if start < 0 or len(blob) - start < 8:
+        raise ValueError(failure)
+    end = start + 8 + struct.unpack_from("<I", blob, start + 4)[0]
+    if end > len(blob) or len(blob) - end >= 16 or any(blob[end:]):
+        raise ValueError(failure)
+
+    at = start + 8
+    loader = None
+    usb = False
+    while at + 24 <= end:
+        name, length, reserved = struct.unpack_from("<16sII", blob, at)
+        at += 24
+        if not any(name):
+            if (at == end and not length and not reserved and usb and loader is not None
+                    and loader.startswith(b"MZ") and RAM_LOG_POLICY in loader):
+                return
+            break
+        data_end = at + length
+        next_entry = at + ((length + 15) & ~15)
+        if next_entry > end or reserved:
+            break
+        if name.rstrip(b"\0") == b"loader.efi":
+            if loader is not None:
+                break
+            loader = blob[at:data_end]
+        if name.rstrip(b"\0") == b"usb":
+            usb = blob[at:data_end] == b"1\0"
+        at = next_entry
+    raise ValueError(failure)
 
 
 def platform_tools():
@@ -232,20 +288,33 @@ def main():
     bundle = parser.add_mutually_exclusive_group()
     bundle.add_argument("--bundle-dir", type=Path, help="directory holding the four image files")
     bundle.add_argument("--bundle-url", help="trusted HTTPS manifest for first-run image download")
-    parser.add_argument("--check", action="store_true", help="prepare and validate the payload without USB")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="prepare and validate the payload without USB")
+    mode.add_argument("--preflight", action="store_true", help="check Android and print the USB serial without booting")
+    mode.add_argument("--check-loader", type=Path, help="verify a thyme USB loader keeps its logs in RAM")
     args = parser.parse_args()
     url = args.bundle_url
     if url is None and args.bundle_dir is None:
         url = os.environ.get("HAKIOS_THYME_BUNDLE_URL")
 
     try:
+        if args.preflight:
+            adb = shutil.which("adb")
+            if adb is None:
+                raise ValueError("Put Android Platform-Tools adb on PATH")
+            print(preflight(adb))
+            return
+        if args.check_loader:
+            check_loader(args.check_loader)
+            return
         files = bundle_from_url(url) if url else local_bundle(args.bundle_dir)
+        check_loader(files["xnu-usb.img"])
         with tempfile.TemporaryDirectory() as folder:
             payload = Path(folder) / "run-payload.bin"
             build_payload(files, payload)
             if not args.check:
                 ram_boot(*platform_tools(), files, payload)
-    except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile, KeyboardInterrupt) as error:
+    except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile, zlib.error, KeyboardInterrupt) as error:
         parser.exit(1, f"RAM boot: {error or 'interrupted'}\n")
 
 
