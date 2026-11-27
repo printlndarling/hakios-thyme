@@ -5,22 +5,9 @@ English · [中文](README.zh.md) · [Українська](README.uk.md)
 **Device fork of [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel) for the Xiaomi Mi 10S (`thyme`, Snapdragon 870 / SM8250-AC).**
 Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM without modifying Android or user partitions, keeping verified `thyme` hardware drivers alongside selectively merged upstream improvements.
 
-> Every `PASS` below is verified on a physical Xiaomi Mi 10S. Full test logs, build hashes, and technical notes live in [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
-
-## Target Hardware
-
-| Component | Specification |
-|---|---|
-| SoC / GPU | Qualcomm Snapdragon 870 (`SM8250-AC`) · Adreno 650 |
-| Modem / GNSS | External Qualcomm Snapdragon X55 (`SDX55M`) over PCIe2 / MHI |
-| Display / Touch | 6.67" 1080 × 2340 90 Hz AMOLED · FocalTech FTS521 |
-| Wireless | Qualcomm QCA6390 (Wi-Fi 6 + Bluetooth 5.1) |
-| Audio / Haptics | Dual Cirrus Logic CS35L41 stereo amps · AW8697 LRA |
-| Cameras | Rear 108 MP Samsung S5KHMX + AK7377 VCM AF · Front 20 MP S5K3T2 |
+> Every `PASS` below is verified on a physical Xiaomi Mi 10S. Full checklist lives in [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
 
 ## Hardware & Feature Status
-
-> Full Mi 10S (`thyme`) silicon inventory audit (including SoC VPU/idle/crypto, NFC, IR, FOD, aux cameras, wired/wireless fast charging, USB gadget/OTG, OS-level readiness, and 168 h stability gates) lives in the **Master Audit Matrix** at the top of [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
 
 | Subsystem | Status | Summary |
 |---|---|---|
@@ -44,26 +31,70 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
 | Persistent Storage | **TODO** | RAM-boot only by default (`modem_a` read-only VFAT OK); guarded writable UFS storage pending |
 
+## Quick Start
+
+Everything runs **strictly from RAM** — Android and user partitions are never flashed or modified. Rebooting returns cleanly to Android.
+
+### Prerequisites
+
+- **Phone**: Xiaomi Mi 10S (`thyme`) with unlocked bootloader, USB debugging enabled, and battery **≥ 40%**.
+- **Host**: Linux or **WSL2 Ubuntu** on native ext4 (Windows is only used for `adb`/`fastboot` USB passthrough).
+- **Local assets (not committed to Git)**:
+  - Your own `iPhone10,3` iOS 16.5 IPSW (for Darwin userland).
+  - Vendor firmware (`fw-*`) extracted from your own Mi 10S — see [`devices/thyme/README.md`](devices/thyme/README.md).
+  - Optional: Wi-Fi credentials in `fw-wifi/network` (two lines: SSID and passphrase).
+
+### 1. Clone & Configure
+
+```sh
+git clone --recursive https://github.com/printlndarling/hakios-thyme.git
+cd hakios-thyme
+make doctor
+make thyme_defconfig
+```
+
+### 2. Unpack Userland & Build Latest Stable Images
+
+```sh
+# 1) Unpack your iPhone10,3 iOS 16.5 IPSW into sysimage/ (once)
+make unpack IPSW=/path/to/iPhone10,3_16.5_Restore.ipsw
+
+# 2) Build the XNU kernel (hakios-kernel)
+make kernel JOBS=$(nproc)
+
+# 3) Build the full resident system image (userland/system.apfs) + daily RAM rootfs (userland/root.apfs)
+SYSTEM=1 SCENE=daily devices/thyme/build-root.sh
+# (Subsequent rootfs-only rebuilds only need: SCENE=daily devices/thyme/build-root.sh)
+```
+
+### 3. RAM-Boot on Mi 10S
+
+```sh
+export DEVICE=thyme
+export XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img
+export XL_RAMDISK=userland/root.apfs
+export XL_CMDLINE="-v debug=0x8 rd=md0 $(tr -d '\n' < devices/thyme/ram.args) pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
+
+# Enter the RAM UEFI loader (non-destructive fastboot boot)
+./xl enter
+
+# Upload userland/system.apfs into RAM once (~2 min; stays resident across kernel runs)
+./xl ramdisk userland/system.apfs
+
+# Option A — Daily interactive boot (detaches after launch; you can unplug USB)
+XL_SECS=0 XL_DETACH=1 ./xl run
+
+# Option B — Timed verification boot (collects logs/<time>-run.log & reboots back to Android)
+# XL_SECS=120 XL_REBOOT_AFTER=1 ./xl run
+```
+
+> **Tip**: Check [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) for current hardware status and [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf) for regression baselines. To return to Android at any time, run `./xl reboot` or force-reboot the phone.
+
 ## Current Priorities
 
 - **Outdoor GNSS & Cellular Polish**: Verify open-sky 3D satellite fixes via `umi_gnssd` and SMS when needed.
 - **VPU Decode & USB Gadget**: Complete `pil-venus` HFI hardware video decode and SM8250 `DWC3` USB gadget (`usbmux`/`lockdownd`) for PC tools (i4Tools/iTunes).
 - **Graphics & Persistence**: System `MTLDevice` support for third-party apps; safe, opt-in persistent storage.
-
-## Building & Running (RAM Boot)
-
-Development runs in **WSL2 Ubuntu** on native ext4 (Windows is used only for USB `adb`/`fastboot`). Normal testing never flashes or modifies phone partitions and automatically returns the phone to Android.
-
-```sh
-make thyme_defconfig
-make kernel JOBS=16
-SCENE=daily devices/thyme/build-root.sh
-devices/thyme/ram-regress.sh
-```
-
-- **Firmware & IPSW setup**: Vendor firmware and Darwin userland are local and Git-ignored — see [`devices/thyme/README.md`](devices/thyme/README.md).
-- **Cellular / GNSS boots**: Use `XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img` (1023-char cmdline with `/baseband` DT node).
-- **Detailed evidence & baselines**: See [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) and [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf).
 
 ## Upstream & Related Repositories
 

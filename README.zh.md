@@ -5,22 +5,9 @@
 **本项目为 [HakiOS](https://github.com/oosexgang/hakios-xnu-kernel) 的小米 10S（`thyme`，骁龙 870 / SM8250-AC）长期维护分支。**
 系统默认以 RAM 方式引导 Apple 开源 Darwin/XNU 内核（`xnu-8796.121.2`），不刷写、不修改原有 Android 分区与用户数据；保留经真机验证的 `thyme` 专属驱动与修复，并选择性合并上游通用更新。
 
-> 下表所有 `PASS` 均经小米 10S 真机实测验证。完整测试日志、构建校验和及排查记录请见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)。
-
-## 目标硬件
-
-| 模块 | 规格 |
-|---|---|
-| SoC / GPU | 高通骁龙 870（`SM8250-AC`）· Adreno 650 |
-| 基带 / GNSS | 外挂高通骁龙 X55（`SDX55M`，PCIe2 / MHI） |
-| 屏幕 / 触控 | 6.67 英寸 1080 × 2340 90 Hz AMOLED · FocalTech FTS521 |
-| 无线连接 | 高通 QCA6390（Wi-Fi 6 + 蓝牙 5.1） |
-| 音频 / 马达 | 双 Cirrus Logic CS35L41 立体声功放 · AW8697 线性马达 |
-| 相机 | 后置 1.08 亿像素三星 S5KHMX + AK7377 对焦马达 · 前置 2000 万 S5K3T2 |
+> 下表所有 `PASS` 均经小米 10S 真机实测验证。完整逐项清单请见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)。
 
 ## 硬件与功能状态
-
-> 基于小米 10S 设备树与完整日用标准的**全量逐项审计清单**（含 SoC 视频编解码/休眠/加密、NFC、红外、屏下指纹、副摄/OIS、快充/无线充、USB 数据/OTG、系统层能力及长期稳定性门禁）已置于 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 顶部总表。
 
 | 功能模块 | 状态 | 实测摘要 |
 |---|---|---|
@@ -44,26 +31,70 @@
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
 | 持久化存储 | **TODO** | 默认纯内存启动（`modem_a` 只读 VFAT 就绪）；受保护的闪存读写持久化尚未启用 |
 
+## 快速开始（Quick Start）
+
+全程**仅在内存中引导运行**，不刷写、不改动手机任何分区；重启后直接回到原 Android 系统。
+
+### 准备条件
+
+- **手机**：已解锁 Bootloader 的小米 10S（`thyme`），开启 USB 调试，电量 **≥ 40%**。
+- **主机环境**：Linux 或 **WSL2 Ubuntu** 原生 ext4 文件系统（Windows 仅负责 `adb`/`fastboot` USB 连接）。
+- **本地资源（仓库不包含闭源固件）**：
+  - 自行准备的 `iPhone10,3` iOS 16.5 IPSW（用于解包 Darwin 用户空间）。
+  - 从本机提取的厂商固件（`fw-*`），提取方式见 [`devices/thyme/README.md`](devices/thyme/README.md)。
+  - 可选：在 `fw-wifi/network` 写入两行 Wi-Fi 名称与密码，开机即可自动连网。
+
+### 1. 拉取代码并初始化配置
+
+```sh
+git clone --recursive https://github.com/printlndarling/hakios-thyme.git
+cd hakios-thyme
+make doctor
+make thyme_defconfig
+```
+
+### 2. 解包用户空间并构建最新稳定镜像
+
+```sh
+# 1) 解包 iPhone10,3 iOS 16.5 IPSW 到 sysimage/（仅需一次）
+make unpack IPSW=/path/to/iPhone10,3_16.5_Restore.ipsw
+
+# 2) 构建 XNU 内核（hakios-kernel）
+make kernel JOBS=$(nproc)
+
+# 3) 构建完整系统镜像（userland/system.apfs）与日常内存根镜像（userland/root.apfs）
+SYSTEM=1 SCENE=daily devices/thyme/build-root.sh
+# （后续仅更新内存根镜像时只需运行：SCENE=daily devices/thyme/build-root.sh）
+```
+
+### 3. 一键 RAM 启动到小米 10S
+
+```sh
+export DEVICE=thyme
+export XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img
+export XL_RAMDISK=userland/root.apfs
+export XL_CMDLINE="-v debug=0x8 rd=md0 $(tr -d '\n' < devices/thyme/ram.args) pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
+
+# 进入内存 UEFI 引导器（仅 fastboot boot，不刷机）
+./xl enter
+
+# 上传常驻系统镜像 userland/system.apfs 到内存（约 2 分钟，后续重启内核无需重复上传）
+./xl ramdisk userland/system.apfs
+
+# 方式 A — 日常独立启动（启动确认后自动脱离电脑，可拔掉数据线）
+XL_SECS=0 XL_DETACH=1 ./xl run
+
+# 方式 B — 限时测试启动（保存 logs/<时间>-run.log 并自动重启回 Android 充电）
+# XL_SECS=120 XL_REBOOT_AFTER=1 ./xl run
+```
+
+> **提示**：完整硬件清单见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)，回归基线见 [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf)。随时可执行 `./xl reboot` 或长按电源键重启回原 Android。
+
 ## 后续重点
 
 - **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
 - **视频硬解与 USB 设备连接**：打通 `pil-venus` VPU 硬件解码及 SM8250 `DWC3` USB Gadget / `usbmux` / `lockdownd`（用于电脑端爱思助手 / iTunes 连接）。
 - **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
-
-## 构建与运行（RAM 启动）
-
-开发环境位于 **WSL2 Ubuntu** 原生 ext4 文件系统（Windows 仅用于 USB `adb`/`fastboot`）。常规测试全程在内存中运行，不刷写分区，测试结束后自动重启回 Android。
-
-```sh
-make thyme_defconfig
-make kernel JOBS=16
-SCENE=daily devices/thyme/build-root.sh
-devices/thyme/ram-regress.sh
-```
-
-- **固件与 IPSW 准备**：厂商固件与 Darwin 用户空间均为本地文件且已忽略，准备步骤见 [`devices/thyme/README.md`](devices/thyme/README.md)。
-- **蜂窝 / GNSS 启动**：请使用 `XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img`（支持 1023 字符启动参数与 `/baseband` 设备树节点）。
-- **详细记录与基线**：完整真机证据见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 与 [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf)。
 
 ## 上游与相关仓库
 
