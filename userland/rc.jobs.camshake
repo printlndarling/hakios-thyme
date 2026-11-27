@@ -3,8 +3,9 @@
 # then six times on the front, so the exposure's behaviour under a violent
 # shake is in the log (few asks while the picture moves, and the frame rate
 # steady) without a hand on the phone.
-/redwood/bin/sound_test springboard
-/redwood/bin/rwtouch wait 10 swipe 0.5 0.985 0.5 0.3 200 wait 6 tap 0.845 0.36 wait 15
+/redwood/bin/rwtouch wait 20 tap 0.5 0.5 wait 2 notify com.hakios.unlock wait 2 swipe 0.5 0.985 0.5 0.3 200 wait 2
+/var/jb/usr/bin/uiopen --bundleid com.apple.camera
+/redwood/bin/rwtouch wait 15
 /redwood/bin/sound_test system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 5
 /redwood/bin/rwtouch tap 0.886 0.871 wait 15
 /redwood/bin/sound_test system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 2 system 4095 wait 5

@@ -666,6 +666,8 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 		v_at = cells_h > 1 ? (float)cy0 / (cells_h - 1) : 0;
 		const uint8_t *t0 = raw + (size_t)cy0 * 2 * f->stride, *t1 = raw + (size_t)cy1 * 2 * f->stride;
 		float gains[3] = { 1, 1, 1 };
+		uint32_t cached_left = UINT32_MAX, cached_right = UINT32_MAX;
+		int samples[4][4];
 
 		for (uint32_t x = 0; x < width; x++) {
 			float fx = x0 + (x + 0.5f) * cw / width - 0.5f, tx, c[3] = { 0, 0, 0 };
@@ -674,19 +676,29 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 			cx0 = cx0 > cells_w - 1 ? cells_w - 1 : cx0;
 			cx1 = cx0 + 1 > cells_w - 1 ? cells_w - 1 : cx0 + 1;
 			tx = fx < (float)cx0 ? 0 : fx - cx0;
+			/* An enlarged preview reuses the same Bayer cells and lens gain across adjacent pixels. */
+			if (cx0 != cached_left) {
+				cell(t0, f->stride, cx0, samples[0]);
+				cell(t1, f->stride, cx0, samples[2]);
+				if (isp->lsc.on) {
+					lsc_at(isp, cells_w > 1 ? (float)cx0 / (cells_w - 1) : 0, v_at, gains);
+				}
+				cached_left = cx0;
+			}
+			if (cx1 != cached_right) {
+				cell(t0, f->stride, cx1, samples[1]);
+				cell(t1, f->stride, cx1, samples[3]);
+				cached_right = cx1;
+			}
 			for (int k = 0; k < 4; k++) {
-				int v[4];
+				const int *v = samples[k];
 				float w = (k & 1 ? tx : 1 - tx) * (k & 2 ? ty : 1 - ty);
 
-				cell(k & 2 ? t1 : t0, f->stride, k & 1 ? cx1 : cx0, v);
 				c[0] += w * v[r];
 				c[2] += w * v[b];
 				for (int j = 0; j < 4; j++) {
 					c[1] += j != r && j != b ? w * v[j] * 0.5f : 0;
 				}
-			}
-			if (isp->lsc.on) {
-				lsc_at(isp, cells_w > 1 ? (float)cx0 / (cells_w - 1) : 0, v_at, gains);
 			}
 			pixel(isp, &p, c[0] * gains[0], c[1] * gains[1], c[2] * gains[2], rgb + 3 * (isp->turned ? width - 1 - x : x));
 		}

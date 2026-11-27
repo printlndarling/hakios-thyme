@@ -3931,7 +3931,7 @@ fake_session(void)
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
 		    ios_mode->height, hw->chip, fps);
 	}
-	uint32_t last_lines = lines, last_gain = gain;
+	uint32_t last_lines = lines, last_gain = gain, last_frame_lines = frame_lines;
 	unsigned grab_failures = 0;
 
 	while (ios_open && ios_switch_to == 0) {
@@ -3977,6 +3977,7 @@ fake_session(void)
 			continue;
 		}
 		uint32_t given_lines = ios_now.lines, given_gain = ios_now.gain;
+		uint32_t given_frame_lines = ios_now.frame_lines;
 
 		if (real_source) {
 			uint8_t *at = (uint8_t *)(ring + (uint64_t)p * ring_place_bytes);
@@ -3991,18 +3992,25 @@ fake_session(void)
 			 */
 			given_lines = last_lines;
 			given_gain = last_gain;
-			if (lines != last_lines || gain != last_gain) {
+			given_frame_lines = last_frame_lines;
+			if (lines != last_lines || gain != last_gain || frame_lines != last_frame_lines) {
 				umi_camera_ios_set_exposure(lines, gain, frame_lines);
 				last_lines = lines;
 				last_gain = gain;
+				last_frame_lines = frame_lines;
 			}
 			int grab = umi_camera_ios_grab(at, ios_mode->width, ios_mode->height);
 
 			if (grab != 0) {
 				if (grab_failures++ == 0) {
-					say("camera: a frame of the S5KHMX did not complete in time; keeping the session\n");
+					say("camera: %s frame capture failed (%d); discarding the frame\n", hw->chip, grab);
 				}
-			} else if (dump_raw_on && !dumped_raw && hw_index == 1) {
+				lck_mtx_lock(&ios_lock);
+				place[p].state = PLACE_FREE;
+				lck_mtx_unlock(&ios_lock);
+				continue;
+			}
+			if (dump_raw_on && !dumped_raw && hw_index == 1) {
 				dumped_raw = true;
 				dump_frame(at, ios_mode->width, ios_mode->height, RAW10_STRIDE(ios_mode->width));
 			}
@@ -4017,7 +4025,7 @@ fake_session(void)
 		place[p].time = mach_absolute_time();
 		place[p].exposure_lines = given_lines;
 		place[p].gain = given_gain;
-		place[p].frame_lines = ios_now.frame_lines;
+		place[p].frame_lines = given_frame_lines;
 		lck_mtx_unlock(&ios_lock);
 		wakeup(&ios_frames_done);
 	}

@@ -38,6 +38,7 @@ static struct {
 	bool mapped, running, context_changed;
 	uint64_t frame_bytes;   /* one frame; the buffer holds two, the WM's ping-pong */
 	unsigned bank;          /* which of them the WM was last given */
+	uint64_t last_frame_ns; /* previous frame time within this stream */
 } ud;
 static const unsigned ud_cbregs[9] = {0,0x10,0x20,0x24,0x28,0x2c,0x30,0x38,0x3c};
 struct ud_header {
@@ -301,7 +302,12 @@ umi_camera_stream_arm(vm_offset_t ife,vm_offset_t csid,unsigned width,unsigned h
 	memcpy(h->magic,"RWCAM001",8);h->width=width;h->height=height;h->stride=stride;
 	h->format=1;h->bayer=bayer;h->frame_bytes=(uint32_t)bytes;h->source=1;
 	strlcpy(h->sensor,sensor,sizeof(h->sensor));
-	memset((void *)(ud.memory+4096),0xa5,(vm_size_t)bytes*2);dcache(ud.memory,ud.size);
+	vm_size_t banks_end=4096+(vm_size_t)bytes*2;
+	memset((void *)(ud.memory+4096),0xa5,(vm_size_t)bytes*2);
+	/* A smaller mode can reuse a reserve whose tail still contains an older, larger frame. */
+	memset((void *)(ud.memory+banks_end),0,ud.size-banks_end);
+	dcache(ud.memory,ud.size);
+	ud.last_frame_ns=0;
 	ud.frame_bytes=bytes;ud.bank=0;
 	lck_mtx_lock(&hakios_smmu_lock);int error=dmap();lck_mtx_unlock(&hakios_smmu_lock);
 	if(error){umi_camera_dma_quiesce(false);return error;}
@@ -469,10 +475,9 @@ umi_camera_stream_grab(void *dst,unsigned width,unsigned height)
 	 * then; a length that grows costs nothing here, and the one after a
 	 * shrink runs at the new length.
 	 */
-	static uint64_t last_frame_ns;
-	uint64_t frame_ns=umi_camera_frame_ns();
-	if(frame_ns<last_frame_ns)frame_ns=last_frame_ns;
-	last_frame_ns=umi_camera_frame_ns();
+	uint64_t current_frame_ns=umi_camera_frame_ns();
+	uint64_t frame_ns=MAX(current_frame_ns,ud.last_frame_ns);
+	ud.last_frame_ns=current_frame_ns;
 	unsigned wait_ms=(unsigned)(frame_ns/NSEC_PER_MSEC)+(frame_ns?4:40);
 
 	umi_camera_stream_advance();
