@@ -135,6 +135,34 @@ try:
     log = open(os.path.join(root, "commands.log")).read()
     check("the stand-in saw only reads: no of=, no write, no flash", "of=" not in log and "write" not in log and "flash" not in log and ">" not in log.replace("2>/dev/null", ""), log[:400])
 
+    verify = [sys.executable, TOOL, out, "--verify", "--adb", "/no/adb"]
+    r = subprocess.run(verify, capture_output=True, text=True)
+    check("verify uses only local files and reports partial coverage",
+          r.returncode == 0 and "verified 3 partition files and 2 GPT files" in r.stdout
+          and "core rollback partition files missing" in r.stdout, r.stdout + r.stderr)
+    with open(os.path.join(out, "persist.img"), "wb") as f:
+        f.write(bytes([persist[0] ^ 1]) + persist[1:])
+    r = subprocess.run(verify, capture_output=True, text=True)
+    check("verify rejects a changed file of the expected size", r.returncode == 1 and "SHA-256 mismatch" in r.stderr, r.stderr)
+    with open(os.path.join(out, "persist.img"), "wb") as f:
+        f.write(persist)
+    with open(os.path.join(out, "boot_a.img"), "wb") as f:
+        f.write(boot[:-1])
+    r = subprocess.run(verify, capture_output=True, text=True)
+    check("verify rejects a truncated file", r.returncode == 1 and "expected" in r.stderr, r.stderr)
+    with open(os.path.join(out, "boot_a.img"), "wb") as f:
+        f.write(boot)
+    manifest["tables"].pop()
+    with open(os.path.join(out, "manifest.json"), "w") as f:
+        json.dump(manifest, f)
+    r = subprocess.run(verify, capture_output=True, text=True)
+    check("verify rejects an incomplete GPT pair", r.returncode == 1 and "missing GPT head or tail" in r.stderr, r.stderr)
+    manifest["partitions"][0]["file"] = "../boot_a.img"
+    with open(os.path.join(out, "manifest.json"), "w") as f:
+        json.dump(manifest, f)
+    r = subprocess.run(verify, capture_output=True, text=True)
+    check("verify rejects a record naming an external path", r.returncode == 1 and "invalid manifest entry" in r.stderr, r.stderr)
+
     # a partition that changes while it is read is read again and kept once it holds still
     shutil.rmtree(root); phone(root, parts)
     out = os.path.join(work, "out-change")

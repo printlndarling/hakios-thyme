@@ -2,6 +2,10 @@
 """Copy the partitions that cannot be made again off the phone, and prove the copies: READ ONLY.
 
 usage: tools/backup-partitions.py OUTDIR [--yes] [--only NAME,NAME] [--with-bootchain] [--adb PROGRAM [--adb-arg ARG ...]]
+       tools/backup-partitions.py OUTDIR --verify
+
+--verify checks the local manifest, file sizes, SHA-256s and GPT pairs without adb.
+It accepts partial backups and reports their coverage separately.
 
 Rule 1 of docs/install.md: before anything is ever written to a phone, what could not be made again is copied off it and
 checked. This is that copy. It never writes to the phone: the only things it runs there are `ls`, `blockdev`, `dd if=`
@@ -34,6 +38,7 @@ import datetime
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -130,17 +135,88 @@ def proven_copy(adb, node, path, size, skip=None, count=None):
     raise Failure("%s: the copy could not be proven after %d tries (%s); it was not kept" % (node, TRIES, last))
 
 
+def verify_file(directory, entry, filename, size):
+    digest = entry.get("sha256")
+    if (entry.get("file") != filename or type(size) is not int or size <= 0 or
+            not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        raise Failure("invalid manifest entry for %s" % filename)
+    path = directory / filename
+    if path.is_symlink() or not path.is_file():
+        raise Failure("%s: missing regular backup file" % filename)
+    hashed = hashlib.sha256()
+    total = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            total += len(chunk)
+            hashed.update(chunk)
+    if total != size:
+        raise Failure("%s: expected %d bytes, found %d" % (filename, size, total))
+    if hashed.hexdigest() != digest:
+        raise Failure("%s: SHA-256 mismatch" % filename)
+
+
+def verify_backup(directory):
+    path = directory / "manifest.json"
+    with path.open(encoding="utf-8") as source:
+        manifest = json.load(source)
+    if not isinstance(manifest, dict):
+        raise Failure("expected a backup manifest object")
+    partitions, tables = manifest.get("partitions"), manifest.get("tables")
+    if not isinstance(partitions, list) or not isinstance(tables, list) or not (partitions or tables):
+        raise Failure("manifest must list partitions and GPT records, with at least one backup file")
+
+    names = set()
+    for entry in partitions:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", name) or name in names:
+            raise Failure("invalid or duplicate partition record")
+        names.add(name)
+        verify_file(directory, entry, name + ".img", entry.get("bytes"))
+
+    disks = {}
+    for entry in tables:
+        disk = entry.get("disk") if isinstance(entry, dict) else None
+        if not isinstance(disk, str) or not re.fullmatch(r"/dev/block/sd[a-z]", disk):
+            raise Failure("invalid GPT disk record")
+        end, skip = entry.get("part"), entry.get("skip_blocks")
+        ends = disks.setdefault(disk, set())
+        if (end not in ("head", "tail") or end in ends or
+                type(entry.get("blocks")) is not int or entry["blocks"] != 8 or
+                type(skip) is not int or (skip != 0 if end == "head" else skip < 8)):
+            raise Failure("invalid or duplicate GPT range for %s" % disk)
+        ends.add(end)
+        verify_file(directory, entry, "gpt-%s-%s.bin" % (Path(disk).name, end), 8 * BLOCK)
+    for disk, ends in disks.items():
+        if ends != {"head", "tail"}:
+            raise Failure("missing GPT head or tail for %s" % disk)
+
+    print("backup-partitions: verified %d partition files and %d GPT files for %d disks" %
+          (len(names), len(tables), len(disks)))
+    absent = sorted(set(IDENTITY + ["boot_a", "boot_b", "vbmeta_a", "vbmeta_b"]) - names)
+    if absent:
+        print("backup-partitions: core rollback partition files missing from manifest: %s" % ", ".join(absent))
+    if not disks:
+        print("backup-partitions: no GPT files in manifest")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("outdir")
-    ap.add_argument("--yes", action="store_true", help="really copy (without it: say what would be)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--yes", action="store_true", help="really copy (without it: say what would be)")
+    mode.add_argument("--verify", action="store_true", help="verify local backup files without connecting to a phone")
     ap.add_argument("--only", help="only these partitions, comma separated (and their disks' tables are not copied)")
     ap.add_argument("--with-bootchain", action="store_true")
     ap.add_argument("--adb", default="adb", help="the adb program (tests use a stand-in)")
     ap.add_argument("--adb-arg", action="append", default=[], help="an argument to put after the adb program (tests: the stand-in's script)")
     a = ap.parse_args(argv)
+    if a.verify and (a.only or a.with_bootchain):
+        ap.error("--verify checks the records already in the backup manifest")
     adb = [a.adb] + a.adb_arg
     try:
+        if a.verify:
+            verify_backup(Path(a.outdir))
+            return 0
         parts = by_name(adb)
         wanted = [n.strip() for n in a.only.split(",")] if a.only else BOOT + IDENTITY + (BOOTCHAIN if a.with_bootchain else [])
         plan, missing = [], []
@@ -192,7 +268,7 @@ def main(argv=None):
         print("backup-partitions: %d partitions and %d table copies proven and kept in %s (manifest.json, restore.txt)" %
               (len(manifest["partitions"]), len(manifest["tables"]), a.outdir))
         return 0
-    except Failure as e:
+    except (Failure, OSError, ValueError) as e:
         print("backup-partitions: STOPPED: %s" % e, file=sys.stderr)
         return 1
 

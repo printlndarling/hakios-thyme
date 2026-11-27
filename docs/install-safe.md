@@ -1,8 +1,7 @@
 # From RAM to the phone's own storage, without a brick: the order, the gates, and what has been done
 
 [install.md](install.md) is the design and its rules. This is the order of work that follows from them, with a gate between
-every two steps, and an honest account of how far it has got. **Nothing here has written a byte to a phone.** The first two
-stages are tools that only read; the rest is a plan for a person at the desk.
+every two steps, and an honest account of how far it has got. The first two stages use read-only tools; the rest is a plan for a person at the desk.
 
 ## Why this order
 
@@ -21,7 +20,7 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 | # | Stage | What happens to the phone | State |
 |---|---|---|---|
 | 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
-| 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). Not run on a phone: the phone was not on USB when it was finished |
+| 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest |
 | 2 | **Carve `darwin`** off the end of Android's userdata | **Android's data is shrunk and moved**: the f2fs is resized and the GPT rewritten. Back up the phone's data first (the user's own, with Android's tools); the tool does not | plan only: `tools/userdata-carve.py` prints the commands and writes nothing |
 | 3 | **Write the system image to `darwin`** with the guarded writer | writes `darwin` only; the writer refuses any other partition and reads every write back | exists: `tools/darwin-write.py`; its self-test refuses the wrong partition. Never run on a phone |
 | 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | **not verified**: the arguments the flash recipe needs are not confirmed. Repeat until it is boring; this is the gate before stage 5 |
@@ -30,6 +29,19 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 
 Stage 4 is the one that changes the project: it makes "the system lives in RAM for the length of a session" false, and it does so
 without any step that can brick. A phone that boots from `darwin` by `fastboot boot` is already "not RAM"; stage 5 only removes the cable.
+
+## Recheck a local backup
+
+```sh
+tools/backup-partitions.py /path/to/backup --verify
+```
+
+This rereads the named files, verifies their sizes and SHA-256 hashes, and
+requires a head and tail record for each disk listed in the manifest. It also
+reports missing core rollback partitions. Before any authorized write, compare
+the backup coverage and GPT geometry with the current phone and verify that
+Android's user-data backup is recoverable. The partition tool does not back
+up `userdata`.
 
 ## The gates
 
