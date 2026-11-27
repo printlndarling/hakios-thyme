@@ -23,29 +23,31 @@
 > 基于小米 10S 设备树与完整日用标准的**全量逐项审计清单**（含 SoC 视频编解码/休眠/加密、NFC、红外、屏下指纹、副摄/OIS、快充/无线充、USB 数据/OTG、系统层能力及长期稳定性门禁）已置于 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 顶部总表。
 
 | 功能模块 | 状态 | 实测摘要 |
-|---|---|---|
-| 系统启动与桌面 | **PASS** | RAM 冷启动至 `launchd`、`backboardd`、SpringBoard 与设置 |
-| CPU / 调频 | **PASS** | 7 核在线，EPSS 三丛集频率达 1.80 / 2.42 / 3.19 GHz |
-| 显示与刷新率 | **PASS** | 1080 × 2340 OLED，真硬件 90 Hz（`INTF_1` TE 同步零漏扫）、DCS 亮度调节与锁屏灭背光 |
-| GPU（OpenGL） | **PASS** | Adreno 650 经 Mesa/Freedreno 硬件渲染（`hakios-gl`） |
-| Metal | **PARTIAL** | `hakios-metal` 可编译；系统 `MTLDevice` / VectorKit / ANGLE 应用待打通 |
+|---|---|---|---|
+| 系统启动与桌面 | **PASS** | `SCENE=daily` 独立脱线启动（`boot-hakios-ram.bat`）至 `launchd`、`backboardd` 与 SpringBoard |
+| CPU 与动态调频 | **PASS** | 7 核在线；200 ms 运行时 EPSS 调频（最高 1.80 / 2.42 / 3.19 GHz）与温控限频 |
+| 显示与刷新率 | **PASS** | 1080 × 2340 OLED，真硬件 90 Hz（`INTF_1` TE 同步零漏扫）、DCS 亮度与锁屏灭背光 |
+| GPU（OpenGL）与调频 | **PASS** | Adreno 650 经 Mesa/Freedreno 硬件渲染 + GMU HFI 运行时调频（305–587 MHz） |
+| Metal | **PARTIAL** | `hakios-metal` 可编译（已修 `metal_apps=1` `backboardd` 豁免）；系统 `MTLDevice` 稳定性待测 |
 | 触控与按键 | **PASS** | FTS521 多点触控、手势、电源键与音量键正常 |
-| 音频与触感 | **PASS** | 双 CS35L41 独立左右声道扬声器、双麦克风、AW8697 CoreHaptics 正常 |
-| 相机与闪光灯 | **PASS** | 后摄 27 MP S5KHMX + AK7377 自动对焦、前摄 S5K3T2、镜头切换与 PM8150L 闪光灯 |
-| 蜂窝与通话 | **PASS** | SDX55M 4G LTE 双栈数据与双向 VoLTE 语音（当前 `Mav17` 仅 4G，5G 需 `Mav20`） |
-| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测精准蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
-| Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏休眠唤醒、AP 踢下线与断电自动重连 |
-| 蓝牙（QCA6390） | **PARTIAL** | 3 Mbaud H4、扫描配对、A2DP 播放、BlueTool 休眠与 PlayAndRecord HFP/A2DP 会话正常；耳机 HFP/AVRCP 实测待补 |
-| 电池与温控 | **PASS** | 电量/电流读取、USB 充电、温控限频与低电量保护正常 |
-| 传感器（SLPI） | **PASS** | LSM6DSO 加速度/陀螺仪、AK0991x 磁力计、TCS3701 屏下光感已接入 backboardd HID，BMP285 气压计在线（距离为 ADSP 超声波） |
-| 中文界面 | **PASS** | 开机默认简体中文界面、苹方字体与简体拼音键盘 |
-| Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内/无根源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
-| 持久化存储 | **TODO** | 默认纯内存启动；受保护的闪存持久化与独立安装流程尚未启用 |
+| 音频与触感 | **PASS** | 双 CS35L41 立体声+听筒（15 s 防休眠恢复）、语音备忘录零断流双麦、AW8697 CoreHaptics |
+| 相机与闪光灯 | **PASS** | 后摄 1080p ~51 fps S5KHMX + AK7377 对焦、前摄 S5K3T2、PM8150L 闪光灯（OIS `0x1c` 应答已验证） |
+| 蜂窝与通话 | **PASS** | SDX55M（`pcie2_mhi=2` 原生 `AppleBaseband`/`CommCenter`）、4G LTE 双栈与 VoLTE（`Mav17`） |
+| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
+| Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏唤醒、AP 踢下线与断电自动重连 |
+| 蓝牙（QCA6390） | **PASS** | 3 Mbaud H4、已实测正常连接蓝牙耳机（A2DP 音频播放）与其它手机配对、BlueTool 休眠 |
+| 电池与温控 | **PASS** | 电量读取、`bq25970` 与 `fsa4480` 10 s 遥测、USB 充电、温控限频与低电量保护正常 |
+| 传感器（SLPI） | **PASS** | LSM6DSO、50 Hz `mag_cal` 指南针、前 `TCS3701` + 后 `TSL2540` 光感、气压计、计步与朝向 |
+| CDSP / 红外 / RTC / WDT | **PASS** | `CDSP` TZ 鉴权启动与关闭、`/dev/hakios-ir`（38 kHz NEC）、SPMI RTC 校时、TRNG、APSS 硬件看门狗 |
+| NFC 与视频 VPU | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 握手就绪；UFS `modem_a` 加载 `venus.mdt` 与 TZ `MEM_SETUP` 已过，VPU 解码待通 |
+| 中文界面与日常应用 | **PASS** | 开机默认简体中文界面、苹方字体、拼音输入法与预装百度地图 |
+| Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
+| 持久化存储 | **TODO** | 默认纯内存启动（`modem_a` 只读 VFAT 就绪）；受保护的闪存读写持久化尚未启用 |
 
 ## 后续重点
 
 - **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
-- **蓝牙体验与 USB 设备连接**：实测蓝牙耳机 HFP/SCO 与 AVRCP；推进 SM8250 `DWC3` USB Gadget / `usbmux` / `lockdownd`（用于电脑端爱思助手 / iTunes 连接）。
+- **视频硬解与 USB 设备连接**：打通 `pil-venus` VPU 硬件解码及 SM8250 `DWC3` USB Gadget / `usbmux` / `lockdownd`（用于电脑端爱思助手 / iTunes 连接）。
 - **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
 
 ## 构建与运行（RAM 启动）
@@ -55,7 +57,7 @@
 ```sh
 make thyme_defconfig
 make kernel JOBS=16
-SCENE=wirelessfull devices/thyme/build-root.sh
+SCENE=daily devices/thyme/build-root.sh
 devices/thyme/ram-regress.sh
 ```
 
