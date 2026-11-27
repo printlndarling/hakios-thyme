@@ -28,7 +28,7 @@ Status legend:
 | Front Camera | 20 MP `S5K3T2` | P1 | ✅ | `720p @ 42.7 fps` config + lens switching |
 | Camera Flash / Torch | `PM8150L` WLED | P1 | ✅ | Torch & shutter flash (`torch=3`) |
 | Camera OIS | `qcom,ois@1` (`umi_ois` @ CCI `0x1c`) | P1 | 🚧 | CCI `0x1c` HW readback verified (`ok=1`, `0xf0`); active servo control pending |
-| Aux Cameras (Ultra-wide / Macro) | `S5K4H7` / `OV02B10` | P2 | 🚧 | XNU has sensor profiles and a raw switching diagnostic. The capture bridge exposes only rear main and front streams to Camera. |
+| Aux Cameras (Ultra-wide / Macro / Depth) | `OV13B10` / `GC02M1` | P2 | 🚧 | Stock UMI module tables can be parsed. The real UMI capture backend and Camera expose rear main and front only. |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` (`PCIe2 / MHI / pcie2_mhi=2`) | P0 | ✅ | `AppleBaseband` + `CommCenter`, 4G LTE dual-stack + VoLTE (`10099`) |
 | 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` n41) | P1 | ❌ | Userland `Mav17` is 4G-only; needs `Mav20` bridge + 2nd SIM slot |
 | GNSS / Location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | 🚧 | Wi-Fi CoreLocation (`BaiduMap` blue dot) & SV stream working; outdoor 3D fix pending |

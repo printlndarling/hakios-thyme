@@ -1138,7 +1138,6 @@ static const struct ctab_head real_ctab = { .magic = "RWCTAB02", .modes = 2 };
 /* The wide's module mode the iOS session runs (cam_mode, default 3): for the logs
  * (the real_modes index is 0 "the wide" whatever the module's mode is).
  */
-static uint32_t real_mode_n = 1;
 
 /*
  * The wide's iOS session mode: the module file's resN, cam_mode (default 3) --
@@ -1182,7 +1181,6 @@ real_mode_from_table(void)
 			continue;
 		}
 		real_modes[0] = mode;
-		real_mode_n = mode_n;
 		say("camera: the wide's iOS session runs res%u: %ux%u, %u.%03u frames/s at the most\n", mode_n,
 		    mode.width, mode.height, mode.fps_milli / 1000, mode.fps_milli % 1000);
 		return;
@@ -3916,18 +3914,19 @@ fake_session(void)
 		/* the first exposure before the stream starts (the front sensor takes
 		 * it only then); the AE's later changes go the mid-stream way
 		 */
+		const char *sensor_name = hw_index == 2 ? "S5K3T2" : "S5KHMX";
 		umi_camera_ios_set_start_exposure(lines, gain);
 		int error = umi_camera_ios_start(ios_mode->width, ios_mode->height);
 		if (error) {
-			say("camera: the S5KHMX did not start for iOS (error %d)\n", error);
+			say("camera: %s did not start for iOS (error %d)\n", sensor_name, error);
 			lck_mtx_lock(&ios_lock);
 			ios_streaming = false;
 			lck_mtx_unlock(&ios_lock);
 			ring_free();
 			return;
 		}
-		say("camera: the frames for iOS: the S5KHMX's own, %ux%u (res%u whole); the frame length follows "
-		    "the capture stack's AE\n", ios_mode->width, ios_mode->height, real_mode_n);
+		say("camera: the frames for iOS: the %s's own, %ux%u; the frame length follows "
+		    "the capture stack's AE\n", sensor_name, ios_mode->width, ios_mode->height);
 	} else {
 		say("camera: the frames for iOS: cam_fake's colour chart, %ux%u in %s's order, %u a second\n", ios_mode->width,
 		    ios_mode->height, hw->chip, fps);
@@ -4330,6 +4329,12 @@ camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	if (c.command == HAKIOS_CAMERA_SENSOR) {
 		if (c.a >= sizeof(sensors) / sizeof(sensors[0])) {
 			return EINVAL;
+		}
+		/* The UMI stream backend currently selects only rear wide (1)
+		 * or front (2). Reject auxiliary requests before changing frames
+		 * or metadata, or a rear-wide image would carry the wrong ID. */
+		if (real_source && c.a != 1 && c.a != 2) {
+			return ENOTSUP;
 		}
 		lck_mtx_lock(&ios_lock);
 		if (ios_streaming && ios_switch_to == 0 && hw_index == c.a && (c.b == ~0u || c.b == ios_mode_n)) {

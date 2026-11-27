@@ -1,13 +1,61 @@
 ## Chronological Verification Logs & Evidence
 
+## Thyme camera sensor selection
+
+- The real UMI backend previously treated every selection except front
+  as rear wide, while the capture bridge labelled the frames with the
+  requested sensor index. Auxiliary requests now return `ENOTSUP`
+  before mutating the stream. Capture logs name the sensor used in each
+  supported session.
+- A 115 s physical thyme run with kernel `18dfa8137bb6` and root
+  `ff48f1bae701` returned `ENOTSUP` for indices 0 and 3 and `EINVAL`
+  for index 4. An in-session rear → front → rear switch then read
+  a frame header for each correct index. The kernel started real rear
+  mode 5 at 1920×1080, front mode 2 at 1280×720, and rear mode 5 again.
+  The loader returned `1441823 0` and the phone rebooted to Android.
+  Final log `logs/145013-run.log`, SHA-256
+  `297d7bdbfbec633d6e9310f8c63db57c5378ae7fcfe66e23e224b631f9781937`.
+  Retained live lines `logs/codex-camera-guard-snapshots.log`, SHA-256
+  `24b3e23bcf4150f9a069bc3d0075d6579de8db324a927169cce5c1f8bc845c66`.
+  The test uses the camera character device. Native Camera switching
+  and actual image acceptance retain their own checklist items.
+- The offline parser exported the original OV13B10 and GC02M1 depth
+  mode tables. The macro export stops at an unsupported power
+  operation. Confirm the UMI sensor-slot mapping and power order from
+  stock Android before programming either auxiliary path.
+
+## Applied OLED brightness for ambient compensation
+
+- SLPI's brightness query now uses the most recent DCS brightness command
+  accepted by the DSI controller. A requested brightness of zero with
+  the screen lit maps to DCS 16 and Android-scale 8. Blanking maps to
+  zero. A host check used the production conversion and covered the
+  pre-DSI fallback, both zero paths, all 1001 steps, and maximum 2047.
+- A 115 s RAM diagnostic on physical thyme used kernel `a9205fa82f25`
+  and root `0645309722b4`. Direct sysctl writes in the scene produced
+  successful DCS commands at slider inputs 0, 250, 500, 750 and 1000
+  permille (levels 16, 1036, 2056, 3075 and 4095 in the live output);
+  factor zero sent DCS zero and factor 1000 restored DCS 16. The
+  diagnostic completed, the watchdog quiesced and the loader returned
+  `1441823 0`. The final on-device log retains the opening endpoint and
+  shutdown, and rotated past the intermediate sweep that was observed
+  live. Use `XL_FOLLOW_KEEP=1` for a replay. Final evidence:
+  `logs/144506-run.log`, SHA-256
+  `e41a58489f0b9bc2a70df730f7b42170762df215d762cb5bed201e1dd48e5486`.
+  Native slider endpoints, visible low-light stability and ambient-light
+  driven adjustment remain open in section 6 of the checklist.
+
 ## Native app and daily-use audit
 
-- The camera kernel driver has S5K4H7 (ultra-wide) and OV02B10 (macro)
-  profiles and a raw sensor cycle scene. The AVFoundation bridge in
-  `userland/src/camera_device.c` creates two streams, rear main and
-  front. The bridge accepts `ZoomFactor` and records the ISP-applied
-  crop ratio in capture metadata. Native auxiliary lens controls,
-  gestures, zoom dial and saved framing still require verification.
+- Parsing the stock UMI module files identified OV13B10 for ultra-wide
+  and separate GC02M1 modules for macro and depth. OV13B10 describes
+  4208×3120 RAW10 at its 30 fps mode. The S5K4H7 and OV02B10
+  descriptors in `hakios.thyme_camera.c` and the four-sensor cycle
+  scene came from Redwood. The real UMI backend implements rear wide
+  and front, as does the AVFoundation bridge in
+  `userland/src/camera_device.c`. The bridge accepts `ZoomFactor` and
+  records its crop ratio in capture metadata. Native auxiliary lens
+  controls, gestures, zoom dial and saved framing require verification.
 - The prior cellular run used one SIM in physical slot 2 mapped to
   logical subscription 1, with LTE data and two-way VoLTE. The WDS
   bridge explicitly binds to that primary subscription. That test
