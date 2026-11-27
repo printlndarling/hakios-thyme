@@ -28,7 +28,7 @@ Status legend:
 | Front Camera | 20 MP `S5K3T2` | P1 | ✅ | `720p @ 42.7 fps` config + lens switching |
 | Camera Flash / Torch | `PM8150L` WLED | P1 | ✅ | Torch & shutter flash (`torch=3`) |
 | Camera OIS | `qcom,ois@1` (`umi_ois` @ CCI `0x1c`) | P1 | 🚧 | CCI `0x1c` HW readback verified (`ok=1`, `0xf0`); active servo control pending |
-| Aux Cameras (UW / Macro / Depth) | `ov13b10` / `gc02m1` | P2 | ❌ | Sensor module bins present in `fw-camera/`; XNU switching unimplemented |
+| Aux Cameras (Ultra-wide / Macro) | `S5K4H7` / `OV02B10` | P2 | 🚧 | XNU has sensor profiles and a raw switching diagnostic. The capture bridge exposes only rear main and front streams to Camera. |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` (`PCIe2 / MHI / pcie2_mhi=2`) | P0 | ✅ | `AppleBaseband` + `CommCenter`, 4G LTE dual-stack + VoLTE (`10099`) |
 | 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` n41) | P1 | ❌ | Userland `Mav17` is 4G-only; needs `Mav20` bridge + 2nd SIM slot |
 | GNSS / Location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | 🚧 | Wi-Fi CoreLocation (`BaiduMap` blue dot) & SV stream working; outdoor 3D fix pending |
@@ -62,7 +62,7 @@ Status legend:
 | VPU Hardware Video Encode | P0 | ❌ | Depends on `pil-venus` HFI encode pipeline |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | 🚧 | SW 5×5 Malvar-He-Cutler + sharpen + AE/AF; HW IFE/IPE/HDR pending |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP` and `SLPI` operational; `cdsp=2` verified TZ startup, fresh SMP2P ready and clean shutdown |
-| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `cdsp=2` observes firmware ready and the remote GLINK queue. AP transmit queue, GLINK negotiation, and FastRPC/HVX Core ML work remain. |
+| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `cdsp=4` verifies GLINK negotiation and bidirectional FastRPC channel open. Intent exchange, DSP invocation and the HVX/Core ML bridge remain. |
 | Hardware Crypto & PRNG | P0 | 🚧 | `qrng@793000` TRNG -> `mc_prng` (`✅`); `GCC_CE1` read (`qcedev@1de0000` crypto pending) |
 | IOMMU / SMMU DMA Isolation | P0 | ✅ | Active SMMU contexts zero-fault across Wi-Fi, SDX55M, ADSP, GPU, SLPI |
 | Hardware Watchdog | P1 | ✅ | `wdt=1` APSS WDT (`0x17c10000`, 16 s/32 s) 4 s keepalive & panic-safe quiesce |
@@ -78,7 +78,7 @@ Status legend:
 | Wi-Fi | 2.4/5 GHz WPA2, DHCP/TLS, `CN`, 65 s wake, auto-rejoin | WPA3-SAE, hidden SSID, Personal Hotspot, 8 h standby |
 | Bluetooth | 3 Mbaud H4, headphones A2DP playback, phone pairing | HFP/SCO call verification, AVRCP keys, HID keyboards/mice |
 | GNSS | Settings toggle, Wi-Fi CL (`BaiduMap`), QMI SV stream | Outdoor 3D GPS+BeiDou fix, A-GPS XTRA, navigation |
-| Camera | 27 MP rear + front switch, ~51 fps, AF/AWB, flash | OIS servo, 108 MP mode, video rec, slow-mo, HDR, QR |
+| Camera | 27 MP rear + front switch, ~51 fps, AF/AWB, flash | Auxiliary lens integration, OIS servo, 108 MP mode, video rec, slow-mo, HDR, QR |
 | Display / Touch | 89.08 Hz OLED TE, DCS brightness, multi-touch | 60/90 Hz dynamic switch, auto-brightness curve, DT2W |
 | Audio | Stereo L/R `CS35L41` + earpiece, dual mic, USB-C switch probe | USB-C headset routing, automatic BT HFP/A2DP switch |
 | Battery / Charging | Fuel gauge, USB charge, `bq25970` telemetry, thermal cap | Active QC/PD/33W & 30W wireless control, off-mode charge UI |
@@ -91,10 +91,10 @@ Status legend:
 | Layer | Status | Scope & Notes |
 |---|---|---|
 | Security & Privacy | 🚧 | TCC permission prompts work; Keychain persistence, passcode/FOD BiometricKit pending |
-| Install & Storage | 🚧 | Detached `boot-hakios-ram.bat` (`SCENE=daily`); UFS dual-boot RW persistence & OTA pending |
+| Install & Storage | 🚧 | Cross-platform RAM boot launchers and local image builds. UFS persistence, standalone boot and OTA remain open. |
 | Background Services | 🚧 | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` live; deep-sleep alarm/notifications pending |
 | Networking | 🚧 | IPv4/IPv6, DNS, HTTPS TLS work; VPN (`utun`), proxy UI, Personal Hotspot pending |
-| System Interaction | ✅ | zh-Hans UI, Pinyin, PingFang, control/notif center, switcher (screen recording pending) |
+| System Interaction | 🚧 | zh-Hans UI, PingFang, keyboard configuration, Control Center, Notification Center and switcher available. Input, notifications and functional controls have separate acceptance in section 6. |
 | App Ecosystem | ✅ | `Sileo` (11 CN repos), `TrollStore` (`ldid`), `TrollApps` (6 CN sources), `WebKit`, `BaiduMap` |
 | Apple services | ⛔ | Apple ID, App Store, FairPlay and stock WeatherKit lack end-to-end thyme verification. See [upstream review](UPSTREAM.md#apple-services-compatibility-review). iCloud, Apple Pay, APNs, iMessage and FaceTime remain unsupported. |
 
@@ -110,3 +110,51 @@ Status legend:
 | Cold Boots | 50 consecutive RAM boots | ❌ |
 | Multi-App / Video / Handoff | 2 h video, app switch, Wi-Fi↔LTE | ❌ |
 | Thermal / Memory / fsck | 30 min load, RSS leak, power-loss fsck | ❌ |
+
+---
+
+## 6. Native App and Daily-Use Acceptance
+
+A PASS in this section requires completing the operation through the native
+app or control on a physical thyme and observing its real effect. Keep the
+build ID, operation, observed outcome and available log or capture. A
+hardware, driver or UI milestone belongs in the earlier sections.
+**Manual** marks interaction or equipment still needed. The acceptance status
+remains open until that test passes.
+
+### Camera, Photos, and Display
+
+| Feature | Status | Acceptance on thyme |
+|---|---|---|
+| Rear ultra-wide live output | ❌ Manual | Select ultra-wide in Camera. Confirm the physical lens by occluding it and comparing field of view with the main sensor. Capture a real still, open it in Photos, and confirm the saved image came from that lens. |
+| Auxiliary camera switching | ❌ Manual | Identify each independently exposed imager and its supported modes. Repeat main/ultra-wide/front and supported auxiliary switches. Verify real frames resume, the active sensor matches the selection, focus/exposure recover, and Camera works after reopen. |
+| Zoom gestures, readout and dial | 🚧 Manual | Pinch in and out, tap available presets and drag the zoom dial in both directions. Confirm the displayed ratio follows the gesture, live framing changes, supported lens boundaries behave consistently and the saved photo matches preview framing. |
+| Camera modes and Photos | ❌ Manual | Capture photo and video, verify playback, orientation and synced audio in Photos, then check recent thumbnail, edit/delete, permission prompts, and return to Camera. Test Portrait, slow-motion and QR separately where supported. |
+| Manual brightness range | 🚧 Manual | Start from the minimum nonzero slider setting in Settings and Control Center, sweep to maximum and back, and check slider state across both surfaces. Measure or visibly confirm the panel responds across the range, especially at the low end. Verify the minimum stays nonzero. |
+| Low-brightness stability | ❌ Manual | Hold the minimum visible setting in a dark room, change content, lock/wake repeatedly, and check for black frames, flicker or jumps. Use a photometer or fixed-exposure recording where available to corroborate panel output. |
+| Auto-brightness | 🚧 Manual | Enable in Settings and move between controlled dark and bright conditions. Observe ambient readings and actual panel changes with plausible latency and hysteresis. Repeat with the setting disabled and after lock/wake. |
+
+### Cellular, Phone, and Messages
+
+| Feature | Status | Acceptance on thyme |
+|---|---|---|
+| Dual-SIM recognition and management | ❌ Manual (two active SIMs) | Insert two distinct SIMs, confirm concurrent registration, validate each line in Settings, and exercise line enable/disable, labels and line state after restart. Check incoming calls to both lines while idle. |
+| Default data and voice lines | ❌ Manual (two active SIMs and peer phone) | Change default data and voice lines independently. Confirm carrier/line on an outbound call and real cellular traffic on the selected data line with Wi-Fi off. Test switching back and incoming calls on the non-default line. |
+| Cellular data switch | 🚧 Manual (active SIM) | Turn data off in Settings and Control Center. With Wi-Fi off, confirm fresh network requests stop and the cellular route is removed. Re-enable and verify address, DNS and HTTPS recovery while the voice line remains usable. |
+| Airplane mode and recovery | ❌ Manual (active SIM and peer phone) | Toggle from Settings and Control Center. Verify cellular registration and call/data behavior, independent Wi-Fi/Bluetooth toggles, and automatic cellular recovery without reboot. Repeat across lock/wake. |
+| Native cellular SMS in both directions | ❌ Manual (active SIM and peer phone) | Send plain Latin and Chinese text from Messages to a real peer and receive replies. Verify correct sender/line, timestamps, delivery, thread placement and reply. Exercise while locked and on each line when dual SIM is available. |
+| SMS OTP, tone, and lock-screen notification | ❌ Manual (approved OTP sender and peer phone) | Receive a real test OTP over SMS and verify the Messages thread, keyboard suggestion, SMS alert tone, banner, notification-center item, lock-screen preview/privacy and opening the correct thread. Check audible alerts with silent mode disabled and the silent path separately. Store redacted evidence only. |
+| Phone integration | 🚧 Manual (peer phone) | Verify incoming/declined/missed calls, lock-screen answering, recent calls, earpiece/speaker switch and microphone mute during a real call. Verify resumed media and Bluetooth HFP when headphones are available. |
+
+### Audio, Input, Voice Memos and System Controls
+
+| Feature | Status | Acceptance on thyme |
+|---|---|---|
+| System volume and volume HUD | 🚧 Manual | Press both side buttons and drag the Control Center slider during media playback. Confirm HUD and sliders match the audible level, including min/max and mute. Check ringtone/alert volume independently, plus route changes to earpiece and headphones. |
+| System sounds | ❌ Manual | Toggle keyboard clicks and lock sound individually and verify audible output on real typing and locking. Capture a real photo in the applicable region/mode and check shutter behavior. Preview and use a stock ringtone on an incoming call and a selected SMS tone on real delivery. |
+| Silent mode and Focus | ❌ Manual | Toggle the native supported mute path, confirm its UI state, then verify ring, SMS, keyboard, lock and shutter behavior under the device's region rules. Verify media-volume independence, haptic policy, Focus notification handling and restoring audible alerts. |
+| Pinyin and keyboard switching | 🚧 Manual | Type real pinyin into Notes and Messages, select a non-first candidate, correct and commit mixed Chinese/Latin text. Switch among Pinyin, Latin and emoji using the globe key and verify the committed text survives app relaunch within the RAM session. |
+| Native Voice Memos | 🚧 Manual | Record spoken phrases with leading/trailing quiet, stop and name the memo, reopen Voice Memos, then play the entire recording and seek near both ends. Confirm duration, full audible content, gain and save/reopen. Reboot persistence is tracked under Install & Storage. |
+| Settings and Control Center | 🚧 Manual | Cross-check tile and Settings state after toggling Wi-Fi, Bluetooth, data, Airplane Mode, brightness, volume and Focus. Verify actual radio/panel/audio effects, flashlight switching and state after lock/wake. Test accessible labels and permitted lock-screen controls. |
+| Notifications, alarms and timers | ❌ Manual | Fire a Clock timer and alarm and a real app notification while unlocked, locked and in Focus. Verify sound/haptics, dismissal, correct app launch from Notification Center, and localized text. Deep-sleep and reboot behavior have separate gates. |
+| Native apps and peripheral integration | 🚧 Manual | Exercise Safari page load/download, Files open/share, Photos playback/share, Maps location permissions, Calculator, Notes, and app switching with real state. Test A2DP/HFP and reconnect with a Bluetooth device, OTG with a supported USB device, and wireless charging with a pad. Record each result independently. |

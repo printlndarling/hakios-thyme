@@ -1,5 +1,30 @@
 ## Chronological Verification Logs & Evidence
 
+## Native app and daily-use audit
+
+- The camera kernel driver has S5K4H7 (ultra-wide) and OV02B10 (macro)
+  profiles and a raw sensor cycle scene. The AVFoundation bridge in
+  `userland/src/camera_device.c` creates two streams, rear main and
+  front. The bridge accepts `ZoomFactor` and records the ISP-applied
+  crop ratio in capture metadata. Native auxiliary lens controls,
+  gestures, zoom dial and saved framing still require verification.
+- The prior cellular run used one SIM in physical slot 2 mapped to
+  logical subscription 1, with LTE data and two-way VoLTE. The WDS
+  bridge explicitly binds to that primary subscription. That test
+  deferred SMS. Dual active lines, switching defaults, cellular data
+  controls, airplane mode recovery and real Messages delivery have
+  separate acceptance steps.
+- The historical manual brightness sweep tested 265 to 971 permille
+  and lock blanking. Live front and rear ALS streams alone leave the
+  lowest visible setting, low-light stability and auto-brightness open.
+- The ringer state listener and ADSP playback/capture paths give
+  coverage for hardware audio. System HUD, sound effects, ringtones,
+  Messages alerts and silent behavior need their own system tests.
+  Simplified Pinyin is configured in the preferences seed. The
+  existing Voice Memos scene reaches recording. Candidate selection
+  and switching keyboards, and the full stop/save/reopen/play cycle
+  still require native app acceptance.
+
 ## Wi-Fi shutdown during CDSP diagnostics
 
 - In `logs/113128-run.log`, the QMI driver event worker reached
