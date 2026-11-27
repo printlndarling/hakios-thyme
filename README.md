@@ -30,7 +30,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts and Pinyin keyboard |
 | Baidu Maps compatibility | **PARTIAL** | Roads and labels verified with [app-only Metal](devices/thyme/docs/ram-boot.md#app-only-metal). Install the app separately to test compatibility. |
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
-| Persistent Storage | **TODO** | RAM Boot by default. `modem_a` read-only VFAT verified. The [installation plan](docs/install-safe.md) tracks guarded provisioning and persistence. |
+| Persistent Storage | **TODO** | RAM Boot by default. `modem_a` read-only VFAT verified. The GPT-sized HFSX image retained data across two QEMU boots. Physical provisioning remains open in the [installation plan](docs/install-safe.md). |
 
 ## Quick Start
 

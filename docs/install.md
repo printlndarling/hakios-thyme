@@ -52,7 +52,7 @@ Each one is how the project already treats writes (`darwin-write.py`, the loader
 | Needed | State |
 |---|---|
 | A boot image that starts with no host (shim + payload) | exists (`mkxnuimg.py`); the loader started from it by `fastboot boot` on the attached phone |
-| A guarded writer for `darwin` | Data-range writer for the legacy layout. Root provisioning for the attached thyme needs a separate verified path. |
+| Preparing and provisioning `darwin` | The HFSX data image can be built from paired GPTs and has passed host replay and QEMU tests. The Android data-range writer supports the legacy layout. Root and cryptex provisioning on thyme remain open. |
 | A plan for carving `darwin` | Host-only planner and tests. The resize path requires a matching F2FS readback before emitting GPT files. |
 | Read-only preflight | exists (`make doctor`): slots, `darwin`, firmware, root, bootloader as reported |
 | **Writing the boot image to a slot and switching to it** | **not done, not tried** |

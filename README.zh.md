@@ -29,7 +29,7 @@
 | NFC 与视频 VPU | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 握手就绪；Venus 固件准备与 MVS0C 核心时钟和 AXI0 门控可逆启停已验证，VPU 硬解待通 |
 | 中文界面与日常应用 | **PASS** | 开机默认简体中文界面、苹方字体、拼音输入法与预装百度地图 |
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
-| 持久化存储 | **TODO** | 默认纯内存启动（`modem_a` 只读 VFAT 就绪）；受保护的闪存读写持久化尚未启用 |
+| 持久化存储 | **TODO** | 默认纯内存启动。`modem_a` 只读 VFAT 就绪，按 GPT 生成的 HFSX 数据卷通过 QEMU 重启保留测试，[真机安装与持久化](docs/install-safe.md)待验收 |
 
 ## 快速启动
 

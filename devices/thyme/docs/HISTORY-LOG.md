@@ -1,5 +1,32 @@
 ## Chronological Verification Logs & Evidence
 
+## Size the HFSX data volume from the proposed GPT (2026-11-28)
+
+- Compared the proposed LUN 0 layouts off-device. The clear-data GPT
+  places `darwin` at entry 36, LBAs 25396736–30640122
+  (5,243,387 blocks). The conservative F2FS plan starts `darwin` at
+  25397248 (5,242,875 blocks) and awaits a physical shrink readback.
+  The device's Android GPT still has no `darwin`.
+- `mkdatavol.py --gpt HEAD TAIL` checks both headers, both table
+  CRCs, the partition identity and exact sizes. The synthetic test
+  rejected a missing `darwin` and a mismatched pair with valid CRCs.
+  Both the thyme-sized and legacy sparse images replayed into HFSX
+  volumes with the expected primary and alternate header locations.
+  `fsck.hfsplus -fn` reported both journaled volumes OK.
+- The replayed thyme volume presented 12,503 MiB to kernel
+  `faedd6175a35` on QEMU virtio. Each boot wrote and read back 1 MiB,
+  remounted the volume and reported `ALL OK`. The boot counter
+  advanced from 1 to 2 across independent guest boots. After printing
+  the success marker and unmounting, the fixture exits as PID 1 and
+  the guest reports an init exit panic. Physical UFS mounting and
+  persistence remain pending.
+- Local artifacts are under `out/thyme-boot/datavol.0yhTppPd/`.
+  `thyme-data.simg` SHA-256
+  `929c9dc48886528299b12326425f40dc19cb4868da85791a332696a15f8214e6`.
+  `qemu-hfs-1.log` and `qemu-hfs-2.log` SHA-256 values are
+  `69df6488990568067a16b376293f51a4cfa8624f748611bfe5c7758fc49cfd57`
+  and `36150ba0b03c563e7563a17c53e833b7caf5855fb382b0f52f5ad68b66a01e53`.
+
 ## Reuse decoded Bayer rows during live camera preview (2026-11-28)
 
 - Each preview slice keeps the two decoded Bayer rows across adjacent
