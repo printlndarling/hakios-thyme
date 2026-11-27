@@ -50,7 +50,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | IR Blaster | `ir-spi@0` (`gpio116` MOSI on NORTH TLMM) | P2 | **PASS** | `/dev/hakios-ir` registered (`38 kHz` NEC TX on `gpio116`, `cfg=0x1`, `kern.hakios.ir_ready=1`, `logs/033757-run.log`) |
 | Under-Display Fingerprint (FOD) | `goodix,fingerprint` (optical sensor under OLED) | P1 | **TODO** | DTB GPIOs surveyed (`pwr(10)=0/0 irq(23)=0/0 rst(24)=0x1/0`, `logs/033757-run.log`); SPI/BiometricKit HAL & HBM zone `TODO` |
 | Standard USB Charging & Gauge | Fuel gauge + USB power telemetry | P0 | **PASS** | Real-time mV/mA/`%`, USB charging, `battery_stop=40` guard |
-| 33W Wired Fast Charge | `bq25970` (`0x66` on QUP15 `gpio44/45`) + `smb1390` + USB-PD | P1 | **PARTIAL** | Read-only I2C telemetry `PASS` (`part=0x16 vbus=5104 mV vac=4960 mV vbat=4406 mV ibus=0 mA`, `kern.hakios.fastchg_*`); active QC/PD high-wattage pump control `TODO` |
+| 33W Wired Fast Charge | `bq25970` (`0x66` on QUP15 `gpio44/45`) + `smb1390` + USB-PD | P1 | **PARTIAL** | Live 10 s QUP15 I2C telemetry refresh `PASS` (`part=0x16 vbus=5112 mV vbat=4407 mV ibus=0 mA usbc_st=0x5`, `kern.hakios.fastchg_*`, `logs/075911-run.log`); active QC/PD high-wattage pump control `TODO` |
 | 30W Wireless & 10W Reverse Charge | `idt,p9415` (`0x3b`) / `ln8282` (`0x55`) / `rx1619` (`0x61`) on QUP16 | P1 | **TODO** | QUP16 `gpio48/49` verified idle-high (`cfg=0x1 io=0x1`); `0x3b`/`0x55` NACK off wireless pad (`idt,enable` `GPIO155`/`VRECT` unpowered); active WLC `TODO` |
 | USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3`) | P0 | **TODO** | Read-only hardware MMIO probe `PASS` (`id=0x33313130 hw0=0x4020400a hw3=0x10420086 dsts=0x82cdf0 speed=0 link=0`, `kern.hakios.usb_dwc3_*`, `logs/034840-run.log`); XNU `DWC3` gadget, `usbmux`, `lockdownd` `TODO` |
 | USB OTG Host Mode | `dwc3@a600000` / `dwc3@a800000` host | P1 | **TODO** | External USB drives, HID keyboards/mice, USB-C audio unsupported |
@@ -72,7 +72,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
 | Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (64 B / 16 distinct words mixed into XNU `mc_prng`, `kern.hakios.qrng_ready=1`); `qcedev@1de0000` bulk crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
-| Hardware Watchdog | P1 | **PARTIAL** | Read-only MMIO probe `PASS` (`0x17c10000`: `ctl=0 sts=0 bark=524287 bite=1048575`, `kern.hakios.wdt_*`); active bark/pet policy `TODO` |
+| Hardware Watchdog | P1 | **PASS** | Active SM8250 APSS WDT (`0x17c10000`, `wdt=1`: `bark=16s bite=32s`, `ctl=0x1`) + 4 s `keys_thread` keepalive (`pets=16` over 60 s run) + `loader_return` panic-safe `hakios_wdt_quiesce()` (`ctl=0 pets=16`, `logs/075911-run.log`) |
 
 ### 3. Existing Subsystem Completeness Checklist (Daily-Driver Standard)
 
@@ -134,6 +134,17 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 6 Autonomous Audit (2026-11-27, `logs/075911-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `be4a673bce03`, `result: returned 1441823 0`):
+
+- **Active SM8250 Hardware Watchdog (`qcom,wdt@17c10000`, `PASS`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`, `xnu/files/osfmk/arm64/loader_return.c`, `devices/thyme/ram.args`):
+  - Added opt-in `wdt=1` arming (`bark=524287` / 16 s, `bite=1048575` / 32 s, `WDT_CTL=0x1`), 4.0 s `keys_thread` pet loop (`UMI wdt: pet #1..#3`), `kern.hakios.wdt_armed` / `kern.hakios.wdt_pets` sysctls, and `hakios_wdt_quiesce()` wired into `loader_return()` prior to `hakios_ufs_quiesce()` so panics and normal exits disarm the WDT before handing back to `xnuloader`.
+  - Live 60 s run confirmed: `UMI wdt: armed (bark=16s bite=32s ctl=0x1 sts=0)`, survived past the 32 s bite window with 16 pets, and exited cleanly with `UMI wdt: quiesced (ctl=0 pets=16)`.
+- **Live 10 s QUP15 `bq25970` / `fsa4480` Telemetry Refresh** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Extracted shared `thyme_qup15_poll(bool initial)` helper called on boot (`initial=true`) and every 10 s in `keys_thread` (`initial=false`, silent on QUP15 changes), refreshing `kern.hakios.fastchg_*` and `kern.hakios.usbc_switch_status` (`UMI fastchg: refresh vbus=5112 mV vbat=4407 mV ibus=0 mA usbc_st=0x5`).
+- **Artifacts**: `hakios-kernel` (`17,005,904 B`, sha256 `be4a673bce039f0d4cd5480f30529c280eb3320aaea93bf33b92a3f1d944e1b5`), `userland/root.apfs` (`48,992,256 B`, sha256 `99594b1ddac37ac810aacf62d6619f35ca8a0e99aa49946eda233e69c269bc8a`; total `65,998,160 B < 66,060,288 B`), `logs/075911-run.log` (sha256 `d3eeb36a20552a1c8ef9af7198cc570ad7c358fc3f0891caa1ecab15fa681e86`).
 
 ## Batch 5 Autonomous Audit (2026-11-27, `logs/034840-run.log`)
 

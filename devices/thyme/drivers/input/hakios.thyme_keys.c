@@ -75,6 +75,7 @@ SYSCTL_DECL(_kern_hakios);
 #define UMI_FOD_RST_PIN       24u
 
 #define UMI_WDT_PA            0x17c10000UL
+#define UMI_WDT_RST           0x04u
 #define UMI_WDT_CTL           0x08u
 #define UMI_WDT_STS           0x0cu
 #define UMI_WDT_BARK          0x10u
@@ -93,11 +94,11 @@ SYSCTL_DECL(_kern_hakios);
 #define OBS_ERRORS            0x0eu
 #define OBS_READ_LONG         (1u << 27)
 
-static vm_offset_t arb_core, arb_cnfg, arb_observer, south_tlmm, north_tlmm, hall_gpio;
+static vm_offset_t arb_core, arb_cnfg, arb_observer, south_tlmm, north_tlmm, hall_gpio, wdt_base;
 static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_NO_APID;
 static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
-static int wdt_ctl, wdt_sts;
+static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
 static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static int usb_dwc3_id, usb_dwc3_dsts;
@@ -121,6 +122,12 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_ctl,
 SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_sts,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &wdt_sts, 0,
     "SM8250 hardware watchdog STS register (0x17c1000c)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_armed,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &wdt_armed, 0,
+    "SM8250 hardware watchdog active armed state (1=armed)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_pets,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &wdt_pets, 0,
+    "SM8250 hardware watchdog periodic pet count");
 SYSCTL_INT(_kern_hakios, OID_AUTO, fastchg_part,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &fastchg_part, 0,
     "Wired 33W charger IC bq25970 part register (0x13)");
@@ -413,13 +420,15 @@ keys_post(unsigned key, bool down)
 	hakios_touch_post(down ? HAKIOS_BUTTON_DOWN : HAKIOS_BUTTON_UP, button[key], 0, 0);
 }
 
+static void thyme_qup15_poll(bool initial);
+
 static void
 keys_thread(__unused void *arg, __unused wait_result_t result)
 {
 	/* Unknown initial state is observed silently; only subsequent transitions are events. */
 	int state[3] = { -1, -1, -1 };
 	bool live[3] = { false, false, false };
-	unsigned errors = 0, ticks = 0, hall_debounce = 0;
+	unsigned errors = 0, ticks = 0, wdt_ticks = 0, chg_ticks = 0, hall_debounce = 0;
 	int hall_candidate = hall_closed;
 	bool rtc_tick_checked = !rtc_ready;
 
@@ -480,6 +489,23 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 				hakios_tl("UMI rtc: tick check t0=%u t1=%u delta=%u s\n",
 				    rtc_boot_seconds, now_secs, now_secs - rtc_boot_seconds);
 			}
+		}
+		if (wdt_armed && wdt_base != 0 && ++wdt_ticks >= 200u) {
+			wdt_ticks = 0;
+			uint32_t sts_before = keys_reg(wdt_base, UMI_WDT_STS);
+
+			keys_write(wdt_base, UMI_WDT_RST, 1u);
+			uint32_t sts_after = keys_reg(wdt_base, UMI_WDT_STS);
+
+			wdt_sts = (int)sts_after;
+			wdt_pets++;
+			if (wdt_pets <= 3) {
+				hakios_tl("UMI wdt: pet #%d sts %#x -> %#x\n", wdt_pets, sts_before, sts_after);
+			}
+		}
+		if (south_tlmm != 0 && fastchg_part != 0 && ++chg_ticks >= 500u) {
+			chg_ticks = 0;
+			thyme_qup15_poll(false);
 		}
 		keys_wait();
 	}
@@ -589,8 +615,10 @@ i2c_bus_take(vm_offset_t tlmm, unsigned bus_id, unsigned sda, unsigned scl,
 	uint32_t cfg_scl = tlmm_cfg_rd(tlmm, scl);
 	uint32_t io_scl = tlmm_io_rd(tlmm, scl);
 
-	hakios_tl("UMI i2c: bus%u gpio%u/%u cfg=%#x/%#x io=%#x/%#x\n",
-	    bus_id, sda, scl, cfg_sda, cfg_scl, io_sda, io_scl);
+	if (bus_id != 0) {
+		hakios_tl("UMI i2c: bus%u gpio%u/%u cfg=%#x/%#x io=%#x/%#x\n",
+		    bus_id, sda, scl, cfg_sda, cfg_scl, io_sda, io_scl);
+	}
 	if ((cfg_sda == 0 && io_sda == 0) || (cfg_scl == 0 && io_scl == 0)) {
 		hakios_tl("UMI i2c: bus%u gpio%u/%u RAZ/XPU guarded; skipped safely\n", bus_id, sda, scl);
 		return false;
@@ -963,24 +991,55 @@ static const struct cdevsw ir_cdevsw = {
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0,
 };
 
-/* Read-only SM8250 watchdog status probe (qcom,wdt@17c10000). */
+/* SM8250 APSS hardware watchdog (qcom,wdt@17c10000): probe, opt-in wdt=1 arming, and loader_return quiesce. */
+void hakios_wdt_quiesce(void);
+
+void
+hakios_wdt_quiesce(void)
+{
+	if (wdt_base != 0 && wdt_armed) {
+		keys_write(wdt_base, UMI_WDT_CTL, 0u);
+		keys_write(wdt_base, UMI_WDT_RST, 1u);
+		uint32_t ctl = keys_reg(wdt_base, UMI_WDT_CTL);
+
+		wdt_ctl = (int)ctl;
+		wdt_armed = 0;
+		hakios_tl("UMI wdt: quiesced (ctl=%#x pets=%d)\n", ctl, wdt_pets);
+	}
+}
+
 static void
 thyme_wdt_probe(void)
 {
-	vm_offset_t wdt = ml_io_map(UMI_WDT_PA, 0x1000UL);
+	wdt_base = ml_io_map(UMI_WDT_PA, 0x1000UL);
 
-	if (wdt == 0) {
+	if (wdt_base == 0) {
 		hakios_tl("UMI wdt: map failed\n");
 		return;
 	}
-	uint32_t ctl = keys_reg(wdt, UMI_WDT_CTL);
-	uint32_t sts = keys_reg(wdt, UMI_WDT_STS);
-	uint32_t bark = keys_reg(wdt, UMI_WDT_BARK);
-	uint32_t bite = keys_reg(wdt, UMI_WDT_BITE);
+	uint32_t ctl = keys_reg(wdt_base, UMI_WDT_CTL);
+	uint32_t sts = keys_reg(wdt_base, UMI_WDT_STS);
+	uint32_t bark = keys_reg(wdt_base, UMI_WDT_BARK);
+	uint32_t bite = keys_reg(wdt_base, UMI_WDT_BITE);
 
 	wdt_ctl = (int)ctl;
 	wdt_sts = (int)sts;
 	hakios_tl("UMI wdt: 0x17c10000 ctl=%#x sts=%#x bark=%u bite=%u\n", ctl, sts, bark, bite);
+
+	uint32_t wdt_en = 0;
+	if (PE_parse_boot_argn("wdt", &wdt_en, sizeof(wdt_en)) && wdt_en == 1) {
+		keys_write(wdt_base, UMI_WDT_CTL, 0u);
+		keys_write(wdt_base, UMI_WDT_BARK, 524287u);
+		keys_write(wdt_base, UMI_WDT_BITE, 1048575u);
+		keys_write(wdt_base, UMI_WDT_RST, 1u);
+		keys_write(wdt_base, UMI_WDT_CTL, 1u);
+		ctl = keys_reg(wdt_base, UMI_WDT_CTL);
+		sts = keys_reg(wdt_base, UMI_WDT_STS);
+		wdt_ctl = (int)ctl;
+		wdt_sts = (int)sts;
+		wdt_armed = (ctl & 1u) ? 1 : 0;
+		hakios_tl("UMI wdt: armed (bark=16s bite=32s ctl=%#x sts=%#x)\n", ctl, sts);
+	}
 }
 
 /* Strictly read-only Synopsys DWC3 hardware telemetry probe (dwc3@a600000). */
@@ -1006,34 +1065,42 @@ thyme_usb_dwc3_probe(void)
 	    id, hw0, hw3, dsts, speed, link);
 }
 
-/* Strictly read-only I2C telemetry probe for wired 33W (bq25970), wireless 30W (idtp9415/ln8282) & NFC (nq-nci). */
+/* Strictly read-only I2C telemetry helper for QUP15 wired 33W (bq25970) & USB-C audio switch (fsa4480). */
 static void
-thyme_charger_probe(void)
+thyme_qup15_poll(bool initial)
 {
+	static bool qup15_refreshed;
 	uint32_t saved_cfg[2], saved_io[2];
 
-	if (i2c_bus_take(south_tlmm, 15, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io)) {
-		uint8_t part = 0, adc[10] = { 0 }, fsa_id = 0;
+	if (!i2c_bus_take(south_tlmm, initial ? 15 : 0, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io)) {
+		return;
+	}
+	uint8_t part = (uint8_t)fastchg_part, adc[10] = { 0 }, fsa_id = (uint8_t)usbc_audio_id;
+	int prev_st = usbc_switch_status;
+	bool bq_ok = !initial || i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x13u, false, &part, 1);
 
-		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x13u, false, &part, 1)) {
-			fastchg_part = (int)part;
-			if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x16u, false, adc, sizeof(adc))) {
-				int ibus = (int)(((uint16_t)adc[0] << 8) | adc[1]);
-				int vbus = (int)(((uint16_t)adc[2] << 8) | adc[3]);
-				int vac  = (int)(((uint16_t)adc[4] << 8) | adc[5]);
-				int vbat = (int)(((uint16_t)adc[8] << 8) | adc[9]);
+	if (bq_ok && part != 0) {
+		fastchg_part = (int)part;
+		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x66u, 0x16u, false, adc, sizeof(adc))) {
+			int ibus = (int)(((uint16_t)adc[0] << 8) | adc[1]);
+			int vbus = (int)(((uint16_t)adc[2] << 8) | adc[3]);
+			int vac  = (int)(((uint16_t)adc[4] << 8) | adc[5]);
+			int vbat = (int)(((uint16_t)adc[8] << 8) | adc[9]);
 
-				fastchg_ibus_ma = ibus;
-				fastchg_vbus_mv = vbus;
-				fastchg_vbat_mv = vbat;
+			fastchg_ibus_ma = ibus;
+			fastchg_vbus_mv = vbus;
+			fastchg_vbat_mv = vbat;
+			if (initial) {
 				hakios_tl("UMI fastchg: bq25970@0x66 part=%#x vbus=%d mV vac=%d mV vbat=%d mV ibus=%d mA\n",
 				    part, vbus, vac, vbat, ibus);
-			} else {
-				hakios_tl("UMI fastchg: bq25970@0x66 part=%#x (ADC read failed)\n", part);
 			}
-		} else {
-			hakios_tl("UMI fastchg: bq25970@0x66 NACK\n");
+		} else if (initial) {
+			hakios_tl("UMI fastchg: bq25970@0x66 part=%#x (ADC read failed)\n", part);
 		}
+	} else if (initial) {
+		hakios_tl("UMI fastchg: bq25970@0x66 NACK\n");
+	}
+	if (initial) {
 		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x00u, false, &fsa_id, 1)) {
 			uint8_t en = 0, sel = 0, st0 = 0, st1 = 0, jack = 0;
 
@@ -1047,8 +1114,29 @@ thyme_charger_probe(void)
 			hakios_tl("UMI usbc_audio: fsa4480@0x42 id=%#x en=%#x sel=%#x st=%#x/%#x jack=%#x\n",
 			    fsa_id, en, sel, st0, st1, jack);
 		}
-		i2c_bus_release(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io);
+	} else if (usbc_audio_id != 0) {
+		uint8_t st0 = 0, st1 = 0;
+
+		if (i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x06u, false, &st0, 1) &&
+		    i2c_read_regs(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, 0x42u, 0x07u, false, &st1, 1)) {
+			usbc_switch_status = ((int)st1 << 8) | (int)st0;
+		}
+		if (!qup15_refreshed || usbc_switch_status != prev_st) {
+			qup15_refreshed = true;
+			hakios_tl("UMI fastchg: refresh vbus=%d mV vbat=%d mV ibus=%d mA usbc_st=%#x\n",
+			    fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, usbc_switch_status);
+		}
 	}
+	i2c_bus_release(south_tlmm, UMI_QUP15_SDA_PIN, UMI_QUP15_SCL_PIN, saved_cfg, saved_io);
+}
+
+/* Strictly read-only I2C telemetry probe for wired 33W (bq25970), wireless 30W (idtp9415/ln8282) & NFC (nq-nci). */
+static void
+thyme_charger_probe(void)
+{
+	uint32_t saved_cfg[2], saved_io[2];
+
+	thyme_qup15_poll(true);
 
 	if (i2c_bus_take(south_tlmm, 16, UMI_QUP16_SDA_PIN, UMI_QUP16_SCL_PIN, saved_cfg, saved_io)) {
 		uint8_t idt[4] = { 0 }, ln_id = 0;
