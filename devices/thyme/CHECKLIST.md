@@ -21,7 +21,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | CPU Cluster (7/8 cores) | Snapdragon 870 (`SM8250-AC`) Silver/Gold/Prime | P1 | **PASS** | `bootcpu=7 cpus=7`, EPSS runtime CPU DVFS (`ml_cpu_idle_time()` scaling e.g. `3187->844 MHz`, `2419->710 MHz` in `logs/024327-run.log`) + `thermal=1` cap |
 | CPU0 (8th Core) | Silver core 0 | P1 | **TODO** | `xnuloader/loader.c` deliberately reserves core 0 for UEFI/EL3 firmware under `bootcpu=7 cpus=7` RAM boot |
 | GPU (OpenGL ES) | Adreno 650 (`0x06050002`) + GMU | P0 | **PASS** | Hardware rendering via Mesa/Freedreno (`hakios-gl`) |
-| GPU (System Metal) | Adreno 650 (`hakios-metal` + `HakiosMetalCA`) | P0 | **PARTIAL** | Compiles and initializes in probes (`CA`); full `metal_all=1` / VectorKit / ANGLE stability open |
+| GPU (System Metal) | Adreno 650 (`hakios-metal` + `HakiosMetalCA`) | P0 | **PARTIAL** | Compiles and initializes in probes (`CA`); `HakiosMetalCA.m` `metal_apps=1` `backboardd` exemption fixed (`logs/080948-run.log` clean under default GL); full `METAL_PLUGIN=ca` / `metal=1` VectorKit / ANGLE stability open |
 | Display & Refresh | 6.67" 1080×2340 OLED (`j2s_mp_42_02_0a_dsc_cmd`) | P0 | **PASS** | Hardware `89.08 Hz` TE-synced (`INTF_1`, `0%` missed scans), DCS brightness, lock blanking |
 | Touchscreen | FocalTech `FTS521` | P0 | **PASS** | Multi-touch, edge/home gestures, coordinate/latency logging (`touch_lat=1`) |
 | Physical Keys | Power / Volume +/- (`hakios.thyme_keys`) | P0 | **PASS** | Short/long press, screenshot chord, reboot/wake sequence |
@@ -31,10 +31,10 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | Main Rear Camera + AF | 108 MP `S5KHMX` (`cam_mode=5` `1080p` / `27 MP`) + `AK7377` VCM | P1 | **PASS** | Live ~51 fps preview (`1920x1080`, `3899` frames `logs/030913-run.log`), adaptive AF (`AF_WATCH` 1/3 skip), frame-0 AWB (`1.6f`), 5×5 ISP stills |
 | Front Camera | 20 MP `S5K3T2` | P1 | **PASS** | Live switch & capture; configured `res2` (`1280x720 @ 42.7 fps`) in `hakios.thyme_umi_camera.c` / `hakios.thyme_camera.c` |
 | Camera Flash | `PM8150L` WLED/Torch | P1 | **PASS** | Torch & shutter flash (`torch=3`) |
-| Camera OIS | `qcom,ois@1` | P1 | **TODO** | Hardware node present in DTB; XNU OIS driver not implemented |
+| Camera OIS | `qcom,ois@1` (`umi_ois` @ CCI `0x1c`) | P1 | **PARTIAL** | Live rear CCI `0x1c` readback `PASS` via `cam_ois_probe=1` (`ok=1 r0=0xf0 r2=0xf0 r4=0xf0 r6=0xf0 r7000=0xf0`, `kern.hakios.ois_chip_id=0xf0`, clean `ios_stop` & power-off `error=0`, `logs/080948-run.log`); active OIS gyro/servo init `TODO` |
 | Aux Cameras (Ultrawide / Macro / Depth) | Rear secondary CCI/CSIPHY sensors | P2 | **TODO** | Only rear wide (`S5KHMX`) + front (`S5K3T2`) driven; ultrawide, macro & depth unimplemented |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` over `PCIe2 / MHI` | P0 | **PASS** | China Broadnet `46015` 4G LTE dual-stack + VoLTE (`10099`); `pcie2_mhi=2` native `AppleBaseband` (22 services) + `CommCenter[31]` active (`logs/024327-run.log`) |
-| 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` Band n41) | P1 | **TODO** | Kernel `NAS5G` reads `mode=0x50`; iOS userland emulates `Mav17` (4G-only); needs `Mav20` bridge + 2nd SIM slot |
+| 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` Band n41) | P1 | **TODO** | Kernel `NAS5G` reads `mode=0x50` (under `pcie2_mhi=2` `CommCenter` owns IPCR/QMI, so `pcie2_nr=1` kernel ask is bypassed; `logs/080948-run.log`); iOS userland emulates `Mav17` (4G-only) and needs `Mav20` bridge + 2nd SIM slot |
 | GNSS Receiver | `SDX55M QMI LOC 0x10` + `umi_gnssd` | P0 | **PARTIAL** | Wi-Fi CoreLocation (`+/-52..92 m`, Baidu Maps `PASS`) & `START=0` SV stream active; outdoor 3D fix pending |
 | Wi-Fi | `QCA6390` (`PCIe0 / MHI / ath11k`) | P0 | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s sleep/wake, AP deauth & power auto-rejoin |
 | Bluetooth | `QCA6390` (UART `3 Mbaud` H4) | P1 | **PARTIAL** | Scan, pair, A2DP audio, `BlueTool deepsleep`, `PlayAndRecord` HFP/A2DP `yes`; live headset HFP/AVRCP open |
@@ -134,6 +134,19 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 7 Autonomous Audit (2026-11-27, `logs/080948-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `9d4866517785`, `SCENE=daily` rootfs `6393155cc2be`, `result: returned 1441823 0`):
+
+- **Rear Camera OIS (`0x1c`) Live CCI Verification (`PARTIAL` — HW Readback `PASS`)** (`devices/thyme/drivers/camera/hakios.thyme_umi_camera.c`):
+  - Added opt-in `cam_ois_probe=1` hook in `umi_camera_ios_prepare()` running one clean rear `1920x1080` `umi_camera_ios_start()` + `umi_camera_ios_stop()` cycle (`err=0`, all 3 camera regulators released `error=0`).
+  - Live log confirmed CCI `0x1c` answers (`UMI ois: 0x1c ok=1 r0=0xf0 r2=0xf0 r4=0xf0 r6=0xf0 r7000=0xf0`, `UMI camera: cam_ois_probe start err=0 ois_chip_id=0xf0`), matching `umi_ois` in `com.qti.sensormodule.umi_semco_s5khmx.bin`; active OIS gyro/servo init remains `TODO`.
+- **`HakiosMetalCA.m` `metal_apps=1` Window-Server Fix** (`userland/src/HakiosMetalCA.m`):
+  - Exempted `window_server` (`backboardd`) alongside `/var/containers/Bundle/Application/` when `metal_apps=1` is set (`if (!application && !window_server)`) and restricted `hm_draw_on=1` to user applications only. Note `SCENE=daily` builds default OpenGL ES unless `METAL_PLUGIN=ca` + `metal=1` are explicitly enabled; `backboardd` and `SpringBoard` launched cleanly (`[BootUI] updateOverlay: Dismissing overlay: shell launched`).
+- **`pcie2_nr=1` & `wdt=1` Interaction Check**:
+  - Confirmed under `pcie2_mhi=2` (`AppleBaseband` / `CommCenter` IPCR handoff), kernel `pcie2_nr=1` NR-first NAS request is bypassed while `Mav17` SIM slot 1 `USIM` initializes cleanly (`AID a0 00 00 00 87 10 02...`), and `wdt=1` completed 20 pets + `UMI wdt: quiesced (ctl=0 pets=20)` across the 75 s run.
+- **Artifacts**: `hakios-kernel` (`17,005,904 B`, sha256 `9d4866517785417e7e24a707682b62d00eff8a42a53fc31991ab536c16a9c6e0`), `userland/root.apfs` (`48,992,256 B`, sha256 `6393155cc2be9631641de8ec96657b232a117926121efd4ef70eee375ca74f99`; total `65,998,160 B < 66,060,288 B`), `logs/080948-run.log` (sha256 `b6959bc77329bc3d2bdc09ab363c0bb95227fc173682d44ea7ef60e2c09d8113`).
 
 ## Batch 6 Autonomous Audit (2026-11-27, `logs/075911-run.log`)
 

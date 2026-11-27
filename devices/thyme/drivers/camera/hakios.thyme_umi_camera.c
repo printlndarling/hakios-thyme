@@ -31,6 +31,8 @@ int umi_camera_isp_probe(void);
 int umi_camera_capture_tpg(void);
 int umi_camera_capture_sensor(void);
 void umi_camera_ios_prepare(void);
+int umi_camera_ios_start(unsigned, unsigned);
+void umi_camera_ios_stop(void);
 extern int umi_camera_tpg(vm_offset_t, vm_offset_t);
 extern int umi_camera_stream_arm(vm_offset_t, vm_offset_t, unsigned, unsigned, unsigned,
     unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, const char *);
@@ -196,6 +198,18 @@ umi_camera_ios_prepare(void)
 	if (umi_camera_dma_reserve(reserve_w, reserve_h) != 0)
 		hakios_tl("UMI camera: no frame buffer for the iOS session (%ux%u)\n", reserve_w, reserve_h);
 	hakios_tl("UMI camera: iOS session mappings reserved (%u blocks)\n", umaps_used);
+	{
+		uint32_t ois_probe = 0;
+
+		if (PE_parse_boot_argn("cam_ois_probe", &ois_probe, sizeof(ois_probe)) && ois_probe == 1) {
+			int err = umi_camera_ios_start(reserve_w, reserve_h);
+
+			hakios_tl("UMI camera: cam_ois_probe start err=%d ois_chip_id=%#x\n", err, ois_chip_id);
+			if (err == 0) {
+				umi_camera_ios_stop();
+			}
+		}
+	}
 }
 
 static uint32_t

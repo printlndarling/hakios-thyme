@@ -2148,12 +2148,14 @@ hm_boot_arg_set(const char *what)
 				at += 8;        /* dyld reports /private/var/... : /var is a link to /private/var */
 			}
 			application = application && strncmp(at, "/var/containers/Bundle/Application/", 35) == 0;
-			if (!application) {
+			if (!application && !window_server) {
 				HM_ONCE("%s (%s) is not an application: it keeps the road it has (metal_apps=1: /var/containers/Bundle/Application)\n",
 				    name ? name : "?", path);
 				return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 			}
-			hm_draw_on = 1;     /* (hakios) an application: its large surfaces are sampled, see hm_draw_slots */
+			if (application) {
+				hm_draw_on = 1; /* (hakios) an application: its large surfaces are sampled, see hm_draw_slots */
+			}
 		}
 		if (!all && !apps && !window_server) {
 			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process, metal_apps=1: every application)\n", name ? name : "?");
