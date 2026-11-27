@@ -338,6 +338,9 @@ thyme_qrng_init(void)
 		hakios_tl("UMI qrng: GCC map failed\n");
 		return;
 	}
+	hakios_tl("UMI qce: gcc_ce1 cbcr=%#x/%#x/%#x/%#x\n",
+	    keys_reg(gcc, 0x41004u), keys_reg(gcc, 0x41008u),
+	    keys_reg(gcc, 0x4100cu), keys_reg(gcc, 0x41010u));
 	vote_before = keys_reg(gcc, UMI_GCC_PRNG_VOTE);
 	cbcr = keys_reg(gcc, UMI_GCC_PRNG_CBCR);
 	keys_write(gcc, UMI_GCC_PRNG_VOTE, vote_before | (1u << 13));
@@ -1158,6 +1161,7 @@ static bool
 fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out_clus, bool log_root)
 {
 	unsigned logged = 0;
+	uint32_t first_dir_clus = 0;
 
 	if (!g->is_fat32 && g->root_dir_secs > 0) {
 		uint64_t base = (uint64_t)(g->rsvd_sec + g->num_fats * g->fat_sz) * g->bps;
@@ -1170,8 +1174,7 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 			}
 			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
 				const uint8_t *d = secbuf + o;
-				if (d[0] == 0x00) return false;
-				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
 				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 				uint32_t fsize = fat_u32(d + 28);
 				if (log_root && logged < 8u) {
@@ -1179,43 +1182,83 @@ fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out
 					    logged, (const char *)d, d[11], fclus, fsize);
 					logged++;
 				}
-				if ((d[11] & 0x10) != 0 && fat_eq_83_ci(d, "IMAGE      ")) {
-					*out_clus = fclus;
-					return *out_clus >= 2u;
+				if ((d[11] & 0x10) != 0 && fclus >= 2u) {
+					if (first_dir_clus == 0) {
+						first_dir_clus = fclus;
+					}
+					if (fat_eq_83_ci(d, "IMAGE      ")) {
+						*out_clus = fclus;
+						return true;
+					}
 				}
 			}
 		}
+	} else {
+		uint32_t clus = g->root_clus;
+		for (unsigned iter = 0; iter < 64u && clus >= 2u && clus < 0x0ffffff8u; iter++) {
+			uint64_t base = fat_clus_off(g, clus);
+			for (uint32_t s = 0; s < g->spc; s++) {
+				int err = hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g->bps, secbuf, g->bps, NULL);
+				if (err != 0) {
+					hakios_tl("UMI ufs_fw: rdir32 read clus=%u err=%d\n", clus, err);
+					return false;
+				}
+				for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
+					const uint8_t *d = secbuf + o;
+					if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+					uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
+					uint32_t fsize = fat_u32(d + 28);
+					if (log_root && logged < 8u) {
+						hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
+						    logged, (const char *)d, d[11], fclus, fsize);
+						logged++;
+					}
+					if ((d[11] & 0x10) != 0 && fclus >= 2u) {
+						if (first_dir_clus == 0) {
+							first_dir_clus = fclus;
+						}
+						if (fat_eq_83_ci(d, "IMAGE      ")) {
+							*out_clus = fclus;
+							return true;
+						}
+					}
+				}
+			}
+			clus = fat_next_clus(g, clus);
+		}
+	}
+	if (first_dir_clus < 2u) {
 		return false;
 	}
-	uint32_t clus = g->root_clus;
-	for (unsigned iter = 0; iter < 64u && clus >= 2u && clus < 0x0ffffff8u; iter++) {
-		uint64_t base = fat_clus_off(g, clus);
+	uint32_t sub_clus = first_dir_clus;
+	unsigned sub_logged = 0;
+	for (unsigned iter = 0; iter < 16u && sub_clus >= 2u && sub_clus < 0x0ffffff8u; iter++) {
+		uint64_t base = fat_clus_off(g, sub_clus);
 		for (uint32_t s = 0; s < g->spc; s++) {
-			int err = hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g->bps, secbuf, g->bps, NULL);
-			if (err != 0) {
-				hakios_tl("UMI ufs_fw: rdir32 read clus=%u err=%d\n", clus, err);
-				return false;
+			if (hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g->bps, secbuf, g->bps, NULL) != 0) {
+				*out_clus = first_dir_clus;
+				return true;
 			}
 			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
 				const uint8_t *d = secbuf + o;
-				if (d[0] == 0x00) return false;
-				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				if (d[0] == 0x00 || d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
 				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
 				uint32_t fsize = fat_u32(d + 28);
-				if (log_root && logged < 8u) {
-					hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
-					    logged, (const char *)d, d[11], fclus, fsize);
-					logged++;
+				if (log_root && sub_logged < 8u) {
+					hakios_tl("UMI ufs_fw: sub[%u] '%.11s' attr=%#x clus=%u size=%u\n",
+					    sub_logged, (const char *)d, d[11], fclus, fsize);
+					sub_logged++;
 				}
-				if ((d[11] & 0x10) != 0 && fat_eq_83_ci(d, "IMAGE      ")) {
+				if ((d[11] & 0x10) != 0 && fclus >= 2u && fat_eq_83_ci(d, "IMAGE      ")) {
 					*out_clus = fclus;
-					return *out_clus >= 2u;
+					return true;
 				}
 			}
 		}
-		clus = fat_next_clus(g, clus);
+		sub_clus = fat_next_clus(g, sub_clus);
 	}
-	return false;
+	*out_clus = first_dir_clus;
+	return true;
 }
 
 int
@@ -1285,8 +1328,8 @@ thyme_modem_fat_scan(void)
 		hakios_tl("UMI ufs_fw: modem_a FAT init failed\n");
 		return;
 	}
-	hakios_tl("UMI ufs_fw: modem_a FAT%u bps=%u spc=%u fat_sz=%u root_ent=%u root_clus=%u\n",
-	    g.is_fat32 ? 32u : 16u, g.bps, g.spc, g.fat_sz, g.root_ent, g.root_clus);
+	hakios_tl("UMI ufs_fw: modem_a FAT%u bps=%u spc=%u nfats=%u rsvd=%u fat_sz=%u root_ent=%u fdata=%u\n",
+	    g.is_fat32 ? 32u : 16u, g.bps, g.spc, g.num_fats, g.rsvd_sec, g.fat_sz, g.root_ent, g.first_data_sec);
 	if (!fat_find_image_dir(&g, modem_fat_secbuf, &img_clus, true)) {
 		hakios_tl("UMI ufs_fw: modem_a/IMAGE not found\n");
 		return;
@@ -1311,7 +1354,7 @@ thyme_modem_fat_scan(void)
 				if (is_venus || is_cdsp) {
 					uint32_t fsize = fat_u32(d + 28);
 					uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
-					if (logged < 12u) {
+					if (logged < 16u) {
 						logged++;
 						hakios_tl("UMI ufs_fw: image/%.8s.%.3s size=%u clus=%u\n",
 						    (const char *)d, (const char *)(d + 8), fsize, fclus);
@@ -1346,6 +1389,13 @@ thyme_modem_fat_scan(void)
 	}
 	hakios_tl("UMI ufs_fw: scanned %u files in IMAGE (venus=%d cdsp=%d)\n",
 	    total, venus_fw_size, cdsp_fw_size);
+	{
+		uint8_t sb[64] = { 0 };
+		if (hakios_ufs_read_partition("dsp_a", 0x400u, sb, sizeof(sb), NULL) == 0) {
+			hakios_tl("UMI ufs_fw: dsp_a magic=%#x blocks=%u\n",
+			    fat_u16(sb + 0x38u), fat_u32(sb + 4u));
+		}
+	}
 }
 
 /* SM8250 APSS hardware watchdog (qcom,wdt@17c10000): probe, opt-in wdt=1 arming, and loader_return quiesce. */

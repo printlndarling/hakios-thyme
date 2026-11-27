@@ -65,12 +65,12 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
 | CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **PARTIAL** | XNU `machine_idle()` `WFI`/`WFE` active on all idle cores; display blanking (`DCS 0x51=0`) works (`logs/173008-run.log`); PSCI `CPU_SUSPEND` deep power collapse `TODO` |
 | GPU Dynamic Frequency Scaling (DVFS) | P1 | **PASS** | Adreno 650 GMU HFI runtime OPP switching (`305 / 441 / 587 MHz`, `31` live transitions in `logs/231618-run.log`), `kern.hakios.gpu_*` sysctls, nominal restore on exit |
-| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` (`0xaab0000`, `pas-id=9`) unimplemented; UFS `modem_a` FAT16 reader live (`bps=4096 spc=4 root[0]='PCAFUI~2   ' clus=2`, `logs/082446-run.log`), firmware dir scan next |
+| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` (`0xaab0000`, `pas-id=9`) unimplemented; `modem_a` `clus=2` contains 514 VFAT LFN firmware files (`~2.B00..B07`, `logs/083127-run.log`); LFN `0x0f` decoder next to extract `venus.mdt`/`bXX` |
 | VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
-| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) not brought up |
+| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) in `modem_a` VFAT LFN (`514` files) + `dsp_a` ext4 verified (`magic=0xef53 blocks=16384`, `logs/083127-run.log`) |
 | NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
-| Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (64 B / 16 distinct words mixed into XNU `mc_prng`, `kern.hakios.qrng_ready=1`); `qcedev@1de0000` bulk crypto engine `TODO` |
+| Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (`kern.hakios.qrng_ready=1`); `GCC_CE1` registers read safely (`cbcr=0x80004220/0/0x80000002/0x80000000`, `logs/083127-run.log`), `qcedev@1de0000` crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
 | Hardware Watchdog | P1 | **PASS** | Active SM8250 APSS WDT (`0x17c10000`, `wdt=1`: `bark=16s bite=32s`, `ctl=0x1`) + 4 s `keys_thread` keepalive (`pets=16` over 60 s run) + `loader_return` panic-safe `hakios_wdt_quiesce()` (`ctl=0 pets=16`, `logs/075911-run.log`) |
 
@@ -134,6 +134,17 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 9 Autonomous Audit (2026-11-27, `logs/083127-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `367234565f2e`, `result: returned 1441823 0`):
+
+- **`modem_a` Subdir Descent (`clus=2`, 514 VFAT LFN Firmware Segments)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Descended past `'PCAFUI~2   '` (`clus=2`) and enumerated `514` files with `.B00`..`.B07` extensions (`EPUZJI~2.B00` 692 B, `47MKHH~2.B01` 7528 B, `NK7HJZ~2.B02` 82424 B, `7T66QN~2.B03` 358784 B, `EU4PDT~2.B04` 1947772 B, `OJAB2Y~2.B05` 2487860 B, plus 2 subdirs `X5LAEE~2` clus=3 & `WMLSPW~2` clus=6). Confirmed Mi 10S stores firmware filenames in VFAT LFN (`attr=0x0f`) entries with `~2` hash-generated short names; adding VFAT LFN decoding next unlocks `venus.*` & `cdsp.*`.
+- **`dsp_a` Ext4 Partition & `GCC_CE1` Clock Readback**:
+  - Verified `dsp_a` superblock via `hakios_ufs_read_partition`: `UMI ufs_fw: dsp_a magic=0xef53 blocks=16384` (64 MiB ext4).
+  - Read SM8250 `GCC_CE1` clock registers safely inside `thyme_qrng_init`: `UMI qce: gcc_ce1 cbcr=0x80004220/0/0x80000002/0x80000000` (clocks gated off in `0x41004` bit 31 until voted).
+- **Artifacts**: `hakios-kernel` (`17,039,248 B`, sha256 `367234565f2e88e76a062863bece135a1c4175249ea04fdbf5cc57022faf8bca`), `userland/root.apfs` (`48,992,256 B`, sha256 `6393155cc2be9631641de8ec96657b232a117926121efd4ef70eee375ca74f99`; total `66,031,504 B < 66,060,288 B`), `logs/083127-run.log` (sha256 `53cedcd5148257031b4626cfa887ab2e5e6fb77efae1b043e7f9da2e04f1d557`).
 
 ## Batch 8 Autonomous Audit (2026-11-27, `logs/082446-run.log`)
 
