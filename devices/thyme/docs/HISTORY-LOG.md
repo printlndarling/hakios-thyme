@@ -1,5 +1,27 @@
 ## Chronological Verification Logs & Evidence
 
+## PAS relocation before split firmware load
+
+- The [Qualcomm MDT loader](https://raw.githubusercontent.com/torvalds/linux/master/drivers/soc/qcom/mdt_loader.c)
+  sets up the relocation range following image initialization and before
+  writing firmware segments. Thyme now uses that order. It validates the
+  ELF32 little-endian program-header table and the full memory extent
+  before sending firmware to the secure monitor.
+- Eight host cases exercised the actual loader code with stubbed hardware:
+  a valid shifted program-header table, wrong byte order, out-of-range or
+  truncated headers, invalid segment sizes, and relocation failure before
+  the first carveout write. Local harness is `logs/codex-pas-layout-test.py`.
+- The physical Mi 10S ran `venus=3 cdsp=1` for 90 s with kernel
+  `01866010b7d4` and compact root `7d8ba86fdb50`. For both images, the
+  log records successful `INIT_IMAGE` and `MEM_SETUP` before copying
+  any segments. Venus copied 926,324 bytes across 14 loadable segments and
+  CDSP copied 5,793,254 across 11. CDSP authenticated and shut down.
+  SpringBoard ran, the watchdog quiesced, and Android booted after the
+  loader returned `1441823 0`. No kernel panic appears in the final log.
+  Local evidence is `logs/110825-run.log`, SHA-256
+  `755b8da36a7d0d224f22f14a740967af84241f585cef25ebce15a055ef857dba`.
+  Venus firmware execution and HFI remain pending.
+
 ## Venus core clock and RAM payload headroom
 
 - The first `venus=3 cdsp=1` run (`b5087c04a781`) returned normally, but

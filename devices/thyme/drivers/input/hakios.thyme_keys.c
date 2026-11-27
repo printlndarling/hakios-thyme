@@ -1551,14 +1551,18 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 		return;
 	}
 	const uint8_t *hdr = (const uint8_t *)meta_va;
-	if (memcmp(hdr, "\177ELF\1", 5) != 0) {
+	if (memcmp(hdr, "\177ELF\1\1\1", 7) != 0) {
 		hakios_tl("UMI %s: bad ELF magic\n", tag);
 		kmem_free(kernel_map, meta_va, PAGE_SIZE);
 		return;
 	}
+	uint32_t phoff = fat_u32(hdr + 28u);
+	uint32_t phentsize = fat_u16(hdr + 42u);
 	uint32_t phnum = fat_u16(hdr + 44u);
-	if (phnum < 2u || phnum > 64u || 52u + 32u * phnum > mdt_size) {
-		hakios_tl("UMI %s: bad ELF phnum=%u size=%u\n", tag, phnum, mdt_size);
+	if (phoff < 52u || phoff > mdt_size || phentsize != 32u ||
+	    phnum < 2u || phnum > 64u || phnum > (mdt_size - phoff) / phentsize) {
+		hakios_tl("UMI %s: bad ELF phoff=%u phentsize=%u phnum=%u size=%u\n",
+		    tag, phoff, phentsize, phnum, mdt_size);
 		kmem_free(kernel_map, meta_va, PAGE_SIZE);
 		return;
 	}
@@ -1567,14 +1571,22 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 	bool reloc = false;
 
 	for (uint32_t i = 0; i < phnum; i++) {
-		const uint8_t *ph = hdr + 52u + 32u * i;
+		const uint8_t *ph = hdr + phoff + phentsize * i;
 		uint32_t p_type = fat_u32(ph + 0u);
 		uint32_t p_paddr = fat_u32(ph + 12u);
 		uint32_t p_filesz = fat_u32(ph + 16u);
 		uint32_t p_memsz = fat_u32(ph + 20u);
 		uint32_t p_flags = fat_u32(ph + 24u);
 
-		if (p_type != 1u || ((p_flags & (7u << 24)) == (2u << 24)) || p_memsz == 0 || p_filesz > p_memsz) {
+		if (p_type != 1u || ((p_flags & (7u << 24)) == (2u << 24))) {
+			continue;
+		}
+		if (p_filesz > p_memsz) {
+			hakios_tl("UMI %s: seg %u filesz=%u exceeds memsz=%u\n", tag, i, p_filesz, p_memsz);
+			kmem_free(kernel_map, meta_va, PAGE_SIZE);
+			return;
+		}
+		if (p_memsz == 0) {
 			continue;
 		}
 		if ((p_flags & 0x08000000u) != 0) {
@@ -1590,12 +1602,12 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 		loadable++;
 	}
 	uint32_t base = reloc ? lowest : (uint32_t)carve_pa;
-	uint64_t raw_span = (highest > base) ? (highest - base) : 0;
-	uint32_t span = (uint32_t)((raw_span + 0xfffULL) & ~0xfffULL);
-	hakios_tl("UMI %s: ELF segments=%u loadable=%u reloc=%d span=%#x (base=%#x)\n",
+	uint64_t aligned_end = (highest + 0xfffULL) & ~0xfffULL;
+	uint64_t span = aligned_end > base ? aligned_end - base : 0;
+	hakios_tl("UMI %s: ELF segments=%u loadable=%u reloc=%d span=%#llx (base=%#x)\n",
 	    tag, phnum, loadable, reloc ? 1 : 0, span, base);
-	if (loadable == 0 || span == 0 || span > (uint32_t)carve_sz) {
-		hakios_tl("UMI %s: invalid ELF span %#x (max=%#lx)\n", tag, span, (unsigned long)carve_sz);
+	if (loadable == 0 || lowest < base || span == 0 || (span & 7u) != 0 || span > carve_sz) {
+		hakios_tl("UMI %s: invalid ELF span %#llx (max=%#lx)\n", tag, span, (unsigned long)carve_sz);
 		kmem_free(kernel_map, meta_va, PAGE_SIZE);
 		return;
 	}
@@ -1614,20 +1626,30 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 		return;
 	}
 
+	/* PAS establishes the relocation window before the AP writes the segments. */
+	if (reloc) {
+		ret = thyme_scm_call(UMI_SCM_PAS_MEM_SETUP, 3u, pas_id, carve_pa, span, &ans);
+		hakios_tl("UMI %s: TZ MEM_SETUP ret=%d ans=%#llx\n", tag, ret, ans);
+		if (ret != 0 || ans != 0) {
+			kmem_free(kernel_map, meta_va, PAGE_SIZE);
+			return;
+		}
+	}
+
 	vm_offset_t carve = ml_io_map_unmappable((vm_offset_t)carve_pa, carve_sz, VM_WIMG_WCOMB);
 	if (carve == 0) {
 		hakios_tl("UMI %s: carveout map failed\n", tag);
 		kmem_free(kernel_map, meta_va, PAGE_SIZE);
 		return;
 	}
-	hakios_tl("UMI %s: loading %u segments into %#llx (span=%#x)\n", tag, loadable, carve_pa, span);
+	hakios_tl("UMI %s: loading %u segments into %#llx (span=%#llx)\n", tag, loadable, carve_pa, span);
 	volatile uint8_t *dst = (volatile uint8_t *)carve;
-	for (uint32_t z = 0; z + 8u <= span; z += 8u) {
+	for (uint64_t z = 0; z < span; z += 8u) {
 		*(volatile uint64_t *)(dst + z) = 0;
 	}
 	uint32_t total_loaded = 0;
 	for (uint32_t i = 0; i < phnum; i++) {
-		const uint8_t *ph = hdr + 52u + 32u * i;
+		const uint8_t *ph = hdr + phoff + phentsize * i;
 		uint32_t p_type = fat_u32(ph + 0u);
 		uint32_t p_paddr = fat_u32(ph + 12u);
 		uint32_t p_filesz = fat_u32(ph + 16u);
@@ -1637,7 +1659,7 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 		if (p_type != 1u || ((p_flags & (7u << 24)) == (2u << 24)) || p_memsz == 0 || p_filesz == 0) {
 			continue;
 		}
-		if (p_paddr < base || (uint64_t)(p_paddr - base) + p_filesz > span) {
+		if (p_paddr < base || (uint64_t)(p_paddr - base) + p_memsz > span) {
 			hakios_tl("UMI %s: seg %u out of bounds\n", tag, i);
 			ml_io_unmap(carve, carve_sz);
 			kmem_free(kernel_map, meta_va, PAGE_SIZE);
@@ -1645,7 +1667,7 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 		}
 		char bname[24];
 		snprintf(bname, sizeof(bname), seg_fmt, i);
-		vm_size_t bufsz = (vm_size_t)((p_filesz + 0xfffu) & ~0xfffu);
+		vm_size_t bufsz = round_page((vm_size_t)p_filesz);
 		vm_offset_t seg_va = 0;
 		if (kmem_alloc(kernel_map, &seg_va, bufsz, KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS ||
 		    seg_va == 0) {
@@ -1685,11 +1707,6 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 	kmem_free(kernel_map, meta_va, PAGE_SIZE);
 	hakios_tl("UMI %s: segments loaded (%u bytes total)\n", tag, total_loaded);
 
-	ret = thyme_scm_call(UMI_SCM_PAS_MEM_SETUP, 3u, pas_id, carve_pa, (uint64_t)span, &ans);
-	hakios_tl("UMI %s: TZ MEM_SETUP ret=%d ans=%#llx\n", tag, ret, ans);
-	if (ret != 0 || ans != 0) {
-		return;
-	}
 	*out_segs = (int)loadable;
 
 	if (!do_auth_reset) {
