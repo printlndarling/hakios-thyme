@@ -134,10 +134,20 @@ remains open until that test passes.
 | Rear ultra-wide live output | ❌ Manual | Select ultra-wide in Camera. Confirm the physical lens by occluding it and comparing field of view with the main sensor. Capture a real still, open it in Photos, and confirm the saved image came from that lens. |
 | Auxiliary camera switching | ❌ Manual | Identify each independently exposed imager and its supported modes. Repeat main/ultra-wide/front and supported auxiliary switches. Verify real frames resume, the active sensor matches the selection, focus/exposure recover, and Camera works after reopen. |
 | Zoom gestures, readout and dial | 🚧 Manual | Pinch in and out, tap available presets and drag the zoom dial in both directions. Confirm the displayed ratio follows the gesture, live framing changes, supported lens boundaries behave consistently and the saved photo matches preview framing. |
+| Rear and front motion preview | 🚧 Manual | Pan and rotate the phone while viewing a high-contrast subject. Check frame pacing, flashes, repeated frames and tracking on both lenses. A repeat-switch run gave about 8 preview frames per second in a front sample. |
+| Camera switch latency | 🚧 Manual | Time each switch from the tap to the first new live preview frame, in both directions. Confirm the viewfinder keeps updating after each switch. Rear sensor arm still took up to about 4.3 seconds in the repeat-switch run. |
+| Front preview quality | 🚧 Manual | Compare sharpness and noise in good light and low light at the same distance. Check the live preview and the saved image independently. |
 | Camera modes and Photos | ❌ Manual | Capture photo and video, verify playback, orientation and synced audio in Photos, then check recent thumbnail, edit/delete, permission prompts, and return to Camera. Test Portrait, slow-motion and QR separately where supported. |
 | Manual brightness range | 🚧 Manual | Start from the minimum nonzero slider setting in Settings and Control Center, sweep to maximum and back, and check slider state across both surfaces. Measure or visibly confirm the panel responds across the range, especially at the low end. Verify the minimum stays nonzero. |
 | Low-brightness stability | ❌ Manual | Hold the minimum visible setting in a dark room, change content, lock/wake repeatedly, and check for black frames, flicker or jumps. Use a photometer or fixed-exposure recording where available to corroborate panel output. |
 | Auto-brightness | 🚧 Manual | Enable in Settings and move between controlled dark and bright conditions. Observe ambient readings and actual panel changes with plausible latency and hysteresis. Repeat with the setting disabled and after lock/wake. |
+
+### Maps and positioning
+
+| Feature | Status | Acceptance on thyme |
+|---|---|---|
+| Baidu Maps base layers | 🚧 Manual | Roads and labels appeared on physical thyme with the app-only Metal profile. The operator confirmed the visible layers. Pan and zoom to a new area, then verify fresh tiles, rendering stability, and behavior across app relaunch. |
+| Outdoor GNSS position | 🚧 Manual (clear sky) | Verify a fresh satellite position and app updates with Wi-Fi positioning isolated. Record accuracy and time to fix without retaining coordinates. |
 
 ### Cellular, Phone, and Messages
 

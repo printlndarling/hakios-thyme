@@ -1,5 +1,74 @@
 ## Chronological Verification Logs & Evidence
 
+## Baidu Maps tiles and native Camera preview (2026-11-27)
+
+- During the 300 s daily run, the operator saw a white Baidu Maps
+  canvas after the location and privacy dialogs. The position arrow
+  and correct place details were available. A second launch in the
+  non-Metal camera image reproduced the pale base layer and brought
+  `com.baidu.map` to the foreground. See `logs/soak.HWeTv1RK/kernel.log`
+  and `logs/soak.Y8weWEDT/baidu-baseline.png`.
+- The locally staged Baidu Maps 22.2.20 image has bundle identifier
+  `com.baidu.map` and executable `/Applications/BaiduMap.app/IphoneCom`.
+  The previous successful map test used an app installed into the data
+  volume, with `metal=1 metal_apps=1`. The application gate now admits
+  the staged executable using its path and bundle identifier.
+- Turning on `metal_apps=1` with the current daily build also gave
+  Metal to `backboardd`. It repeatedly exited with SIGABRT and the
+  screen went black. That run was ended through the loader and
+  Android completed boot. Evidence `logs/soak.xPhIuT9B/kernel.log`,
+  SHA-256 `59c5237b70100a83291982723b31d961dad09a59f73b91b0dac5ac8bcc898f09`.
+  The app-only comparison uses `metal_apps=2` to keep the compositor
+  on its regular path.
+- With root `0a526b7db12b` and `metal_apps=2`, `backboardd` used
+  OpenGL. `IphoneCom` opened the Adreno Metal device and linked the map's
+  texture and text-outline pipelines. The operator confirmed the layers
+  were visible. Local screenshot
+  `logs/soak.xBCB4ghc/baidu-apps-only.png` shows roads, labels, and base
+  layers. It contains the test location and stays local.
+  The 285 s test returned on its timer and Android completed boot.
+  Local log `logs/soak.xBCB4ghc/kernel.log`, SHA-256
+  `0b59f124a62430ac6182ca4da46d7d60ee25988d2a556918e3e1eba166c5b7d2`.
+  Host payload checks accepted the rebuilt plug-in and rejected the
+  older daily root for the app-only profile.
+- In the same original daily log, the front sensor armed about 1.28 s
+  after the request. The first preview picture arrived at about 1.48 s.
+  The interval from that picture to stream stop was about 5.62 s and
+  the graph reported 26 pictures. The sensor path reported 213 frames
+  over its session. Rear initialization on the return switch took about
+  2.87 s before the sensor armed.
+- The front fed 1280×720 RAW10 into a 1504×1128 preview. Its AE log
+  showed about 22.5 ms and reached a 16× analogue-gain request. Motion,
+  noise and blur on the device still need visual acceptance. A WSL
+  comparison of eight deterministic preview inputs produced identical
+  NV12 bytes before and after caching repeated Bayer decodes and
+  shading gains, at 65.7 ms and 46.4 ms per frame on a single host
+  thread. Fixture and outputs are under
+  `out/thyme-boot/camera-preview-check.Jc6V4NYS/`.
+- The front DMA guard failed during the manual run. The host proved
+  that rearming a smaller mode over the old reserve left stale bytes
+  in its guard. The reproduction failed with the older code and passed
+  after resetting the reserve tail. The new kernel discards errors
+  before publishing frames and carries the prior frame's exposure
+  timing. The kernel and media library compiled. The first automatic
+  Camera scene stayed at the ringer wait, so it established no Camera
+  timing result. Updated switch and motion scenes use direct app launch.
+- The updated switch scene completed a 190 s RAM run on kernel
+  `c466de2c8f3c`, root `c3911cc2a379` and loader `11f4e0271c65`.
+  Camera delivered real frames from both sensors across repeated
+  switches. All four completed sessions in the final log passed
+  the DMA guard with zero SMMU faults. The front produced 100 graph
+  pictures during the approximately 12.3 s from sensor arm to stop
+  in one sample. The observed requests to arm took about 2–3 s for
+  the front, and about 1.7–4.3 s for the rear. Stable motion preview
+  and front image quality remain open.
+- The camera log `logs/soak.xPInX80j/kernel.log` has SHA-256
+  `f93bb10cfc872d0ac14030245fd68c77c5d91a893d6e0316a6319a9b59e8f4ec`.
+  The loader returned on its timer and Android completed boot. A
+  whole-partition read-only check found the same `logdump` SHA-256
+  after the map and camera tests. A later cross-build adds per-session
+  ISP, graph-callback and buffer-pool metrics, for the next device run.
+
 ## APFS and modem host regression checks (2026-11-27)
 
 - The APFS stream-fetch fixture now links the zbitmap decoder and

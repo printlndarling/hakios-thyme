@@ -18,7 +18,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Metal | **PARTIAL** | `hakios-metal` builds (`metal_apps=1` compositor fix); system `MTLDevice` stability pending |
 | Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
 | Audio & Haptics | **PASS** | Dual CS35L41 L/R + earpiece, 0-short-read mics (VoiceMemos), 15 s retry recovery, AW8697 CoreHaptics |
-| Camera & Torch | **PASS** | 1080p ~51 fps S5KHMX + AK7377 AF, front S5K3T2, PM8150L flash (CCI `0x1c` OIS readback verified) |
+| Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. Native preview pacing, switching latency, and front preview quality are still under test. |
 | Cellular & VoLTE | **PASS** | SDX55M (`pcie2_mhi=2` native `AppleBaseband`/`CommCenter`), 4G LTE dual-stack + VoLTE (`Mav17`) |
 | Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (`BaiduMap`) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
@@ -27,7 +27,8 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Sensors (SLPI) | **PASS** | LSM6DSO, `mag_cal` 50 Hz AK0991x compass, front `TCS3701` + rear `TSL2540` ALS, `BMP285` baro, pedometer, orient |
 | Hexagon CDSP / IR / RTC / WDT | **PASS** | `CDSP` TrustZone boot/shutdown, SMP2P ready, GLINK negotiation, a FastRPC capability query, guest-session attach/release, and stock compute-process create/release, an in-process ASID query and reverse-listener registration, `/dev/hakios-ir` (38 kHz NEC), SPMI RTC Unix sync, TRNG, active APSS WDT |
 | NFC (`nq-nci`) & VPU (`venus`) | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 handshake ready; Venus firmware preparation and reversible MVS0C core and AXI0 gate enable verified; hardware decode pending |
-| Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts & Pinyin keyboard (`BaiduMap` staged) |
+| Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts and Pinyin keyboard |
+| Baidu Maps | **PARTIAL** | Roads and labels verified on thyme with the [app-only Metal profile](devices/thyme/docs/ram-boot.md#baidu-maps-app-metal-comparison). Use the launcher’s `--metal-apps` option with a compatible bundle to enable this profile. |
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
 | Persistent Storage | **TODO** | RAM-boot only by default (`modem_a` read-only VFAT OK); guarded writable UFS storage pending |
 
