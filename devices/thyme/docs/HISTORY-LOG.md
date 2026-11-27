@@ -1,5 +1,21 @@
 ## Chronological Verification Logs & Evidence
 
+## Cross-platform RAM launcher validation
+
+- On native Windows, `ram-boot.bat` and Python transferred the local
+  four-file bundle to a physical Mi 10S and reached the running SpringBoard
+  service. The loader returned `1441823 0` after `oem stop` and accepted the
+  reboot to Android. Local evidence is `logs/codex-native-windows-thyme.log`
+  (SHA-256 `d9e9c1f88652fb290d1667041302274ff15a1b3185af7916aa8f7e94f61fb4fb`).
+- The Linux shell wrapper passed `--check` and the generated kernel payload was
+  66,033,064 bytes. The Windows and Linux downloads of Google Platform-Tools
+  ran their version commands on the respective hosts. The macOS download
+  contained universal x86_64/arm64 executables. Linux and macOS USB boot
+  were not exercised on native hosts.
+- Host fixtures verified fresh manifest downloads, cache reuse, and rejection
+  of mismatched hashes and another device's manifest. The project has no
+  public release containing the complete thyme bundle.
+
 ## Venus power probe follow-up
 
 - The inherited `venus=2` experiment entered the PAS authentication path

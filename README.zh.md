@@ -31,64 +31,62 @@
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
 | 持久化存储 | **TODO** | 默认纯内存启动（`modem_a` 只读 VFAT 就绪）；受保护的闪存读写持久化尚未启用 |
 
-## 快速开始（Quick Start）
+## 快速启动
 
-全程**仅在内存中引导运行**，不刷写、不改动手机任何分区；重启后直接回到原 Android 系统。
+Windows、Linux、macOS 都可以直接通过 USB 启动 HakiOS。**HakiOS 从 RAM 运行，重启手机即回到 Android。**
 
-### 准备条件
+先准备：
 
-- **手机**：已解锁 Bootloader 的小米 10S（`thyme`），开启 USB 调试，电量 **≥ 40%**。
-- **主机环境**：Linux 或 **WSL2 Ubuntu** 原生 ext4 文件系统（Windows 仅负责 `adb`/`fastboot` USB 连接）。
-- **本地资源（仓库不包含闭源固件）**：
-  - 自行准备的 `iPhone10,3` iOS 16.5 IPSW（用于解包 Darwin 用户空间）。
-  - 从本机提取的厂商固件（`fw-*`），提取方式见 [`devices/thyme/README.md`](devices/thyme/README.md)。
-  - 可选：在 `fw-wifi/network` 写入两行 Wi-Fi 名称与密码，开机即可自动连网。
+- 一台已解锁 Bootloader 的小米 10S（`thyme`），手机开在 Android，打开 USB 调试并接受本机授权。使用数据线，电量至少 40%，电池温度低于 45 °C。
+- Python 3.8 或更新版本。在 Windows 上从 [Python 官网](https://www.python.org/downloads/windows/) 安装。Linux 或 macOS 上可用包管理器安装 `python3`。
+- [下载项目 ZIP](https://github.com/printlndarling/hakios-thyme/archive/refs/heads/main.zip) 并解压，或克隆仓库。把同一次构建的 `xnu-usb.img`、`hakios-kernel`、`root.apfs`、`system.apfs` 放在仓库内的 `thyme-bundle` 目录中。首次运行时，脚本会将缺失的 [Google Platform-Tools](https://developer.android.com/tools/releases/platform-tools) 下载到本地缓存。
 
-### 1. 拉取代码并初始化配置
+### Windows
+
+双击 `devices\thyme\ram-boot.bat`，或在解压后的目录打开 PowerShell 执行：
+
+```powershell
+.\devices\thyme\ram-boot.bat
+```
+
+若 Android 可见但进入 Fastboot 后失联，请检查 Windows USB 驱动和数据线。
+
+### Linux
 
 ```sh
-git clone --recursive https://github.com/printlndarling/hakios-thyme.git
-cd hakios-thyme
+sh devices/thyme/ram-boot.sh
+```
+
+出现 USB 权限错误时，先为 Android/Fastboot 配置本发行版的 udev 规则。
+
+### macOS
+
+```sh
+sh devices/thyme/ram-boot.sh
+```
+
+脚本使用原生 macOS Platform-Tools。传输镜像时请保持 USB 连接。
+
+### 首次自动下载镜像
+
+如果你有获授权的镜像下载地址，在启动命令后加上 `--bundle-url https://your-host/thyme-ram-boot.json`。脚本自动下载并校验每个镜像的 SHA-256，此后复用校验通过的缓存。清单格式见 [跨平台启动说明](devices/thyme/docs/ram-boot.md)。
+
+目前项目没有发布公共的完整镜像包。请用自备 IPSW 和从自有设备取得的固件生成镜像，或从你获授权的私有 HTTPS 清单下载。
+
+### 在 Linux 上准备镜像
+
+先安装构建依赖并按 [设备文档](devices/thyme/README.md) 准备本地固件和 UEFI 输入。Linux 实机、Linux 虚拟机和 WSL2 都可以构建。构建完成后可在原目录启动，或将四个镜像复制到其他启动主机的 `thyme-bundle`。
+
+```sh
 make doctor
 make thyme_defconfig
-```
-
-### 2. 解包用户空间并构建最新稳定镜像
-
-```sh
-# 1) 解包 iPhone10,3 iOS 16.5 IPSW 到 sysimage/（仅需一次）
 make unpack IPSW=/path/to/iPhone10,3_16.5_Restore.ipsw
-
-# 2) 构建 XNU 内核（hakios-kernel）
-make kernel JOBS=$(nproc)
-
-# 3) 构建完整系统镜像（userland/system.apfs）与日常内存根镜像（userland/root.apfs）
+make kernel JOBS=8
 SYSTEM=1 SCENE=daily devices/thyme/build-root.sh
-# （后续仅更新内存根镜像时只需运行：SCENE=daily devices/thyme/build-root.sh）
+devices/thyme/build-loader.sh
 ```
 
-### 3. 一键 RAM 启动到小米 10S
-
-```sh
-export DEVICE=thyme
-export XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img
-export XL_RAMDISK=userland/root.apfs
-export XL_CMDLINE="-v debug=0x8 rd=md0 $(tr -d '\n' < devices/thyme/ram.args) pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
-
-# 进入内存 UEFI 引导器（仅 fastboot boot，不刷机）
-./xl enter
-
-# 上传常驻系统镜像 userland/system.apfs 到内存（约 2 分钟，后续重启内核无需重复上传）
-./xl ramdisk userland/system.apfs
-
-# 方式 A — 日常独立启动（启动确认后自动脱离电脑，可拔掉数据线）
-XL_SECS=0 XL_DETACH=1 ./xl run
-
-# 方式 B — 限时测试启动（保存 logs/<时间>-run.log 并自动重启回 Android 充电）
-# XL_SECS=120 XL_REBOOT_AFTER=1 ./xl run
-```
-
-> **提示**：完整硬件清单见 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md)，回归基线见 [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf)。随时可执行 `./xl reboot` 或长按电源键重启回原 Android。
+可加 `--check` 在连接手机前检查输入和载荷大小。构建输出位置、清单及异常恢复步骤见 [跨平台启动说明](devices/thyme/docs/ram-boot.md)。
 
 ## 后续重点
 

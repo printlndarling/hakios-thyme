@@ -33,62 +33,58 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 
 ## Quick Start
 
-Everything runs **strictly from RAM** — Android and user partitions are never flashed or modified. Rebooting returns cleanly to Android.
+Start HakiOS over USB from Windows, Linux, or macOS. **HakiOS runs in RAM. Restart the phone to return to Android.**
 
-### Prerequisites
+You need an unlocked Xiaomi Mi 10S (`thyme`) running Android with USB debugging enabled and authorized, a data cable, at least 40% charge, and a battery temperature below 45 °C. Install Python 3.8 or later and [download and extract the repository ZIP](https://github.com/printlndarling/hakios-thyme/archive/refs/heads/main.zip) or clone the repository.
 
-- **Phone**: Xiaomi Mi 10S (`thyme`) with unlocked bootloader, USB debugging enabled, and battery **≥ 40%**.
-- **Host**: Linux or **WSL2 Ubuntu** on native ext4 (Windows is only used for `adb`/`fastboot` USB passthrough).
-- **Local assets (not committed to Git)**:
-  - Your own `iPhone10,3` iOS 16.5 IPSW (for Darwin userland).
-  - Vendor firmware (`fw-*`) extracted from your own Mi 10S — see [`devices/thyme/README.md`](devices/thyme/README.md).
-  - Optional: Wi-Fi credentials in `fw-wifi/network` (two lines: SSID and passphrase).
+Put the four images from the same build in a directory named `thyme-bundle` inside the repository. The required files are `xnu-usb.img`, `hakios-kernel`, `root.apfs`, and `system.apfs`. The launcher downloads [Google Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) to a local cache if they are missing.
 
-### 1. Clone & Configure
+### Windows
+
+Double-click `devices\thyme\ram-boot.bat` or run it from PowerShell. Install [Python for Windows](https://www.python.org/downloads/windows/) if needed.
+
+```powershell
+.\devices\thyme\ram-boot.bat
+```
+
+If Android is visible but bootloader fastboot disappears, check the Windows USB driver and cable.
+
+### Linux
 
 ```sh
-git clone --recursive https://github.com/printlndarling/hakios-thyme.git
-cd hakios-thyme
+sh devices/thyme/ram-boot.sh
+```
+
+If USB access is denied, install your distribution's Android/Fastboot udev rules.
+
+### macOS
+
+```sh
+sh devices/thyme/ram-boot.sh
+```
+
+The launcher uses native macOS Platform-Tools. Keep the cable connected during upload.
+
+### Download the images on first use
+
+Add `--bundle-url https://your-host/thyme-ram-boot.json` to the launch command to download the images from a trusted manifest. The launcher verifies every download against its SHA-256 and reuses verified cached files. See the [manifest format](devices/thyme/docs/ram-boot.md).
+
+A public full-image bundle is currently unavailable. Build the images from your own IPSW and device firmware, or use a private HTTPS bundle you are authorized to access.
+
+### Prepare images on Linux
+
+Set up the build dependencies and collect the local firmware and UEFI inputs in the [device documentation](devices/thyme/README.md). Native Linux, a Linux VM, or WSL2 can build the bundle. The launchers use the resulting images on any of the three hosts.
+
+```sh
 make doctor
 make thyme_defconfig
-```
-
-### 2. Unpack Userland & Build Latest Stable Images
-
-```sh
-# 1) Unpack your iPhone10,3 iOS 16.5 IPSW into sysimage/ (once)
 make unpack IPSW=/path/to/iPhone10,3_16.5_Restore.ipsw
-
-# 2) Build the XNU kernel (hakios-kernel)
-make kernel JOBS=$(nproc)
-
-# 3) Build the full resident system image (userland/system.apfs) + daily RAM rootfs (userland/root.apfs)
+make kernel JOBS=8
 SYSTEM=1 SCENE=daily devices/thyme/build-root.sh
-# (Subsequent rootfs-only rebuilds only need: SCENE=daily devices/thyme/build-root.sh)
+devices/thyme/build-loader.sh
 ```
 
-### 3. RAM-Boot on Mi 10S
-
-```sh
-export DEVICE=thyme
-export XL_BOOT_IMAGE=devices/thyme/prebuilt/xnu-usb.img
-export XL_RAMDISK=userland/root.apfs
-export XL_CMDLINE="-v debug=0x8 rd=md0 $(tr -d '\n' < devices/thyme/ram.args) pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
-
-# Enter the RAM UEFI loader (non-destructive fastboot boot)
-./xl enter
-
-# Upload userland/system.apfs into RAM once (~2 min; stays resident across kernel runs)
-./xl ramdisk userland/system.apfs
-
-# Option A — Daily interactive boot (detaches after launch; you can unplug USB)
-XL_SECS=0 XL_DETACH=1 ./xl run
-
-# Option B — Timed verification boot (collects logs/<time>-run.log & reboots back to Android)
-# XL_SECS=120 XL_REBOOT_AFTER=1 ./xl run
-```
-
-> **Tip**: Check [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) for current hardware status and [`devices/thyme/ram-baseline.conf`](devices/thyme/ram-baseline.conf) for regression baselines. To return to Android at any time, run `./xl reboot` or force-reboot the phone.
+Add `--check` to validate the files and payload size before connecting the phone. For build output paths, manifest details, and recovery from an interrupted boot, see the [cross-platform launcher guide](devices/thyme/docs/ram-boot.md).
 
 ## Current Priorities
 
