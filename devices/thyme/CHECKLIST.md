@@ -31,7 +31,7 @@ Status legend:
 | Aux Cameras (Ultra-wide / Macro / Depth) | `OV13B10` / `GC02M1` | P2 | 🚧 | Stock UMI module tables can be parsed. The real UMI capture backend and Camera expose rear main and front only. |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` (`PCIe2 / MHI / pcie2_mhi=2`) | P0 | ✅ | `AppleBaseband` + `CommCenter`, 4G LTE dual-stack + VoLTE (`10099`) |
 | 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` n41) | P1 | ❌ | Userland `Mav17` is 4G-only; needs `Mav20` bridge + 2nd SIM slot |
-| GNSS / Location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | 🚧 | Wi-Fi CoreLocation (`BaiduMap` blue dot) & SV stream working; outdoor 3D fix pending |
+| GNSS / Location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | 🚧 | Wi-Fi CoreLocation (`BaiduMap` blue dot) and repeated indoor QMI satellite reports with the updated GNSS helper; outdoor 3D fix pending |
 | Wi-Fi | `QCA6390` (`PCIe0 / ath11k`) | P0 | ✅ | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s lock/wake, auto-rejoin |
 | Bluetooth | `QCA6390` (`3 Mbaud H4`, `BlueTool`) | P0 | ✅ | Verified headphone connection, A2DP playback, and cross-phone pairing |
 | SLPI Core Sensors | `LSM6DSO` (accel/gyro), `AK0991x` (mag), `BMP285` (baro) | P1 | ✅ | FastRPC live stream + `mag_cal` 50 Hz Compass HID + pedometer + orient |
@@ -103,8 +103,9 @@ Status legend:
 ## 5. Long-Term Stability & Soak Gates
 
 On 2026-11-27 the updated RAM Boot workflow reached SpringBoard, returned on
-its 150 s timer and recovered to Android, with the `logdump` partition hash
-unchanged across the run. See the [test record](docs/HISTORY-LOG.md#timed-daily-ram-boot-with-ram-only-diagnostics-2026-11-27).
+its 150 s timer and recovered to Android. A second daily-image run returned
+on its 300 s timer with the updated GNSS helper. Both runs preserved the
+`logdump` partition hash. See the [test record](docs/HISTORY-LOG.md#timed-daily-ram-boot-with-ram-only-diagnostics-2026-11-27).
 
 | Gate | Target | Status |
 |---|---|---|

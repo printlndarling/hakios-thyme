@@ -20,7 +20,7 @@
   staged daily tree with its current 128-block APFS allowance let it fit.
 - The legacy loader ran before its diagnostic behavior was identified.
   During the aborted retest, it wrote to `logdump`. The partition
-  contained the old loader ID `b6cc8f17f9f5` and the 20:29:22 CST boot
+  contained the old loader ID `b6cc8f17f9f5` and the 20:29:22 UTC+08:00 boot
   epoch. The host returned the phone to Android. The rebuilt thyme
   loader keeps its log in RAM and the launcher rejects the older image.
 - The 150 s run used loader `11f4e0271c65`, kernel `52f00a441635` and
@@ -45,8 +45,15 @@
   still uses UTC. The daemon counts a fix after submitting it to the
   simulation manager.
 - The daemon compiled and linked as arm64 Mach-O against the iOS 16.5
-  SDK on WSL2. A clear-sky position and native app location acceptance
-  remain open.
+  SDK on WSL2. Its daily image `eae7d47c924f` ran for 300 s with loader
+  `11f4e0271c65` and kernel `52f00a441635`. Launchd spawned
+  `com.hakios.gnss` and the modem logged repeated QMI satellite reports
+  with zero satellites in view and zero fixes indoors. No lease-expiry
+  marker appeared in the captured log. Android completed its boot after
+  the timer return, and the whole `logdump` partition hash matched.
+- Local evidence `logs/soak.HWeTv1RK/kernel.log`, SHA-256
+  `7361d8ec2f361c830a2dacdfff90ecb80ffa46aacbf737aac4721af7bdfcd9a8`.
+  A clear-sky position and native app location acceptance remain open.
 
 ## CDSP external-module callbacks (working-tree experiment)
 

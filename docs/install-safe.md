@@ -20,7 +20,7 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 | # | Stage | What happens to the phone | State |
 |---|---|---|---|
 | 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
-| 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest |
+| 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest. All 12 GPT ranges also matched a read-only comparison against the connected thyme |
 | 2 | **Carve `darwin`** off the end of Android's userdata | **Android's data is shrunk and moved**: the f2fs is resized and the GPT rewritten. Back up the phone's data first (the user's own, with Android's tools); the tool does not | plan only: `tools/userdata-carve.py` prints the commands and writes nothing |
 | 3 | **Write the system image to `darwin`** with the guarded writer | writes `darwin` only; the writer refuses any other partition and reads every write back | exists: `tools/darwin-write.py`; its self-test refuses the wrong partition. Never run on a phone |
 | 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | **not verified**: the arguments the flash recipe needs are not confirmed. Repeat until it is boring; this is the gate before stage 5 |
@@ -40,8 +40,17 @@ This rereads the named files, verifies their sizes and SHA-256 hashes, and
 requires a head and tail record for each disk listed in the manifest. It also
 reports missing core rollback partitions. Before any authorized write, compare
 the backup coverage and GPT geometry with the current phone and verify that
-Android's user-data backup is recoverable. The partition tool does not back
-up `userdata`.
+Android's user-data backup is recoverable. On 2026-11-27 the six GPT
+head/tail pairs matched the connected thyme's backup. Fastboot reported
+two slots, current slot `a`, and `unlocked: yes`. Android reported
+`ro.boot.flash.locked=1`. Use the bootloader's report for this preflight.
+Android completed boot again after the query. The partition tool does not
+back up `userdata`.
+
+Local transcripts are `logs/thyme-install-readonly-20261127.log`
+(SHA-256 `5d636fedbc6c266db6c8f0550a89a4a0aa74f1501a91e72ca772cae53f00eae5`)
+and `logs/thyme-fastboot-readonly-20261127.log`
+(SHA-256 `e48a9961a2361bc1de038258412467ee04e96553244c0b4ab12e43fc43cf2a3c`).
 
 ## The gates
 
