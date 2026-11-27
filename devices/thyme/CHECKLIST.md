@@ -30,7 +30,7 @@ Status legend:
 | Camera OIS | `qcom,ois@1` (`umi_ois` @ CCI `0x1c`) | P1 | 🚧 | CCI `0x1c` HW readback verified (`ok=1`, `0xf0`); active servo control pending |
 | Aux Cameras (Ultra-wide / Macro / Depth) | `OV13B10` / `GC02M1` | P2 | 🚧 | Stock UMI module tables can be parsed. The real UMI capture backend and Camera expose rear main and front only. |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` (`PCIe2 / MHI / pcie2_mhi=2`) | P0 | ✅ | `AppleBaseband` + `CommCenter`, 4G LTE dual-stack + VoLTE (`10099`) |
-| 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` n41) | P1 | ❌ | Userland `Mav17` is 4G-only; needs `Mav20` bridge + 2nd SIM slot |
+| 5G NR (SA/NSA) & Dual-SIM | `SDX55M` | P1 | 🚧 | HakiOS UIM and CommCenter report two READY SIMs with separate GW indices. Android reported NR SA and LTE on the two lines. HakiOS dual registration, line controls and 5G remain open. |
 | GPS / everyday location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | ✅ | Operator-confirmed position and map refresh on thyme. Indoor QMI satellite reports verified. Outdoor satellite-only acquisition is tracked separately. |
 | Wi-Fi | `QCA6390` (`PCIe0 / ath11k`) | P0 | ✅ | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s lock/wake, auto-rejoin |
 | Bluetooth | `QCA6390` (`3 Mbaud H4`, `BlueTool`) | P0 | ✅ | Verified headphone connection, A2DP playback, and cross-phone pairing |
@@ -154,7 +154,8 @@ remains open until that test passes.
 
 | Feature | Status | Acceptance on thyme |
 |---|---|---|
-| Dual-SIM recognition and management | ❌ Manual (two active SIMs) | Insert two distinct SIMs, confirm concurrent registration, validate each line in Settings, and exercise line enable/disable, labels and line state after restart. Check incoming calls to both lines while idle. |
+| Dual-SIM card recognition | ✅ Hardware | Both slots were present with READY SIMs. The modem and CommCenter reported primary GW index `0x0000` and secondary GW index `0x0100` in the read-only UIM test. |
+| Dual-SIM registration and management | ❌ Manual (two active SIMs) | Confirm concurrent registration, validate each line in Settings, and exercise line enable/disable, labels and line state after restart. Check incoming calls to both lines while idle. |
 | Default data and voice lines | ❌ Manual (two active SIMs and peer phone) | Change default data and voice lines independently. Confirm carrier/line on an outbound call and real cellular traffic on the selected data line with Wi-Fi off. Test switching back and incoming calls on the non-default line. |
 | Cellular data switch | 🚧 Manual (active SIM) | Turn data off in Settings and Control Center. With Wi-Fi off, confirm fresh network requests stop and the cellular route is removed. Re-enable and verify address, DNS and HTTPS recovery while the voice line remains usable. |
 | Airplane mode and recovery | ❌ Manual (active SIM and peer phone) | Toggle from Settings and Control Center. Verify cellular registration and call/data behavior, independent Wi-Fi/Bluetooth toggles, and automatic cellular recovery without reboot. Repeat across lock/wake. |

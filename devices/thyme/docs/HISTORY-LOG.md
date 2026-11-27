@@ -1,5 +1,37 @@
 ## Chronological Verification Logs & Evidence
 
+## Dual-SIM Android baseline and native UIM inventory (2026-11-28)
+
+- The operator inserted two active SIMs. Android reported DSDS,
+  `LOADED,LOADED`, and the two radio technologies NR SA and LTE.
+- The UIM parser now checks complete card and application records, counts
+  present and READY SIMs, and reads both GW indices according to the
+  [libqmi card-status schema](https://www.freedesktop.org/software/libqmi/libqmi-glib/latest/method.MessageUimGetCardStatusOutput.get_card_status.html).
+  Synthetic single-card, dual-card and truncated responses passed
+  ASan/UBSan. Both QMI transport suites and the NAS and soak regressions
+  passed. The arm64 kernel linked.
+- The 190 s RAM baseline used `SOAK_UIM_READONLY=1` with kernel
+  `55debe192bd3`, root `4ae2e529c505` and the map-free system image
+  `83e304d77605`. CommCenter received a successful UIM Get Card Status
+  response with a 200-byte SDU. That run did not retain card-level
+  summary lines. It returned to Android, which again reported two
+  loaded SIMs. The before/after `logdump` SHA-256 matched. Final log
+  `logs/soak.tcIWzUkB/kernel.log`, SHA-256
+  `2dc861c8d74bd12cc394556ac15bc6a6aa2297828d8d42a000fef73ca1dc4a15`.
+- Added inventory decoding directly to the UIM Get Card Status
+  response delivered to CommCenter. With kernel `2a2d5afd1942`, the
+  modem reported two present slots and two READY SIMs on three
+  reads. The CommCenter bridge confirmed the same two cards with
+  primary GW index `0x0000` and secondary GW index `0x0100`.
+  Live excerpt `out/thyme-boot/dual-sim.AhKDyog5/uim-runtime-inventory.log`,
+  SHA-256 `b0e05bd59b5c9168bac45e899fbc9e03f1b27d5c029eeea3c8cdf4f25cead9b2`.
+  The 155 s run returned to Android, which reported both SIMs loaded.
+  The `logdump` SHA-256 matched the pre-test value. Final log
+  `logs/soak.mOFjbr9N/kernel.log`, SHA-256
+  `736cb8f6aeece65c022587e6355e2ea98e35d4b8b8e5ae84b24408675dee814b`.
+  The bridge's default WDS binding still targets the primary line.
+  Concurrent registration and native line selection remain open.
+
 ## Everyday positioning acceptance and Baidu Maps packaging (2026-11-28)
 
 - The operator confirmed everyday positioning and map refresh. README and
