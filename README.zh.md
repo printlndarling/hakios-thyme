@@ -110,7 +110,7 @@ XL_SECS=0 XL_DETACH=1 ./xl run
 
 ## 法律声明与致谢
 
-- **不包含 Apple 或厂商闭源固件**：用户空间由用户自行提供的 IPSW 解包，固件从用户自有设备提取。不支持且不以 Apple 服务（激活、Apple ID、iCloud、App Store / FairPlay DRM）为目标。
+- **不包含 Apple 或厂商闭源固件**：用户空间由用户自行提供的 IPSW 解包，固件从用户自有设备提取。上游公开实验与 Apple ID、App Store、FairPlay、WeatherKit 的真机验收状态见 [兼容性记录](devices/thyme/UPSTREAM.md#apple-services-compatibility-review)。
 - **开源协议**：XNU 补丁及其派生代码遵循 [APSL 2.0](LICENSE.APSL)，其余原创代码遵循 [MIT](LICENSE)。详见 [NOTICE](NOTICE)、[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)、[COMPLIANCE.md](COMPLIANCE.md) 与 [LEGAL.md](LEGAL.md)。
 - **免责声明**：本项目为独立研究项目，**与 Apple 无任何关联或背书关系**。
 - **致谢**：感谢 HakiOS 上游团队以及高通 SLPI/QMI 开源逆向社区。

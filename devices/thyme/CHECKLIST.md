@@ -4,7 +4,7 @@ Status legend:
 - `✅` Passed — verified on physical Xiaomi Mi 10S (`SM8250-AC`)
 - `🚧` Partial — hardware/driver partially working or sub-features remaining
 - `❌` Todo — not implemented or not yet verified
-- `➖` N/A — Apple-proprietary hardware/cloud boundary (SEP, FairPlay DRM, Apple servers)
+- `⛔` Blocked — external prerequisite or compatibility boundary prevents end-to-end verification
 
 > Historical bring-up logs, SHA-256 checksums, and per-run records are archived in [`devices/thyme/docs/HISTORY-LOG.md`](docs/HISTORY-LOG.md).
 
@@ -96,7 +96,7 @@ Status legend:
 | Networking | 🚧 | IPv4/IPv6, DNS, HTTPS TLS work; VPN (`utun`), proxy UI, Personal Hotspot pending |
 | System Interaction | ✅ | zh-Hans UI, Pinyin, PingFang, control/notif center, switcher (screen recording pending) |
 | App Ecosystem | ✅ | `Sileo` (11 CN repos), `TrollStore` (`ldid`), `TrollApps` (6 CN sources), `WebKit`, `BaiduMap` |
-| Apple Proprietary | ➖ | Apple ID, iCloud, App Store DRM, Apple Pay, APNs, iMessage, FaceTime, SEP |
+| Apple services | ⛔ | Apple ID, App Store, FairPlay and stock WeatherKit lack end-to-end thyme verification. See [upstream review](UPSTREAM.md#apple-services-compatibility-review). iCloud, Apple Pay, APNs, iMessage and FaceTime remain unsupported. |
 
 ---
 

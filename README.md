@@ -110,7 +110,7 @@ This fork tracks [`oosexgang/hakios-xnu-kernel`](https://github.com/oosexgang/ha
 
 ## Legal & Credits
 
-- **No Apple or vendor blobs** are distributed in this repository; users supply their own IPSW and extract firmware from their own device. Apple services (Activation, Apple ID, iCloud, App Store / FairPlay DRM) are not supported.
+- **No Apple or vendor blobs** are distributed in this repository; users supply their own IPSW and extract firmware from their own device. See the [Apple services compatibility review](devices/thyme/UPSTREAM.md#apple-services-compatibility-review) for the published upstream experiments and their verification status on thyme.
 - **Licenses**: XNU patches and derivatives are licensed under [APSL 2.0](LICENSE.APSL); original code is [MIT](LICENSE). See [NOTICE](NOTICE), [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), [COMPLIANCE.md](COMPLIANCE.md), and [LEGAL.md](LEGAL.md).
 - **Disclaimer**: Independent research project, **not affiliated with or endorsed by Apple**.
 - **Thanks**: Upstream HakiOS maintainers and the open-source Qualcomm/SLPI/QMI reverse-engineering community.

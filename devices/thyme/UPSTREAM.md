@@ -72,3 +72,24 @@ the validation battery now needs:
 
 Do not carry this optional rendering stack into a hardware-diagnostic payload
 before the current THYME regression is closed.
+
+## Apple services compatibility review
+
+The public [`common` tree at `62e09f85`](https://github.com/oosexgang/hakios-xnu-kernel/tree/62e09f850f1f713192228cb9031da256033ede93)
+contains the account and store experiments introduced in [`7e43fbbf`](https://github.com/oosexgang/hakios-xnu-kernel/commit/7e43fbbf5381ce55f26bcd4f2215efda784af2fe).
+The main experimental daemon integrations target Darwin 26/27. The
+`components/apple-id/first-generation/` experiments target Darwin 16.5,
+the generation used by thyme. The [upstream FAQ](https://hackios-web.vercel.app/en/faq)
+still describes Apple account and App Store support as unavailable.
+
+| Feature | Thyme status | Evidence needed |
+|---|---|---|
+| Apple ID | BLOCKED | Successful sign-in, 2FA, and token retention across reboot on thyme. |
+| App Store | BLOCKED | Catalog, download, installation, and launch of an acquired app on thyme. |
+| FairPlay | BLOCKED | Authorized installation and playback or execution of protected content. The stock Apple Secure Enclave is absent on thyme. |
+| Stock WeatherKit | BLOCKED | Live Apple forecast and widget refresh on thyme. Apple's [public REST API](https://developer.apple.com/documentation/weatherkitrestapi/request-authentication-for-weatherkit-rest-api) requires a signed developer token and is available to apps that integrate it explicitly. |
+
+The fork's optional Open-Meteo forecast screen is documented in the
+[Weather bring-up notes](docs/weather-data-shim.md). Stock Weather and its
+widget have their own verification gates. The upstream experiments are
+not part of the daily RAM scene.
