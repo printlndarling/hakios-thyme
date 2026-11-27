@@ -1876,6 +1876,7 @@ hakios_ufs_init(void)
 		if (offered == 0 || offered > ufs_parts || ufs_page->write_first != UFS_WRITE_FIRST) {
 			printf("ufs: the loader offers no partition to write into (ufs_write=1 on its command "
 			    "line too, and a loader that knows about writes)\n");
+			offered = 0;
 		}
 		for (uint32_t i = 0; offered != 0 && i < ufs_parts; i++) {
 			const char *why = NULL;
