@@ -106,3 +106,8 @@ app's first-launch
 choices on the phone. Compare visible map tiles and panning with the
 same build launched with `SOAK_METAL_APPS=0` and collect framebuffer
 captures after the dialogs are dismissed.
+
+For a regular RAM boot, pass `--metal-apps` to either platform
+launcher with the same Metal-capable bundle. The host checks the root
+image for app-only support before touching USB. Use
+`--metal-apps --check` to validate the bundle without a phone.

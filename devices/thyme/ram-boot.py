@@ -234,10 +234,25 @@ def preflight(adb):
     return serial
 
 
-def build_payload(files, payload):
+def check_app_metal(root_image):
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/apfs/apfs.py"), "cat", str(root_image),
+         "/lib/HakiosMetal.bundle/HakiosMetal"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+    )
+    marker = b"the window server stays on its existing renderer (metal_apps=2)"
+    if (result.returncode or not result.stdout.startswith(b"\xcf\xfa\xed\xfe")
+            or marker not in result.stdout):
+        raise ValueError("App Metal needs a thyme root image built with the current METAL_PLUGIN=ca")
+
+
+def build_payload(files, payload, metal_apps=False):
     args = " ".join((ROOT / "devices/thyme/ram.args").read_text().split())
     cmdline = (f"loader_return_after=0 epoch={int(time.time())} sb_delay=8 debug=0x8 rd=md0 "
                f"{args} pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0")
+    if metal_apps:
+        check_app_metal(files["root.apfs"])
+        cmdline += " metal=1 metal_apps=2"
     mac_file = ROOT / "fw-wifi" / "mac"
     if mac_file.is_file():
         mac = mac_file.read_text().strip()
@@ -292,6 +307,8 @@ def main():
     mode.add_argument("--check", action="store_true", help="prepare and validate the payload without USB")
     mode.add_argument("--preflight", action="store_true", help="check Android and print the USB serial without booting")
     mode.add_argument("--check-loader", type=Path, help="verify a thyme USB loader keeps its logs in RAM")
+    mode.add_argument("--check-metal-apps", type=Path, help="validate a root image supports the app-only Metal profile")
+    parser.add_argument("--metal-apps", action="store_true", help="enable application Metal while keeping the regular compositor")
     args = parser.parse_args()
     url = args.bundle_url
     if url is None and args.bundle_dir is None:
@@ -307,11 +324,14 @@ def main():
         if args.check_loader:
             check_loader(args.check_loader)
             return
+        if args.check_metal_apps:
+            check_app_metal(args.check_metal_apps)
+            return
         files = bundle_from_url(url) if url else local_bundle(args.bundle_dir)
         check_loader(files["xnu-usb.img"])
         with tempfile.TemporaryDirectory() as folder:
             payload = Path(folder) / "run-payload.bin"
-            build_payload(files, payload)
+            build_payload(files, payload, metal_apps=args.metal_apps)
             if not args.check:
                 ram_boot(*platform_tools(), files, payload)
     except (ValueError, OSError, subprocess.SubprocessError, zipfile.BadZipFile, zlib.error, KeyboardInterrupt) as error:

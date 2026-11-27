@@ -46,8 +46,16 @@ class SoakTest(unittest.TestCase):
         self.env = dict(
             os.environ, PATH=f"{self.root}:{os.environ['PATH']}", XL_ADB_SERIAL="",
             SYSTEM_IMAGE="image", SCENE="image", XL_BOOT_IMAGE="boot.img", XL_LOADER="image",
-            SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", TEST_METAL="0", TEST_LEVEL="75", TEST_LOG=TIMER,
+            SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", TEST_METAL="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
             TEST_PRODUCT="thyme", TEST_FASTBOOT="", TEST_RUN_EXIT="0", TEST_PAYLOAD_EXIT="0",
+        )
+        apfs = self.root / "tools" / "apfs"
+        apfs.mkdir(parents=True)
+        (apfs / "apfs.py").write_text(
+            "import os, sys\n"
+            "if os.environ['TEST_METAL_BUNDLE'] == '1':\n"
+            "    sys.stdout.buffer.write(bytes.fromhex('cffaedfe') + "
+            "b'the window server stays on its existing renderer (metal_apps=2)')\n"
         )
         self.program("adb", """
 case "$*" in
@@ -136,6 +144,7 @@ esac
         for overrides in (
             {"TEST_LEVEL": "39"}, {"TEST_PRODUCT": "umi"}, {"XL_ADB_SERIAL": "OTHER"},
             {"TEST_FASTBOOT": "OTHER fastboot"}, {"SOAK_STEP": "00"}, {"TEST_PAYLOAD_EXIT": "1"}, {"SOAK_METAL_APPS": "all"},
+            {"SOAK_METAL_APPS": "1", "TEST_METAL_BUNDLE": "0"},
         ):
             with self.subTest(overrides=overrides):
                 result = self.soak(**overrides)
