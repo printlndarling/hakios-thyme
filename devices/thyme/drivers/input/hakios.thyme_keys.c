@@ -12,7 +12,11 @@
 #include <kern/thread.h>
 #include <kern/thread_call.h>
 #include <libkern/libkern.h>
+#include <kern/kalloc.h>
 #include <mach/mach_types.h>
+#include <mach/vm_param.h>
+#include <vm/memory_types.h>
+#include <vm/vm_kern.h>
 #include <miscfs/devfs/devfs.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
@@ -24,6 +28,9 @@
 #include <sys/uio.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+extern vm_offset_t ml_io_map_unmappable(vm_offset_t, vm_size_t, unsigned int);
+extern void ml_io_unmap(vm_offset_t, vm_size_t);
+extern uint64_t kvtophys(vm_offset_t);
 extern kern_return_t thread_terminate(thread_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern void hakios_prng_mix(const void *, size_t) __attribute__((weak));
@@ -100,7 +107,7 @@ static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_
 static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
-static int venus_fw_size, cdsp_fw_size;
+static int venus_fw_size, cdsp_fw_size, venus_ready, venus_segments, cdsp_ready, cdsp_segments;
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
 static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static int usb_dwc3_id, usb_dwc3_dsts;
@@ -136,6 +143,18 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, venus_fw_size,
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_fw_size,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_fw_size, 0,
     "Size in bytes of cdsp.mdt/mbn found in UFS modem_a/image");
+SYSCTL_INT(_kern_hakios, OID_AUTO, venus_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &venus_ready, 0,
+    "Venus VPU TrustZone PIL-TZ authenticated state (1=up)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, venus_segments,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &venus_segments, 0,
+    "Number of loadable ELF segments loaded into pil_video_region");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_ready, 0,
+    "CDSP Hexagon DSP TrustZone PIL-TZ authenticated state (1=up)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_segments,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_segments, 0,
+    "Number of loadable ELF segments loaded into pil_cdsp_region");
 SYSCTL_INT(_kern_hakios, OID_AUTO, fastchg_part,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &fastchg_part, 0,
     "Wired 33W charger IC bq25970 part register (0x13)");
@@ -433,6 +452,7 @@ keys_post(unsigned key, bool down)
 
 static void thyme_qup15_poll(bool initial);
 static void thyme_modem_fat_scan(void);
+static void thyme_venus_pil_boot(void);
 int hakios_modem_fat_read(const char *image_file, uint8_t *dst, uint32_t max_len, uint32_t *out_len);
 
 static void
@@ -506,6 +526,7 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 		if (!ufs_fw_checked && ticks >= 100u) {
 			ufs_fw_checked = true;
 			thyme_modem_fat_scan();
+			thyme_venus_pil_boot();
 		}
 		if (wdt_armed && wdt_base != 0 && ++wdt_ticks >= 200u) {
 			wdt_ticks = 0;
@@ -1467,12 +1488,263 @@ thyme_modem_fat_scan(void)
 	}
 }
 
+#define UMI_SCM_64              (1ULL << 30)
+#define UMI_SCM_SIP             (2ULL << 24)
+#define UMI_SCM_PAS_INIT_IMAGE  ((2ULL << 8) | 1ULL)
+#define UMI_SCM_PAS_MEM_SETUP   ((2ULL << 8) | 2ULL)
+#define UMI_SCM_PAS_AUTH_RESET  ((2ULL << 8) | 5ULL)
+#define UMI_SCM_PAS_SHUTDOWN    ((2ULL << 8) | 6ULL)
+#define UMI_VENUS_PA            0x8ca00000ULL
+#define UMI_VENUS_SIZE          0x00500000UL
+#define UMI_VENUS_PAS_ID        9ULL
+#define UMI_CDSP_PA             0x8d400000ULL
+#define UMI_CDSP_SIZE           0x01400000UL
+#define UMI_CDSP_PAS_ID         0x12ULL
+
+static int32_t
+thyme_scm_call(uint64_t func, uint64_t arginfo, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t *ans)
+{
+	uint64_t session = 0;
+
+	func |= UMI_SCM_64 | UMI_SCM_SIP;
+	for (int i = 0; i < 100; i++) {
+		register uint64_t x0 __asm__("x0") = (i == 0) ? func : 1ULL;
+		register uint64_t x1 __asm__("x1") = arginfo;
+		register uint64_t x2 __asm__("x2") = a0;
+		register uint64_t x3 __asm__("x3") = a1;
+		register uint64_t x4 __asm__("x4") = a2;
+		register uint64_t x5 __asm__("x5") = 0;
+		register uint64_t x6 __asm__("x6") = session;
+		register uint64_t x7 __asm__("x7") = 0;
+
+		__asm__ volatile("smc #0"
+		    : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6), "+r"(x7)
+		    : : "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
+		session = x6;
+		if (x0 != 1ULL) {
+			if (ans != NULL) {
+				*ans = x1;
+			}
+			return (int32_t)x0;
+		}
+	}
+	return -1;
+}
+
+static void
+thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
+    uint64_t pas_id, uint64_t carve_pa, vm_size_t carve_sz,
+    bool do_auth_reset, int *out_ready, int *out_segs)
+{
+	vm_offset_t meta_va = 0;
+	uint32_t mdt_size = 0;
+
+	if (kmem_alloc(kernel_map, &meta_va, PAGE_SIZE,
+	    KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS || meta_va == 0) {
+		hakios_tl("UMI %s: meta alloc failed\n", tag);
+		return;
+	}
+	if (hakios_modem_fat_read(mdt_name, (uint8_t *)meta_va, (uint32_t)PAGE_SIZE, &mdt_size) != 0 ||
+	    mdt_size < 52u || mdt_size > (uint32_t)PAGE_SIZE) {
+		hakios_tl("UMI %s: %s read failed (size=%u)\n", tag, mdt_name, mdt_size);
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+	const uint8_t *hdr = (const uint8_t *)meta_va;
+	if (memcmp(hdr, "\177ELF\1", 5) != 0) {
+		hakios_tl("UMI %s: bad ELF magic\n", tag);
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+	uint32_t phnum = fat_u16(hdr + 44u);
+	if (phnum < 2u || phnum > 64u || 52u + 32u * phnum > mdt_size) {
+		hakios_tl("UMI %s: bad ELF phnum=%u size=%u\n", tag, phnum, mdt_size);
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+	uint32_t lowest = 0xffffffffu, loadable = 0;
+	uint64_t highest = 0;
+	bool reloc = false;
+
+	for (uint32_t i = 0; i < phnum; i++) {
+		const uint8_t *ph = hdr + 52u + 32u * i;
+		uint32_t p_type = fat_u32(ph + 0u);
+		uint32_t p_paddr = fat_u32(ph + 12u);
+		uint32_t p_filesz = fat_u32(ph + 16u);
+		uint32_t p_memsz = fat_u32(ph + 20u);
+		uint32_t p_flags = fat_u32(ph + 24u);
+
+		if (p_type != 1u || ((p_flags & (7u << 24)) == (2u << 24)) || p_memsz == 0 || p_filesz > p_memsz) {
+			continue;
+		}
+		if ((p_flags & 0x08000000u) != 0) {
+			reloc = true;
+		}
+		if (p_paddr < lowest) {
+			lowest = p_paddr;
+		}
+		uint64_t end = (uint64_t)p_paddr + p_memsz;
+		if (end > highest) {
+			highest = end;
+		}
+		loadable++;
+	}
+	uint32_t base = reloc ? lowest : (uint32_t)carve_pa;
+	uint64_t raw_span = (highest > base) ? (highest - base) : 0;
+	uint32_t span = (uint32_t)((raw_span + 0xfffULL) & ~0xfffULL);
+	hakios_tl("UMI %s: ELF segments=%u loadable=%u reloc=%d span=%#x (base=%#x)\n",
+	    tag, phnum, loadable, reloc ? 1 : 0, span, base);
+	if (loadable == 0 || span == 0 || span > (uint32_t)carve_sz) {
+		hakios_tl("UMI %s: invalid ELF span %#x (max=%#lx)\n", tag, span, (unsigned long)carve_sz);
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+
+	for (vm_offset_t line = meta_va; line < meta_va + PAGE_SIZE; line += 64) {
+		__asm__ volatile("dc civac, %0" : : "r"(line));
+	}
+	__asm__ volatile("dsb sy; isb" ::: "memory");
+
+	uint64_t ans = ~0ULL;
+	int32_t ret = thyme_scm_call(UMI_SCM_PAS_INIT_IMAGE, 2u | (2u << 6),
+	    pas_id, kvtophys(meta_va), 0, &ans);
+	hakios_tl("UMI %s: TZ INIT_IMAGE ret=%d ans=%#llx\n", tag, ret, ans);
+	if (ret != 0 || ans != 0) {
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+
+	vm_offset_t carve = ml_io_map_unmappable((vm_offset_t)carve_pa, carve_sz, VM_WIMG_WCOMB);
+	if (carve == 0) {
+		hakios_tl("UMI %s: carveout map failed\n", tag);
+		kmem_free(kernel_map, meta_va, PAGE_SIZE);
+		return;
+	}
+	hakios_tl("UMI %s: loading %u segments into %#llx (span=%#x)\n", tag, loadable, carve_pa, span);
+	volatile uint8_t *dst = (volatile uint8_t *)carve;
+	for (uint32_t z = 0; z + 8u <= span; z += 8u) {
+		*(volatile uint64_t *)(dst + z) = 0;
+	}
+	uint32_t total_loaded = 0;
+	for (uint32_t i = 0; i < phnum; i++) {
+		const uint8_t *ph = hdr + 52u + 32u * i;
+		uint32_t p_type = fat_u32(ph + 0u);
+		uint32_t p_paddr = fat_u32(ph + 12u);
+		uint32_t p_filesz = fat_u32(ph + 16u);
+		uint32_t p_memsz = fat_u32(ph + 20u);
+		uint32_t p_flags = fat_u32(ph + 24u);
+
+		if (p_type != 1u || ((p_flags & (7u << 24)) == (2u << 24)) || p_memsz == 0 || p_filesz == 0) {
+			continue;
+		}
+		if (p_paddr < base || (uint64_t)(p_paddr - base) + p_filesz > span) {
+			hakios_tl("UMI %s: seg %u out of bounds\n", tag, i);
+			ml_io_unmap(carve, carve_sz);
+			kmem_free(kernel_map, meta_va, PAGE_SIZE);
+			return;
+		}
+		char bname[24];
+		snprintf(bname, sizeof(bname), seg_fmt, i);
+		vm_size_t bufsz = (vm_size_t)((p_filesz + 0xfffu) & ~0xfffu);
+		vm_offset_t seg_va = 0;
+		if (kmem_alloc(kernel_map, &seg_va, bufsz, KMA_KOBJECT | KMA_ZERO | KMA_DATA, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS ||
+		    seg_va == 0) {
+			hakios_tl("UMI %s: seg %u alloc %u failed\n", tag, i, p_filesz);
+			ml_io_unmap(carve, carve_sz);
+			kmem_free(kernel_map, meta_va, PAGE_SIZE);
+			return;
+		}
+		uint32_t got_sz = 0;
+		int rerr = hakios_modem_fat_read(bname, (uint8_t *)seg_va, p_filesz, &got_sz);
+		if (rerr != 0 || got_sz != p_filesz) {
+			hakios_tl("UMI %s: read %s err=%d got=%u want=%u\n", tag, bname, rerr, got_sz, p_filesz);
+			kmem_free(kernel_map, seg_va, bufsz);
+			ml_io_unmap(carve, carve_sz);
+			kmem_free(kernel_map, meta_va, PAGE_SIZE);
+			return;
+		}
+		uint32_t at = p_paddr - base, k = 0;
+		const uint8_t *src_b = (const uint8_t *)seg_va;
+		while (k < p_filesz && ((at + k) & 7u) != 0) {
+			dst[at + k] = src_b[k];
+			k++;
+		}
+		for (; k + 8u <= p_filesz; k += 8u) {
+			uint64_t w;
+			memcpy(&w, src_b + k, sizeof(w));
+			*(volatile uint64_t *)(dst + at + k) = w;
+		}
+		for (; k < p_filesz; k++) {
+			dst[at + k] = src_b[k];
+		}
+		total_loaded += p_filesz;
+		kmem_free(kernel_map, seg_va, bufsz);
+	}
+	__asm__ volatile("dsb sy; isb" ::: "memory");
+	ml_io_unmap(carve, carve_sz);
+	kmem_free(kernel_map, meta_va, PAGE_SIZE);
+	hakios_tl("UMI %s: segments loaded (%u bytes total)\n", tag, total_loaded);
+
+	ret = thyme_scm_call(UMI_SCM_PAS_MEM_SETUP, 3u, pas_id, carve_pa, (uint64_t)span, &ans);
+	hakios_tl("UMI %s: TZ MEM_SETUP ret=%d ans=%#llx\n", tag, ret, ans);
+	if (ret != 0 || ans != 0) {
+		return;
+	}
+	*out_segs = (int)loadable;
+
+	if (!do_auth_reset) {
+		return;
+	}
+	ret = thyme_scm_call(UMI_SCM_PAS_AUTH_RESET, 1u, pas_id, 0, 0, &ans);
+	hakios_tl("UMI %s: TZ AUTH_AND_RESET ret=%d ans=%#llx\n", tag, ret, ans);
+	if (ret == 0 && ans == 0) {
+		*out_ready = 1;
+	}
+}
+
+static void
+thyme_venus_pil_boot(void)
+{
+	uint32_t v_en = 0, c_en = 0;
+
+	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && (v_en == 1 || v_en == 2)) {
+		vm_offset_t gcc_v = ml_io_map(0x0010b000UL, 0x1000UL);
+
+		if (gcc_v != 0) {
+			hakios_tl("UMI venus: gcc_video ahb=%#x xo=%#x\n",
+			    keys_reg(gcc_v, 0x004u), keys_reg(gcc_v, 0x03cu));
+		}
+		thyme_pil_boot_one("venus", "venus.mdt", "venus.b%02u",
+		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
+		    (v_en >= 2), &venus_ready, &venus_segments);
+	}
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en == 1) {
+		thyme_pil_boot_one("cdsp", "cdsp.mdt", "cdsp.b%02u",
+		    UMI_CDSP_PAS_ID, UMI_CDSP_PA, UMI_CDSP_SIZE,
+		    true, &cdsp_ready, &cdsp_segments);
+	}
+}
+
 /* SM8250 APSS hardware watchdog (qcom,wdt@17c10000): probe, opt-in wdt=1 arming, and loader_return quiesce. */
 void hakios_wdt_quiesce(void);
 
 void
 hakios_wdt_quiesce(void)
 {
+	if (venus_ready) {
+		uint64_t ans = ~0ULL;
+		int32_t ret = thyme_scm_call(UMI_SCM_PAS_SHUTDOWN, 1u, UMI_VENUS_PAS_ID, 0, 0, &ans);
+
+		venus_ready = 0;
+		hakios_tl("UMI venus: TZ SHUTDOWN ret=%d ans=%#llx\n", ret, ans);
+	}
+	if (cdsp_ready) {
+		uint64_t ans = ~0ULL;
+		int32_t ret = thyme_scm_call(UMI_SCM_PAS_SHUTDOWN, 1u, UMI_CDSP_PAS_ID, 0, 0, &ans);
+
+		cdsp_ready = 0;
+		hakios_tl("UMI cdsp: TZ SHUTDOWN ret=%d ans=%#llx\n", ret, ans);
+	}
 	if (wdt_base != 0 && wdt_armed) {
 		keys_write(wdt_base, UMI_WDT_CTL, 0u);
 		keys_write(wdt_base, UMI_WDT_RST, 1u);

@@ -65,11 +65,11 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
 | CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **PARTIAL** | XNU `machine_idle()` `WFI`/`WFE` active on all idle cores; display blanking (`DCS 0x51=0`) works (`logs/173008-run.log`); PSCI `CPU_SUSPEND` deep power collapse `TODO` |
 | GPU Dynamic Frequency Scaling (DVFS) | P1 | **PASS** | Adreno 650 GMU HFI runtime OPP switching (`305 / 441 / 587 MHz`, `31` live transitions in `logs/231618-run.log`), `kern.hakios.gpu_*` sysctls, nominal restore on exit |
-| VPU Hardware Video Decode | P0 | **PARTIAL** | UFS `modem_a/image/venus.mdt` (`8220 B`, ELF `7f 45 4c 46 01 01 01 00`) & `venus.b00..` readable via `hakios_modem_fat_read()` (`logs/083725-run.log`); `pil-venus` (`pas-id=9`, `0x8ca00000`) TrustZone auth & HFI VPU decode `TODO` |
+| VPU Hardware Video Decode | P0 | **PARTIAL** | `venus=1` PIL-TZ `INIT_IMAGE` + `926,324 B` (14 segments) load + `MEM_SETUP` `PASS` (`ret=0 ans=0`, `0x8ca00000`, `logs/085419-run.log`); `gcc_video` `ahb=0x80000000 xo=0x80000000` gated -> `AUTH_AND_RESET` needs `GCC_VIDEO` + `mmcx`/`mvsc` vote, then HFI VPU decode |
 | VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
-| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`, `modem_a/image/cdsp.mdt` `7660 B`, ELF `7f 45 4c 46 01 01 01 00` + `cdsp.b00..`, `logs/083725-run.log`) + `dsp_a` ext4 verified; TrustZone `pas-id=0x12` boot `TODO` |
-| NPU / AI Acceleration (Core ML) | P2 | **TODO** | `CDSP` / HVX / HTA NPU not ported |
+| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PASS** | `ADSP` (`PASS`), `SLPI` (`PASS`), & `CDSP` (`cdsp=1` TrustZone PIL-TZ `pas-id=0x12` `INIT_IMAGE` + `5,793,254 B` / 11 segs + `MEM_SETUP` + `AUTH_AND_RESET ret=0 ans=0` + `SHUTDOWN ret=0` in `logs/085419-run.log`) |
+| NPU / AI Acceleration (Core ML) | P2 | **PARTIAL** | `CDSP` Hexagon DSP TrustZone PIL-TZ boot `PASS` (`kern.hakios.cdsp_ready=1`, `5,793,254 B` @ `0x8d400000`, `logs/085419-run.log`); FastRPC HTA/HVX Core ML bridge `TODO` |
 | Hardware Crypto & PRNG (`qcedev` / `prng`) | P0 | **PARTIAL** | SM8250 TRNG `qrng@793000` `PASS` (`kern.hakios.qrng_ready=1`); `GCC_CE1` registers read safely (`cbcr=0x80004220/0/0x80000002/0x80000000`, `logs/083127-run.log`), `qcedev@1de0000` crypto engine `TODO` |
 | IOMMU / SMMU DMA Isolation | P0 | **PASS** | Real SMMU contexts verified zero-fault for Wi-Fi, SDX55M PCIe2, ADSP, Adreno 650, SLPI FastRPC |
 | Hardware Watchdog | P1 | **PASS** | Active SM8250 APSS WDT (`0x17c10000`, `wdt=1`: `bark=16s bite=32s`, `ctl=0x1`) + 4 s `keys_thread` keepalive (`pets=16` over 60 s run) + `loader_return` panic-safe `hakios_wdt_quiesce()` (`ctl=0 pets=16`, `logs/075911-run.log`) |
@@ -134,6 +134,17 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 11 Autonomous Audit (2026-11-27, `logs/085419-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `bd69fa3dbeed`, `result: returned 1441823 0`):
+
+- **Hexagon CDSP (`pas-id=0x12`, `0x8d400000`) Full TrustZone PIL-TZ Boot & Shutdown (`PASS`)** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Built generalized `thyme_pil_boot_one()` loading split ELF firmware directly from UFS `modem_a/image/` via `hakios_modem_fat_read()` + TrustZone `SCM_PAS_INIT_IMAGE` / `MEM_SETUP` / `AUTH_AND_RESET` / `SHUTDOWN`.
+  - Live `cdsp=1` boot verified: `UMI cdsp: ELF segments=13 loadable=11 reloc=1 span=0x1400000 (base=0x87800000)`, `TZ INIT_IMAGE ret=0 ans=0`, `segments loaded (5793254 bytes total)`, `TZ MEM_SETUP ret=0 ans=0`, **`TZ AUTH_AND_RESET ret=0 ans=0`**, and clean exit **`TZ SHUTDOWN ret=0 ans=0`** (`kern.hakios.cdsp_ready=1`).
+- **Venus VPU (`pas-id=9`, `0x8ca00000`) TrustZone Header/Memory Auth & Clock Diagnosis (`PARTIAL`)**:
+  - Live `venus=1` verified `UMI venus: ELF segments=20 loadable=14 reloc=1 span=0x500000 (base=0xf500000)`, `TZ INIT_IMAGE ret=0 ans=0`, `segments loaded (926324 bytes total)`, `TZ MEM_SETUP ret=0 ans=0`, and diagnosed gated Video CC buses (`UMI venus: gcc_video ahb=0x80000000 xo=0x80000000`) explaining why `AUTH_AND_RESET(9)` requires enabling `GCC_VIDEO` clocks + `mmcx`/`mvsc` first.
+- **Artifacts**: `hakios-kernel` (`17,040,232 B`, sha256 `bd69fa3dbeed0d89448183005dcaa3fedfb3b96b0dae8790f15ce35a05faa29f`), `userland/root.apfs` (`48,992,256 B`, sha256 `6393155cc2be9631641de8ec96657b232a117926121efd4ef70eee375ca74f99`; total `66,032,488 B < 66,060,288 B`), `logs/085419-run.log` (sha256 `0e678805a928b7ec5180464b8d29fccb57f04db27e745e530e67c0f91fd06cad`).
 
 ## Batch 10 Autonomous Audit (2026-11-27, `logs/083725-run.log`)
 
