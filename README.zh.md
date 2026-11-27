@@ -23,7 +23,7 @@
 > 基于小米 10S 设备树与完整日用标准的**全量逐项审计清单**（含 SoC 视频编解码/休眠/加密、NFC、红外、屏下指纹、副摄/OIS、快充/无线充、USB 数据/OTG、系统层能力及长期稳定性门禁）已置于 [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md) 顶部总表。
 
 | 功能模块 | 状态 | 实测摘要 |
-|---|---|---|---|
+|---|---|---|
 | 系统启动与桌面 | **PASS** | `SCENE=daily` 独立脱线启动（`boot-hakios-ram.bat`）至 `launchd`、`backboardd` 与 SpringBoard |
 | CPU 与动态调频 | **PASS** | 7 核在线；200 ms 运行时 EPSS 调频（最高 1.80 / 2.42 / 3.19 GHz）与温控限频 |
 | 显示与刷新率 | **PASS** | 1080 × 2340 OLED，真硬件 90 Hz（`INTF_1` TE 同步零漏扫）、DCS 亮度与锁屏灭背光 |

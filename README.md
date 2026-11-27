@@ -23,7 +23,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 > Full Mi 10S (`thyme`) silicon inventory audit (including SoC VPU/idle/crypto, NFC, IR, FOD, aux cameras, wired/wireless fast charging, USB gadget/OTG, OS-level readiness, and 168 h stability gates) lives in the **Master Audit Matrix** at the top of [`devices/thyme/CHECKLIST.md`](devices/thyme/CHECKLIST.md).
 
 | Subsystem | Status | Summary |
-|---|---|---|---|
+|---|---|---|
 | Boot & SpringBoard | **PASS** | Detached daily RAM boot (`SCENE=daily`) to `launchd`, `backboardd`, SpringBoard, and Settings |
 | CPU & Runtime DVFS | **PASS** | 7 cores active; 200 ms EPSS scaling (up to 1.80 / 2.42 / 3.19 GHz) + thermal cap |
 | Display & Refresh | **PASS** | 1080 × 2340 OLED, hardware 90 Hz (`INTF_1` TE-synced, 0 missed scans), DCS brightness & lock blanking |
