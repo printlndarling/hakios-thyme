@@ -47,6 +47,7 @@
 #include "../../bsd/dev/coachz_bb_control.h"
 #include "../../bsd/dev/coachz_bb_channels.h"
 #include "../../bsd/dev/coachz_bb_data.h"
+#include "../../bsd/dev/hakios.uim_status.h"
 #include "../../bsd/dev/coachz_bb_pdp.h"
 #include <miscfs/devfs/devfs.h>
 #include <sys/conf.h>
@@ -734,7 +735,20 @@ static void bb_sim_request(const struct cbq_result &r, const uint8_t *sdu)
 }
 static void bb_sim_answer(const struct cbq_result &r, const uint8_t *sdu, uint32_t n)
 {
-  if (r.service != CBD_SVC_UIM || n < 7u || sdu[0] != 2u || cbd_rd16(sdu + 3) != CBD_UIM_READ_TRANSPARENT) return;
+  if (r.service != CBD_SVC_UIM || !cbd_sdu_ok(sdu, n) || sdu[0] != CBQ_QMI_RESPONSE) return;
+  const uint32_t message = cbd_rd16(sdu + 3);
+  if (message == 0x002fu && cbd_error(sdu, n) == 0) {
+    uint32_t length = 0;
+    const uint8_t *status = cbd_find(sdu, n, 0x10, &length);
+    struct uim_inventory inventory;
+    if (status && uim_status_inventory(status, length, &inventory)) {
+      BB_LOG("UIM inventory: %u reported slots, %u cards present, %u ready SIMs, primary GW index 0x%x, secondary GW index 0x%x\n",
+             inventory.slots, inventory.present, inventory.ready, inventory.primary_gw, inventory.secondary_gw);
+    } else {
+      BB_LOG("UIM inventory: no complete card status TLV (%u bytes)\n", length);
+    }
+  }
+  if (message != CBD_UIM_READ_TRANSPARENT) return;
   for (auto &q : bb_sim_reads) {
     if (!q.used || q.channel != r.channel || q.cid != r.cid || q.txn != cbd_rd16(sdu + 1)) continue;
     q.used = 0;

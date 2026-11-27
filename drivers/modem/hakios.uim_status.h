@@ -23,9 +23,9 @@ uim_status_inventory(const uint8_t *status, size_t size, struct uim_inventory *i
 		return false;
 	}
 	struct uim_inventory parsed = {
-		.primary_gw = status[0] | (unsigned)status[1] << 8,
-		.secondary_gw = status[4] | (unsigned)status[5] << 8,
-		.slots = status[8],
+		status[0] | (unsigned)status[1] << 8,
+		status[4] | (unsigned)status[5] << 8,
+		status[8], 0, 0,
 	};
 	size_t at = 9;
 
