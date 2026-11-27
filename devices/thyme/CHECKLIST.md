@@ -91,7 +91,7 @@ Status legend:
 | Layer | Status | Scope & Notes |
 |---|---|---|
 | Security & Privacy | 🚧 | TCC permission prompts work; Keychain persistence, passcode/FOD BiometricKit pending |
-| Install & Storage | 🚧 | Cross-platform RAM boot launchers and local image builds. UFS persistence, standalone boot and OTA remain open. |
+| Install & Storage | 🚧 | Cross-platform RAM Boot launchers and local image builds. Current GPT geometry and the host F2FS planner are verified separately. The attached phone has no `darwin`. UFS persistence, standalone boot and OTA remain open. |
 | Background Services | 🚧 | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` live; deep-sleep alarm/notifications pending |
 | Networking | 🚧 | IPv4/IPv6, DNS, HTTPS TLS work; VPN (`utun`), proxy UI, Personal Hotspot pending |
 | System Interaction | 🚧 | zh-Hans UI, PingFang, keyboard configuration, Control Center, Notification Center and switcher available. Input, notifications and functional controls have separate acceptance in section 6. |

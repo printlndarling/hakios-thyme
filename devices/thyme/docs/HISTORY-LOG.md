@@ -1,5 +1,35 @@
 ## Chronological Verification Logs & Evidence
 
+## Installation geometry and F2FS planner (2026-11-27)
+
+- Queried the attached thyme from Android using read-only operations.
+  `userdata` maps to `sda35` and is 114,093,436,928 bytes. The
+  `darwin` by-name node is absent.
+- The non-wipe planner used to emit both GPT files without a post-resize
+  F2FS superblock. Synthetic cases reproduced that and a successful plan
+  from a corrupt readback. The planner now requires matching readback
+  geometry for GPT generation and rejects out-of-range requests and
+  overlapping partition entries even when both tables have correct CRCs.
+  Six host tests passed. The backup tool's read-only regression suite also
+  passed.
+- A 20 GiB hypothetical wipe-mode layout was generated only from copies
+  of the local LUN 0 GPT backup. Both original and proposed GPT pairs
+  passed their CRC and geometry checks. Only entry indices 34 and 35
+  changed, placing the proposed `darwin` at `sda36`. The existing writer
+  accepts the legacy `sda34` geometry and protects its root-image
+  range. Neither the hypothetical layout nor a F2FS resize was applied
+  to the phone. Local transcript
+  `out/thyme-boot/layout-plan.4Qub6uuk/offline.log`, SHA-256
+  `6380a51bc3e18a9360ed9e38025994a7a558bee0bcb43f3878214fe89d57dc06`.
+- Read the first F2FS block and segment allocation counters from the
+  attached Android system, then ran the non-wipe planner offline. For
+  an illustrative 20 GiB candidate, it found no valid blocks past the
+  requested limit at the time of the snapshot. It reported
+  `25397248..30640122` on `sda36` and stopped at the resize target.
+  Neither GPT output file existed afterward. Transcript
+  `out/thyme-boot/layout-live-readonly.VOyJDe9Y/preflight.log`, SHA-256
+  `805869cac95ec03df90f4ac1a16079da611f81064c8d968c9cd6b35bea23b625`.
+
 ## Camera chroma boundary and preview timing (2026-11-27)
 
 - After the earlier switch run, the operator reported a much smoother rear preview

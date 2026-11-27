@@ -1,16 +1,17 @@
 # Installing HakiOS on a phone: the design, and what is missing
 
-**Nothing in this document has been run on a phone.** The pieces it names exist and are tested one by one (in QEMU,
-against stand-in programs, by their own self-tests). The whole chain has not been tried, and the attached phone was
-not on USB while this was written. Read it as the safety model that an install has to meet, not as instructions.
+This design covers an installation alongside Android. See
+[the installation verification record](install-safe.md) for device-specific
+results. On the attached thyme, RAM boot and Android return are verified.
+`darwin` provisioning and independent installation remain open.
 
 ## Today
 
-HakiOS is booted from RAM: `./xl enter` takes a boot image with `fastboot boot`, and a reboot brings Android back.
-Android's own partitions are not written. The one default write is the loader's log (a few KB) into the phone's
-`logdump` partition at the end of a run, and with `ufs_write=1` the kernel may write to the port's own partition
-`darwin` and nowhere else. The complete list of what can write is in `tools/provenance.allow` (the `flash` lines), and
-CI fails if another writer appears.
+HakiOS is booted from RAM using `fastboot boot`, and the timed test
+workflow returns to Android. The rebuilt thyme loader retains diagnostic
+logs in RAM. The opt-in `ufs_write=1` path is limited to a compatible
+`darwin` partition. The complete list of writers is recorded in
+`tools/provenance.allow`.
 
 ## What "installed" would mean
 
@@ -22,9 +23,10 @@ on the phone:
    when the payload carries no `usb` entry. Installed, that same kind of image would sit in the boot partition of the
    **inactive** slot.
 2. **The system.** The partition `darwin`, cut off the end of Android's userdata once
-   (`tools/userdata-carve.py` prints the plan and says what it does to Android's data), written by
-   `tools/darwin-write.py`, which refuses everything but that partition and reads every write back. The root image for
-   it is the flash recipe (`FLASHBOOT=1 userland/build.sh`).
+   (`tools/userdata-carve.py` validates both GPT copies and checks the F2FS resize readback).
+   Provisioning the root image from the flash recipe (`FLASHBOOT=1 userland/build.sh`)
+   still needs a guarded path for the actual thyme layout. `tools/darwin-write.py` is
+   limited to the data range of the legacy geometry.
 
 `make doctor` already looks at what this stands on, read only: whether the phone reports two slots, which one Android
 runs from, and whether `darwin` exists.
@@ -50,8 +52,8 @@ Each one is how the project already treats writes (`darwin-write.py`, the loader
 | Needed | State |
 |---|---|
 | A boot image that starts with no host (shim + payload) | exists (`mkxnuimg.py`); the loader started from it by `fastboot boot` on the attached phone |
-| A guarded writer for `darwin` | exists (`tools/darwin-write.py`); its self-test refuses the wrong partition |
-| A plan for carving `darwin` | exists (`tools/userdata-carve.py`, prints the commands, writes nothing) |
+| A guarded writer for `darwin` | Data-range writer for the legacy layout. Root provisioning for the attached thyme needs a separate verified path. |
+| A plan for carving `darwin` | Host-only planner and tests. The resize path requires a matching F2FS readback before emitting GPT files. |
 | Read-only preflight | exists (`make doctor`): slots, `darwin`, firmware, root, bootloader as reported |
 | **Writing the boot image to a slot and switching to it** | **not done, not tried** |
 | **Booting the flash recipe's root from `darwin`** | **not verified** (the arguments it needs are not confirmed) |

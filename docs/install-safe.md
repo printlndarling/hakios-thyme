@@ -21,8 +21,8 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 |---|---|---|---|
 | 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
 | 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest. All 12 GPT ranges also matched a read-only comparison against the connected thyme |
-| 2 | **Carve `darwin`** off the end of Android's userdata | **Android's data is shrunk and moved**: the f2fs is resized and the GPT rewritten. Back up the phone's data first (the user's own, with Android's tools); the tool does not | plan only: `tools/userdata-carve.py` prints the commands and writes nothing |
-| 3 | **Write the system image to `darwin`** with the guarded writer | writes `darwin` only; the writer refuses any other partition and reads every write back | exists: `tools/darwin-write.py`; its self-test refuses the wrong partition. Never run on a phone |
+| 2 | **Carve `darwin`** off the end of Android's userdata | An authorized resize moves F2FS data and changes both GPT copies. An independently recoverable Android user-data backup is required. | Host planner tested. The non-wipe path requires a matching F2FS readback before generating either GPT file. The attached thyme currently has no `darwin`. |
+| 3 | **Provision the root and data regions in `darwin`** | Writes would be limited to the approved `darwin` layout and read back. | The existing writer protects the root range and requires the legacy `sda34` identity. The current thyme needs a provisioning design for its actual geometry. |
 | 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | **not verified**: the arguments the flash recipe needs are not confirmed. Repeat until it is boring; this is the gate before stage 5 |
 | 5 | **The boot image into the inactive slot**, `fastboot set_active` to it, once | writes the inactive slot's `boot` (and what its recipe needs); the active slot is not touched | **not done, not tried**; whether Project Silicium's boot manager behaves from a boot slot, and what `vbmeta` says to a modified boot image, are unknown |
 | 6 | **A way back**, tested before it is needed: `fastboot set_active a` (or b) from the bootloader, and Android's own slot switch | writes the slot flag | the standard fastboot command; not tried here |
@@ -51,6 +51,20 @@ Local transcripts are `logs/thyme-install-readonly-20261127.log`
 (SHA-256 `5d636fedbc6c266db6c8f0550a89a4a0aa74f1501a91e72ca772cae53f00eae5`)
 and `logs/thyme-fastboot-readonly-20261127.log`
 (SHA-256 `e48a9961a2361bc1de038258412467ee04e96553244c0b4ab12e43fc43cf2a3c`).
+
+## Current thyme layout
+
+On 2026-11-27 a read-only Android query found `userdata` on
+`/dev/block/sda35` and no `/dev/block/by-name/darwin`. The host planner
+was exercised on copies of the verified LUN 0 GPT backup. A hypothetical
+20 GiB layout placed `darwin` on `sda36` and changed only the `userdata`
+and new `darwin` entries. The two generated tables matched and all four
+CRCs passed. The exercise used the planner's wipe mode on host files to
+validate GPT geometry. A separate read-only F2FS snapshot put the non-wipe
+candidate on `sda36` as well and found no valid blocks beyond the proposed
+segment limit at the time of the snapshot. The planner emitted the resize
+target and no GPT files. A device F2FS shrink and Android recovery remain
+unverified. Partition provisioning requires the owner's explicit authorization.
 
 ## The gates
 

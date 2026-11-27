@@ -30,7 +30,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Localization & UI | **PASS** | Boots directly in Simplified Chinese with PingFang fonts and Pinyin keyboard |
 | Baidu Maps | **PARTIAL** | Roads and labels verified on thyme with the [app-only Metal profile](devices/thyme/docs/ram-boot.md#baidu-maps-app-metal-comparison). Use the launcher’s `--metal-apps` option with a compatible bundle to enable this profile. |
 | Sileo & TrollStore | **PASS** | Sileo (11 CN/rootless repos, no Canister nag), TrollStore (`ldid` ready), TrollApps (6 CN sources) |
-| Persistent Storage | **TODO** | RAM-boot only by default (`modem_a` read-only VFAT OK); guarded writable UFS storage pending |
+| Persistent Storage | **TODO** | RAM Boot by default. `modem_a` read-only VFAT verified. The [installation plan](docs/install-safe.md) tracks guarded provisioning and persistence. |
 
 ## Quick Start
 
