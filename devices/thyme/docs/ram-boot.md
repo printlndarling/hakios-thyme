@@ -99,7 +99,10 @@ SCENE=mapstaged METAL_PLUGIN=ca devices/thyme/build-root.sh
 SCENE=out/thyme-boot/root-mapstaged.apfs SOAK_METAL_APPS=1 SOAK_SECS=300 devices/thyme/soak.sh
 ```
 
-The scene brings Baidu Maps to the foreground. Handle its first-launch
+The scene brings Baidu Maps to the foreground. In this comparison,
+`SOAK_METAL_APPS=1` selects `metal_apps=2`, which keeps the regular
+compositor and exposes Metal to application processes. Handle the
+app's first-launch
 choices on the phone. Compare visible map tiles and panning with the
 same build launched with `SOAK_METAL_APPS=0` and collect framebuffer
 captures after the dialogs are dismissed.

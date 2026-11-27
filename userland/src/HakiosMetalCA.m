@@ -3,7 +3,7 @@
  * at eb9fdf5), the one that serves CoreAnimation's window server, with what this tree adds for it: CoreAnimation's
  * shaders chosen by pipeline (hm_bitcode_for()), QuartzCore's pipeline library given a default.metallib, stand-ins for
  * functions the library lacks (hm_stand_ins), and the device shown to the window server alone (metal_all=1: all;
- * metal_apps=1: installed applications and the optional Baidu Maps bundle).
+ * metal_apps=1: add applications; metal_apps=2: apps with the OpenGL compositor).
  * Built instead of hakios-metal's plug-in with METAL_PLUGIN=ca (userland/build.sh); the library it needs comes from
  * tools/ca-metallib.py.
  */
@@ -2120,10 +2120,10 @@ hm_boot_arg_set(const char *what)
 	/* (hakios) the window server alone is shown the device: every other client of this image's Metal (SpringBoard
 	 * through SiriUICore, mediaserverd, ...) finds pipeline libraries made for Apple's GPUs with no default.metallib
 	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all;
-	 * metal_apps=1: applications installed in the data volume and the optional Baidu Maps bundle
-	 * the local image builder stages under /Applications. */
+	 * metal_apps=1: add installed applications and the optional Baidu Maps bundle.
+	 * metal_apps=2: give those apps the device and keep the window server on OpenGL. */
 	{
-		static int all = -1, apps = -1;
+		static int all = -1, apps = -1, apps_only;
 		char args[1024] = "";
 		size_t size = sizeof(args) - 1;
 		const char *name = getprogname();
@@ -2135,7 +2135,12 @@ hm_boot_arg_set(const char *what)
 				args[0] = 0;
 			}
 			all = strstr(args, "metal_all=1") != NULL;
-			apps = strstr(args, "metal_apps=1") != NULL;
+			apps_only = strstr(args, "metal_apps=2") != NULL;
+			apps = apps_only || strstr(args, "metal_apps=1") != NULL;
+		}
+		if (apps_only && !all && window_server) {
+			HM_ONCE("the window server stays on its existing renderer (metal_apps=2)\n");
+			return nil;
 		}
 		if (apps && !all) {
 			char path[1024] = "";
@@ -2152,7 +2157,7 @@ hm_boot_arg_set(const char *what)
 			    (strcmp(at, "/Applications/BaiduMap.app/IphoneCom") == 0 &&
 			    [[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.baidu.map"]));
 			if (!application && !window_server) {
-				HM_ONCE("%s (%s) is outside the Metal app scope (metal_apps=1)\n",
+				HM_ONCE("%s (%s) is outside the Metal app scope\n",
 				    name ? name : "?", path);
 				return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 			}
@@ -2161,7 +2166,7 @@ hm_boot_arg_set(const char *what)
 			}
 		}
 		if (!all && !apps && !window_server) {
-			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process, metal_apps=1: every application)\n", name ? name : "?");
+			HM_ONCE("%s is not shown the device: the window server alone is (metal_all=1: every process, metal_apps=1: include applications)\n", name ? name : "?");
 			return nil;     /* (not released: before -init, _MTLDevice's -dealloc reads what -init never set) */
 		}
 	}

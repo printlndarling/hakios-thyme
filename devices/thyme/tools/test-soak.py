@@ -72,8 +72,8 @@ case "$1" in
             case " $XL_CMDLINE " in *" $arg "*) ;; *) exit 1 ;; esac
         done
         case "$XL_CMDLINE:$TEST_METAL" in
-            *" metal=1 metal_apps=1:1") ;;
-            *" metal_apps=1:"*) exit 1 ;;
+            *" metal=1 metal_apps=2:1") ;;
+            *" metal_apps=2:"*) exit 1 ;;
             *:0) ;;
             *) exit 1 ;;
         esac

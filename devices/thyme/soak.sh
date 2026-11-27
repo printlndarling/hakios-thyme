@@ -29,7 +29,7 @@ export XL_MAX_PAYLOAD=66060288 XL_SECS=$SOAK_SECS XL_REBOOT_AFTER=1 XL_DETACH=0 
 export XL_CMDLINE="debug=0x8 rd=md0 $ARGS pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
 case "${SOAK_METAL_APPS:-0}" in
 0) ;;
-1) XL_CMDLINE="$XL_CMDLINE metal=1 metal_apps=1" ;;
+1) XL_CMDLINE="$XL_CMDLINE metal=1 metal_apps=2" ;;
 *) echo "soak: SOAK_METAL_APPS must be 0 or 1" >&2; exit 1 ;;
 esac
 python3 devices/thyme/ram-boot.py --check-loader "$XL_BOOT_IMAGE"
