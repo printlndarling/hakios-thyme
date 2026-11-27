@@ -16,6 +16,7 @@
 #include <libkern/libkern.h>
 #include <mach/mach_time.h>
 #include <mach/mach_types.h>
+#include <os/atomic_private.h>
 #include <pexpert/device_tree.h>
 #include <pexpert/pexpert.h>
 #include <sys/hakios.board.h>
@@ -74,6 +75,7 @@ extern void loader_log_putc(char c);
 #define THYME_BL_MIN_LEVEL         16u
 #define THYME_BL_MAX_LEVEL         4095u
 #define THYME_BL_DEFAULT_PERMILLE  600
+#define THYME_BL_ANDROID_MAX       2047u
 
 struct hakios_display_scan {
 	int ok;
@@ -611,7 +613,8 @@ apply_backlight_locked(const char *tag)
 		int eff = (brightness_permille * backlight_factor + 500) / 1000;
 		level = permille_to_level(eff);
 	}
-	if (level != brightness_last_level) {
+	uint32_t last_level = os_atomic_load(&brightness_last_level, relaxed);
+	if (level != last_level) {
 		bool ok = false;
 		for (unsigned attempt = 0; attempt < 3 && !ok; attempt++) {
 			if (attempt != 0) {
@@ -619,9 +622,9 @@ apply_backlight_locked(const char *tag)
 			}
 			ok = send_backlight(level);
 		}
-		bool was_zero = (brightness_last_level == 0);
+		bool was_zero = (last_level == 0);
 		if (ok) {
-			brightness_last_level = level;
+			os_atomic_store(&brightness_last_level, level, relaxed);
 		}
 		if (brightness_logs < 48 || !ok || level == 0 || was_zero) {
 			brightness_logs++;
@@ -681,23 +684,18 @@ sysctl_backlight_factor(__unused struct sysctl_oid *oidp, __unused void *arg1, _
 	return 0;
 }
 
-/* Effective OLED backlight level scaled to Android's 0..2047 range (for SLPI under-OLED ALS). */
+/* SLPI's under-OLED ALS reads Android's backlight scale. Use the last level
+ * accepted by DSI so the panel floor and blanking are reflected in that value. */
 int hakios_display_backlight_level_2047(void);
 int
 hakios_display_backlight_level_2047(void)
 {
-	int eff;
+	uint32_t level = os_atomic_load(&brightness_last_level, relaxed);
 
-	if (backlight_factor <= 0) {
-		return 0;
+	if (level == ~0u) {
+		level = permille_to_level(THYME_BL_DEFAULT_PERMILLE);
 	}
-	eff = (brightness_permille * backlight_factor + 500) / 1000;
-	if (eff < 0) {
-		eff = 0;
-	} else if (eff > 1000) {
-		eff = 1000;
-	}
-	return (eff * 2047 + 500) / 1000;
+	return (level * THYME_BL_ANDROID_MAX + THYME_BL_MAX_LEVEL / 2) / THYME_BL_MAX_LEVEL;
 }
 
 
@@ -1051,7 +1049,7 @@ hakios_brightness_init(void)
 		ok = send_backlight(level);
 	}
 	if (ok) {
-		brightness_last_level = level;
+		os_atomic_store(&brightness_last_level, level, relaxed);
 	}
 	tell("display: THYME brightness ready: DSI_CTRL=%#x, %d permille -> level %u (%s)\n",
 	    control, brightness_permille, level, ok ? "ok" : "skipped");
