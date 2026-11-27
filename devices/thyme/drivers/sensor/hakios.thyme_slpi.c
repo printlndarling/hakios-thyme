@@ -810,6 +810,7 @@ static struct block aoss = { "mailbox", 0x0c300000, 0x400 };
 #define IPCC_NOBODY             0xffffffffu
 #define IPCC_AOP                0u
 #define IPCC_SLPI              4u              /* dt: mboxes of qcom,smp2p-dsps and qcom,glink/dsps */
+#define IPCC_CDSP               6u              /* dt: mboxes of qcom,smp2p-cdsp and qcom,glink/cdsp */
 #define IPCC_GLINK              0u
 #define IPCC_SMP2P              2u
 
@@ -1918,7 +1919,6 @@ hakios_thyme_cdsp_publish(void)
 void
 hakios_thyme_cdsp_kick(void)
 {
-	enum { IPCC_CDSP = 6 };
 	need(&ipcc);
 	if (ipcc.base != 0) {
 		wr(ipcc.base + IPCC_SEND, IPCC_CDSP << 16 | IPCC_SMP2P);
@@ -2340,6 +2340,225 @@ struct glink_message {
 	uint16_t command, param1;
 	uint32_t param2;
 };
+enum { CDSP_GLINK_QUEUE_SIZE = 16384, CDSP_FASTRPC_LOCAL_ID = 1 };
+static const char cdsp_fastrpc_name[] = "fastrpcglink-apps-dsp";
+static struct {
+	uint32_t descriptor, tx, rx;
+	bool allocated, sent, remote_version, acknowledged;
+	bool fastrpc_sent, fastrpc_ack;
+	uint16_t fastrpc_remote_id;
+} cdsp_glink;
+
+static int
+cdsp_glink_find(void)
+{
+	static struct smem_item items[256];
+	uint32_t cacheline = 0, part_size = 0;
+	uint32_t part = smem_partition(SMEM_US, CDSP_PID, &cacheline, &part_size);
+	unsigned count = smem_items(part, cacheline, items, sizeof(items) / sizeof(items[0]));
+	uint32_t descriptor = 0, tx = 0, rx = 0;
+	for (unsigned i = 0; i < count && i < sizeof(items) / sizeof(items[0]); i++) {
+		const struct smem_item *entry = &items[i];
+		switch (entry->item) {
+		case ITEM_GLINK_DESCRIPTOR:
+			if (descriptor != 0 || entry->size != 32 || (entry->offset & 3u) != 0) {
+				return -1;
+			}
+			descriptor = entry->offset;
+			break;
+		case ITEM_GLINK_OUR_QUEUE:
+		case ITEM_GLINK_THEIR_QUEUE: {
+			uint32_t *queue = entry->item == ITEM_GLINK_OUR_QUEUE ? &tx : &rx;
+			if (*queue != 0 || entry->size != CDSP_GLINK_QUEUE_SIZE || (entry->offset & 7u) != 0) {
+				return -1;
+			}
+			*queue = entry->offset;
+			break;
+		}
+		}
+	}
+	if (descriptor == 0 || rx == 0) {
+		return 0;
+	}
+	if (tx == 0) {
+		if (cdsp_glink.allocated || !smem_private_item_make(part, ITEM_GLINK_OUR_QUEUE, CDSP_GLINK_QUEUE_SIZE)) {
+			return -1;
+		}
+		cdsp_glink.allocated = true;
+		return 0;
+	}
+	if (!cdsp_glink.allocated || smem_word(descriptor + GLINK_OUR_HEAD) != 0 ||
+	    smem_word(descriptor + GLINK_THEIR_TAIL) != 0) {
+		return -1; /* Never attach to or reset an inherited active edge. */
+	}
+	cdsp_glink.descriptor = descriptor;
+	cdsp_glink.tx = tx;
+	cdsp_glink.rx = rx;
+	printf("UMI cdsp: GLINK private queues found, tx=%u rx=%u\n", CDSP_GLINK_QUEUE_SIZE, CDSP_GLINK_QUEUE_SIZE);
+	return 1;
+}
+
+static bool
+cdsp_glink_index_ok(uint32_t value)
+{
+	return value < CDSP_GLINK_QUEUE_SIZE && (value & 7u) == 0;
+}
+
+static bool
+cdsp_glink_send(struct glink_message message, const char *body, uint32_t length)
+{
+	uint32_t descriptor = cdsp_glink.descriptor;
+	uint32_t head = smem_word(descriptor + GLINK_OUR_HEAD);
+	uint32_t tail = smem_word(descriptor + GLINK_OUR_TAIL);
+	if (!cdsp_glink_index_ok(head) || !cdsp_glink_index_ok(tail)) {
+		return false;
+	}
+	uint32_t bytes = (sizeof(message) + length + 7) & ~7u;
+	uint32_t room = tail <= head ? CDSP_GLINK_QUEUE_SIZE - head + tail : tail - head;
+	if (room < GLINK_RESERVE + bytes) {
+		return false;
+	}
+	need(&ipcc);
+	if (ipcc.base == 0) {
+		return false;
+	}
+	smem_poke(cdsp_glink.tx + head, message.command | ((uint32_t)message.param1 << 16));
+	smem_poke(cdsp_glink.tx + head + 4, message.param2);
+	for (uint32_t i = 0; i < bytes - sizeof(message); i += 4) {
+		uint32_t word = 0;
+		if (i < length) {
+			memcpy(&word, body + i, MIN(length - i, sizeof(word)));
+		}
+		smem_poke(cdsp_glink.tx + (head + sizeof(message) + i) % CDSP_GLINK_QUEUE_SIZE, word);
+	}
+	settle();
+	smem_poke(descriptor + GLINK_OUR_HEAD, (head + bytes) % CDSP_GLINK_QUEUE_SIZE);
+	settle();
+	wr(ipcc.base + IPCC_SEND, IPCC_CDSP << 16 | IPCC_GLINK);
+	return true;
+}
+
+static bool
+cdsp_glink_control(uint16_t command)
+{
+	return cdsp_glink_send((struct glink_message){ command, GLINK_VERSION_1, 0 }, NULL, 0);
+}
+
+static int
+cdsp_glink_fastrpc(struct glink_message message, uint32_t tail, uint32_t waiting)
+{
+	if (message.command == GLINK_OPEN_ACK && message.param1 == CDSP_FASTRPC_LOCAL_ID) {
+		cdsp_glink.fastrpc_ack = true;
+		printf("UMI cdsp: GLINK FastRPC OPEN_ACK local=%u\n", message.param1);
+		return sizeof(message);
+	}
+	if (message.command != GLINK_OPEN || message.param1 == 0) {
+		return -1;
+	}
+	char name[33];
+	uint32_t length = message.param2 & 0xffffu;
+	if (length < 2 || length > sizeof(name)) {
+		return -1;
+	}
+	uint32_t frame_size = (sizeof(message) + length + 7) & ~7u;
+	if (waiting < frame_size) {
+		return 0;
+	}
+	for (uint32_t i = 0; i < length; i++) {
+		uint32_t offset = (tail + sizeof(message) + i) % CDSP_GLINK_QUEUE_SIZE;
+		if (!smem_peek(cdsp_glink.rx + offset, &name[i], 1)) {
+			return -1;
+		}
+	}
+	if (memchr(name, '\0', length) != &name[length - 1]) {
+		return -1;
+	}
+	if (strcmp(name, cdsp_fastrpc_name) == 0) {
+		if (cdsp_glink.fastrpc_remote_id != 0 && cdsp_glink.fastrpc_remote_id != message.param1) {
+			return -1;
+		}
+		if (!cdsp_glink_send((struct glink_message){ GLINK_OPEN_ACK, message.param1, 0 }, NULL, 0)) {
+			return -1;
+		}
+		cdsp_glink.fastrpc_remote_id = message.param1;
+		printf("UMI cdsp: GLINK acknowledged FastRPC OPEN remote=%u\n", message.param1);
+	}
+	return frame_size;
+}
+
+/* Keys thread only. 0: keep polling, 1: requested handshake completed, -1: stop. */
+int hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated);
+
+int
+hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated)
+{
+	*negotiated = cdsp_glink.acknowledged && cdsp_glink.remote_version;
+	if (cdsp_glink.descriptor == 0) {
+		int found = cdsp_glink_find();
+		if (found != 1) {
+			return found;
+		}
+	}
+	if (!cdsp_glink.sent) {
+		if (!cdsp_glink_control(GLINK_VERSION)) {
+			return -1;
+		}
+		cdsp_glink.sent = true;
+		printf("UMI cdsp: GLINK sent VERSION 1 features=0\n");
+	}
+	if (open_fastrpc && *negotiated && !cdsp_glink.fastrpc_sent) {
+		const uint32_t size = sizeof(cdsp_fastrpc_name);
+		if (!cdsp_glink_send((struct glink_message){ GLINK_OPEN, CDSP_FASTRPC_LOCAL_ID, size },
+		    cdsp_fastrpc_name, size)) {
+			return -1;
+		}
+		cdsp_glink.fastrpc_sent = true;
+		printf("UMI cdsp: GLINK sent FastRPC OPEN local=%u\n", CDSP_FASTRPC_LOCAL_ID);
+	}
+	uint32_t descriptor = cdsp_glink.descriptor;
+	uint32_t head = smem_word(descriptor + GLINK_THEIR_HEAD);
+	uint32_t tail = smem_word(descriptor + GLINK_THEIR_TAIL);
+	if (!cdsp_glink_index_ok(head) || !cdsp_glink_index_ok(tail)) {
+		return -1;
+	}
+	if (head == tail) {
+		return 0;
+	}
+	struct glink_message message;
+	int consumed = sizeof(message);
+	settle();
+	if (!smem_peek(cdsp_glink.rx + tail, &message, sizeof(message))) {
+		return -1;
+	}
+	if (message.command == GLINK_VERSION && message.param1 == GLINK_VERSION_1) {
+		if (!cdsp_glink_control(GLINK_VERSION_ACK)) {
+			return -1;
+		}
+		cdsp_glink.remote_version = true;
+		printf("UMI cdsp: GLINK received VERSION 1 features=%#x, sent VERSION_ACK\n", message.param2);
+	} else if (message.command == GLINK_VERSION_ACK && message.param1 == GLINK_VERSION_1 &&
+	    message.param2 == 0) {
+		cdsp_glink.acknowledged = true;
+		printf("UMI cdsp: GLINK received VERSION_ACK 1 features=0\n");
+	} else if (open_fastrpc && *negotiated) {
+		uint32_t waiting = head >= tail ? head - tail : CDSP_GLINK_QUEUE_SIZE - tail + head;
+		consumed = cdsp_glink_fastrpc(message, tail, waiting);
+	} else {
+		consumed = -1;
+	}
+	if (consumed <= 0) {
+		if (consumed < 0) {
+			printf("UMI cdsp: GLINK left frame cmd=%u version/id=%u data=%#x in RX\n",
+			    message.command, message.param1, message.param2);
+		}
+		return consumed;
+	}
+	settle();
+	smem_poke(descriptor + GLINK_THEIR_TAIL, (tail + (uint32_t)consumed) % CDSP_GLINK_QUEUE_SIZE);
+	*negotiated = cdsp_glink.acknowledged && cdsp_glink.remote_version;
+	return open_fastrpc ? cdsp_glink.fastrpc_ack && cdsp_glink.fastrpc_remote_id != 0 : *negotiated;
+}
+
 struct glink_packet {
 	struct glink_packet *next;
 	uint32_t length;

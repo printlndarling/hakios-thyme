@@ -40,6 +40,7 @@ extern bool hakios_thyme_cdsp_smp2p(uint32_t *) __attribute__((weak));
 extern bool hakios_thyme_cdsp_publish(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
+extern int hakios_thyme_cdsp_glink_step(bool, bool *) __attribute__((weak));
 
 SYSCTL_DECL(_kern_hakios);
 
@@ -114,7 +115,9 @@ static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
 static int venus_fw_size, cdsp_fw_size, venus_ready, venus_segments, cdsp_ready, cdsp_segments;
 static int cdsp_smp2p_state = -1, cdsp_smp2p_fresh_ready;
-static unsigned cdsp_probe_ticks;
+static unsigned cdsp_probe_ticks, cdsp_glink_ticks;
+static bool cdsp_glink_requested, cdsp_fastrpc_requested;
+static int cdsp_glink_ready, cdsp_fastrpc_channel_ready;
 static bool cdsp_saw_not_ready;
 
 #define CDSP_SMP2P_FATAL (1u << 0)
@@ -170,6 +173,12 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_smp2p_state,
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_smp2p_fresh_ready,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_smp2p_fresh_ready, 0,
     "Observed a fresh CDSP SMP2P ready indication after PAS authentication");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_glink_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_glink_ready, 0,
+    "CDSP bidirectional GLINK version negotiation completed");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_fastrpc_channel_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_fastrpc_channel_ready, 0,
+    "CDSP FastRPC GLINK channel opened in both directions");
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_segments,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_segments, 0,
     "Number of loadable ELF segments loaded into pil_cdsp_region");
@@ -485,6 +494,9 @@ thyme_cdsp_poll(void)
 			if (hakios_thyme_cdsp_edge_summary != NULL) {
 				hakios_thyme_cdsp_edge_summary();
 			}
+			if (cdsp_glink_requested && hakios_thyme_cdsp_glink_step != NULL) {
+				cdsp_glink_ticks = CDSP_SMP2P_POLL_TICKS;
+			}
 			return;
 		}
 	}
@@ -492,6 +504,36 @@ thyme_cdsp_poll(void)
 		hakios_tl("UMI cdsp: SMP2P fresh ready timed out (last=%#x)\n", (uint32_t)cdsp_smp2p_state);
 		if (hakios_thyme_cdsp_edge_summary != NULL) {
 			hakios_thyme_cdsp_edge_summary();
+		}
+	}
+}
+
+static void
+thyme_cdsp_glink_poll(void)
+{
+	if (cdsp_glink_ticks == 0) {
+		return;
+	}
+	cdsp_glink_ticks--;
+	if (!cdsp_ready) {
+		cdsp_glink_ticks = 0;
+		return;
+	}
+	bool negotiated;
+	int status = hakios_thyme_cdsp_glink_step(cdsp_fastrpc_requested, &negotiated);
+	if (negotiated && !cdsp_glink_ready) {
+		cdsp_glink_ready = 1;
+		hakios_tl("UMI cdsp: GLINK version negotiation complete\n");
+	}
+	if (status != 0 || cdsp_glink_ticks == 0) {
+		cdsp_glink_ticks = 0;
+		if (cdsp_fastrpc_requested && negotiated) {
+			cdsp_fastrpc_channel_ready = status == 1;
+			hakios_tl("UMI cdsp: FastRPC channel handshake %s\n",
+			    status == 1 ? "complete" : status < 0 ? "stopped" : "timed out");
+		} else if (!negotiated) {
+			hakios_tl("UMI cdsp: GLINK version negotiation %s\n",
+			    status < 0 ? "stopped" : "timed out");
 		}
 	}
 }
@@ -586,6 +628,7 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 			thyme_venus_pil_boot();
 		}
 		thyme_cdsp_poll();
+		thyme_cdsp_glink_poll();
 		if (wdt_armed && wdt_base != 0 && ++wdt_ticks >= 200u) {
 			wdt_ticks = 0;
 			uint32_t sts_before = keys_reg(wdt_base, UMI_WDT_STS);
@@ -1953,12 +1996,14 @@ thyme_venus_pil_boot(void)
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 2) {
-		if (c_en == 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 4) {
+		if (c_en >= 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
 		    !hakios_thyme_cdsp_publish())) {
 			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");
 			return;
 		}
+		cdsp_glink_requested = c_en >= 3;
+		cdsp_fastrpc_requested = c_en == 4;
 		uint32_t before;
 		if (hakios_thyme_cdsp_smp2p != NULL) {
 			bool sampled = hakios_thyme_cdsp_smp2p(&before);
@@ -1970,7 +2015,7 @@ thyme_venus_pil_boot(void)
 		thyme_pil_boot_one("cdsp", "cdsp.mdt", "cdsp.b%02u",
 		    UMI_CDSP_PAS_ID, UMI_CDSP_PA, UMI_CDSP_SIZE,
 		    true, &cdsp_ready, &cdsp_segments);
-		if (cdsp_ready && c_en == 2) {
+		if (cdsp_ready && c_en >= 2) {
 			hakios_thyme_cdsp_kick();
 		}
 		if (cdsp_ready && hakios_thyme_cdsp_smp2p != NULL) {

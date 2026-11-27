@@ -1,5 +1,31 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP GLINK transport
+
+- Thyme now allocates the AP-owned GLINK transmit ring in the CDSP-private
+  SMEM partition. Its queue, indices and IPCC client are independent from
+  SLPI's. An active inherited queue is left untouched. The probe follows
+  [Qualcomm GLINK's version negotiation](https://raw.githubusercontent.com/torvalds/linux/master/drivers/rpmsg/qcom_glink_native.c)
+  and validates ring bounds and alignment before accessing packets.
+- The physical Mi 10S's 90 s `cdsp=3` run with kernel `87bb69f69db9`
+  and root `7d8ba86fdb50` found both 16 KiB rings. The AP sent GLINK
+  version 1 with optional features zero. The DSP sent version 1 with
+  features `0x7`; the AP acknowledged it, and the DSP returned
+  `VERSION_ACK` 1 with zero features. Both directions completed.
+  CDSP shut down and the watchdog quiesced before the kernel
+  returned to the loader and rebooted to Android. Local evidence:
+  `logs/112646-run.log`, SHA-256
+  `f3be5b98a0650175c60a340e678453416161054d11bfb30e6123543a082266b7`.
+
+- A second 90 s run, `cdsp=4` with kernel `8a7573d443b7` and root
+  `7d8ba86fdb50`, repeated negotiation and opened
+  `fastrpcglink-apps-dsp`. The AP used channel 1 and the DSP used channel 3.
+  Both OPEN messages were acknowledged. The run exposed a Wi-Fi shutdown
+  panic after CDSP had shut down. Local evidence: `logs/113128-run.log`,
+  SHA-256 `2de66f5dce70b6b5a09a152f47be02ac09ce8cbf7bc25350e935a61e0884fe69`.
+  The CDSP transport is ready for receive-intent handling and the first
+  DSP invocation. HVX and Core ML acceleration remain open.
+
 ## CDSP reports ready over SMP2P
 
 - The [SM8250 binding](https://raw.githubusercontent.com/torvalds/linux/master/arch/arm64/boot/dts/qcom/sm8250.dtsi)
