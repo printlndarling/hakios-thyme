@@ -9106,7 +9106,7 @@ cdsp_dma_attach(const uint64_t *pa)
 }
 
 static int
-cdsp_rpc_reply(uint32_t tx_intent, int32_t *result)
+cdsp_rpc_reply(uint32_t tx_intent, uint32_t rx_intent, uint64_t expected_ctx, int32_t *result, bool *tx_done)
 {
 	uint32_t descriptor = cdsp_glink.descriptor;
 	uint32_t head = smem_word(descriptor + GLINK_THEIR_HEAD);
@@ -9124,7 +9124,8 @@ cdsp_rpc_reply(uint32_t tx_intent, int32_t *result)
 		return -1;
 	}
 	int used = sizeof(msg), reply = 0;
-	if (msg.command == GLINK_DATA && msg.param1 == cdsp_glink.fastrpc_remote_id && msg.param2 == 1) {
+	if (msg.command == GLINK_DATA && msg.param1 == cdsp_glink.fastrpc_remote_id &&
+	    rx_intent != 0 && msg.param2 == rx_intent) {
 		uint32_t sizes[2];
 		if (span < used + sizeof(sizes)) {
 			return 0;
@@ -9148,18 +9149,19 @@ cdsp_rpc_reply(uint32_t tx_intent, int32_t *result)
 		uint64_t ctx = words[0] | ((uint64_t)words[1] << 32);
 		*result = (int32_t)words[2];
 		printf("UMI cdsp: FastRPC response ctx=%#llx retval=%d bytes=%u\n", (unsigned long long)ctx, *result, sizes[0]);
-		if (!cdsp_glink_send((struct glink_message){ GLINK_DONE, CDSP_FASTRPC_LOCAL_ID, 1 }, NULL, 0)) {
+		if (!cdsp_glink_send((struct glink_message){ GLINK_DONE, CDSP_FASTRPC_LOCAL_ID, rx_intent }, NULL, 0)) {
 			return -1;
 		}
-		reply = ctx == CDSP_RPC_CTX ? 1 : -1;
+		reply = ctx == expected_ctx ? 1 : -1;
 	} else if (msg.param1 == cdsp_glink.fastrpc_remote_id && msg.command == GLINK_INTENT) {
 		used = cdsp_glink_intents(msg, tail, span);
 	} else if (msg.param1 == cdsp_glink.fastrpc_remote_id &&
 	    (msg.command == GLINK_DONE || msg.command == GLINK_DONE_REUSE) &&
 	    msg.param2 == tx_intent) {
 		/* Some firmware sends DONE_REUSE even with reuse negotiated off.
-		 * Both completions release this one-shot transfer; never reuse its intent.
+		 * A subsequent call still asks for a fresh intent advertisement.
 		 */
+		*tx_done = true;
 	} else if (msg.param1 != cdsp_glink.fastrpc_remote_id ||
 	    (msg.command != GLINK_INTENT_REQUEST_ACK && msg.command != GLINK_SIGNALS)) {
 		printf("UMI cdsp: FastRPC unexpected GLINK cmd=%u channel=%u arg=%#x\n", msg.command, msg.param1, msg.param2);
@@ -9173,10 +9175,102 @@ cdsp_rpc_reply(uint32_t tx_intent, int32_t *result)
 	return reply;
 }
 
-int hakios_thyme_cdsp_capability_probe(void);
+/* Each synchronous invocation owns the page until the transmit completion
+ * and the matching FastRPC reply have both arrived.
+ */
+static int
+cdsp_rpc_call(uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_intent)
+{
+	struct {
+		uint32_t bytes, left;
+		struct fastrpc_msg msg;
+	} packet = { sizeof(struct fastrpc_msg), 0, { 0, 1, ctx, handle, scalars,
+	    CDSP_RPC_REMOTE_ADDR, CDSP_RPC_PAGE } };
+	uint32_t tx_intent = cdsp_glink.remote_intent_id;
+	if (!cdsp_glink_send((struct glink_message){ GLINK_DATA, CDSP_FASTRPC_LOCAL_ID, tx_intent },
+	    (const char *)&packet, sizeof(packet))) {
+		return EIO;
+	}
+	printf("UMI cdsp: sent FastRPC handle=%u scalars=%#x ctx=%#llx intent=%u\n",
+	    handle, scalars, (unsigned long long)ctx, tx_intent);
+	int32_t result = 0;
+	bool sent = false, answered = false;
+	for (unsigned i = 0; i < 500; i++) {
+		int reply = cdsp_rpc_reply(tx_intent, rx_intent, ctx, &result, &sent);
+		if (reply < 0) {
+			return EPROTO;
+		}
+		answered |= reply == 1;
+		if (rd(cdsp_dma.cb + 0x58) & CDSP_RPC_FSR) {
+			return EFAULT;
+		}
+		if (answered && sent) {
+			return result == 0 ? 0 : EIO;
+		}
+		sleep_ms(1);
+	}
+	return ETIMEDOUT;
+}
+
+static int
+cdsp_rpc_new_intents(uint32_t rx_intent)
+{
+	const uint32_t pair[] = { CDSP_FASTRPC_INTENT_SIZE, rx_intent };
+	uint32_t last_tx = cdsp_glink.remote_intent_id;
+	cdsp_glink.remote_intent_size = 0;
+	if (!cdsp_glink_send((struct glink_message){ GLINK_INTENT, CDSP_FASTRPC_LOCAL_ID, 1 },
+	    (const char *)pair, sizeof(pair)) ||
+	    !cdsp_glink_send((struct glink_message){ GLINK_INTENT_REQUEST, CDSP_FASTRPC_LOCAL_ID,
+	    CDSP_FASTRPC_INTENT_SIZE }, NULL, 0)) {
+		return EIO;
+	}
+	for (unsigned i = 0; i < 500; i++) {
+		int32_t result;
+		bool done = false;
+		if (cdsp_rpc_reply(last_tx, 0, 0, &result, &done) < 0) {
+			return EPROTO;
+		}
+		if (cdsp_glink_intents_ready()) {
+			return 0;
+		}
+		sleep_ms(1);
+	}
+	return ETIMEDOUT;
+}
+
+static int
+cdsp_rpc_guest_cycle(uint8_t *buf)
+{
+	uint32_t client = 1;
+	const uint32_t length = sizeof(client);
+	const void *source = &client;
+
+	for (unsigned i = 0; i < 4; i++) {
+		uint32_t rx_intent = i + 2;
+		uint64_t ctx = (uint64_t)rx_intent << 8;
+		bool release = (i & 1) != 0;
+		int error = cdsp_rpc_new_intents(rx_intent);
+		if (error == 0) {
+			memset(buf, 0, CDSP_RPC_PAGE);
+			if (fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 1, &length, &source) != CDSP_RPC_PAGE) {
+				return EINVAL;
+			}
+			cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
+			error = cdsp_rpc_call(1, release ? 0x01010000 : 0x00010000, ctx, rx_intent);
+		}
+		printf("UMI cdsp: guest client=%u %s cycle=%u result=%d\n",
+		    client, release ? "INIT_RELEASE" : "INIT_ATTACH", 1 + i / 2, error);
+		if (error) {
+			return error;
+		}
+	}
+	return 0;
+}
+
+int hakios_thyme_cdsp_capability_probe(bool guest_cycle);
 
 int
-hakios_thyme_cdsp_capability_probe(void)
+hakios_thyme_cdsp_capability_probe(bool guest_cycle)
 {
 	if (cdsp_dma.memory || !cdsp_glink_intents_ready()) {
 		return EBUSY;
@@ -9226,42 +9320,20 @@ hakios_thyme_cdsp_capability_probe(void)
 	if (!mapped) {
 		return EIO;
 	}
-	struct {
-		uint32_t bytes, left;
-		struct fastrpc_msg msg;
-	} packet = { sizeof(struct fastrpc_msg), 0, { 0, 1, CDSP_RPC_CTX, 2, 0x00010100,
-	    CDSP_RPC_REMOTE_ADDR, CDSP_RPC_PAGE } };
-	uint32_t tx_intent = cdsp_glink.remote_intent_id;
-	if (!cdsp_glink_send((struct glink_message){ GLINK_DATA, CDSP_FASTRPC_LOCAL_ID, tx_intent },
-	    (const char *)&packet, sizeof(packet))) {
+	int error = cdsp_rpc_call(2, 0x00010100, CDSP_RPC_CTX, 1);
+	if (error) {
+		return error;
+	}
+	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
+	unsigned changed = 0;
+	for (unsigned n = 0; n < count; n++) {
+		changed += output[n] != 0xa5a5a5a5u;
+	}
+	printf("UMI cdsp: FastRPC capability DMA wrote %u/%u words\n", changed, count);
+	if (changed != count) {
 		return EIO;
 	}
-	printf("UMI cdsp: sent FastRPC capability query ctx=%#llx intent=%u\n",
-	    CDSP_RPC_CTX, tx_intent);
-	int32_t result = 0;
-	for (unsigned i = 0; i < 500; i++) {
-		int reply = cdsp_rpc_reply(tx_intent, &result);
-		if (reply < 0) {
-			return EPROTO;
-		}
-		if (reply == 1) {
-			if (result != 0) {
-				return EIO;
-			}
-			cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
-			unsigned changed = 0;
-			for (unsigned n = 0; n < count; n++) {
-				changed += output[n] != 0xa5a5a5a5u;
-			}
-			printf("UMI cdsp: FastRPC capability DMA wrote %u/%u words\n", changed, count);
-			return changed == count ? 0 : EIO;
-		}
-		if (rd(cdsp_dma.cb + 0x58) & CDSP_RPC_FSR) {
-			return EFAULT;
-		}
-		sleep_ms(1);
-	}
-	return ETIMEDOUT;
+	return guest_cycle ? cdsp_rpc_guest_cycle(buf) : 0;
 }
 
 static vm_offset_t fastrpc_smmu_base;

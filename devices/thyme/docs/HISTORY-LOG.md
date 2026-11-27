@@ -1,5 +1,26 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP guest-session attach and release
+
+- With `cdsp=8`, thyme runs the capability query and then performs
+  two guest-session attach/release cycles. The process-group methods
+  follow the [Xiaomi FastRPC driver](https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/umi-q-oss/drivers/char/adsprpc.c).
+  Each call uses a fresh receive intent and a new RPC context. The
+  argument page is reused only after both the TX completion and the
+  matching DSP reply.
+- On physical thyme, the 90 s run with kernel `b68e48f14cbf` and root
+  `7d8ba86fdb50` returned zero for `INIT_ATTACH`, `INIT_RELEASE`,
+  `INIT_ATTACH` and `INIT_RELEASE` with contexts `0x200` through
+  `0x500`. The DSP provided fresh TX intent IDs 1 through 4. The
+  preceding capability query still wrote all 255 output words. The
+  DSP shut down, CB5/SMR6 restored with zero faults, and the loader
+  returned `1441823 0`. Local evidence: `logs/153252-run.log`, SHA-256
+  `9e50b7fe8a742c7c08db8aab668d56a39dc6fbffdee66524036428f8941523c7`.
+- Host checks covered both orders of TX completion and reply, wrong
+  contexts and intents, firmware errors, missing TX completion, and
+  SMMU faults. This establishes the guest-session lifecycle. Creating a
+  dedicated compute process and running a loaded HVX module remain open.
+
 ## CDSP FastRPC capability query
 
 - The opt-in `cdsp=7` path uses the established GLINK edge to query the
