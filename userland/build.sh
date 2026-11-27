@@ -1129,51 +1129,6 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		ln -sfn /var/jb/var/lib/apt/sileolists sysroot/sileolists
 		echo "  the package manager's prefix: $(du -sh sysroot/jb | cut -f1) as /jb (init puts it at /var/jb)"
 	fi
-	# Temporary local IPA staging for GPS / map verification (BAIDUMAP=1): extract into /Applications/BaiduMap.app
-	if [ -n "${BAIDUMAP:-}" ]; then
-		BAIDU_IPA="${BAIDUMAP_IPA:-/mnt/d/myFiles/sj/百度地图-路线规划出行必备.ipa}"
-		[ -f "$BAIDU_IPA" ] || { echo "build.sh: BAIDUMAP=1 needs $BAIDU_IPA" >&2; exit 1; }
-		mkdir -p sysroot/Applications/BaiduMap.app
-		python3 - "$BAIDU_IPA" sysroot/Applications/BaiduMap.app <<'PY'
-import os, sys, zipfile
-ipa_path, out_dir = sys.argv[1], sys.argv[2]
-prefix = "Payload/IphoneCom.app/"
-with zipfile.ZipFile(ipa_path) as z:
-    for info in z.infolist():
-        if not info.filename.startswith(prefix):
-            continue
-        rel = info.filename[len(prefix):]
-        if not rel or info.is_dir():
-            if rel:
-                os.makedirs(os.path.join(out_dir, rel), exist_ok=True)
-            continue
-        dst = os.path.join(out_dir, rel)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with z.open(info) as src, open(dst, "wb") as out:
-            out.write(src.read())
-PY
-		chmod -R a+rX sysroot/Applications/BaiduMap.app
-		chmod 755 sysroot/Applications/BaiduMap.app/IphoneCom
-		if [ -n "${LDID:-}" ] && [ -x "$LDID" ]; then
-			TMP_ENT=$(mktemp)
-			for bin in sysroot/Applications/BaiduMap.app/IphoneCom \
-			           sysroot/Applications/BaiduMap.app/*.dylib \
-			           sysroot/Applications/BaiduMap.app/Frameworks/*.dylib \
-			           sysroot/Applications/BaiduMap.app/Frameworks/*.framework/* \
-			           sysroot/Applications/BaiduMap.app/PlugIns/*.appex/*; do
-				[ -f "$bin" ] || continue
-				case "$bin" in *.plist|*.nib|*.png|*.webp|*.json|*.car|*.mom*|*.strings|*.h|*.lproj/*) continue ;; esac
-				chmod 755 "$bin"
-				if "$LDID" -e "$bin" > "$TMP_ENT" 2>/dev/null && grep -q '<plist' "$TMP_ENT"; then
-					"$LDID" -S"$TMP_ENT" "$bin" 2>/dev/null || true
-				else
-					"$LDID" -S "$bin" 2>/dev/null || true
-				fi
-			done
-			rm -f "$TMP_ENT"
-		fi
-		echo "  BaiduMap.app: $(du -sh sysroot/Applications/BaiduMap.app | cut -f1) staged at /Applications/BaiduMap.app"
-	fi
 	# our audio device, where the audio server looks for such plug-ins (and for no others: Apple's are left out)
 	mkdir -p sysroot/System/Library/Audio/Plug-Ins/HAL
 	ln -s /redwood/lib/HakiosAudio.driver sysroot/System/Library/Audio/Plug-Ins/HAL/HakiosAudio.driver

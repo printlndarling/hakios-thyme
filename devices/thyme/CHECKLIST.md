@@ -31,7 +31,7 @@ Status legend:
 | Aux Cameras (Ultra-wide / Macro / Depth) | `OV13B10` / `GC02M1` | P2 | 🚧 | Stock UMI module tables can be parsed. The real UMI capture backend and Camera expose rear main and front only. |
 | Cellular Modem (4G / VoLTE) | External `SDX55M` (`PCIe2 / MHI / pcie2_mhi=2`) | P0 | ✅ | `AppleBaseband` + `CommCenter`, 4G LTE dual-stack + VoLTE (`10099`) |
 | 5G NR (SA/NSA) & Dual-SIM | `SDX55M` (Android camps `NR_SA` n41) | P1 | ❌ | Userland `Mav17` is 4G-only; needs `Mav20` bridge + 2nd SIM slot |
-| GNSS / Location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | 🚧 | Wi-Fi CoreLocation (`BaiduMap` blue dot) and repeated indoor QMI satellite reports with the updated GNSS helper; outdoor 3D fix pending |
+| GPS / everyday location | `SDX55M QMI LOC` + `umi_gnssd` | P0 | ✅ | Operator-confirmed position and map refresh on thyme. Indoor QMI satellite reports verified. Outdoor satellite-only acquisition is tracked separately. |
 | Wi-Fi | `QCA6390` (`PCIe0 / ath11k`) | P0 | ✅ | 2.4/5 GHz WPA2, DHCP/TLS, `CN` locale, 65 s lock/wake, auto-rejoin |
 | Bluetooth | `QCA6390` (`3 Mbaud H4`, `BlueTool`) | P0 | ✅ | Verified headphone connection, A2DP playback, and cross-phone pairing |
 | SLPI Core Sensors | `LSM6DSO` (accel/gyro), `AK0991x` (mag), `BMP285` (baro) | P1 | ✅ | FastRPC live stream + `mag_cal` 50 Hz Compass HID + pedometer + orient |
@@ -95,7 +95,7 @@ Status legend:
 | Background Services | 🚧 | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` live; deep-sleep alarm/notifications pending |
 | Networking | 🚧 | IPv4/IPv6, DNS, HTTPS TLS work; VPN (`utun`), proxy UI, Personal Hotspot pending |
 | System Interaction | 🚧 | zh-Hans UI, PingFang, keyboard configuration, Control Center, Notification Center and switcher available. Input, notifications and functional controls have separate acceptance in section 6. |
-| App Ecosystem | ✅ | `Sileo` (11 CN repos), `TrollStore` (`ldid`), `TrollApps` (6 CN sources), `WebKit`, `BaiduMap` |
+| App Ecosystem | ✅ | `Sileo` (11 CN repos), `TrollStore` (`ldid`), `TrollApps` (6 CN sources), `WebKit` |
 | Apple services | ⛔ | Apple ID, App Store, FairPlay and stock WeatherKit lack end-to-end thyme verification. See [upstream review](UPSTREAM.md#apple-services-compatibility-review). iCloud, Apple Pay, APNs, iMessage and FaceTime remain unsupported. |
 
 ---
@@ -146,8 +146,9 @@ remains open until that test passes.
 
 | Feature | Status | Acceptance on thyme |
 |---|---|---|
-| Baidu Maps base layers | 🚧 Manual | Roads and labels appeared on physical thyme with the app-only Metal profile. The operator confirmed the visible layers. Pan and zoom to a new area, then verify fresh tiles, rendering stability, and behavior across app relaunch. |
-| Outdoor GNSS position | 🚧 Manual (clear sky) | Verify a fresh satellite position and app updates with Wi-Fi positioning isolated. Record accuracy and time to fix without retaining coordinates. |
+| Baidu Maps base layers and refresh | ✅ Operator | The operator confirmed roads, labels and refresh with the app-only Metal profile. The test bundle was removed from current system images. Repeated relaunch and long-term stability have separate coverage. |
+| Everyday location and map refresh | ✅ Operator | Confirmed the position and map refresh on physical thyme on 2026-11-28. |
+| Outdoor satellite-only GNSS fix | 🚧 Manual (clear sky) | Verify a fresh satellite position and app updates with Wi-Fi positioning isolated. Record accuracy and time to fix without retaining coordinates. |
 
 ### Cellular, Phone, and Messages
 

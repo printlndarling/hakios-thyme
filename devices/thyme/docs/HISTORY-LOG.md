@@ -1,5 +1,20 @@
 ## Chronological Verification Logs & Evidence
 
+## Everyday positioning acceptance and Baidu Maps packaging (2026-11-28)
+
+- The operator confirmed everyday positioning and map refresh. README and
+  CHECKLIST mark that acceptance as passed. A cold start outdoors with Wi-Fi
+  positioning isolated remains a separate satellite-only test.
+- Removed the build-time Baidu Maps IPA staging, the staged-app scene and
+  its executable-path exception. The app-only Metal profile still handles
+  independently installed applications.
+- WSL rebuilt the daily system and root. APFS inspection verified
+  `BaiduMap.app` was removed and that stage0 and SDX55 firmware were
+  present. The local default system image shrank from 2,958,917,632
+  to 2,751,471,616 bytes (197.84 MiB saved), SHA-256
+  `83e304d77605b489e66042fb0378c2b72e059d2527cfd02ced4cbeafe5f198ef`.
+  Test media stays local.
+
 ## Protect the HFS data volume from raw archive writes (2026-11-27)
 
 - The raw `var_store` slots at block 2097152 overlap the HFS data

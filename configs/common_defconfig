@@ -1480,7 +1480,7 @@ CONFIG_MODEM_AGAIN=y
 # read by HakiosMetalCA.m (user space)
 # CONFIG_METAL_ALL is not set
 
-# add installed applications and the optional Baidu Maps bundle
+# add installed applications
 # CONFIG_METAL_APPS is not set
 
 # this queue's command buffers recorded by a thread of hakios-metal's own (deferred recording), so that the window ...

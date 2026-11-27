@@ -88,26 +88,14 @@ completion. A battery or thermal exit, a panic, or missing evidence fails the
 test. A completed timer is one uptime observation. Use the native app and
 long-term gates in the [checklist](../CHECKLIST.md) to record wider coverage.
 
-## Baidu Maps app Metal comparison
+## App-only Metal
 
-For a system image that already contains the authorized `BAIDUMAP=1`
-bundle, build the comparison root on WSL2 with the CoreAnimation Metal
-plug-in, then run the staged-map scene.
+Use `--metal-apps` with a compatible RAM Boot bundle to expose Metal to
+separately installed applications while the compositor keeps its regular
+renderer. Use `--metal-apps --check` to validate the bundle without a phone.
+For the timed soak, `SOAK_METAL_APPS=1` selects the same profile.
 
-```sh
-SCENE=mapstaged METAL_PLUGIN=ca devices/thyme/build-root.sh
-SCENE=out/thyme-boot/root-mapstaged.apfs SOAK_METAL_APPS=1 SOAK_SECS=300 devices/thyme/soak.sh
-```
-
-The scene brings Baidu Maps to the foreground. In this comparison,
-`SOAK_METAL_APPS=1` selects `metal_apps=2`, which keeps the regular
-compositor and exposes Metal to application processes. Handle the
-app's first-launch
-choices on the phone. Compare visible map tiles and panning with the
-same build launched with `SOAK_METAL_APPS=0` and collect framebuffer
-captures after the dialogs are dismissed.
-
-For a regular RAM boot, pass `--metal-apps` to either platform
-launcher with the same Metal-capable bundle. The host checks the root
-image for app-only support before touching USB. Use
-`--metal-apps --check` to validate the bundle without a phone.
+The historical Baidu Maps verification used an operator-provided bundle.
+Current build images omit it. To repeat that comparison, install an
+authorized copy separately, handle first-launch choices on the phone,
+then check map tiles and panning.

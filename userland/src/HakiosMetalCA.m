@@ -2120,7 +2120,7 @@ hm_boot_arg_set(const char *what)
 	/* (hakios) the window server alone is shown the device: every other client of this image's Metal (SpringBoard
 	 * through SiriUICore, mediaserverd, ...) finds pipeline libraries made for Apple's GPUs with no default.metallib
 	 * beside them and aborts, while without a device it takes the road it takes today. Boot-arg metal_all=1: all;
-	 * metal_apps=1: add installed applications and the optional Baidu Maps bundle.
+	 * metal_apps=1: add installed applications.
 	 * metal_apps=2: give those apps the device and keep the window server on OpenGL. */
 	{
 		static int all = -1, apps = -1, apps_only;
@@ -2152,10 +2152,7 @@ hm_boot_arg_set(const char *what)
 			if (strncmp(at, "/private", 8) == 0) {
 				at += 8;        /* dyld reports /private/var/... : /var is a link to /private/var */
 			}
-			application = application &&
-			    (strncmp(at, "/var/containers/Bundle/Application/", 35) == 0 ||
-			    (strcmp(at, "/Applications/BaiduMap.app/IphoneCom") == 0 &&
-			    [[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.baidu.map"]));
+			application = application && strncmp(at, "/var/containers/Bundle/Application/", 35) == 0;
 			if (!application && !window_server) {
 				HM_ONCE("%s (%s) is outside the Metal app scope\n",
 				    name ? name : "?", path);

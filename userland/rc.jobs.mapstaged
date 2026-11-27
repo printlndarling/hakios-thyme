@@ -1,8 +1,0 @@
-# Open the optional Baidu Maps bundle staged by BAIDUMAP=1 after Wi-Fi setup.
-# Leave its privacy and location choices to the person using the phone.
-/redwood/bin/loc_test enable
-/redwood/bin/net_test wait 20 joinfile /redwood/fw/network
-/redwood/bin/net_test show dhcp en0 waitaddr en0 25 store wait 20
-/redwood/bin/loc_test
-/redwood/bin/rwtouch tap 0.5 0.5 wait 2 notify com.hakios.unlock wait 2 swipe 0.5 0.985 0.5 0.3 200 wait 2
-/var/jb/usr/bin/uiopen --bundleid com.baidu.map
