@@ -1,5 +1,26 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP FastRPC intent exchange
+
+- The `cdsp=5` RAM diagnostic follows the
+  [GLINK intent format](https://raw.githubusercontent.com/torvalds/linux/master/drivers/rpmsg/qcom_glink_native.c).
+  After both OPENs, it advertises an AP receive intent and checks a
+  remote intent for enough room for a FastRPC request header. It does
+  not send an invocation. The first run stopped on the firmware's
+  receive-intent advertisement because the parser rejected remote ID
+  zero, which the sender can validly allocate. Local evidence:
+  `logs/145617-run.log`, SHA-256
+  `01704a5581e2b4eeed6e43e9d4448017347f3b4e3694885c258b25e76a44daf0`.
+- The 90 s retest with kernel `4fe1100da52d` and root `7d8ba86fdb50`
+  observed AP intent ID 1 and DSP intent ID 0, each 64 bytes, on the
+  FastRPC channel. The kernel shut down CDSP, quiesced the watchdog
+  and returned to the loader with `1441823 0`. Local evidence:
+  `logs/150058-run.log`, SHA-256
+  `01ed64a16b07145f7af2deda8e9d47865075e6cb9af39e33a30b5b08e1673c42`.
+  The host transport check passed 25 cases, including ring wrapping,
+  incomplete records and intent ID zero. The next DSP milestone
+  requires a CDSP SMMU context, request buffers and a real reply.
+
 ## Thyme camera sensor selection
 
 - The real UMI backend previously treated every selection except front
@@ -59,9 +80,11 @@
 - The prior cellular run used one SIM in physical slot 2 mapped to
   logical subscription 1, with LTE data and two-way VoLTE. The WDS
   bridge explicitly binds to that primary subscription. That test
-  deferred SMS. Dual active lines, switching defaults, cellular data
-  controls, airplane mode recovery and real Messages delivery have
-  separate acceptance steps.
+  deferred SMS. The separate WMS send-to-self diagnostic has an
+  unsuccessful submission in the local `163801` run, and no native
+  Messages evidence. Dual active lines, switching defaults, cellular
+  data controls, airplane mode recovery and real Messages delivery
+  have separate acceptance steps.
 - The historical manual brightness sweep tested 265 to 971 permille
   and lock blanking. Live front and rear ALS streams alone leave the
   lowest visible setting, low-light stability and auto-brightness open.

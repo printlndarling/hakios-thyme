@@ -40,7 +40,7 @@ extern bool hakios_thyme_cdsp_smp2p(uint32_t *) __attribute__((weak));
 extern bool hakios_thyme_cdsp_publish(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
-extern int hakios_thyme_cdsp_glink_step(bool, bool *) __attribute__((weak));
+extern int hakios_thyme_cdsp_glink_step(unsigned, bool *, bool *) __attribute__((weak));
 
 SYSCTL_DECL(_kern_hakios);
 
@@ -116,13 +116,14 @@ static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
 static int venus_fw_size, cdsp_fw_size, venus_ready, venus_segments, cdsp_ready, cdsp_segments;
 static int cdsp_smp2p_state = -1, cdsp_smp2p_fresh_ready;
 static unsigned cdsp_probe_ticks, cdsp_glink_ticks;
-static bool cdsp_glink_requested, cdsp_fastrpc_requested;
-static int cdsp_glink_ready, cdsp_fastrpc_channel_ready;
+static unsigned cdsp_glink_stage;
+static int cdsp_glink_ready, cdsp_fastrpc_channel_ready, cdsp_fastrpc_intents_ready;
 static bool cdsp_saw_not_ready;
 
 #define CDSP_SMP2P_FATAL (1u << 0)
 #define CDSP_SMP2P_READY (1u << 1)
 #define CDSP_SMP2P_POLL_TICKS (2000u / UMI_KEY_POLL_MS)
+#define CDSP_INTENT_POLL_TICKS (5000u / UMI_KEY_POLL_MS)
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
 static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static int usb_dwc3_id, usb_dwc3_dsts;
@@ -179,6 +180,9 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_glink_ready,
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_fastrpc_channel_ready,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_fastrpc_channel_ready, 0,
     "CDSP FastRPC GLINK channel opened in both directions");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_fastrpc_intents_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_fastrpc_intents_ready, 0,
+    "CDSP FastRPC local receive intent offered and remote send capacity observed");
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_segments,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_segments, 0,
     "Number of loadable ELF segments loaded into pil_cdsp_region");
@@ -494,8 +498,8 @@ thyme_cdsp_poll(void)
 			if (hakios_thyme_cdsp_edge_summary != NULL) {
 				hakios_thyme_cdsp_edge_summary();
 			}
-			if (cdsp_glink_requested && hakios_thyme_cdsp_glink_step != NULL) {
-				cdsp_glink_ticks = CDSP_SMP2P_POLL_TICKS;
+			if (cdsp_glink_stage >= 3 && hakios_thyme_cdsp_glink_step != NULL) {
+				cdsp_glink_ticks = cdsp_glink_stage >= 5 ? CDSP_INTENT_POLL_TICKS : CDSP_SMP2P_POLL_TICKS;
 			}
 			return;
 		}
@@ -519,21 +523,26 @@ thyme_cdsp_glink_poll(void)
 		cdsp_glink_ticks = 0;
 		return;
 	}
-	bool negotiated;
-	int status = hakios_thyme_cdsp_glink_step(cdsp_fastrpc_requested, &negotiated);
+	bool negotiated, opened;
+	int status = hakios_thyme_cdsp_glink_step(cdsp_glink_stage, &negotiated, &opened);
 	if (negotiated && !cdsp_glink_ready) {
 		cdsp_glink_ready = 1;
 		hakios_tl("UMI cdsp: GLINK version negotiation complete\n");
 	}
+	if (opened && !cdsp_fastrpc_channel_ready) {
+		cdsp_fastrpc_channel_ready = 1;
+		hakios_tl("UMI cdsp: FastRPC channel handshake complete\n");
+	}
 	if (status != 0 || cdsp_glink_ticks == 0) {
 		cdsp_glink_ticks = 0;
-		if (cdsp_fastrpc_requested && negotiated) {
-			cdsp_fastrpc_channel_ready = status == 1;
-			hakios_tl("UMI cdsp: FastRPC channel handshake %s\n",
-			    status == 1 ? "complete" : status < 0 ? "stopped" : "timed out");
+		const char *outcome = status == 1 ? "complete" : status < 0 ? "stopped" : "timed out";
+		if (cdsp_glink_stage >= 5 && opened) {
+			cdsp_fastrpc_intents_ready = status == 1;
+			hakios_tl("UMI cdsp: FastRPC intent exchange %s\n", outcome);
+		} else if (cdsp_glink_stage >= 4 && negotiated && !opened) {
+			hakios_tl("UMI cdsp: FastRPC channel handshake %s\n", outcome);
 		} else if (!negotiated) {
-			hakios_tl("UMI cdsp: GLINK version negotiation %s\n",
-			    status < 0 ? "stopped" : "timed out");
+			hakios_tl("UMI cdsp: GLINK version negotiation %s\n", outcome);
 		}
 	}
 }
@@ -1996,14 +2005,13 @@ thyme_venus_pil_boot(void)
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 4) {
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 5) {
 		if (c_en >= 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
 		    !hakios_thyme_cdsp_publish())) {
 			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");
 			return;
 		}
-		cdsp_glink_requested = c_en >= 3;
-		cdsp_fastrpc_requested = c_en == 4;
+		cdsp_glink_stage = c_en;
 		uint32_t before;
 		if (hakios_thyme_cdsp_smp2p != NULL) {
 			bool sampled = hakios_thyme_cdsp_smp2p(&before);

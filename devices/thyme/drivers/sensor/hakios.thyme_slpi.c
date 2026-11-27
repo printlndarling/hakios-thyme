@@ -2340,13 +2340,21 @@ struct glink_message {
 	uint16_t command, param1;
 	uint32_t param2;
 };
-enum { CDSP_GLINK_QUEUE_SIZE = 16384, CDSP_FASTRPC_LOCAL_ID = 1 };
+enum {
+	CDSP_GLINK_QUEUE_SIZE = 16384,
+	CDSP_FASTRPC_LOCAL_ID = 1,
+	CDSP_FASTRPC_MIN_TX_SIZE = 40,
+	CDSP_FASTRPC_INTENT_SIZE = 64,
+	CDSP_FASTRPC_MAX_INTENTS = 64,
+};
 static const char cdsp_fastrpc_name[] = "fastrpcglink-apps-dsp";
 static struct {
 	uint32_t descriptor, tx, rx;
 	bool allocated, sent, remote_version, acknowledged;
 	bool fastrpc_sent, fastrpc_ack;
+	bool intent_offered, intent_requested;
 	uint16_t fastrpc_remote_id;
+	uint32_t remote_intent_size;
 } cdsp_glink;
 
 static int
@@ -2486,12 +2494,60 @@ cdsp_glink_fastrpc(struct glink_message message, uint32_t tail, uint32_t waiting
 	return frame_size;
 }
 
+static int
+cdsp_glink_intents(struct glink_message message, uint32_t tail, uint32_t waiting)
+{
+	if (cdsp_glink.fastrpc_remote_id == 0 || message.param1 != cdsp_glink.fastrpc_remote_id) {
+		return -1;
+	}
+	if (message.command == GLINK_INTENT_REQUEST_ACK && cdsp_glink.intent_requested) {
+		printf("UMI cdsp: GLINK FastRPC intent request %s\n", message.param2 ? "granted" : "denied");
+		return message.param2 ? (int)sizeof(message) : -1;
+	}
+	if (message.command != GLINK_INTENT || message.param2 == 0 || message.param2 > CDSP_FASTRPC_MAX_INTENTS) {
+		return -1;
+	}
+	uint32_t pair[2];
+	uint32_t bytes = sizeof(message) + message.param2 * sizeof(pair);
+	if (waiting < bytes) {
+		return 0;
+	}
+	uint32_t largest = 0, largest_id = 0;
+	for (uint32_t i = 0; i < message.param2; i++) {
+		uint32_t off = (tail + sizeof(message) + i * sizeof(pair)) % CDSP_GLINK_QUEUE_SIZE;
+		if (!smem_peek(cdsp_glink.rx + off, pair, sizeof(pair))) {
+			return -1;
+		}
+		/* Intent IDs are allocated by the sender and can start at zero. */
+		if (pair[0] == 0) {
+			printf("UMI cdsp: GLINK FastRPC empty intent id=%u\n", pair[1]);
+			return -1;
+		}
+		if (pair[0] > largest) {
+			largest = pair[0];
+			largest_id = pair[1];
+		}
+	}
+	cdsp_glink.remote_intent_size = MAX(cdsp_glink.remote_intent_size, largest);
+	printf("UMI cdsp: GLINK FastRPC remote intents=%u largest=%u id=%u\n", message.param2, largest, largest_id);
+	return bytes;
+}
+
+static bool
+cdsp_glink_intents_ready(void)
+{
+	return cdsp_glink.intent_offered && cdsp_glink.remote_intent_size >= CDSP_FASTRPC_MIN_TX_SIZE;
+}
+
 /* Keys thread only. 0: keep polling, 1: requested handshake completed, -1: stop. */
-int hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated);
+int hakios_thyme_cdsp_glink_step(unsigned stage, bool *negotiated, bool *opened);
 
 int
-hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated)
+hakios_thyme_cdsp_glink_step(unsigned stage, bool *negotiated, bool *opened)
 {
+	bool open_fastrpc = stage >= 4;
+	bool exchange_intents = stage >= 5;
+	*opened = cdsp_glink.fastrpc_ack && cdsp_glink.fastrpc_remote_id != 0;
 	*negotiated = cdsp_glink.acknowledged && cdsp_glink.remote_version;
 	if (cdsp_glink.descriptor == 0) {
 		int found = cdsp_glink_find();
@@ -2521,7 +2577,27 @@ hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated)
 	if (!cdsp_glink_index_ok(head) || !cdsp_glink_index_ok(tail)) {
 		return -1;
 	}
+	if (exchange_intents && *opened && !cdsp_glink.intent_offered) {
+		const uint32_t pair[] = { CDSP_FASTRPC_INTENT_SIZE, 1 };
+		if (!cdsp_glink_send((struct glink_message){ GLINK_INTENT, CDSP_FASTRPC_LOCAL_ID, 1 },
+		    (const char *)pair, sizeof(pair))) {
+			return -1;
+		}
+		cdsp_glink.intent_offered = true;
+		printf("UMI cdsp: GLINK offered FastRPC receive intent id=1 size=%u\n", pair[0]);
+	}
+	if (exchange_intents && cdsp_glink_intents_ready()) {
+		return 1;
+	}
 	if (head == tail) {
+		if (exchange_intents && *opened && !cdsp_glink.intent_requested) {
+			if (!cdsp_glink_send((struct glink_message){ GLINK_INTENT_REQUEST, CDSP_FASTRPC_LOCAL_ID,
+			    CDSP_FASTRPC_INTENT_SIZE }, NULL, 0)) {
+				return -1;
+			}
+			cdsp_glink.intent_requested = true;
+			printf("UMI cdsp: GLINK requested FastRPC receive intent size=%u\n", CDSP_FASTRPC_INTENT_SIZE);
+		}
 		return 0;
 	}
 	struct glink_message message;
@@ -2542,7 +2618,11 @@ hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated)
 		printf("UMI cdsp: GLINK received VERSION_ACK 1 features=0\n");
 	} else if (open_fastrpc && *negotiated) {
 		uint32_t waiting = head >= tail ? head - tail : CDSP_GLINK_QUEUE_SIZE - tail + head;
-		consumed = cdsp_glink_fastrpc(message, tail, waiting);
+		if (exchange_intents && (message.command == GLINK_INTENT || message.command == GLINK_INTENT_REQUEST_ACK)) {
+			consumed = cdsp_glink_intents(message, tail, waiting);
+		} else {
+			consumed = cdsp_glink_fastrpc(message, tail, waiting);
+		}
 	} else {
 		consumed = -1;
 	}
@@ -2556,7 +2636,8 @@ hakios_thyme_cdsp_glink_step(bool open_fastrpc, bool *negotiated)
 	settle();
 	smem_poke(descriptor + GLINK_THEIR_TAIL, (tail + (uint32_t)consumed) % CDSP_GLINK_QUEUE_SIZE);
 	*negotiated = cdsp_glink.acknowledged && cdsp_glink.remote_version;
-	return open_fastrpc ? cdsp_glink.fastrpc_ack && cdsp_glink.fastrpc_remote_id != 0 : *negotiated;
+	*opened = cdsp_glink.fastrpc_ack && cdsp_glink.fastrpc_remote_id != 0;
+	return exchange_intents ? cdsp_glink_intents_ready() : open_fastrpc ? *opened : *negotiated;
 }
 
 struct glink_packet {
