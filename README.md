@@ -37,7 +37,7 @@ Start HakiOS over USB from Windows, Linux, or macOS. **HakiOS runs in RAM. Resta
 
 You need an unlocked Xiaomi Mi 10S (`thyme`) running Android with USB debugging enabled and authorized, a data cable, at least 40% charge, and a battery temperature below 45 °C. Install Python 3.8 or later and [download and extract the repository ZIP](https://github.com/printlndarling/hakios-thyme/archive/refs/heads/main.zip) or clone the repository.
 
-Put the four images from the same build in a directory named `thyme-bundle` inside the repository. The required files are `xnu-usb.img`, `hakios-kernel`, `root.apfs`, and `system.apfs`. The launcher downloads [Google Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) to a local cache if they are missing.
+Put the four images from the same build in a directory named `thyme-bundle` inside the repository. The required files are `xnu-usb.img`, `hakios-kernel`, `root.apfs`, and `system.apfs`. Build the loader with the current `devices/thyme/build-loader.sh` so diagnostics stay in RAM. The launcher downloads [Google Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) to a local cache if they are missing.
 
 ### Windows
 
@@ -84,7 +84,7 @@ SYSTEM=1 SCENE=daily devices/thyme/build-root.sh
 devices/thyme/build-loader.sh
 ```
 
-Add `--check` to validate the files and payload size before connecting the phone. For build output paths, manifest details, and recovery from an interrupted boot, see the [cross-platform launcher guide](devices/thyme/docs/ram-boot.md).
+Add `--check` to validate the loader and payload size before connecting the phone. The development [soak script](devices/thyme/docs/ram-boot.md#timed-daily-scene-on-a-development-host) records timed return and Android recovery. For build output paths, manifest details, and recovery from an interrupted boot, see the [cross-platform launcher guide](devices/thyme/docs/ram-boot.md).
 
 ## Current Priorities
 

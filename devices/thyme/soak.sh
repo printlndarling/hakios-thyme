@@ -1,17 +1,11 @@
 #!/bin/bash
-# One long daily-scene soak: the canonical ram.args, the wirelessfull scene, a
-# screenshot every SOAK_STEP seconds (default 300) and the loader's return at
-# SOAK_SECS (default 1800, the 30-minute soak the checklist asks for).
-#
-#   devices/thyme/soak.sh
-#   SOAK_SECS=1200 SOAK_STEP=240 devices/thyme/soak.sh
+# Run a timed daily scene from RAM. See docs/ram-boot.md for evidence and options.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 
 export PATH=${PATH}:/tmp/hakios-phone-tools:/usr/local/bin:/usr/bin:/bin
-export XL_ADB_SERIAL=${XL_ADB_SERIAL-5290780a}
 export XL_FIRMWARE=${XL_FIRMWARE:-silicium}
 export XL_BOOT_IMAGE=${XL_BOOT_IMAGE:-devices/thyme/prebuilt/xnu-usb.img}
 export XL_LOADER=${XL_LOADER:-xnuloader/loader-thyme.efi}
@@ -22,33 +16,92 @@ SOAK_SECS=${SOAK_SECS:-1800}
 SOAK_STEP=${SOAK_STEP:-300}
 ARGS=$(tr -d '\n' < devices/thyme/ram.args)
 
-[ -f "$SYSTEM_IMAGE" ] || { echo "soak: no system image: $SYSTEM_IMAGE" >&2; exit 1; }
-[ -f "$SCENE" ] || { echo "soak: no scenario image: $SCENE" >&2; exit 1; }
-echo "soak: ${SOAK_SECS} s of the daily scene, a screenshot every ${SOAK_STEP} s"
-echo "soak: our kernel arguments are ${#ARGS} characters"
-
-STATE=$(./xl state)
-if [ "$STATE" != loader ] && [ "$STATE" != fastboot ]; then
-	echo "soak: entering the loader and uploading the system image (one time)"
-	./xl enter
-	./xl ramdisk "$SYSTEM_IMAGE"
+if ! [[ $SOAK_SECS =~ ^[1-9][0-9]{0,5}$ && $SOAK_STEP =~ ^[1-9][0-9]{0,5}$ ]]; then
+	echo "soak: SOAK_SECS and SOAK_STEP must be positive integers below 1000000" >&2
+	exit 1
 fi
+for image in "$SYSTEM_IMAGE" "$SCENE" "$XL_BOOT_IMAGE" "$XL_LOADER"; do
+	[ -s "$image" ] || { echo "soak: missing or empty image: $image" >&2; exit 1; }
+done
+
+# The thyme loader's run-payload window is 0x03f00000 bytes.
+export XL_MAX_PAYLOAD=66060288 XL_SECS=$SOAK_SECS XL_REBOOT_AFTER=1 XL_DETACH=0 XL_HOME=android XL_RAMDISK="$SCENE"
+export XL_CMDLINE="debug=0x8 rd=md0 $ARGS pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
+python3 devices/thyme/ram-boot.py --check-loader "$XL_BOOT_IMAGE"
+./xl check-payload
+
+serial=$(python3 devices/thyme/ram-boot.py --preflight)
+if [ -n "${XL_ADB_SERIAL:-}" ] && [ "$XL_ADB_SERIAL" != "$serial" ]; then
+	echo "soak: XL_ADB_SERIAL does not match the verified device" >&2
+	exit 1
+fi
+attached=$(timeout -k 2 10 fastboot devices)
+if [ -n "$attached" ]; then
+	echo "soak: disconnect other fastboot devices before starting" >&2
+	exit 1
+fi
+export XL_ADB_SERIAL=$serial
+
+mkdir -p logs
+evidence=$(mktemp -d logs/soak.XXXXXXXX)
+echo "soak: ${SOAK_SECS}s timed scene, framebuffer interval ${SOAK_STEP}s, evidence $evidence"
+capture_pid=
+recover=1
+cleanup() {
+	if [ -n "$capture_pid" ]; then
+		kill "$capture_pid" 2>/dev/null || true
+		wait "$capture_pid" 2>/dev/null || true
+	fi
+	if [ "$recover" = 1 ] && [ "$(timeout -k 2 15 ./xl state)" = loader ]; then
+		timeout -k 2 15 ./xl reboot >&2 || true
+	fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+# Always start from Android and upload the chosen system image for this run.
+./xl ramdisk "$SYSTEM_IMAGE" | tee "$evidence/ramdisk.log"
 
 (
-	elapsed=0
-	while [ "$elapsed" -lt $((SOAK_SECS - 60)) ]; do
-		sleep "$SOAK_STEP"
-		elapsed=$((elapsed + SOAK_STEP))
-		./xl screenshot "logs/soak-${elapsed}.png" || true
+	for ((elapsed=SOAK_STEP; elapsed <= SOAK_SECS - 60; elapsed+=SOAK_STEP)); do
+		sleep "$SOAK_STEP" </dev/null >/dev/null 2>&1
+		./xl screenshot-live "$evidence/screen-$elapsed.png" || true
 	done
 ) &
-CAPTURE_PID=$!
-trap 'kill "$CAPTURE_PID" 2>/dev/null || true' EXIT HUP INT TERM
+capture_pid=$!
 
-XL_SECS="$SOAK_SECS" \
-XL_REBOOT_AFTER=${XL_REBOOT_AFTER:-1} \
-XL_RAMDISK="$SCENE" \
-XL_CMDLINE="$ARGS" \
-	./xl run
-kill "$CAPTURE_PID" 2>/dev/null || true
-trap - EXIT HUP INT TERM
+run_status=0
+./xl run | tee "$evidence/host.log" || run_status=$?
+
+# An authorized adb transport appears before Android has finished booting.
+for ((attempt=0; attempt<45; attempt++)); do
+	booted=$(timeout -k 2 3 adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+	[ "$booted" = 1 ] && break
+	# Fix up a failed loader reboot before waiting out the full deadline.
+	if [ "$attempt" = 0 ] && [ "$(timeout -k 2 15 ./xl state)" = loader ]; then
+		timeout -k 2 15 ./xl reboot || true
+	fi
+	sleep 2
+done
+if [ "$booted" != 1 ]; then
+	echo "soak: Android boot completion was not observed" >&2
+	exit 1
+fi
+recover=0
+echo "soak: Android boot completed"
+
+log=$(tr -d '\r' < "$evidence/host.log" |
+	sed -nE 's/^result: returned [1-9][0-9]* 0 +\[(logs\/[0-9]{6}-run\.log)\]$/\1/p')
+if [ "$run_status" != 0 ] || [ ! -s "$log" ]; then
+	echo "soak: no clean loader return with a kernel log" >&2
+	exit 1
+fi
+cp -- "$log" "$evidence/kernel.log"
+sha256sum "$evidence/kernel.log"
+if ! grep -axq -- '--- loader_return_after expired ---' "$evidence/kernel.log" ||
+	grep -aEq 'panic\(cpu|Debugger message: panic|^--- (battguard|thermal): .*back to the loader ---' "$evidence/kernel.log"; then
+	echo "soak: the log does not show a clean timed return" >&2
+	exit 1
+fi
+echo "soak: timed return verified for ${SOAK_SECS}s; evidence $evidence"

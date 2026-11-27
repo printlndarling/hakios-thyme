@@ -102,6 +102,10 @@ Status legend:
 
 ## 5. Long-Term Stability & Soak Gates
 
+On 2026-11-27 the updated RAM Boot workflow reached SpringBoard, returned on
+its 150 s timer and recovered to Android, with the `logdump` partition hash
+unchanged across the run. See the [test record](docs/HISTORY-LOG.md#timed-daily-ram-boot-with-ram-only-diagnostics-2026-11-27).
+
 | Gate | Target | Status |
 |---|---|---|
 | Continuous Uptime | 168 h zero panic/WDT reset | ❌ (longest: 32 min @ 60 Hz, 21 min @ 90 Hz) |

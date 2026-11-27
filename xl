@@ -2,12 +2,14 @@
 # xl — drive the XNU loader on the phone over USB (fastboot protocol).
 #
 #   xl enter            get the phone into the resident loader (from Android or stock fastboot)
+#   xl check-payload    build and check the current run payload on the host only
 #   xl run [N]          upload the current kernel, run it (optionally stop at checkpoint N), fetch the log
 #   xl ramdisk [FILE]   upload the big system image (default userland/system.apfs) once; it stays in
 #                       the phone's RAM across kernel runs and is the root filesystem (/dev/md0)
 #                       ("xl ramdisk none" forgets it; the image sent with the kernel is then the root)
 #   xl screenshot [F]   save what is in the phone's framebuffer as a PNG (default logs/screen.png);
 #                       works during a run too (from another terminal)
+#   xl screenshot-live [F]  capture only an already-running kernel; never enter the loader
 #   xl recording [F]    fetch the screen recording the last run made (rec_secs=N among XL_CMDLINE) and
 #                       make a video of it (default logs/recording.mp4)
 #   xl sound [F]        fetch the sound the last run recorded (rec_sound=N among XL_CMDLINE: the first N
@@ -46,6 +48,7 @@
 #               the small one the firmware starts on (the loader then watches from the first core, and a
 #               kernel that hangs still gets its log out); cpufreq=1 sets that core to its top speed;
 #               touchscreen=1 turns the touch screen on.
+#   XL_MAX_PAYLOAD  optional maximum run payload size in bytes, checked before staging
 #   XL_RAMDISK  the image sent with the kernel: the small one that is mounted on /redwood
 #               (default userland/root.apfs; "none" sends none). Without a system image in the
 #               phone's RAM it is the root itself (e.g. XL_RAMDISK=userland/hello).
@@ -94,7 +97,11 @@ adb() {
 # -k 5: fastboot.exe is a Windows process through interop and does not always take SIGTERM; without the
 # KILL the pipe stays open and xl blocks in the read for good (a modem probe sat 5 minutes that way on
 # 2026-11-21, the phone in fastboot all along).
-fb() { flock -w 90 $PHONE.lock timeout -k 5 "${FB_TIMEOUT:-10}" fastboot "$@" 2>&1; }
+fb_raw() { timeout -k 5 "${FB_TIMEOUT:-10}" fastboot "$@" 2>&1; }
+fb() (
+	flock -w 90 7 || return 1
+	fb_raw "$@"
+) 7>"$PHONE.lock"
 # does the loader answer while its kernel runs (0.5 and later)? an older one answers only when the run is over
 live_loader() { fb getvar version | grep -Eq 'version: 0\.([5-9]|[1-9][0-9])'; }
 in_fastboot() { fastboot devices 2>/dev/null | grep -q fastboot; }
@@ -168,7 +175,7 @@ slot_unbootable() {
 	u=$(fb getvar "slot-unbootable:$s" 2>/dev/null | sed -n "s/.*slot-unbootable:$s: *//p" | head -1)
 	[ "$u" = yes ] || return 0
 	echo "xl: slot $s is marked unbootable: that is why Android does not start."
-	echo "xl:   clear it with: fastboot set_active $s   (slot metadata only; no partition is written)"
+	echo "xl:   restoring the slot flag requires a separate recovery step."
 }
 
 # What the phone's bootloader starts the loader with: Project Silicium's UEFI (mkxnuimg.py) or HakiOS's U-Boot
@@ -222,11 +229,70 @@ enter() {
 	echo "xl: loader did not come up on USB (state: $(state))"; return 1
 }
 
-fetch_log() { # fetch_log <file>
+fetch_log() ( # fetch_log <file> [snapshot]
+	flock -w 90 7 || return 1
 	rm -f "$1"
-	FB_TIMEOUT=60 fb get_staged "$1" >/dev/null
+	if [ "${2:-}" = snapshot ]; then
+		fb_raw oem log | grep -q OKAY || return 1
+	fi
+	FB_TIMEOUT=60 fb_raw get_staged "$1" >/dev/null || return 1
 	[ -s "$1" ] && tr -d '\0' < "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+) 7>"$PHONE.lock"
+
+build_run_payload() { # build_run_payload <output>
+	# A run about Wi-Fi is given the radio's own address, which is this phone's and so is kept in a
+	# file that is not in the repository: fw-wifi/mac, one line, six bytes in hexadecimal with colons.
+	local output=$1 rd=${XL_RAMDISK:-userland/root.apfs}
+	case "$rd" in
+	none|resident) rd= ;;
+	*) [ -f "$rd" ] || { echo "xl: ramdisk $rd not found"; return 1; } ;;
+	esac
+	local args=${XL_CMDLINE--v}
+	# A daily-driver boot carries the device's hardware arguments (devices/$DEVICE/ram.args:
+	# gpu=, touchscreen=, battery=, wifi= ...).  Without them the kernel comes up with no
+	# GPU and the window server hangs right after SpringBoard, which looks like a kernel
+	# hang and wedges the loader -- the four runs of 2026-11-18 evening went that way.
+	# This is a warning, not a refusal: a deliberate probe may want a bare line.
+	case " $args " in
+	*" gpu="*) ;;
+	*) echo "xl: warning: XL_CMDLINE has no gpu= (and probably none of devices/${DEVICE:-thyme}/ram.args)." \
+	        "A real-device boot wants: XL_CMDLINE=\"\$(tr -d '\\n' < devices/${DEVICE:-thyme}/ram.args) -v\"" \
+	        "-- see devices/thyme/battery-guard.sh" >&2 ;;
+	esac
+	case " $args " in
+	*" wifi="*|*" wifi_step="*) [ -s fw-wifi/mac ] && args="$args wifi_mac=$(tr -d ' \n\r' < fw-wifi/mac)" ;;
+	esac
+	local kernel_sha image_sha loader_sha
+	kernel_sha=$(short_hash "$K")
+	loader_sha=$(short_hash "$L")
+	if [ -n "$rd" ]; then image_sha=$(short_hash "$rd"); else image_sha=none; fi
+	echo "xl: inputs: kernel=$kernel_sha image=$image_sha loader=$loader_sha"
+	# Put the binary identities in the boot log too. The git revision alone says which worktree
+	# asked for the run, not which kernel or ramdisk the loader actually received. They can be
+	# dropped (XL_NO_HASHES=1) when the loader's 607-character command line is needed for probe
+	# arguments: xl's own "inputs:" line above still records them.
+	[ "${XL_NO_HASHES:-0}" = 1 ] ||
+		args="$args kernel_sha=$kernel_sha image_sha=$image_sha loader_sha=$loader_sha"
+	local entries=("kernel=$K")
+	[ -z "$rd" ] || entries+=("ramdisk=$rd")
+	xnuloader/mkpayload.py -o "$output" "${entries[@]}" --cmdline "loader_return_after=${XL_SECS:-8} epoch=$(date +%s) sb_delay=${XL_SB_DELAY:-8} $args" >/dev/null || return 1
+	if [ -n "${XL_MAX_PAYLOAD:-}" ]; then
+		local bytes
+		bytes=$(stat -c %s "$output") || return 1
+		if [ "$bytes" -gt "$XL_MAX_PAYLOAD" ]; then
+			echo "xl: payload is $bytes bytes, over the $XL_MAX_PAYLOAD-byte limit" >&2
+			return 1
+		fi
+	fi
+	return 0
 }
+
+check_payload() (
+	local output
+	output=$(mktemp) || return 1
+	trap 'rm -f "$output"' EXIT
+	build_run_payload "$output"
+)
 
 # A second kernel in one session of the loader dies at once (27 October, four runs: every run after one that returned,
 # whatever its arguments, gave no answer within 5 s; every first run of a session lived). Restart the phone into its own
@@ -243,11 +309,6 @@ run() { # run <oem command> <label>
 	stamp=$(date +%H%M%S); log="logs/$stamp-$2.log"
 	if [ "$1" != "oem selftest" ]; then
 		# The kernel hands control back after XL_SECS seconds even if it is just waiting.
-		local rd=${XL_RAMDISK:-userland/root.apfs}
-		case "$rd" in
-		none|resident) rd= ;;
-		*) [ -f "$rd" ] || { echo "xl: ramdisk $rd not found"; return 1; } ;;
-		esac
 		case $K in prebuilt/*) echo "xl: no kernel built here, running $K" >&2 ;; esac
 		# The resident image: whose it is and how big, when the last upload was not from here.
 		# Both values and not just "not from here", because a foreign image of the same kind
@@ -267,35 +328,7 @@ run() { # run <oem command> <label>
 			echo "xl: nothing here recorded who uploaded the resident image;" \
 			     "if this run needs a particular one, upload it" >&2
 		fi
-		# A run about Wi-Fi is given the radio's own address, which is this phone's and so is kept in a
-		# file that is not in the repository: fw-wifi/mac, one line, six bytes in hexadecimal with colons.
-		local args=${XL_CMDLINE--v}
-		# A daily-driver boot carries the device's hardware arguments (devices/$DEVICE/ram.args:
-		# gpu=, touchscreen=, battery=, wifi= ...).  Without them the kernel comes up with no
-		# GPU and the window server hangs right after SpringBoard, which looks like a kernel
-		# hang and wedges the loader -- the four runs of 2026-11-18 evening went that way.
-		# This is a warning, not a refusal: a deliberate probe may want a bare line.
-		case " $args " in
-		*" gpu="*) ;;
-		*) echo "xl: warning: XL_CMDLINE has no gpu= (and probably none of devices/${DEVICE:-thyme}/ram.args)." \
-		        "A real-device boot wants: XL_CMDLINE=\"\$(tr -d '\\n' < devices/${DEVICE:-thyme}/ram.args) -v\"" \
-		        "-- see devices/thyme/battery-guard.sh" >&2 ;;
-		esac
-		case " $args " in
-		*" wifi="*|*" wifi_step="*) [ -s fw-wifi/mac ] && args="$args wifi_mac=$(tr -d ' \n\r' < fw-wifi/mac)" ;;
-		esac
-		local kernel_sha image_sha loader_sha
-		kernel_sha=$(short_hash "$K")
-		loader_sha=$(short_hash "$L")
-		if [ -n "$rd" ]; then image_sha=$(short_hash "$rd"); else image_sha=none; fi
-		echo "xl: inputs: kernel=$kernel_sha image=$image_sha loader=$loader_sha"
-		# Put the binary identities in the boot log too. The git revision alone says which worktree
-		# asked for the run, not which kernel or ramdisk the loader actually received. They can be
-		# dropped (XL_NO_HASHES=1) when the loader's 607-character command line is needed for probe
-		# arguments: xl's own "inputs:" line above still records them.
-		[ "${XL_NO_HASHES:-0}" = 1 ] ||
-			args="$args kernel_sha=$kernel_sha image_sha=$image_sha loader_sha=$loader_sha"
-		xnuloader/mkpayload.py -o run-payload.bin kernel=$K ${rd:+ramdisk=$rd} --cmdline "loader_return_after=${XL_SECS:-8} epoch=$(date +%s) sb_delay=${XL_SB_DELAY:-8} $args" >/dev/null || return 1
+		build_run_payload run-payload.bin || return 1
 		FB_TIMEOUT=30 fb stage run-payload.bin | grep -q OKAY || { echo "xl: upload failed"; return 1; }
 	fi
 	local live=; live_loader && live=1
@@ -321,7 +354,7 @@ run() { # run <oem command> <label>
 				# (XL_FOLLOW_KEEP=1: every one kept, $log.live.1, .2, ...: a long run's middle, which the log
 				# itself loses once more than a megabyte follows it, is then all there)
 				followed_n=$(( ${followed_n:-0} + 1 ))
-				fb oem log | grep -q OKAY && fetch_log "$log.live" && { [ -z "$XL_FOLLOW_KEEP" ] || cp "$log.live" "$log.live.$followed_n"; }
+				fetch_log "$log.live" snapshot && { [ -z "$XL_FOLLOW_KEEP" ] || cp "$log.live" "$log.live.$followed_n"; }
 			fi
 			sleep 2
 		done
@@ -403,16 +436,34 @@ ramdisk() { # ramdisk [<file>|none]
 	printf '%s\t%s\t%s\t%s\n' "$(pwd)" "$1" "$size" "$sha" > $PHONE.ramdisk 2>/dev/null
 }
 
-screenshot() { # screenshot [file.png]
-	enter || return 1
-	local out=${1:-logs/screen.png} geom
-	geom=$(fb getvar screen | tr -d '\r' | sed -n 's/^screen: //p')
-	[ -n "$geom" ] && fb oem screenshot | grep -q OKAY || { echo "xl: the loader has no display"; return 1; }
-	FB_TIMEOUT=60 fb get_staged logs/screen.raw >/dev/null
-	python3 - logs/screen.raw "$out" $geom <<'PY' && rm -f logs/screen.raw && echo "xl: $out ($geom)"
+capture_framebuffer() ( # capture_framebuffer <raw file> <live-only flag>
+	flock -w 90 7 || return 1
+	if [ "$2" = live ]; then
+		fb_raw getvar result | grep -q '^result: running ' || return 1
+	fi
+	local geom
+	geom=$(fb_raw getvar screen | tr -d '\r' | sed -n 's/^screen: //p')
+	[ -n "$geom" ] && fb_raw oem screenshot | grep -q OKAY || return 1
+	FB_TIMEOUT=60 fb_raw get_staged "$1" >/dev/null || return 1
+	printf '%s\n' "$geom"
+) 7>"$PHONE.lock"
+
+screenshot() ( # screenshot [file.png] [live]
+	if [ "${2:-}" != live ]; then
+		enter || return 1
+	fi
+	local out=${1:-logs/screen.png} raw geom width height stride
+	raw=$(mktemp logs/screen.XXXXXXXX.raw) || return 1
+	trap 'rm -f "$raw"' EXIT
+	geom=$(capture_framebuffer "$raw" "${2:-}") || { echo "xl: no framebuffer available"; return 1; }
+	read -r width height stride <<< "$geom"
+	python3 - "$raw" "$out" "$width" "$height" "$stride" <<'PYPNG' && echo "xl: $out ($geom)"
 import struct, sys, zlib
 raw, out, width, height, stride = sys.argv[1], sys.argv[2], *map(int, sys.argv[3:6])
-data = open(raw, 'rb').read()
+with open(raw, 'rb') as source:
+    data = source.read()
+if width <= 0 or height <= 0 or stride < width * 4 or len(data) != stride * height:
+    sys.exit("xl: incomplete framebuffer")
 rows = bytearray()
 for y in range(height):
     line = data[y * stride:y * stride + width * 4]
@@ -425,8 +476,8 @@ def chunk(kind, body):
 with open(out, 'wb') as f:
     f.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) +
             chunk(b'IDAT', zlib.compress(bytes(rows), 6)) + chunk(b'IEND', b''))
-PY
-}
+PYPNG
+)
 
 # stop and reboot end a run. One that was started from another working copy is somebody else's work
 # (an agent's measurement, a long session): not ended from here unless XL_FORCE=1 says so.
@@ -440,7 +491,7 @@ not_anothers_run() { # not_anothers_run <command>
 # While a run is in progress the loader takes only what does not disturb the kernel: state, screenshot,
 # log, stop, reboot. Anything else would wait for nothing.
 case "$1" in
-""|run|selftest|state|screenshot|log|stop|reboot) ;;
+""|check-payload|run|selftest|state|screenshot|screenshot-live|log|stop|reboot) ;;
 *)	if ! flock -n $PHONE.run true 2>/dev/null; then
 		echo "xl: a run is in progress: only state, screenshot, log, stop and reboot now" >&2; exit 1
 	fi ;;
@@ -449,15 +500,17 @@ esac
 case "$1" in
 enter) enter && echo "xl: loader is up" ;;
 screenshot) screenshot "$2" ;;
+screenshot-live) screenshot "$2" live ;;
 recording) recording "$2" ;;
 camera) camera "$2" ;;
 sound) sound "$2" ;;
 ramdisk) ramdisk "$2" ;;
+check-payload) check_payload ;;
 run) run "oem run $2" "run${2:+-cp$2}" ;;
 selftest) run "oem selftest" selftest ;;
-log) enter && fb oem log >/dev/null && fetch_log logs/loader.log && cat logs/loader.log ;;
+log) enter && fetch_log logs/loader.log snapshot && cat logs/loader.log ;;
 stop) not_anothers_run stop && fb oem stop | grep -q OKAY && echo "xl: asked the kernel to come back" ;;
-memmap) enter && fb oem memmap >/dev/null && fb oem log >/dev/null && fetch_log logs/loader.log && sed -n '/^memory map/,$p' logs/loader.log ;;
+memmap) enter && fb oem memmap >/dev/null && fetch_log logs/loader.log snapshot && sed -n '/^memory map/,$p' logs/loader.log ;;
 hang) enter && fb oem hang; echo "xl: waiting for the watchdog..."; t0=$(date +%s); wait_for android 150 && echo "xl: back in Android after $(( $(date +%s) - t0 )) s" || echo "xl: not back (state: $(state))" ;;
 reboot) not_anothers_run reboot && fb reboot ;;
 reload) [ "$(state)" = loader ] && { fb reboot >/dev/null; wait_for android 120; }; enter && echo "xl: loader is up" ;;

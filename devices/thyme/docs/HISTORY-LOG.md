@@ -1,5 +1,30 @@
 ## Chronological Verification Logs & Evidence
 
+## Timed daily RAM Boot with RAM-only diagnostics (2026-11-27)
+
+- The first attempt returned to Android after the loader rejected a
+  66,069,904-byte run payload against its 66,060,288-byte window. The
+  soak now checks the actual payload before touching USB. Repacking the
+  staged daily tree with its current 128-block APFS allowance let it fit.
+- The legacy loader ran before its diagnostic behavior was identified.
+  During the aborted retest, it wrote to `logdump`. The partition
+  contained the old loader ID `b6cc8f17f9f5` and the 20:29:22 CST boot
+  epoch. The host returned the phone to Android. The rebuilt thyme
+  loader keeps its log in RAM and the launcher rejects the older image.
+- The 150 s run used loader `11f4e0271c65`, kernel `52f00a441635` and
+  daily root `7d8ba86fdb50`. SpringBoard launched. The kernel logged
+  timer expiry, stopped Wi-Fi and quiesced the watchdog. The loader
+  returned `1441823 0`, and Android reached `sys.boot_completed=1`.
+  A read-only hash of the whole `logdump` partition taken in Android
+  matched before and after. This run used the inherited kernel build
+  with the opt-in CDSP experiment disabled.
+- Evidence `logs/soak.iSq38sFt/kernel.log`, SHA-256
+  `5e569f8e6fa3e85bd58c2d8a9f9c807f35b6addd73ef72e9907d27f9514876e6`.
+  The same directory contains the host transcript and 45 s and 90 s
+  framebuffer captures. The two local partition hash records are under
+  `out/thyme-boot/codex-soak/`. Long-duration soak and native app
+  acceptance remain open.
+
 ## GNSS userspace lease timing
 
 - `umi_gnssd` now uses elapsed monotonic time for lease renewals, retry

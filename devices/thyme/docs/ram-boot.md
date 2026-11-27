@@ -20,7 +20,10 @@ building in the current checkout, the launcher uses these output paths.
 | `root.apfs` | `userland/root.apfs` |
 | `system.apfs` | `userland/system.apfs` |
 
-Keep the four files from one build. The loader and APFS images are built
+Keep the four files from one build. Rebuild `xnu-usb.img` using the current
+`devices/thyme/build-loader.sh`. The launcher checks the embedded loader
+before contacting the phone, and accepts the thyme loader that keeps logs in
+RAM for USB retrieval. The older thyme loader wrote diagnostics to `logdump`. The loader and APFS images are built
 locally with licensed IPSW and firmware inputs. Optional `fw-wifi/mac` is
 read from the checkout. Keep it and any private network configuration local.
 
@@ -57,3 +60,30 @@ Reconnect the data cable if needed. With only the target phone attached,
 restart the phone if the loader is unresponsive. For timed engineering runs
 and kernel logs on capable development hosts, use the repository's
 [`xl`](../../../xl) workflow.
+
+## Timed daily scene on a development host
+
+Use a single authorized thyme in Android and put `adb` and `fastboot` on
+`PATH`. The soak uses the same 40% minimum charge and battery temperature
+below 45 °C as the cross-platform launcher. Start from a fresh loader
+session with the desired system image. The script validates the embedded
+loader and stages a host-only payload check before changing the USB state.
+
+```sh
+SYSTEM_IMAGE=userland/system.apfs SCENE=userland/root.apfs \
+  SOAK_SECS=1800 SOAK_STEP=300 devices/thyme/soak.sh
+```
+
+Build `userland/root.apfs` for the daily scene before running this command.
+The script defaults to the locally prepared wireless test scene at
+`out/thyme-boot/root-wirelessfull.apfs`. It keeps the battery, thermal and
+watchdog arguments from [ram.args](../ram.args). Optional interval
+screenshots are requested while the kernel is running, with a one-minute
+margin before the requested end.
+
+Each run saves its upload and run transcripts, the final kernel log and any
+screenshots under a unique `logs/soak.*` directory. A successful run requires
+a normal loader result, the kernel timer-expiry marker, and Android boot
+completion. A battery or thermal exit, a panic, or missing evidence fails the
+test. A completed timer is one uptime observation. Use the native app and
+long-term gates in the [checklist](../CHECKLIST.md) to record wider coverage.
