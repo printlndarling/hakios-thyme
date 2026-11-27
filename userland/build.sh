@@ -920,7 +920,7 @@ if [ -n "${TURNIP:-}${M2V:-}" ]; then
 fi
 # the image: zlib where it saves room (a small file whole in its attribute, as Apple keeps them); fw/
 # as it is, which the kernel's drivers use where it lies in memory (drivers/storage/hakios.image.c)
-python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs redwood=root | tail -1
+python3 ../tools/apfs/mkapfs.py -z --plain fw --slack "${RAM_ROOT_SLACK:-256}" -o root.apfs redwood=root
 [ -z "$CHECK" ] || ../tools/apfs/check-image.sh root.apfs redwood=root
 
 # --- the RAM part of a boot off the flash: FLASHBOOT=1 -> flashboot.apfs --------------------------------

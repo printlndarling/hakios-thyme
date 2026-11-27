@@ -25,7 +25,8 @@ fi
 # A caller's EXTRA (files for /redwood/bin, paths relative to userland/) passes
 # through: the Sileo scene carries sileo-seed.sh that way.
 export EXTRA="${EXTRA:-}"
-/bin/bash ./build.sh
+# stage0 mounts the companion root at /redwood read-only. Keep 512 KiB of APFS slack.
+RAM_ROOT_SLACK=128 /bin/bash ./build.sh
 
 cd "$ROOT"
 python3 devices/thyme/check-root.py userland/root "$RC_JOBS"
