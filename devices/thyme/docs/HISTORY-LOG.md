@@ -1,5 +1,32 @@
 ## Chronological Verification Logs & Evidence
 
+## Preserve WDS client subscription selection (2026-11-28)
+
+- The CommCenter bridge injected a primary-subscription bind after
+  every WDS mux-data-port bind. An explicit subscription bind issued
+  earlier on the same client could therefore be replaced by the
+  fallback. The bridge now records explicit binds after queueing and
+  suppresses the fallback for that client. QMUX allocation and release
+  reset the bridge state for reused ports. A client without an explicit
+  bind keeps the existing primary fallback and mux ordering.
+- Host policy tests passed under Clang ASan/UBSan and GCC, including
+  repeated mux binds, an explicit bind after fallback, and startup
+  without an explicit selection. The common and thyme QMI suites, NAS
+  and soak regressions passed. The arm64 kernel linked.
+- Kernel `faedd6175a35` and root `4ae2e529c505` completed a
+  190 s RAM Boot with the read-only UIM profile. Both SIMs were
+  READY. The live excerpt retained eight successful primary fallback
+  replies. The first group of WDS Start Network replies contained
+  three successes and one failure for mux 2 IPv4 (reason 1,
+  verbose type 2 code 208), matching the previous run's group.
+  This verifies the default data-session startup path. The secondary
+  line was not selected in native Settings during this run.
+- Android completed boot after the timed return and both SIMs
+  were still loaded. The whole `logdump` SHA-256 matched before
+  and after. Final log `logs/soak.1kkfnt4n/kernel.log`,
+  SHA-256 `21c49a7a082870d1ce7a9c20eee6e436ed2b395c76c37de3caed2e2ae5c1927d`.
+  Live excerpts are in `out/thyme-boot/wds-binding.jInQc9Nq`.
+
 ## Dual-SIM Android baseline and native UIM inventory (2026-11-28)
 
 - The operator inserted two active SIMs. Android reported DSDS,
