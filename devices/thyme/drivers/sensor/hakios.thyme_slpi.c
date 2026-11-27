@@ -9179,21 +9179,21 @@ cdsp_rpc_reply(uint32_t tx_intent, uint32_t rx_intent, uint64_t expected_ctx, in
  * and the matching FastRPC reply have both arrived.
  */
 static int
-cdsp_rpc_call(uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_intent,
+cdsp_rpc_call(uint32_t client, uint32_t handle, uint32_t scalars, uint64_t ctx, uint32_t rx_intent,
     uint32_t bytes, unsigned timeout_ms)
 {
 	struct {
 		uint32_t bytes, left;
 		struct fastrpc_msg msg;
-	} packet = { sizeof(struct fastrpc_msg), 0, { 0, 1, ctx, handle, scalars,
+	} packet = { sizeof(struct fastrpc_msg), 0, { (int32_t)client, 1, ctx, handle, scalars,
 	    CDSP_RPC_REMOTE_ADDR, bytes } };
 	uint32_t tx_intent = cdsp_glink.remote_intent_id;
 	if (!cdsp_glink_send((struct glink_message){ GLINK_DATA, CDSP_FASTRPC_LOCAL_ID, tx_intent },
 	    (const char *)&packet, sizeof(packet))) {
 		return EIO;
 	}
-	printf("UMI cdsp: sent FastRPC handle=%u scalars=%#x ctx=%#llx intent=%u\n",
-	    handle, scalars, (unsigned long long)ctx, tx_intent);
+	printf("UMI cdsp: sent FastRPC client=%u handle=%u scalars=%#x ctx=%#llx intent=%u\n",
+	    client, handle, scalars, (unsigned long long)ctx, tx_intent);
 	int32_t result = 0;
 	bool sent = false, answered = false;
 	for (unsigned i = 0; i < timeout_ms; i++) {
@@ -9257,7 +9257,7 @@ cdsp_rpc_guest_cycle(uint8_t *buf)
 				return EINVAL;
 			}
 			cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
-			error = cdsp_rpc_call(1, release ? 0x01010000 : 0x00010000, ctx, rx_intent, CDSP_RPC_PAGE, 500);
+			error = cdsp_rpc_call(0, 1, release ? 0x01010000 : 0x00010000, ctx, rx_intent, CDSP_RPC_PAGE, 500);
 		}
 		printf("UMI cdsp: guest client=%u %s cycle=%u result=%d\n",
 		    client, release ? "INIT_RELEASE" : "INIT_ATTACH", 1 + i / 2, error);
@@ -9337,7 +9337,86 @@ cdsp_dma_window(uint32_t bytes, uint32_t executable_offset, uint8_t **data)
 static int cdsp_ext_stock_shell(uint8_t **image, uint32_t *image_size);
 
 static int
-cdsp_rpc_create(uint8_t *buf, uint32_t args_size, const uint8_t *image, uint32_t length, uint32_t heap_size)
+cdsp_rpc_user_exchange(uint8_t *buf, uint32_t client, uint32_t handle, uint32_t scalars,
+    uint32_t size, uint32_t *next_intent, bool *page_idle)
+{
+	uint32_t intent = *next_intent;
+	cdsp_dma_flush((vm_offset_t)buf, size);
+	*page_idle = false;
+	int error = cdsp_rpc_new_intents(intent);
+	if (!error) {
+		error = cdsp_rpc_call(client, handle, scalars, ((uint64_t)intent << 8) | 1, intent, size, 3000);
+	}
+	if (!error) {
+		*page_idle = true;
+		*next_intent = intent + 1;
+		cdsp_dma_flush((vm_offset_t)buf, size);
+	}
+	return error;
+}
+
+/* Match the vendor remotectl and adsp_current_process stubs. Capture the
+ * output offsets before handing the shared page to the DSP.
+ */
+static int
+cdsp_rpc_user_module(uint8_t *buf, uint32_t client, uint32_t *next_intent, bool *page_idle)
+{
+	static const char name[] = "adsp_current_process";
+	const uint32_t error_size = 128;
+	uint32_t params[] = { sizeof(name), error_size };
+	uint32_t lengths[] = { sizeof(params), sizeof(name), 2 * sizeof(uint32_t), error_size };
+	const void *sources[] = { params, name, NULL, NULL };
+	int error;
+	uint32_t handle, asid;
+
+	memset(buf, 0, CDSP_RPC_PAGE);
+	uint32_t size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 4, lengths, sources);
+	const struct fastrpc_remote_buf *args = (const void *)buf;
+	uint32_t *open_result = (void *)(buf + (args[2].pv - CDSP_RPC_IOVA));
+	open_result[0] = 0;
+	open_result[1] = ~0u;
+	error = cdsp_rpc_user_exchange(buf, client, 0, 0x00020200, size, next_intent, page_idle);
+	if (error) {
+		return error;
+	}
+	handle = open_result[0];
+	printf("UMI cdsp: user remotectl_open %s handle=%#x dlret=%#x\n", name, handle, open_result[1]);
+	if (open_result[1] || !handle || handle == ~0u) {
+		return ENOENT;
+	}
+
+	memset(buf, 0, CDSP_RPC_PAGE);
+	const uint32_t asid_size = sizeof(asid);
+	const void *asid_source = NULL;
+	size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 1, &asid_size, &asid_source);
+	uint32_t *asid_result = (void *)(buf + (args[0].pv - CDSP_RPC_IOVA));
+	*asid_result = ~0u;
+	error = cdsp_rpc_user_exchange(buf, client, handle, 0x03000100, size, next_intent, page_idle);
+	if (error) {
+		return error;
+	}
+	asid = *asid_result;
+	printf("UMI cdsp: user module getASID=%#x\n", asid);
+
+	memset(buf, 0, CDSP_RPC_PAGE);
+	params[0] = handle;
+	lengths[1] = sizeof(uint32_t);
+	lengths[2] = error_size;
+	sources[1] = NULL;
+	size = fastrpc_build(buf, CDSP_RPC_IOVA, CDSP_RPC_REMOTE_ADDR, 3, lengths, sources);
+	uint32_t *close_result = (void *)(buf + (args[1].pv - CDSP_RPC_IOVA));
+	*close_result = ~0u;
+	error = cdsp_rpc_user_exchange(buf, client, 0, 0x01010200, size, next_intent, page_idle);
+	if (error) {
+		return error;
+	}
+	printf("UMI cdsp: user remotectl_close handle=%#x dlret=%#x\n", handle, *close_result);
+	return asid == ~0u || *close_result ? EIO : 0;
+}
+
+static int
+cdsp_rpc_create(uint8_t *buf, uint32_t args_size, const uint8_t *image, uint32_t length, uint32_t heap_size,
+    bool use_module)
 {
 	static const char process[] = "hakios-cdsp";
 	const uint32_t client = 2;
@@ -9352,11 +9431,25 @@ cdsp_rpc_create(uint8_t *buf, uint32_t args_size, const uint8_t *image, uint32_t
 	cdsp_dma_flush((vm_offset_t)buf, size);
 	int error = cdsp_rpc_new_intents(2);
 	if (error == 0) {
-		error = cdsp_rpc_call(1, 0x06040000, 0x201, 2, size, 5000);
+		error = cdsp_rpc_call(0, 1, 0x06040000, 0x201, 2, size, 5000);
 	}
 	printf("UMI cdsp: user client=%u INIT_CREATE shell=%u heap=%u result=%d\n", client, length, heap_size, error);
 	if (error) {
 		return error;
+	}
+
+	uint32_t next_intent = 3;
+	int module_error = 0;
+	if (use_module) {
+		bool page_idle = true;
+		module_error = cdsp_rpc_user_module(buf, client, &next_intent, &page_idle);
+		printf("UMI cdsp: user module probe result=%d\n", module_error);
+		/* An uncompleted RPC may still own the page. PAS shutdown will
+		 * stop the DSP before the DMA window is withdrawn.
+		 */
+		if (!page_idle) {
+			return module_error;
+		}
 	}
 
 	memset(buf, 0, CDSP_RPC_PAGE);
@@ -9366,12 +9459,13 @@ cdsp_rpc_create(uint8_t *buf, uint32_t args_size, const uint8_t *image, uint32_t
 		return EINVAL;
 	}
 	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
-	error = cdsp_rpc_new_intents(3);
+	error = cdsp_rpc_new_intents(next_intent);
 	if (error == 0) {
-		error = cdsp_rpc_call(1, 0x01010000, 0x301, 3, CDSP_RPC_PAGE, 2000);
+		error = cdsp_rpc_call(0, 1, 0x01010000, ((uint64_t)next_intent << 8) | 1,
+		    next_intent, CDSP_RPC_PAGE, 2000);
 	}
 	printf("UMI cdsp: user client=%u INIT_RELEASE result=%d\n", client, error);
-	return error;
+	return module_error ? module_error : error;
 }
 
 int hakios_thyme_cdsp_capability_probe(unsigned stage);
@@ -9409,7 +9503,7 @@ hakios_thyme_cdsp_capability_probe(unsigned stage)
 	uint32_t *output = (uint32_t *)(buf + (args[1].pv - CDSP_RPC_IOVA));
 	memset(output, 0xa5, lengths[1]);
 	cdsp_dma_flush((vm_offset_t)buf, CDSP_RPC_PAGE);
-	error = cdsp_rpc_call(2, 0x00010100, CDSP_RPC_CTX, 1, CDSP_RPC_PAGE, 500);
+	error = cdsp_rpc_call(0, 2, 0x00010100, CDSP_RPC_CTX, 1, CDSP_RPC_PAGE, 500);
 	if (error) {
 		goto out;
 	}
@@ -9425,7 +9519,7 @@ hakios_thyme_cdsp_capability_probe(unsigned stage)
 		error = cdsp_rpc_guest_cycle(buf);
 	} else if (stage >= 10) {
 		memset(buf, 0, args_size);
-		error = cdsp_rpc_create(buf, args_size, image, image_size, heap_size);
+		error = cdsp_rpc_create(buf, args_size, image, image_size, heap_size, stage >= 11);
 	}
 out:
 	if (image != NULL) {

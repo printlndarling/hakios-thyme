@@ -1,5 +1,26 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP in-process module dispatch
+
+- The opt-in `cdsp=11` test creates the stock signed user process and
+  opens the built-in `adsp_current_process` module as FastRPC client 2.
+  Dispatch follows Qualcomm's [module control stub](https://raw.githubusercontent.com/qualcomm/fastrpc/development/src/remotectl_stub.c)
+  and [getASID stub](https://raw.githubusercontent.com/qualcomm/fastrpc/development/src/adsp_current_process_stub.c).
+  Each call waits for both TX completion and its matching DSP reply
+  before reusing the argument page.
+- On physical thyme, the 90 s RAM Boot used kernel `50e4efcc3720`
+  and root `7d8ba86fdb50`. The capability query wrote all 255 words.
+  `INIT_CREATE` returned zero. The DSP opened handle `0x2570d2e0`,
+  returned ASID `0xd`, closed the handle and accepted `INIT_RELEASE`.
+  The kernel shut down CDSP and restored SMMU CB5/SMR6 with zero faults.
+  The watchdog quiesced, the loader returned `1441823 0`, and Android
+  reported boot completion. Local evidence `logs/194140-run.log`,
+  SHA-256 `06675605e92d7637348c1969ad6fd985afeb7e0bd078fbd3250d3cc4a1f7a8c2`.
+- Host checks exercised the open, invoke and close arguments, DSP
+  loader errors and intent timeouts with outstanding DMA. Loading an
+  external module, running an HVX workload and integrating Core ML
+  remain open.
+
 ## Stock CDSP process image and process-group calls
 
 - Stock Android mounts `dsp_a` read-only at `/vendor/dsp`. The

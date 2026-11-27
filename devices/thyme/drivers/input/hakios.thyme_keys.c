@@ -2038,7 +2038,7 @@ thyme_venus_pil_boot(void)
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 10) {
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 11) {
 		if (c_en >= 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
 		    !hakios_thyme_cdsp_publish())) {
 			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");
