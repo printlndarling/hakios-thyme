@@ -1,5 +1,46 @@
 ## Chronological Verification Logs & Evidence
 
+## Venus power probe follow-up
+
+- The inherited `venus=2` experiment entered the PAS authentication path
+  after enabling the GCC AHB and XO branches and setting MVS0C GDSC
+  `PWR_ON`. Its live log stopped after successful `TZ MEM_SETUP` without an
+  authentication result or a normal return. Local evidence is
+  `logs/090135-run.log.live` (SHA-256
+  `1c02b8e31592aa1445eec8e57c52140ad57ee71339f7dc2a8ff0d478ef45b396`).
+- The 90 s `venus=1 cdsp=1` RAM control returned `1441823 0` and rebooted to
+  Android. It recorded the Venus 14-segment load and `MEM_SETUP`, the CDSP
+  `AUTH_AND_RESET` and `SHUTDOWN`, and watchdog quiescence with 23 pets.
+  Kernel prefix `cd013feee0ae`. Local evidence is `logs/103533-run.log`
+  (SHA-256 `6c4200b18c355662fe52d923c12aaf2e486533bd73c58b4c2b9ac51d9f82bbf8`).
+- The first isolated power-probe build (`83027f04d3ca`) read a halted
+  MVS0C core branch (`CBCR=0x80000220`), then panicked as it tried to free a
+  permanent MMIO mapping. That run had a loader return record, so the
+  return record alone cannot be used as a pass condition. Local evidence
+  is `logs/104019-run.log` (SHA-256
+  `514f44cb08112effb294479092672a290e6b047380973607e337c9bdc0ad161f`).
+  Temporary probes use page-aligned, explicitly unmap-capable MMIO mappings.
+- The stock thyme `qcom,venus@aab0000` node describes PAS ID 9, the same
+  reserved-memory carveout, a vdd proxy through `mvs0c_gdsc` with an
+  MMCX parent, XO/core/AHB clocks, and an interconnect bandwidth vote.
+  The [SM8250 video clock driver](https://github.com/torvalds/linux/blob/master/drivers/clk/qcom/videocc-sm8250.c)
+  identifies the MVS0C core CBCR at offset `0xc34`. Reaching the GDSC
+  power-on state leaves core clock sequencing and interconnect votes to
+  validate before attempting PAS authentication again.
+
+- The corrected 90 s `venus=2 cdsp=1` RAM run used kernel `e460dd7666e0`.
+  MVS0C moved from `0x226001` to `0xf8226000` (PWR_ON) and then
+  `0x70226001` (PWR_ON cleared, software collapse restored). AHB and XO
+  both went from `0x80000000` to `0x1` and back. The core branch still
+  reported `0x80000220` (halted). Venus completed `TZ MEM_SETUP` for its
+  14 segments. CDSP authenticated and shut down, and the watchdog quiesced
+  after 23 pets. The loader returned `1441823 0` and rebooted to Android.
+  No kernel panic is present in the final log. Local evidence is
+  `logs/104323-run.log` (SHA-256
+  `67e0ba3b386bd9d0d380b3501408ce729b69a12c5f4016cda0cf97024c7f695c`).
+  The controlled power probe passed. Venus firmware execution and HFI
+  encode/decode remain partial.
+
 ## Batch 11 Autonomous Audit (2026-11-27, `logs/085419-run.log`)
 
 Verified on physical Mi 10S (`5290780a`, kernel `bd69fa3dbeed`, `result: returned 1441823 0`):

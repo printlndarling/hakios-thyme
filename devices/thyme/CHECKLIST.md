@@ -58,7 +58,7 @@ Status legend:
 | All 8 CPU Cores Online | P1 | 🚧 | 7 cores active (`bootcpu=7 cpus=7`); CPU0 reserved by UEFI loader |
 | CPU Idle / Deep Sleep | P0 | 🚧 | ARM64 `WFI`/`WFE` + display blanking working; PSCI `CPU_SUSPEND` power collapse pending |
 | GPU Dynamic Frequency Scaling | P1 | ✅ | GMU HFI `305 / 400 / 441.6 / 525 / 587 MHz` runtime scaling verified |
-| VPU Hardware Video Decode | P0 | 🚧 | `venus=1` PIL-TZ `INIT_IMAGE` + `926 KB` load + `MEM_SETUP` working; `videocc` & HFI decode pending |
+| VPU Hardware Video Decode | P0 | 🚧 | `venus=1` prepares firmware. `venus=2` verifies reversible GCC/MVS0C power; the core clock remains halted. PAS execution and HFI decode pending. |
 | VPU Hardware Video Encode | P0 | ❌ | Depends on `pil-venus` HFI encode pipeline |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | 🚧 | SW 5×5 Malvar-He-Cutler + sharpen + AE/AF; HW IFE/IPE/HDR pending |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP`, `SLPI`, and `CDSP` (`cdsp=1` TZ `AUTH_AND_RESET` & `SHUTDOWN`) verified |

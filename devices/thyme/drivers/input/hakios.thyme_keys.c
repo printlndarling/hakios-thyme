@@ -1702,21 +1702,105 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 	}
 }
 
+#define VENUS_GCC_VIDEO_BASE    0x0010b000UL
+#define VENUS_GCC_AHB_CBCR      0x004u
+#define VENUS_GCC_XO_CBCR       0x03cu
+#define VENUS_VIDEO_CC_BASE     0x0abf0000UL
+#define VENUS_MVS0C_GDSCR       0xbf8u
+#define VENUS_MVS0C_CBCR        0xc34u
+#define VENUS_CLK_ENABLE        1u
+#define VENUS_CLK_OFF           (1u << 31)
+#define VENUS_SW_COLLAPSE       1u
+#define VENUS_PWR_ON            (1u << 31)
+
+static bool
+thyme_venus_wait_reg(vm_offset_t base, uint32_t offset, uint32_t mask, uint32_t expected)
+{
+	for (unsigned attempt = 0; attempt < 200; attempt++) {
+		if ((keys_reg(base, offset) & mask) == expected) {
+			return true;
+		}
+		keys_spin_us(10);
+	}
+	return (keys_reg(base, offset) & mask) == expected;
+}
+
+static void
+thyme_venus_power_probe(bool cycle_domain)
+{
+	const vm_offset_t gcc_pa = trunc_page(VENUS_GCC_VIDEO_BASE);
+	const vm_offset_t gcc_offset = VENUS_GCC_VIDEO_BASE - gcc_pa;
+	const vm_size_t gcc_size = round_page(gcc_offset + 0x1000UL);
+	vm_offset_t gcc_mapping = ml_io_map_unmappable(gcc_pa, gcc_size, VM_WIMG_IO);
+	if (gcc_mapping == 0) {
+		hakios_tl("UMI venus: gcc_video map failed\n");
+		return;
+	}
+
+	const vm_offset_t gcc = gcc_mapping + gcc_offset;
+	const uint32_t ahb = keys_reg(gcc, VENUS_GCC_AHB_CBCR);
+	const uint32_t xo = keys_reg(gcc, VENUS_GCC_XO_CBCR);
+	hakios_tl("UMI venus: gcc_video ahb=%#x xo=%#x\n", ahb, xo);
+	if (!cycle_domain) {
+		ml_io_unmap(gcc_mapping, gcc_size);
+		return;
+	}
+
+	keys_write(gcc, VENUS_GCC_AHB_CBCR, ahb | VENUS_CLK_ENABLE);
+	keys_write(gcc, VENUS_GCC_XO_CBCR, xo | VENUS_CLK_ENABLE);
+	const uint32_t running = VENUS_CLK_ENABLE | VENUS_CLK_OFF;
+	bool ahb_on = thyme_venus_wait_reg(gcc, VENUS_GCC_AHB_CBCR, running, VENUS_CLK_ENABLE);
+	bool xo_on = thyme_venus_wait_reg(gcc, VENUS_GCC_XO_CBCR, running, VENUS_CLK_ENABLE);
+	hakios_tl("UMI venus: gcc_video enabled ahb=%#x xo=%#x\n",
+	    keys_reg(gcc, VENUS_GCC_AHB_CBCR), keys_reg(gcc, VENUS_GCC_XO_CBCR));
+
+	vm_offset_t vcc = (ahb_on && xo_on) ? ml_io_map_unmappable(VENUS_VIDEO_CC_BASE, PAGE_SIZE, VM_WIMG_IO) : 0;
+	if (vcc != 0) {
+		uint32_t gdsc = keys_reg(vcc, VENUS_MVS0C_GDSCR);
+		hakios_tl("UMI venus: mvs0c_gdsc before=%#x\n", gdsc);
+		if ((gdsc & VENUS_SW_COLLAPSE) != 0) {
+			keys_write(vcc, VENUS_MVS0C_GDSCR, gdsc & ~VENUS_SW_COLLAPSE);
+		}
+		bool powered = thyme_venus_wait_reg(vcc, VENUS_MVS0C_GDSCR, VENUS_PWR_ON, VENUS_PWR_ON);
+		hakios_tl("UMI venus: mvs0c_gdsc after=%#x\n", keys_reg(vcc, VENUS_MVS0C_GDSCR));
+		if (powered) {
+			hakios_tl("UMI venus: mvs0c_core cbcr=%#x\n", keys_reg(vcc, VENUS_MVS0C_CBCR));
+		}
+		if ((gdsc & VENUS_SW_COLLAPSE) != 0) {
+			uint32_t current = keys_reg(vcc, VENUS_MVS0C_GDSCR);
+			keys_write(vcc, VENUS_MVS0C_GDSCR, current | VENUS_SW_COLLAPSE);
+			(void)thyme_venus_wait_reg(vcc, VENUS_MVS0C_GDSCR, VENUS_PWR_ON, gdsc & VENUS_PWR_ON);
+		}
+		hakios_tl("UMI venus: mvs0c_gdsc restored=%#x\n", keys_reg(vcc, VENUS_MVS0C_GDSCR));
+		ml_io_unmap(vcc, PAGE_SIZE);
+	} else {
+		hakios_tl("UMI venus: video_cc unavailable (ahb=%d xo=%d)\n", ahb_on, xo_on);
+	}
+
+	if ((xo & VENUS_CLK_ENABLE) == 0) {
+		keys_write(gcc, VENUS_GCC_XO_CBCR, keys_reg(gcc, VENUS_GCC_XO_CBCR) & ~VENUS_CLK_ENABLE);
+		(void)thyme_venus_wait_reg(gcc, VENUS_GCC_XO_CBCR, VENUS_CLK_OFF, xo & VENUS_CLK_OFF);
+	}
+	if ((ahb & VENUS_CLK_ENABLE) == 0) {
+		keys_write(gcc, VENUS_GCC_AHB_CBCR, keys_reg(gcc, VENUS_GCC_AHB_CBCR) & ~VENUS_CLK_ENABLE);
+		(void)thyme_venus_wait_reg(gcc, VENUS_GCC_AHB_CBCR, VENUS_CLK_OFF, ahb & VENUS_CLK_OFF);
+	}
+	hakios_tl("UMI venus: gcc_video restored ahb=%#x xo=%#x\n",
+	    keys_reg(gcc, VENUS_GCC_AHB_CBCR), keys_reg(gcc, VENUS_GCC_XO_CBCR));
+	ml_io_unmap(gcc_mapping, gcc_size);
+}
+
 static void
 thyme_venus_pil_boot(void)
 {
 	uint32_t v_en = 0, c_en = 0;
 
 	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && (v_en == 1 || v_en == 2)) {
-		vm_offset_t gcc_v = ml_io_map(0x0010b000UL, 0x1000UL);
-
-		if (gcc_v != 0) {
-			hakios_tl("UMI venus: gcc_video ahb=%#x xo=%#x\n",
-			    keys_reg(gcc_v, 0x004u), keys_reg(gcc_v, 0x03cu));
-		}
+		/* The GDSC alone is insufficient: stock PIL also votes the core clock and interconnect. */
+		thyme_venus_power_probe(v_en == 2);
 		thyme_pil_boot_one("venus", "venus.mdt", "venus.b%02u",
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
-		    (v_en >= 2), &venus_ready, &venus_segments);
+		    false, &venus_ready, &venus_segments);
 	}
 	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en == 1) {
 		thyme_pil_boot_one("cdsp", "cdsp.mdt", "cdsp.b%02u",
