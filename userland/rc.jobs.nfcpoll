@@ -1,0 +1,2 @@
+# Run one bounded passive NFC-A discovery session. No tag identifiers are printed.
+/redwood/bin/nfc_poll

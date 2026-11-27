@@ -69,6 +69,11 @@ jobs:
           /tmp/hakios-qmi-uim
           cc -std=c11 -Wall -Wextra -Werror -Idrivers/modem -o /tmp/hakios-qmi-wds-binding tools/qmi-test/test_wds_binding.c
           /tmp/hakios-qmi-wds-binding
+      - name: NFC polling deactivates discovery on completion or failure
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fno-builtin -Iuserland/libmini -Dmain=nfc_poll_main -Derrno=nfc_test_errno -Dopen=nfc_test_open -Dclose=nfc_test_close -Dread=nfc_test_read -Dwrite=nfc_test_write -Dusleep=nfc_test_usleep -c userland/src/nfc_poll.c -o /tmp/nfc_poll.o
+          cc -std=c11 -Wall -Wextra -Werror tools/nfc-poll-test.c /tmp/nfc_poll.o -o /tmp/hakios-nfc-poll
+          /tmp/hakios-nfc-poll
       - name: UFS archive writes require an unclaimed data region
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Idrivers/storage -o /tmp/hakios-ufs-archive tools/ufs-archive-test.c

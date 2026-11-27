@@ -84,6 +84,8 @@ if os.path.isfile(ldid):
             missing.append("share/tsldid/ldid (not a 64-bit Mach-O)")
 
 # The scenario file must be the one that was asked for.
+if rc_jobs == "rc.jobs.nfcpoll":
+    need("bin/nfc_poll")
 jobs = os.path.join(root, "etc/rc.jobs")
 source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "userland", rc_jobs)
 if not os.path.isfile(jobs):
