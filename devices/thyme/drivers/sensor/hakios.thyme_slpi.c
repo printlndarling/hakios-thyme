@@ -300,14 +300,24 @@ static const volatile uint8_t *smem;
 static bool
 smem_peek(uint64_t offset, void *to, uint32_t size)
 {
-	if (smem == NULL) {
-		smem = (const volatile uint8_t *)ml_io_map_unmappable(SMEM_PHYS, SMEM_SIZE, VM_WIMG_WCOMB);
-	}
-	if (offset + size > SMEM_SIZE) {
+	if (offset > SMEM_SIZE || size > SMEM_SIZE - offset) {
 		return false;
 	}
+	const volatile uint8_t *base = __atomic_load_n(&smem, __ATOMIC_ACQUIRE);
+	if (base == NULL) {
+		const volatile uint8_t *mapping = (const volatile uint8_t *)ml_io_map_unmappable(
+		    SMEM_PHYS, SMEM_SIZE, VM_WIMG_WCOMB);
+		if (mapping == NULL) {
+			return false;
+		}
+		if (__atomic_compare_exchange_n(&smem, &base, mapping, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+			base = mapping;
+		} else {
+			ml_io_unmap((vm_offset_t)mapping, SMEM_SIZE);
+		}
+	}
 	for (uint32_t i = 0; i < size; i++) {
-		((uint8_t *)to)[i] = smem[offset + i];
+		((uint8_t *)to)[i] = base[offset + i];
 	}
 	return true;
 }
@@ -412,17 +422,16 @@ smem_items(uint32_t partition, uint32_t cacheline, struct smem_item *found, unsi
 
 /* An item the DSP and we share: in the partition of the two, or else in the global one. Where it is; 0: nowhere. */
 static uint32_t
-smem_item(uint32_t item, uint32_t *size)
+smem_find_item(uint16_t remote, uint32_t item, uint32_t *size, struct smem_item *found, unsigned capacity)
 {
-	static struct smem_item found[256];
-	static const uint16_t hosts[2][2] = { { SMEM_US, SMEM_SLPI }, { SMEM_GLOBAL, SMEM_GLOBAL } };
+	const uint16_t hosts[2][2] = { { SMEM_US, remote }, { SMEM_GLOBAL, SMEM_GLOBAL } };
 
 	for (unsigned h = 0; h < 2; h++) {
 		uint32_t cacheline = 0, partition_size = 0;
 		uint32_t partition = smem_partition(hosts[h][0], hosts[h][1], &cacheline, &partition_size);
-		unsigned count = smem_items(partition, cacheline, found, 256);
+		unsigned count = smem_items(partition, cacheline, found, capacity);
 
-		for (unsigned i = 0; i < count && i < 256; i++) {
+		for (unsigned i = 0; i < count && i < capacity; i++) {
 			if (found[i].item == item) {
 				*size = found[i].size;
 				return found[i].offset;
@@ -430,6 +439,14 @@ smem_item(uint32_t item, uint32_t *size)
 		}
 	}
 	return 0;
+}
+
+static uint32_t
+smem_item(uint32_t item, uint32_t *size)
+{
+	static struct smem_item found[256];
+
+	return smem_find_item(SMEM_SLPI, item, size, found, sizeof(found) / sizeof(found[0]));
 }
 
 static void
@@ -616,6 +633,71 @@ smp2p_entry(const struct smp2p *words, const char *name)
 		}
 	}
 	return -1;
+}
+
+/* Thyme qcom,smp2p-cdsp: remote PID 5; CDSP writes 94, APSS writes 432. */
+enum { CDSP_PID = 5, CDSP_SMP2P_INBOUND = 94, CDSP_SMP2P_OUTBOUND = 432 };
+bool hakios_thyme_cdsp_smp2p(uint32_t *state);
+bool hakios_thyme_cdsp_publish(void);
+void hakios_thyme_cdsp_kick(void);
+void hakios_thyme_cdsp_edge_summary(void);
+
+bool
+hakios_thyme_cdsp_smp2p(uint32_t *state)
+{
+	/* The keys thread samples this edge. It must not use SLPI's search buffer. */
+	static struct smem_item found[512];
+	struct smp2p words = { 0 };
+	uint32_t size = 0;
+	uint32_t at = smem_find_item(CDSP_PID, CDSP_SMP2P_INBOUND, &size, found, sizeof(found) / sizeof(found[0]));
+	const uint32_t header = SMP2P_AT_NAME(0);
+
+	if (at == 0 || size < header ||
+	    !smem_peek(at, &words, MIN(size, sizeof(words))) ||
+	    words.magic != SMP2P_MAGIC || (words.version & 0xffu) != SMP2P_VERSION ||
+	    words.local != CDSP_PID || words.remote != SMEM_US ||
+	    words.valid > words.total || words.valid > sizeof(words.entry) / sizeof(words.entry[0]) ||
+	    words.valid > (size - header) / sizeof(words.entry[0])) {
+		return false;
+	}
+	int entry = smp2p_entry(&words, "slave-kernel");
+	if (entry < 0) {
+		return false;
+	}
+	*state = words.entry[entry].value;
+	return true;
+}
+
+/* GLINK item numbers repeat on each edge. Inspect only the private CDSP partition. */
+void
+hakios_thyme_cdsp_edge_summary(void)
+{
+	static struct smem_item found[256];
+	uint32_t cacheline = 0, size = 0;
+	uint32_t part = smem_partition(SMEM_US, CDSP_PID, &cacheline, &size);
+	unsigned count = smem_items(part, cacheline, found, sizeof(found) / sizeof(found[0]));
+	uint32_t smp2p_size = 0, descriptor = 0, rx_size = 0, tx_size = 0;
+	uint32_t indices[4] = { 0 };
+	for (unsigned i = 0; i < count && i < sizeof(found) / sizeof(found[0]); i++) {
+		switch (found[i].item) {
+		case CDSP_SMP2P_INBOUND:
+			smp2p_size = found[i].size;
+			break;
+		case ITEM_GLINK_DESCRIPTOR:
+			if (found[i].size >= sizeof(indices) && smem_peek(found[i].offset, indices, sizeof(indices))) {
+				descriptor = found[i].size;
+			}
+			break;
+		case ITEM_GLINK_OUR_QUEUE:
+			tx_size = found[i].size;
+			break;
+		case ITEM_GLINK_THEIR_QUEUE:
+			rx_size = found[i].size;
+			break;
+		}
+	}
+	printf("UMI cdsp: private SMEM size=%u items=%u SMP2P=%u GLINK descriptor=%u tx=%u rx=%u indices=%u/%u/%u/%u\n",
+	    size, count, smp2p_size, descriptor, tx_size, rx_size, indices[0], indices[1], indices[2], indices[3]);
 }
 
 static uint32_t
@@ -1778,6 +1860,9 @@ smem_private_item_make(uint32_t partition, uint32_t item, uint32_t bytes)
 	smem_poke(partition + at + 4, item_size);
 	smem_poke(partition + at + 8, item_size - bytes);
 	smem_poke(partition + at + 12, 0);
+	for (uint32_t offset = 0; offset < item_size; offset += 4) {
+		smem_poke(partition + at + sizeof(entry) + offset, 0);
+	}
 	settle();
 	smem_poke(partition + __offsetof(struct smem_partition, free_uncached), at + need_bytes);
 	settle();
@@ -1787,6 +1872,58 @@ out:
 	printf("slpi: %u: the lock is released (it reads %u)\n", step, rd(smem_lock.base + LOCK_OWNER));
 	lck_mtx_unlock(&hakios_smem_alloc_lock);
 	return made;
+}
+
+/* Publish the APSS side of the CDSP edge, before the CDSP is released from reset. */
+bool
+hakios_thyme_cdsp_publish(void)
+{
+	static struct smem_item found[512];
+	uint32_t size = 0;
+	uint32_t at = smem_find_item(CDSP_PID, CDSP_SMP2P_OUTBOUND, &size, found, sizeof(found) / sizeof(found[0]));
+	struct smp2p words;
+	if (at == 0) {
+		uint32_t cacheline = 0, partition_size = 0;
+		uint32_t partition = smem_partition(SMEM_US, CDSP_PID, &cacheline, &partition_size);
+		if (partition == 0 || !smem_private_item_make(partition, CDSP_SMP2P_OUTBOUND, sizeof(words))) {
+			printf("UMI cdsp: cannot allocate APSS SMP2P item 432\n");
+			return false;
+		}
+		at = smem_find_item(CDSP_PID, CDSP_SMP2P_OUTBOUND, &size, found, sizeof(found) / sizeof(found[0]));
+		if (at == 0 || size != sizeof(words) || (at & 3u) != 0) {
+			return false;
+		}
+		smem_poke(at, SMP2P_MAGIC);
+		smem_poke(at + SMP2P_AT_PROCESSORS, SMEM_US | CDSP_PID << 16);
+		uint32_t name[4] = { 0 };
+		strlcpy((char *)name, OUR_ENTRY_STOP, sizeof(name));
+		for (unsigned i = 0; i < sizeof(name) / sizeof(name[0]); i++) {
+			smem_poke(at + SMP2P_AT_NAME(0) + i * sizeof(name[0]), name[i]);
+		}
+		smem_poke(at + SMP2P_AT_COUNTS, 16u | (1u << 16));
+		settle();
+		/* Publish version last, with no optional restart feature negotiated. */
+		smem_poke(at + SMP2P_AT_VERSION, SMP2P_VERSION);
+		settle();
+	}
+	bool valid = size == sizeof(words) && smem_peek(at, &words, sizeof(words)) &&
+	    words.magic == SMP2P_MAGIC && words.version == SMP2P_VERSION &&
+	    words.local == SMEM_US && words.remote == CDSP_PID &&
+	    words.valid == 1 && words.total == 16 &&
+	    smp2p_entry(&words, OUR_ENTRY_STOP) == 0 && words.entry[0].value == 0;
+	printf("UMI cdsp: APSS SMP2P item 432 valid=%d\n", valid);
+	return valid;
+}
+
+void
+hakios_thyme_cdsp_kick(void)
+{
+	enum { IPCC_CDSP = 6 };
+	need(&ipcc);
+	if (ipcc.base != 0) {
+		wr(ipcc.base + IPCC_SEND, IPCC_CDSP << 16 | IPCC_SMP2P);
+		printf("UMI cdsp: sent APSS SMP2P notification (IPCC 6:2)\n");
+	}
 }
 
 /* Our SMP2P item and GLINK's 16 KiB host-to-DSP queue are private items in this partition. */

@@ -36,6 +36,11 @@ extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern void hakios_prng_mix(const void *, size_t) __attribute__((weak));
 extern int hakios_ufs_read_partition(const char *, uint64_t, uint8_t *, uint64_t, uint64_t *) __attribute__((weak));
 
+extern bool hakios_thyme_cdsp_smp2p(uint32_t *) __attribute__((weak));
+extern bool hakios_thyme_cdsp_publish(void) __attribute__((weak));
+extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
+extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
+
 SYSCTL_DECL(_kern_hakios);
 
 #define UMI_ARB_CORE_PA       0x0c440000UL
@@ -108,6 +113,13 @@ static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
 static int venus_fw_size, cdsp_fw_size, venus_ready, venus_segments, cdsp_ready, cdsp_segments;
+static int cdsp_smp2p_state = -1, cdsp_smp2p_fresh_ready;
+static unsigned cdsp_probe_ticks;
+static bool cdsp_saw_not_ready;
+
+#define CDSP_SMP2P_FATAL (1u << 0)
+#define CDSP_SMP2P_READY (1u << 1)
+#define CDSP_SMP2P_POLL_TICKS (2000u / UMI_KEY_POLL_MS)
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
 static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static int usb_dwc3_id, usb_dwc3_dsts;
@@ -151,7 +163,13 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, venus_segments,
     "Number of loadable ELF segments loaded into pil_video_region");
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_ready,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_ready, 0,
-    "CDSP Hexagon DSP TrustZone PIL-TZ authenticated state (1=up)");
+    "CDSP TrustZone PAS authentication and reset returned success");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_smp2p_state,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_smp2p_state, 0,
+    "Last CDSP slave-kernel SMP2P state (-1 if unavailable)");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_smp2p_fresh_ready,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_smp2p_fresh_ready, 0,
+    "Observed a fresh CDSP SMP2P ready indication after PAS authentication");
 SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_segments,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_segments, 0,
     "Number of loadable ELF segments loaded into pil_cdsp_region");
@@ -440,6 +458,45 @@ keys_wait(void)
 }
 
 static void
+thyme_cdsp_poll(void)
+{
+	uint32_t state;
+
+	if (cdsp_probe_ticks == 0) {
+		return;
+	}
+	cdsp_probe_ticks--;
+	if (hakios_thyme_cdsp_smp2p(&state)) {
+		if ((uint32_t)cdsp_smp2p_state != state) {
+			cdsp_smp2p_state = (int)state;
+			hakios_tl("UMI cdsp: SMP2P state=%#x\n", state);
+		}
+		if ((state & CDSP_SMP2P_FATAL) != 0) {
+			cdsp_probe_ticks = 0;
+			hakios_tl("UMI cdsp: SMP2P reports fatal\n");
+			return;
+		}
+		if ((state & CDSP_SMP2P_READY) == 0) {
+			cdsp_saw_not_ready = true;
+		} else if (cdsp_saw_not_ready) {
+			cdsp_probe_ticks = 0;
+			cdsp_smp2p_fresh_ready = 1;
+			hakios_tl("UMI cdsp: SMP2P ready after PAS, state=%#x\n", state);
+			if (hakios_thyme_cdsp_edge_summary != NULL) {
+				hakios_thyme_cdsp_edge_summary();
+			}
+			return;
+		}
+	}
+	if (cdsp_probe_ticks == 0) {
+		hakios_tl("UMI cdsp: SMP2P fresh ready timed out (last=%#x)\n", (uint32_t)cdsp_smp2p_state);
+		if (hakios_thyme_cdsp_edge_summary != NULL) {
+			hakios_thyme_cdsp_edge_summary();
+		}
+	}
+}
+
+static void
 keys_post(unsigned key, bool down)
 {
 	static const uint32_t button[] = {
@@ -528,6 +585,7 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 			thyme_modem_fat_scan();
 			thyme_venus_pil_boot();
 		}
+		thyme_cdsp_poll();
 		if (wdt_armed && wdt_base != 0 && ++wdt_ticks >= 200u) {
 			wdt_ticks = 0;
 			uint32_t sts_before = keys_reg(wdt_base, UMI_WDT_STS);
@@ -1895,10 +1953,29 @@ thyme_venus_pil_boot(void)
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en == 1) {
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 2) {
+		if (c_en == 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
+		    !hakios_thyme_cdsp_publish())) {
+			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");
+			return;
+		}
+		uint32_t before;
+		if (hakios_thyme_cdsp_smp2p != NULL) {
+			bool sampled = hakios_thyme_cdsp_smp2p(&before);
+			cdsp_smp2p_state = sampled ? (int)before : -1;
+			cdsp_saw_not_ready = !sampled || (before & CDSP_SMP2P_READY) == 0;
+			hakios_tl("UMI cdsp: SMP2P before PAS sampled=%d state=%#x\n",
+			    sampled, (uint32_t)cdsp_smp2p_state);
+		}
 		thyme_pil_boot_one("cdsp", "cdsp.mdt", "cdsp.b%02u",
 		    UMI_CDSP_PAS_ID, UMI_CDSP_PA, UMI_CDSP_SIZE,
 		    true, &cdsp_ready, &cdsp_segments);
+		if (cdsp_ready && c_en == 2) {
+			hakios_thyme_cdsp_kick();
+		}
+		if (cdsp_ready && hakios_thyme_cdsp_smp2p != NULL) {
+			cdsp_probe_ticks = CDSP_SMP2P_POLL_TICKS;
+		}
 	}
 }
 

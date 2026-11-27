@@ -61,8 +61,8 @@ Status legend:
 | VPU Hardware Video Decode | P0 | 🚧 | `venus=1` prepares firmware, `venus=2` cycles GCC/MVS0C power, and `venus=3` verifies the MVS0C branch on the XO path and restores it. PAS execution and HFI decode pending. |
 | VPU Hardware Video Encode | P0 | ❌ | Depends on `pil-venus` HFI encode pipeline |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | 🚧 | SW 5×5 Malvar-He-Cutler + sharpen + AE/AF; HW IFE/IPE/HDR pending |
-| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP`, `SLPI`, and `CDSP` (`cdsp=1` TZ `AUTH_AND_RESET` & `SHUTDOWN`) verified |
-| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `CDSP` (`pas-id=0x12`) boots via TrustZone PIL-TZ; FastRPC/HVX Core ML bridge pending |
+| Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP` and `SLPI` operational; `cdsp=2` verified TZ startup, fresh SMP2P ready and clean shutdown |
+| NPU / AI Acceleration (`CDSP`) | P2 | 🚧 | `cdsp=2` observes firmware ready and the remote GLINK queue. AP transmit queue, GLINK negotiation, and FastRPC/HVX Core ML work remain. |
 | Hardware Crypto & PRNG | P0 | 🚧 | `qrng@793000` TRNG -> `mc_prng` (`✅`); `GCC_CE1` read (`qcedev@1de0000` crypto pending) |
 | IOMMU / SMMU DMA Isolation | P0 | ✅ | Active SMMU contexts zero-fault across Wi-Fi, SDX55M, ADSP, GPU, SLPI |
 | Hardware Watchdog | P1 | ✅ | `wdt=1` APSS WDT (`0x17c10000`, 16 s/32 s) 4 s keepalive & panic-safe quiesce |

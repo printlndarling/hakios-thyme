@@ -1,5 +1,34 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP reports ready over SMP2P
+
+- The [SM8250 binding](https://raw.githubusercontent.com/torvalds/linux/master/arch/arm64/boot/dts/qcom/sm8250.dtsi)
+  and the thyme DT agree on APSS/CDSP host IDs 0/5, inbound/outbound
+  items 94/432 and SMP2P notification through IPCC client 6, signal 2.
+  The probe reuses the existing SMEM parser and validates the processor IDs,
+  version and bounded entry table before reading `slave-kernel`.
+- The 90 s `cdsp=1` control (`d5788eee504b`) authenticated and shut the
+  DSP down. Its two-second read-only observation found no valid inbound
+  state. The run also logged a backboardd SIGSEGV after GPU teardown started
+  and SpringBoard was relaunched. The second boot did not reproduce that
+  exit. Local control evidence is `logs/111521-run.log`,
+  SHA-256 `66c37382ecf4a67dae007ac1f3d2a11107186979cfeb7e34a64a568c642cd424`.
+- The 90 s `cdsp=2` run (`6753dcaaaf1a`) published the AP-owned
+  `master-kernel` entry before PAS, authenticated the CDSP and notified
+  it over IPCC. The CDSP then created item 94 and reported
+  `slave-kernel=0x6` (ready and proxy handover). In its 128 KiB private
+  partition, a 32-byte GLINK descriptor and a 16 KiB DSP-to-AP queue
+  appeared. The AP-to-DSP queue was still absent. GLINK version negotiation,
+  FastRPC execution and application acceleration remain open.
+- SpringBoard started, SLPI linked with eight services, both DSP shutdown
+  paths completed, the watchdog quiesced, and the loader returned
+  `1441823 0` and rebooted to Android. Local evidence is
+  `logs/112001-run.log`, SHA-256
+  `d98a7a9192c27e8796841cc15b1e80b570a6f44c2ea6f5a8b153fc7276986a42`.
+  Nine inbound and five outbound host fixtures also passed. The outbound
+  cases verify version-last publication and refusal to overwrite invalid
+  inherited items.
+
 ## PAS relocation before split firmware load
 
 - The [Qualcomm MDT loader](https://raw.githubusercontent.com/torvalds/linux/master/drivers/soc/qcom/mdt_loader.c)
