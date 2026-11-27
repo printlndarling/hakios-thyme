@@ -1,5 +1,17 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP external-module callbacks (working-tree experiment)
+
+- The inherited `cdsp=13` RAM run used kernel `52f00a441635`, root
+  `b516e9a42328` and loader `b6cc8f17f9f5`. The in-process and listener
+  probes returned zero. The listener found the 1,612-byte staged module
+  and handled its file-open, seek and read callbacks. The outer FastRPC
+  module-open timed out (result 60). CDSP shut down and SMMU CB5/SMR6
+  restored with zero faults. The loader returned `1441823 0`.
+- Local evidence `logs/201140-run.log`, SHA-256
+  `dfdb57e9d984efafbea65d7cf83c957a78b0a18fa5dcd26d3ea78a8011320a75`.
+  The module-open reply and vector-sum result remain to be observed.
+
 ## CDSP user-process reverse listener registration
 
 - The opt-in `cdsp=12` test first runs the `cdsp=11` ASID query. On
