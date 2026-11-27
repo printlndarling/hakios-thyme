@@ -48,6 +48,7 @@
 #include "../../bsd/dev/coachz_bb_channels.h"
 #include "../../bsd/dev/coachz_bb_data.h"
 #include "../../bsd/dev/hakios.uim_status.h"
+#include "../../bsd/dev/hakios.wds_binding.h"
 #include "../../bsd/dev/coachz_bb_pdp.h"
 #include <miscfs/devfs/devfs.h>
 #include <sys/conf.h>
@@ -108,7 +109,7 @@ static uint32_t bb_private_seen[64], bb_private_count, bb_ctl_logged, bb_activat
 static uint8_t bb_out[BB_FRAME_MAX];     // answers built under bb_lock
 static struct cbp_client bb_pdp_clients[CBQ_MAX_CLIENTS];
 static uint32_t bb_pdp_owners[CBQ_MAX_CLIENTS];
-static uint8_t bb_wds_sub_bound[CBQ_MAX_CLIENTS];
+static enum wds_binding bb_wds_bindings[CBQ_MAX_CLIENTS];
 static bb_pdp_if bb_pdp_ifaces[CBP_INTERFACES];
 static uint32_t bb_pdp_next;
 // IP_HW0 is raw IP over QMAP (5): set by the kernel (umi_bb_link) and kept unless ABM's own WDA request changes it.
@@ -611,23 +612,24 @@ static void bb_answer_error(uint32_t qmux, uint32_t service, uint32_t cid, uint3
 #include "../../bsd/dev/umi_cellinfo.inc"
 
 // A request for the X55: remembered until it answers, or answered here when it cannot be sent.
-static void bb_forward(const struct cbq_result &r, const uint8_t *sdu, uint32_t n)
+static bool bb_forward(const struct cbq_result &r, const uint8_t *sdu, uint32_t n)
 {
   const uint32_t txn = cbd_rd16(sdu + 1), message = cbd_rd16(sdu + 3);
   if (!ubp_add(&bb_pending, r.local_port, r.channel, r.cid, r.service, txn, message, bb_now_ms())) {
     bb_answer_error(r.channel, r.service, r.cid, txn, message, UBP_ERR_INTERNAL, "too many requests in flight");
-    return;
+    return false;
   }
   if (!bb_queue_tx(r.local_port, r.node, r.port, sdu, n)) {
     struct ubp_entry e;
     ubp_answer(&bb_pending, r.local_port, txn, &e);
     bb_answer_error(r.channel, r.service, r.cid, txn, message, UBP_ERR_INTERNAL, "send queue full");
-    return;
+    return false;
   }
   voice_note("tx", r, sdu, n);
   if (bb_req_lines++ < BB_REQ_LINES)
     BB_LOG("req svc 0x%x msg 0x%x txn %u cid %u -> X55 node %u port %u from 0x%x\n", r.service, message, txn, r.cid, r.node, r.port,
            r.local_port);
+  return true;
 }
 
 // A request cbq_from_host could not route (a client ABM no longer has, a service the X55 does not announce): answered.
@@ -920,6 +922,9 @@ static void bb_host_write(uint32_t channel, const uint8_t *data, uint32_t len)
   ims_prune();
   switch (r.kind) {
   case CBQ_TO_HOST:
+    // CTL allocation or release may recycle a QRTR port with a different QMUX owner.
+    if (r.service == CBD_SVC_WDS && r.local_port >= CBQ_PORT_BASE && r.local_port < CBQ_PORT_BASE + CBQ_MAX_CLIENTS)
+      bb_wds_bindings[r.local_port - CBQ_PORT_BASE] = WDS_UNBOUND;
     ims_note_ctl(data, len, bb_out, r.len);
     bb_push(channel, bb_out, r.len);
     if (bb_qmux.ctl_other != bb_ctl_logged) {
@@ -992,26 +997,21 @@ static void bb_host_write(uint32_t channel, const uint8_t *data, uint32_t len)
       0x00, 0xaf, 0xfe, 0xaf, 0x00, 0x07, 0x00,
       0x01, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00
     };
-    bool wds_bind_after = false;
-    if (r.service == CBD_SVC_WDS && r.local_port >= CBQ_PORT_BASE) {
-      const uint32_t slot = r.local_port - CBQ_PORT_BASE;
-      const uint32_t msg = cbd_sdu_ok(sdu, n) && sdu[0] == 0u ? cbd_rd16(sdu + 3) : 0u;
-      if (slot < CBQ_MAX_CLIENTS) {
-        if (msg == 0x00afu) {
-          bb_wds_sub_bound[slot] = 1;
-        } else if (msg == 0x00a2u) {
-          // Bind Subscription 1 immediately AFTER Bind Mux Data Port (matches qcrild order: 0x00a2 -> 0x00af -> 0x004d -> 0x0020).
-          wds_bind_after = true;
-        } else if (!bb_wds_sub_bound[slot]) {
-          if (bb_queue_tx(r.local_port, r.node, r.port, wds_bind_sub1, sizeof wds_bind_sub1))
-            bb_wds_sub_bound[slot] = 1;
-        }
-      }
+    const uint32_t slot = r.local_port - CBQ_PORT_BASE;
+    if (r.service != CBD_SVC_WDS || slot >= CBQ_MAX_CLIENTS) {
+      bb_forward(r, sdu, n);
+      break;
     }
-    bb_forward(r, sdu, n);
-    if (wds_bind_after) {
-      if (bb_queue_tx(r.local_port, r.node, r.port, wds_bind_sub1, sizeof wds_bind_sub1))
-        bb_wds_sub_bound[r.local_port - CBQ_PORT_BASE] = 1;
+    enum wds_binding &binding = bb_wds_bindings[slot];
+    const uint32_t msg = cbd_sdu_ok(sdu, n) && sdu[0] == CBQ_QMI_REQUEST ? cbd_rd16(sdu + 3) : 0u;
+    const enum wds_bind_action action = wds_bind_action_for(binding, msg);
+    if (action == WDS_BIND_BEFORE && bb_queue_tx(r.local_port, r.node, r.port, wds_bind_sub1, sizeof wds_bind_sub1))
+      binding = WDS_FALLBACK;
+    if (bb_forward(r, sdu, n)) {
+      if (action == WDS_RECORD_EXPLICIT)
+        binding = WDS_EXPLICIT;
+      else if (action == WDS_BIND_AFTER_MUX && bb_queue_tx(r.local_port, r.node, r.port, wds_bind_sub1, sizeof wds_bind_sub1))
+        binding = WDS_FALLBACK;
     }
     break;
   }
@@ -2035,7 +2035,7 @@ extern "C" void umi_bb_modem_lost(void)
   bzero(bb_qmux.server, sizeof bb_qmux.server);
   bzero(bb_pdp_clients, sizeof bb_pdp_clients);
   bzero(bb_pdp_owners, sizeof bb_pdp_owners);
-  bzero(bb_wds_sub_bound, sizeof bb_wds_sub_bound);
+  bzero(bb_wds_bindings, sizeof bb_wds_bindings);
   ims_audit.registration = -1; ims_audit.pending = false; ims_audit.bound = false;
   ims_audit.release = false; ims_audit.port = 0; ims_audit.next_at = bb_now_ms();
   ims_imss_chain = 0;   /* the 0x2a control-point registration died with the modem: redo the preamble */
@@ -2073,7 +2073,7 @@ extern "C" void umi_bb_del_server(uint32_t service, uint32_t node, uint32_t port
   if (service == UCI_SERVICE && cellinfo.node == node && cellinfo.port == port) {
     cellinfo_finish(3); cellinfo.pending = false; cellinfo.port = 0; cellinfo.sampled = false; cellinfo.release = true;
   }
-  if (service == CBD_SVC_WDS) { bzero(bb_pdp_clients, sizeof bb_pdp_clients); bzero(bb_wds_sub_bound, sizeof bb_wds_sub_bound); }
+  if (service == CBD_SVC_WDS) { bzero(bb_pdp_clients, sizeof bb_pdp_clients); bzero(bb_wds_bindings, sizeof bb_wds_bindings); }
   IOLockUnlock(bb_lock);
   BB_LOG("X55 service %u left (node %u port %u)\n", service, node, port);
 }
