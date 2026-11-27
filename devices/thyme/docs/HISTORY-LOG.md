@@ -1,5 +1,28 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP user-process reverse listener registration
+
+- The opt-in `cdsp=12` test first runs the `cdsp=11` ASID query. On
+  physical thyme, the 90 s RAM Boot used kernel `d1d6a84e8c76` and root
+  `7d8ba86fdb50`. In the stock signed user process, client 2 received
+  zero for fixed-handle `adsp_listener_init2`. It opened
+  `adsp_default_listener` as `0x2570d2e0`, registered it, closed the
+  control handle and released the process. The control messages follow
+  Qualcomm's [listener stub](https://raw.githubusercontent.com/qualcomm/fastrpc/development/src/adsp_listener_stub.c)
+  and [default-listener stub](https://raw.githubusercontent.com/qualcomm/fastrpc/development/src/adsp_default_listener_stub.c).
+- The capability query still wrote 255 of 255 words. CDSP shut down,
+  SMMU CB5/SMR6 restored with zero faults, the watchdog quiesced and
+  the loader returned `1441823 0`. Android completed its boot.
+  Local evidence `logs/195302-run.log`, SHA-256
+  `9077ea23fec403eda521e8cb8778f166d0a943ca1b12f7b909a8c76b768a6a68`.
+- Host checks covered init, open, register and close packets, including
+  timeout and error handling. The [scalar probe source](../tools/cdsp-rpc-probe.c)
+  cross-compiled to Hexagon ELF32 with its FastRPC entry point exported
+  and no library dependencies. A native build matched all 128 output
+  bytes, preserved canaries and rejected malformed arguments. It is
+  ready to test once the kernel can serve the DSP's reverse file
+  requests. External module execution, HVX and Core ML remain open.
+
 ## CDSP in-process module dispatch
 
 - The opt-in `cdsp=11` test creates the stock signed user process and

@@ -175,6 +175,29 @@ the verified microphone runs has SHA-256
 Keep the legacy image as a recovery reference, but it is no longer the only
 hardware-proven loader.
 
+### CDSP external module diagnostic
+
+Build the freestanding scalar test module from the repository root with
+Clang's Hexagon target and LLD. The binary belongs in the local build
+directory.
+
+```sh
+mkdir -p out/cdsp-probe
+clang --target=hexagon -mv66 -mno-hvx -ffreestanding -fPIC -O2 -c \
+  devices/thyme/tools/cdsp-rpc-probe.c -o out/cdsp-probe/cdsp-rpc-probe.o
+ld.lld -shared --no-undefined -soname libhakios_cdsp_probe_skel.so \
+  -o out/cdsp-probe/libhakios_cdsp_probe_skel.so out/cdsp-probe/cdsp-rpc-probe.o
+```
+
+The module exposes `hakios_cdsp_probe_skel_invoke`. FastRPC scalars
+`0x00020100` encode two 128-byte inputs and one 128-byte output. Check all
+128 output bytes against element-wise addition modulo 256 after invoking
+it from the CDSP process. The kernel still needs to serve the module
+loader's reverse file calls. Once scalar dispatch is verified on hardware,
+the HVX probe must acquire a 128-byte QuRT vector context before executing
+vector instructions. See [FastRPC argument definitions](https://github.com/qualcomm/fastrpc/blob/development/inc/remote.h)
+and [Xiaomi's QuRT HVX acquisition](https://github.com/XiaoMi/nnlib/blob/master/hexagon/src/nn_os_qurt.c).
+
 ## Repository layout
 
 | Path | Purpose |
