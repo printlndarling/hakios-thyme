@@ -636,28 +636,60 @@ lsc_at(const struct isp *isp, float u, float v, float g[3])
 	}
 }
 
+struct preview_column {
+	uint32_t left;
+	float fraction;
+};
+
+struct preview_crop {
+	uint32_t x, y, width, height;
+	bool bilinear;
+};
+
+/* The horizontal interpolation coordinates are shared by every row in this slice. */
+static struct preview_crop
+prepare_preview(const struct isp *isp, const struct hakios_camera_frame *f, uint32_t width, uint32_t height,
+    struct preview_column *columns)
+{
+	struct preview_crop area;
+
+	crop(isp, f, width, height, &area.x, &area.y, &area.width, &area.height);
+	area.bilinear = area.width <= width * 2 && area.height <= height * 2;
+	if (area.bilinear) {
+		uint32_t last = f->width / 2 - 1;
+
+		for (uint32_t x = 0; x < width; x++) {
+			float fx = area.x + (x + 0.5f) * area.width / width - 0.5f;
+			uint32_t left = fx < 0 ? 0 : (uint32_t)fx;
+
+			left = left > last ? last : left;
+			columns[x] = (struct preview_column){ left, fx < (float)left ? 0 : fx - left };
+		}
+	}
+	return area;
+}
+
 /* one line of the picture as 8-bit R, G, B */
 static void
-render_line(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, uint32_t width, uint32_t height,
-    uint32_t row, uint8_t *rgb)
+render_line(const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw, const struct preview_crop *area,
+    const struct preview_column *columns, uint32_t width, uint32_t height, uint32_t row, uint8_t *rgb)
 {
-	uint32_t x0, y0, cw, ch, cells_w = f->width / 2, cells_h = f->height / 2;
+	uint32_t cells_w = f->width / 2, cells_h = f->height / 2;
 	int r, b;
 	struct pipe p;
 
-	crop(isp, f, width, height, &x0, &y0, &cw, &ch);
 	cell_places(f->bayer, &r, &b);
 	pipe_init(isp, &p);
 	if (isp->turned) {
 		row = height - 1 - row;         /* (and each line from its end, below) */
 	}
-	if (cw <= width * 2 && ch <= height * 2) {
+	if (area->bilinear) {
 		/*
 		 * Bilinear interpolation across the four neighbouring Bayer cells (used for both zoomed
 		 * crops and near-1:1 previews): avoids nearest-neighbour stair-stepping and colour shimmer
 		 * in Camera.app's live viewfinder.
 		 */
-		float fy = y0 + (row + 0.5f) * ch / height - 0.5f, ty, v_at;
+		float fy = area->y + (row + 0.5f) * area->height / height - 0.5f, ty, v_at;
 		uint32_t cy0 = fy < 0 ? 0 : (uint32_t)fy, cy1;
 
 		cy0 = cy0 > cells_h - 1 ? cells_h - 1 : cy0;
@@ -670,12 +702,9 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 		int samples[4][4];
 
 		for (uint32_t x = 0; x < width; x++) {
-			float fx = x0 + (x + 0.5f) * cw / width - 0.5f, tx, c[3] = { 0, 0, 0 };
-			uint32_t cx0 = fx < 0 ? 0 : (uint32_t)fx, cx1;
+			uint32_t cx0 = columns[x].left, cx1 = cx0 + 1 < cells_w ? cx0 + 1 : cx0;
+			float tx = columns[x].fraction, c[3] = { 0, 0, 0 };
 
-			cx0 = cx0 > cells_w - 1 ? cells_w - 1 : cx0;
-			cx1 = cx0 + 1 > cells_w - 1 ? cells_w - 1 : cx0 + 1;
-			tx = fx < (float)cx0 ? 0 : fx - cx0;
 			/* An enlarged preview reuses the same Bayer cells and lens gain across adjacent pixels. */
 			if (cx0 != cached_left) {
 				cell(t0, f->stride, cx0, samples[0]);
@@ -704,9 +733,9 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 		}
 		return;
 	}
-	uint32_t cy = y0 + (uint32_t)((uint64_t)row * ch / height);
+	uint32_t cy = area->y + (uint32_t)((uint64_t)row * area->height / height);
 	const uint8_t *top = raw + (size_t)cy * 2 * f->stride;
-	uint64_t step = ((uint64_t)cw << 16) / width, at = (uint64_t)x0 << 16;
+	uint64_t step = ((uint64_t)area->width << 16) / width, at = (uint64_t)area->x << 16;
 	float v_pos = cells_h > 1 ? (float)cy / (cells_h - 1) : 0, gains[3] = { 1, 1, 1 };
 
 	for (uint32_t x = 0; x < width; x++, at += step) {
@@ -786,9 +815,12 @@ isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	int coring = f->gain >= 16 * unity ? 8 : f->gain >= 8 * unity ? 5 : 3;
 	int lift = 4 + (isp->zoom > 1.15f ? (int)((isp->zoom - 1) * 6) : 0);
 
-	if (width > 8192) {
+	if (width == 0 || width > 8192 || height == 0) {
 		return;
 	}
+	struct preview_column columns[width];
+	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
+
 	if (f->gain >= 24 * unity) {
 		lift = lift > 4 ? 4 : lift;
 	}
@@ -796,8 +828,8 @@ isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	for (uint32_t row = first_row & ~1u; row < end_row && row < height; row += 2) {
 		bool second = row + 1 < height;
 
-		render_line(isp, f, raw, width, height, row, line[0]);
-		render_line(isp, f, raw, width, height, second ? row + 1 : row, line[1]);
+		render_line(isp, f, raw, &area, columns, width, height, row, line[0]);
+		render_line(isp, f, raw, &area, columns, width, height, second ? row + 1 : row, line[1]);
 		if (lift > 0) {
 			sharpen_rgb_row(line[0], width, lift_row, lift, coring);
 			sharpen_rgb_row(line[1], width, lift_row, lift, coring);
@@ -813,13 +845,16 @@ isp_render_bgra(const struct isp *isp, const struct hakios_camera_frame *f, cons
 {
 	uint8_t line[3 * 8192];
 
-	if (width > 8192) {
+	if (width == 0 || width > 8192 || height == 0) {
 		return;
 	}
+	struct preview_column columns[width];
+	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
+
 	for (uint32_t row = first_row; row < end_row && row < height; row++) {
 		uint8_t *o = out + (size_t)row * stride;
 
-		render_line(isp, f, raw, width, height, row, line);
+		render_line(isp, f, raw, &area, columns, width, height, row, line);
 		for (uint32_t x = 0; x < width; x++) {
 			o[4 * x] = line[3 * x + 2];
 			o[4 * x + 1] = line[3 * x + 1];
