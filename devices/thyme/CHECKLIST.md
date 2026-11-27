@@ -65,7 +65,7 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 | All 8 CPU Cores Online | P1 | **PARTIAL** | 7 cores active (`bootcpu=7 cpus=7`); `xnuloader` reserves core 0 for UEFI/EL3 firmware |
 | CPU Idle / Deep Sleep & Suspend-to-RAM | P0 | **PARTIAL** | XNU `machine_idle()` `WFI`/`WFE` active on all idle cores; display blanking (`DCS 0x51=0`) works (`logs/173008-run.log`); PSCI `CPU_SUSPEND` deep power collapse `TODO` |
 | GPU Dynamic Frequency Scaling (DVFS) | P1 | **PASS** | Adreno 650 GMU HFI runtime OPP switching (`305 / 441 / 587 MHz`, `31` live transitions in `logs/231618-run.log`), `kern.hakios.gpu_*` sysctls, nominal restore on exit |
-| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` unimplemented; browser/player video decodes in CPU software |
+| VPU Hardware Video Decode | P0 | **TODO** | `pil-venus` (`0xaab0000`, `pas-id=9`) unimplemented; UFS `modem_a` FAT16 reader live (`bps=4096 spc=4 root[0]='PCAFUI~2   ' clus=2`, `logs/082446-run.log`), firmware dir scan next |
 | VPU Hardware Video Encode | P0 | **TODO** | `pil-venus` unimplemented; hardware H.264/HEVC camera recording & screen record missing |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | **PARTIAL** | Software 5×5 Malvar-He-Cutler + coring sharpen + adaptive AE/AF (`PASS`); hardware `IFE/IPE` & HDR/3DNR unimplemented |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | **PARTIAL** | `ADSP` (`PASS`) + `SLPI` (`PASS`); `CDSP` (`pil_cdsp_region@8d400000`) not brought up |
@@ -134,6 +134,15 @@ Derived directly from Mi 10S `device-tree.dtb` (`SM8250-AC`), Android `dumpsys s
 ---
 
 ## Chronological Verification Logs & Evidence
+
+## Batch 8 Autonomous Audit (2026-11-27, `logs/082446-run.log`)
+
+Verified on physical Mi 10S (`5290780a`, kernel `f83aaf4f138d`, `result: returned 1441823 0`):
+
+- **Read-Only UFS `modem_a` FAT16/FAT32 Firmware Reader & Root Discovery** (`devices/thyme/drivers/input/hakios.thyme_keys.c`):
+  - Implemented bounds-checked read-only FAT16/FAT32 parser (`fat_init_geom()`, `fat_find_image_dir()`, `hakios_modem_fat_read()`, `thyme_modem_fat_scan()`) over `hakios_ufs_read_partition("modem_a", ...)` and exported `kern.hakios.venus_fw_size` / `kern.hakios.cdsp_fw_size`.
+  - Live Mi 10S probe read `modem_a` BPB (`UMI ufs_fw: modem_a FAT16 bps=4096 spc=4 fat_sz=15 root_ent=512 root_clus=1095639119`) and discovered the single HyperOS 3 root directory entry `UMI ufs_fw: root[0] 'PCAFUI~2   ' attr=0x10 clus=2 size=0` instead of a standard 8.3 `IMAGE` folder (`UMI ufs_fw: modem_a/IMAGE not found`). Inspecting `clus=2` and LFN/subdirectories next to locate `venus.*` / `cdsp.*`.
+- **Artifacts**: `hakios-kernel` (`17,039,248 B`, sha256 `f83aaf4f138d6befe9766cdebe40854f4780b52642322b6ac923973c8ff0d8b4`), `userland/root.apfs` (`48,992,256 B`, sha256 `6393155cc2be9631641de8ec96657b232a117926121efd4ef70eee375ca74f99`; total `66,031,504 B < 66,060,288 B`), `logs/082446-run.log` (sha256 `52e2f39246eb76363b0d2189891d8b87b69bb03142fe3955f9032b217aa5bfd9`).
 
 ## Batch 7 Autonomous Audit (2026-11-27, `logs/080948-run.log`)
 

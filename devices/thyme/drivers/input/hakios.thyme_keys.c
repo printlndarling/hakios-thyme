@@ -27,6 +27,7 @@ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 extern kern_return_t thread_terminate(thread_t);
 extern void hakios_tl(const char *, ...) __printflike(1, 2);
 extern void hakios_prng_mix(const void *, size_t) __attribute__((weak));
+extern int hakios_ufs_read_partition(const char *, uint64_t, uint8_t *, uint64_t, uint64_t *) __attribute__((weak));
 
 SYSCTL_DECL(_kern_hakios);
 
@@ -99,6 +100,7 @@ static uint16_t pon_apid = UMI_NO_APID, gpio_apid = UMI_NO_APID, rtc_apid = UMI_
 static bool keys_started, rtc_ready;
 static int keys_sleep_chan, qrng_ready, hall_closed;
 static int wdt_ctl, wdt_sts, wdt_armed, wdt_pets;
+static int venus_fw_size, cdsp_fw_size;
 static int fastchg_part, fastchg_vbus_mv, fastchg_vbat_mv, fastchg_ibus_ma, wlc_chip_id;
 static int nfc_present, nfc_nci_ver, nfc_dev_ready, usbc_audio_id, usbc_switch_status, ir_ready, ir_tx_count;
 static int usb_dwc3_id, usb_dwc3_dsts;
@@ -128,6 +130,12 @@ SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_armed,
 SYSCTL_INT(_kern_hakios, OID_AUTO, wdt_pets,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &wdt_pets, 0,
     "SM8250 hardware watchdog periodic pet count");
+SYSCTL_INT(_kern_hakios, OID_AUTO, venus_fw_size,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &venus_fw_size, 0,
+    "Size in bytes of venus.mdt/mbn found in UFS modem_a/image");
+SYSCTL_INT(_kern_hakios, OID_AUTO, cdsp_fw_size,
+    CTLFLAG_RD | CTLFLAG_ANYBODY, &cdsp_fw_size, 0,
+    "Size in bytes of cdsp.mdt/mbn found in UFS modem_a/image");
 SYSCTL_INT(_kern_hakios, OID_AUTO, fastchg_part,
     CTLFLAG_RD | CTLFLAG_ANYBODY, &fastchg_part, 0,
     "Wired 33W charger IC bq25970 part register (0x13)");
@@ -421,6 +429,8 @@ keys_post(unsigned key, bool down)
 }
 
 static void thyme_qup15_poll(bool initial);
+static void thyme_modem_fat_scan(void);
+int hakios_modem_fat_read(const char *image_file, uint8_t *dst, uint32_t max_len, uint32_t *out_len);
 
 static void
 keys_thread(__unused void *arg, __unused wait_result_t result)
@@ -430,7 +440,7 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 	bool live[3] = { false, false, false };
 	unsigned errors = 0, ticks = 0, wdt_ticks = 0, chg_ticks = 0, hall_debounce = 0;
 	int hall_candidate = hall_closed;
-	bool rtc_tick_checked = !rtc_ready;
+	bool rtc_tick_checked = !rtc_ready, ufs_fw_checked = false;
 
 	for (;;) {
 		uint8_t pon = 0, gpio = 0;
@@ -489,6 +499,10 @@ keys_thread(__unused void *arg, __unused wait_result_t result)
 				hakios_tl("UMI rtc: tick check t0=%u t1=%u delta=%u s\n",
 				    rtc_boot_seconds, now_secs, now_secs - rtc_boot_seconds);
 			}
+		}
+		if (!ufs_fw_checked && ticks >= 100u) {
+			ufs_fw_checked = true;
+			thyme_modem_fat_scan();
 		}
 		if (wdt_armed && wdt_base != 0 && ++wdt_ticks >= 200u) {
 			wdt_ticks = 0;
@@ -990,6 +1004,349 @@ static const struct cdevsw ir_cdevsw = {
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0,
 };
+
+static uint8_t modem_fat_secbuf[4096];
+
+static uint16_t
+fat_u16(const uint8_t *p)
+{
+	return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t
+fat_u32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static char
+fat_up(uint8_t c)
+{
+	return (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : (char)c;
+}
+
+static bool
+fat_eq_83_ci(const uint8_t d[11], const char want[11])
+{
+	for (unsigned i = 0; i < 11; i++) {
+		if (fat_up(d[i]) != fat_up((uint8_t)want[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool
+fat_prefix_ci(const uint8_t *d, const char *pfx, unsigned n)
+{
+	for (unsigned i = 0; i < n; i++) {
+		if (fat_up(d[i]) != fat_up((uint8_t)pfx[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+struct fat_geom {
+	uint64_t part_bytes;
+	uint32_t bps;
+	uint32_t spc;
+	uint32_t rsvd_sec;
+	uint32_t num_fats;
+	uint32_t root_ent;
+	uint32_t fat_sz;
+	uint32_t root_clus;
+	uint32_t first_data_sec;
+	uint32_t root_dir_secs;
+	uint32_t tot_sec;
+	bool is_fat32;
+};
+
+static bool
+fat_init_geom(struct fat_geom *g, uint8_t secbuf[4096])
+{
+	uint64_t part_bytes = 0;
+
+	if (hakios_ufs_read_partition == NULL ||
+	    hakios_ufs_read_partition("modem_a", 0, secbuf, 512, &part_bytes) != 0) {
+		return false;
+	}
+	if (secbuf[510] != 0x55u || secbuf[511] != 0xAAu) {
+		return false;
+	}
+	uint32_t bps = fat_u16(secbuf + 11);
+	uint32_t spc = secbuf[13];
+	uint32_t rsvd = fat_u16(secbuf + 14);
+	uint32_t nfats = secbuf[16];
+	uint32_t rent = fat_u16(secbuf + 17);
+	uint32_t t16 = fat_u16(secbuf + 19);
+	uint32_t f16 = fat_u16(secbuf + 22);
+	uint32_t t32 = fat_u32(secbuf + 32);
+	uint32_t f32 = fat_u32(secbuf + 36);
+	uint32_t rclus = fat_u32(secbuf + 44);
+
+	if (bps < 512u || bps > 4096u || (bps & (bps - 1u)) != 0 || spc == 0 || nfats == 0) {
+		return false;
+	}
+	uint32_t tot_sec = t16 != 0 ? t16 : t32;
+	uint32_t fat_sz = f16 != 0 ? f16 : f32;
+	uint32_t rdir_secs = ((rent * 32u) + (bps - 1u)) / bps;
+	uint32_t fdata = rsvd + nfats * fat_sz + rdir_secs;
+	if (fat_sz == 0 || fdata >= tot_sec) {
+		return false;
+	}
+	uint32_t data_clus = (tot_sec - fdata) / spc;
+	g->part_bytes = part_bytes;
+	g->bps = bps;
+	g->spc = spc;
+	g->rsvd_sec = rsvd;
+	g->num_fats = nfats;
+	g->root_ent = rent;
+	g->fat_sz = fat_sz;
+	g->root_clus = rclus;
+	g->first_data_sec = fdata;
+	g->root_dir_secs = rdir_secs;
+	g->tot_sec = tot_sec;
+	g->is_fat32 = (rent == 0 && data_clus >= 65525u);
+	return true;
+}
+
+static uint32_t
+fat_next_clus(const struct fat_geom *g, uint32_t clus)
+{
+	uint8_t ent[4] = { 0 };
+	uint64_t off = (uint64_t)g->rsvd_sec * g->bps + (uint64_t)clus * (g->is_fat32 ? 4u : 2u);
+
+	if (off + 4u > g->part_bytes ||
+	    hakios_ufs_read_partition("modem_a", off, ent, g->is_fat32 ? 4u : 2u, NULL) != 0) {
+		return 0x0fffffffu;
+	}
+	if (g->is_fat32) {
+		uint32_t v = fat_u32(ent) & 0x0fffffffu;
+		return v >= 0x0ffffff8u ? 0x0fffffffu : v;
+	}
+	uint16_t v = fat_u16(ent);
+	return v >= 0xfff8u ? 0x0fffffffu : (uint32_t)v;
+}
+
+static uint64_t
+fat_clus_off(const struct fat_geom *g, uint32_t clus)
+{
+	uint64_t sec = (uint64_t)g->first_data_sec + (uint64_t)(clus - 2u) * g->spc;
+	return sec * g->bps;
+}
+
+static void
+fat_name_to_83(const char *name, char out83[11])
+{
+	memset(out83, ' ', 11);
+	unsigned i = 0;
+	while (*name && *name != '.' && i < 8) {
+		out83[i++] = fat_up((uint8_t)*name++);
+	}
+	while (*name && *name != '.') name++;
+	if (*name == '.') {
+		name++;
+		i = 8;
+		while (*name && i < 11) {
+			out83[i++] = fat_up((uint8_t)*name++);
+		}
+	}
+}
+
+static bool
+fat_find_image_dir(const struct fat_geom *g, uint8_t secbuf[4096], uint32_t *out_clus, bool log_root)
+{
+	unsigned logged = 0;
+
+	if (!g->is_fat32 && g->root_dir_secs > 0) {
+		uint64_t base = (uint64_t)(g->rsvd_sec + g->num_fats * g->fat_sz) * g->bps;
+		for (uint32_t s = 0; s < g->root_dir_secs; s++) {
+			int err = hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g->bps, secbuf, g->bps, NULL);
+			if (err != 0) {
+				hakios_tl("UMI ufs_fw: rdir read sec=%u off=%llu err=%d\n",
+				    s, base + (uint64_t)s * g->bps, err);
+				return false;
+			}
+			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
+				const uint8_t *d = secbuf + o;
+				if (d[0] == 0x00) return false;
+				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
+				uint32_t fsize = fat_u32(d + 28);
+				if (log_root && logged < 8u) {
+					hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
+					    logged, (const char *)d, d[11], fclus, fsize);
+					logged++;
+				}
+				if ((d[11] & 0x10) != 0 && fat_eq_83_ci(d, "IMAGE      ")) {
+					*out_clus = fclus;
+					return *out_clus >= 2u;
+				}
+			}
+		}
+		return false;
+	}
+	uint32_t clus = g->root_clus;
+	for (unsigned iter = 0; iter < 64u && clus >= 2u && clus < 0x0ffffff8u; iter++) {
+		uint64_t base = fat_clus_off(g, clus);
+		for (uint32_t s = 0; s < g->spc; s++) {
+			int err = hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g->bps, secbuf, g->bps, NULL);
+			if (err != 0) {
+				hakios_tl("UMI ufs_fw: rdir32 read clus=%u err=%d\n", clus, err);
+				return false;
+			}
+			for (uint32_t o = 0; o + 32u <= g->bps; o += 32u) {
+				const uint8_t *d = secbuf + o;
+				if (d[0] == 0x00) return false;
+				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f) continue;
+				uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
+				uint32_t fsize = fat_u32(d + 28);
+				if (log_root && logged < 8u) {
+					hakios_tl("UMI ufs_fw: root[%u] '%.11s' attr=%#x clus=%u size=%u\n",
+					    logged, (const char *)d, d[11], fclus, fsize);
+					logged++;
+				}
+				if ((d[11] & 0x10) != 0 && fat_eq_83_ci(d, "IMAGE      ")) {
+					*out_clus = fclus;
+					return *out_clus >= 2u;
+				}
+			}
+		}
+		clus = fat_next_clus(g, clus);
+	}
+	return false;
+}
+
+int
+hakios_modem_fat_read(const char *image_file, uint8_t *dst, uint32_t max_len, uint32_t *out_len)
+{
+	struct fat_geom g;
+	uint32_t img_clus = 0;
+	char target83[11];
+
+	if (!fat_init_geom(&g, modem_fat_secbuf) || !fat_find_image_dir(&g, modem_fat_secbuf, &img_clus, false)) {
+		return ENOENT;
+	}
+	fat_name_to_83(image_file, target83);
+	uint32_t clus = img_clus, fclus = 0, fsize = 0;
+	bool found = false;
+	for (unsigned iter = 0; iter < 256u && clus >= 2u && clus < 0x0ffffff8u && !found; iter++) {
+		uint64_t base = fat_clus_off(&g, clus);
+		for (uint32_t s = 0; s < g.spc && !found; s++) {
+			if (hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g.bps, modem_fat_secbuf, g.bps, NULL) != 0) {
+				return EIO;
+			}
+			for (uint32_t o = 0; o + 32u <= g.bps; o += 32u) {
+				const uint8_t *d = modem_fat_secbuf + o;
+				if (d[0] == 0x00) break;
+				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f || (d[11] & 0x18) != 0) continue;
+				if (fat_eq_83_ci(d, target83)) {
+					fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
+					fsize = fat_u32(d + 28);
+					found = true;
+					break;
+				}
+			}
+		}
+		clus = fat_next_clus(&g, clus);
+	}
+	if (!found) {
+		return ENOENT;
+	}
+	if (out_len != NULL) {
+		*out_len = fsize;
+	}
+	if (dst == NULL || max_len == 0) {
+		return 0;
+	}
+	uint32_t want = fsize < max_len ? fsize : max_len;
+	uint32_t copied = 0, c = fclus;
+	uint32_t clus_bytes = g.bps * g.spc;
+	while (copied < want && c >= 2u && c < 0x0ffffff8u) {
+		uint32_t chunk = want - copied;
+		if (chunk > clus_bytes) chunk = clus_bytes;
+		if (hakios_ufs_read_partition("modem_a", fat_clus_off(&g, c), dst + copied, chunk, NULL) != 0) {
+			return EIO;
+		}
+		copied += chunk;
+		c = fat_next_clus(&g, c);
+	}
+	return copied == want ? 0 : EIO;
+}
+
+static void
+thyme_modem_fat_scan(void)
+{
+	struct fat_geom g;
+	uint32_t img_clus = 0;
+
+	if (!fat_init_geom(&g, modem_fat_secbuf)) {
+		hakios_tl("UMI ufs_fw: modem_a FAT init failed\n");
+		return;
+	}
+	hakios_tl("UMI ufs_fw: modem_a FAT%u bps=%u spc=%u fat_sz=%u root_ent=%u root_clus=%u\n",
+	    g.is_fat32 ? 32u : 16u, g.bps, g.spc, g.fat_sz, g.root_ent, g.root_clus);
+	if (!fat_find_image_dir(&g, modem_fat_secbuf, &img_clus, true)) {
+		hakios_tl("UMI ufs_fw: modem_a/IMAGE not found\n");
+		return;
+	}
+	uint32_t clus = img_clus, logged = 0, total = 0, sample_logged = 0;
+	uint32_t venus_clus = 0, cdsp_clus = 0;
+	bool done = false;
+	for (unsigned iter = 0; iter < 256u && clus >= 2u && clus < 0x0ffffff8u && !done; iter++) {
+		uint64_t base = fat_clus_off(&g, clus);
+		for (uint32_t s = 0; s < g.spc && !done; s++) {
+			if (hakios_ufs_read_partition("modem_a", base + (uint64_t)s * g.bps, modem_fat_secbuf, g.bps, NULL) != 0) {
+				done = true;
+				break;
+			}
+			for (uint32_t o = 0; o + 32u <= g.bps; o += 32u) {
+				const uint8_t *d = modem_fat_secbuf + o;
+				if (d[0] == 0x00) { done = true; break; }
+				if (d[0] == 0xe5 || (d[11] & 0x0f) == 0x0f || (d[11] & 0x18) != 0) continue;
+				total++;
+				bool is_venus = fat_prefix_ci(d, "VENUS", 5u);
+				bool is_cdsp = fat_prefix_ci(d, "CDSP ", 5u);
+				if (is_venus || is_cdsp) {
+					uint32_t fsize = fat_u32(d + 28);
+					uint32_t fclus = ((uint32_t)fat_u16(d + 20) << 16) | fat_u16(d + 26);
+					if (logged < 12u) {
+						logged++;
+						hakios_tl("UMI ufs_fw: image/%.8s.%.3s size=%u clus=%u\n",
+						    (const char *)d, (const char *)(d + 8), fsize, fclus);
+					}
+					if (is_venus && (fat_prefix_ci(d + 8, "MDT", 3u) || fat_prefix_ci(d + 8, "MBN", 3u))) {
+						venus_fw_size = (int)fsize;
+						venus_clus = fclus;
+					}
+					if (is_cdsp && (fat_prefix_ci(d + 8, "MDT", 3u) || fat_prefix_ci(d + 8, "MBN", 3u))) {
+						cdsp_fw_size = (int)fsize;
+						cdsp_clus = fclus;
+					}
+				} else if (sample_logged < 8u) {
+					sample_logged++;
+					hakios_tl("UMI ufs_fw: sample[%u] %.8s.%.3s size=%u\n",
+					    sample_logged, (const char *)d, (const char *)(d + 8), fat_u32(d + 28));
+				}
+			}
+		}
+		clus = fat_next_clus(&g, clus);
+	}
+	uint8_t hdr[16] = { 0 };
+	if (venus_clus >= 2u &&
+	    hakios_ufs_read_partition("modem_a", fat_clus_off(&g, venus_clus), hdr, sizeof(hdr), NULL) == 0) {
+		hakios_tl("UMI ufs_fw: VENUS header (%d B): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+		    venus_fw_size, hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7]);
+	}
+	if (cdsp_clus >= 2u &&
+	    hakios_ufs_read_partition("modem_a", fat_clus_off(&g, cdsp_clus), hdr, sizeof(hdr), NULL) == 0) {
+		hakios_tl("UMI ufs_fw: CDSP header (%d B): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+		    cdsp_fw_size, hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7]);
+	}
+	hakios_tl("UMI ufs_fw: scanned %u files in IMAGE (venus=%d cdsp=%d)\n",
+	    total, venus_fw_size, cdsp_fw_size);
+}
 
 /* SM8250 APSS hardware watchdog (qcom,wdt@17c10000): probe, opt-in wdt=1 arming, and loader_return quiesce. */
 void hakios_wdt_quiesce(void);
