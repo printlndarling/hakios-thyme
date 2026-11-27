@@ -1,5 +1,72 @@
 ## Chronological Verification Logs & Evidence
 
+## Camera chroma boundary and preview timing (2026-11-27)
+
+- After the earlier switch run, the operator reported a much smoother rear preview
+  with some motion lag, a more responsive front preview with blur and noise, and
+  intermittent coloured blocks and flashes. The flashes were confined to the
+  viewfinder; the status bar and Camera controls stayed visible.
+- The NV12 filter had treated the interleaved UV row as twice its actual width.
+  Concurrent preview slices could modify each other's rows. The host fixture
+  for a 1280×720 RAW10 input and 1504×1128 output initially reported a write
+  outside the slice at UV row 70, byte 1504. With the row bound fixed it preserves
+  stride padding and neighbouring slices under ASan and UBSan. The iOS 16.5
+  arm64 media library also compiled.
+- A 175 s repeat-switch RAM run with root `e26fd90bfc9d`, kernel
+  `c466de2c8f3c` and loader `11f4e0271c65` produced real frames from
+  both cameras and Android completed boot after the timed return. The final
+  log retains three completed sessions with intact DMA guards and zero SMMU
+  faults. In those sessions the ISP averaged 103.86–103.93 ms per front
+  frame and 109.41 ms per rear frame. The graph callback averaged
+  0.09–0.15 ms, with zero pool misses. During one rear sample the
+  kernel captured 954 raw frames and the graph received 165 pictures
+  over about 19.5 s, roughly 8.5 pictures/s. The final log retained
+  the later portion of the run, at `logs/soak.lKYXKE8u/kernel.log`, SHA-256
+  `197663fa8fb836c84445150d493fdf9c0a93702b6859e888239a69d1f713a1c8`.
+- The front again requested 16× analogue gain at about 22.5 ms exposure.
+  The preview crops and enlarges the 1280×720 RAW10 stream with the
+  current Bayer-cell reconstruction. Testing for visible blocks or flashes
+  after the patch, motion pacing, and sharpness and noise under matched
+  light remain separate manual checks.
+- A contiguous RGB sharpening pass reduced the single-thread host conversion
+  from 50.2–50.3 to 41.2–41.6 ms per frame. Eight deterministic cases
+  covered all Bayer orders, zoom, 180-degree rotation, lens shading and both
+  NV12 ranges. The before and after NV12 outputs were byte-identical.
+  Fixture `out/thyme-boot/camera-preview-check.Jc6V4NYS/preview.c`.
+  The arm64 compiler vectorized the sharpening loop and the chroma
+  boundary test passed again.
+- The 175 s sharpening-only run with root `2bf200b7a98d` returned
+  to Android on schedule. Its final log retained three completed sessions,
+  all with intact DMA guards, zero SMMU faults and zero pool misses. Two
+  rear sessions averaged 112.20 ms and 108.37 ms per ISP conversion. The
+  front sample averaged 116.19 ms. Thermal throttling was active and the
+  sample did not demonstrate a repeatable on-device gain. The operator
+  confirmed the rear viewfinder still lagged when moving the phone.
+  Log `logs/soak.5z3YheuY/kernel.log`, SHA-256
+  `8b7083352075d020e41f39dfaa5cb70bad5460ae7a9be953ded60a5c36798e21`.
+- Reusing horizontal Bayer interpolation across rows reduced the rear
+  single-thread host conversion from 43.1–43.8 to 30.0–30.2 ms per frame
+  at 1920×1080 RAW10 to 1504×1128 NV12. Front conversion from 1280×720
+  took 27.2 ms versus 41.5–41.6 ms. The before and after outputs were
+  byte-identical in eight cases for each sensor size, and for the
+  downscaled BGRA path at 239×179. The slice bounds passed ASan and UBSan,
+  and the media library compiled for the iOS 16.5 arm64 target.
+- A 155 s RAM repeat-switch run with the column reuse build
+  (`40c9589bf814`) reached both cameras and returned to Android on time.
+  The live console reported four completed sessions. All had intact
+  DMA guards, zero SMMU faults and zero preview pool misses. Two front
+  sessions averaged 92.76 ms and 93.44 ms per ISP conversion. The rear
+  averaged 122.46 ms and 104.40 ms. In the latter rear session the
+  kernel captured 509 raw frames while the graph received 91 pictures
+  over about 10.5 s, approximately 8.7 pictures/s. Active thermal
+  throttling and varying session lengths limited the comparison.
+  The final dump retained the last front session and timed return,
+  `logs/soak.B6SftDCI/kernel.log`, SHA-256
+  `58c1be7a17eda18a3d19df48320a9ac1dc34b11f1448ac413a130a01780e3bbb`.
+  The read-only SHA-256 of the full `logdump` partition matched the
+  earlier comparison after all three runs. Motion acceptance remains
+  open, as does visual verification of the front colour-block fix.
+
 ## Baidu Maps tiles and native Camera preview (2026-11-27)
 
 - During the 300 s daily run, the operator saw a white Baidu Maps

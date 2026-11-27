@@ -18,7 +18,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Metal | **PARTIAL** | `hakios-metal` builds (`metal_apps=1` compositor fix); system `MTLDevice` stability pending |
 | Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
 | Audio & Haptics | **PASS** | Dual CS35L41 L/R + earpiece, 0-short-read mics (VoiceMemos), 15 s retry recovery, AW8697 CoreHaptics |
-| Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. Native preview pacing, switching latency, and front preview quality are still under test. |
+| Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. Native preview pacing, switching latency, and front preview quality remain [under test](devices/thyme/CHECKLIST.md#camera-photos-and-display). |
 | Cellular & VoLTE | **PASS** | SDX55M (`pcie2_mhi=2` native `AppleBaseband`/`CommCenter`), 4G LTE dual-stack + VoLTE (`Mav17`) |
 | Location & GNSS | **PARTIAL** | Settings toggle, Wi-Fi fixes (`BaiduMap`) & SDX55M QMI LOC SV active; outdoor 3D fix pending |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |

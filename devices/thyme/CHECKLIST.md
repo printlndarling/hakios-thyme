@@ -24,8 +24,8 @@ Status legend:
 | Stereo Speakers & Earpiece | Dual `CS35L41` (`0x40` bottom + `0x42` top RCV) | P0 | ✅ | Stereo L/R, ADSP `0x1004`, VoLTE, 15 s keepalive & 5×500 ms retry recovery |
 | Microphones | Dual onboard mics (`mic=4`) | P0 | ✅ | Dual-mic capture, VoLTE uplink, VoiceMemos 0-short-read capture |
 | Linear Haptics | `AW8697` LRA | P1 | ✅ | CoreHaptics transient & continuous waveforms |
-| Rear Main Camera + AF | 108 MP `S5KHMX` + `AK7377` VCM | P1 | ✅ | `1080p` ~51 fps preview, adaptive AF, instant AWB, 5×5 ISP stills |
-| Front Camera | 20 MP `S5K3T2` | P1 | ✅ | `720p @ 42.7 fps` config + lens switching |
+| Rear Main Camera + AF | 108 MP `S5KHMX` + `AK7377` VCM | P1 | 🚧 | Real 1080p RAW10 frames, AF/AWB and native Camera output. Viewfinder pacing and rear switch latency remain under test. |
+| Front Camera | 20 MP `S5K3T2` | P1 | 🚧 | Real 720p RAW10 frames and native Camera switching verified. The 42.7 fps sensor-mode setting is separate from the delivered preview rate. Front preview quality remains open. |
 | Camera Flash / Torch | `PM8150L` WLED | P1 | ✅ | Torch & shutter flash (`torch=3`) |
 | Camera OIS | `qcom,ois@1` (`umi_ois` @ CCI `0x1c`) | P1 | 🚧 | CCI `0x1c` HW readback verified (`ok=1`, `0xf0`); active servo control pending |
 | Aux Cameras (Ultra-wide / Macro / Depth) | `OV13B10` / `GC02M1` | P2 | 🚧 | Stock UMI module tables can be parsed. The real UMI capture backend and Camera expose rear main and front only. |
@@ -78,7 +78,7 @@ Status legend:
 | Wi-Fi | 2.4/5 GHz WPA2, DHCP/TLS, `CN`, 65 s wake, auto-rejoin | WPA3-SAE, hidden SSID, Personal Hotspot, 8 h standby |
 | Bluetooth | 3 Mbaud H4, headphones A2DP playback, phone pairing | HFP/SCO call verification, AVRCP keys, HID keyboards/mice |
 | GNSS | Settings toggle, Wi-Fi CL (`BaiduMap`), QMI SV stream | Outdoor 3D GPS+BeiDou fix, A-GPS XTRA, navigation |
-| Camera | 27 MP rear + front switch, ~51 fps, AF/AWB, flash | Auxiliary lens integration, OIS servo, 108 MP mode, video rec, slow-mo, HDR, QR |
+| Camera | 27 MP rear, front switch, AF/AWB and flash | Native preview pacing, front image quality, switch latency, auxiliary lenses, OIS servo, 108 MP, video, slow-mo, HDR and QR |
 | Display / Touch | 89.08 Hz OLED TE, DCS brightness, multi-touch | 60/90 Hz dynamic switch, auto-brightness curve, DT2W |
 | Audio | Stereo L/R `CS35L41` + earpiece, dual mic, USB-C switch probe | USB-C headset routing, automatic BT HFP/A2DP switch |
 | Battery / Charging | Fuel gauge, USB charge, `bq25970` telemetry, thermal cap | Active QC/PD/33W & 30W wireless control, off-mode charge UI |
@@ -134,9 +134,9 @@ remains open until that test passes.
 | Rear ultra-wide live output | ❌ Manual | Select ultra-wide in Camera. Confirm the physical lens by occluding it and comparing field of view with the main sensor. Capture a real still, open it in Photos, and confirm the saved image came from that lens. |
 | Auxiliary camera switching | ❌ Manual | Identify each independently exposed imager and its supported modes. Repeat main/ultra-wide/front and supported auxiliary switches. Verify real frames resume, the active sensor matches the selection, focus/exposure recover, and Camera works after reopen. |
 | Zoom gestures, readout and dial | 🚧 Manual | Pinch in and out, tap available presets and drag the zoom dial in both directions. Confirm the displayed ratio follows the gesture, live framing changes, supported lens boundaries behave consistently and the saved photo matches preview framing. |
-| Rear and front motion preview | 🚧 Manual | Pan and rotate the phone while viewing a high-contrast subject. Check frame pacing, flashes, repeated frames and tracking on both lenses. A repeat-switch run gave about 8 preview frames per second in a front sample. |
+| Rear and front motion preview | 🚧 Manual | Pan and rotate the phone while viewing a high-contrast subject. Check frame pacing, flashes, repeated frames and tracking on both lenses. Rear repeat-switch samples yielded about 8.5–8.7 preview frames/s. The operator reported motion lag when moving the rear camera. Flashes were confined to the viewfinder. |
 | Camera switch latency | 🚧 Manual | Time each switch from the tap to the first new live preview frame, in both directions. Confirm the viewfinder keeps updating after each switch. Rear sensor arm still took up to about 4.3 seconds in the repeat-switch run. |
-| Front preview quality | 🚧 Manual | Compare sharpness and noise in good light and low light at the same distance. Check the live preview and the saved image independently. |
+| Front preview quality | 🚧 Manual | Compare sharpness and noise in good light and low light at the same distance. Check the live preview and the saved image independently. Front blur and noise were reported. A corrected NV12 row boundary passed the host slice test; intermittent colour blocks and viewfinder flashes remain pending manual retest. |
 | Camera modes and Photos | ❌ Manual | Capture photo and video, verify playback, orientation and synced audio in Photos, then check recent thumbnail, edit/delete, permission prompts, and return to Camera. Test Portrait, slow-motion and QR separately where supported. |
 | Manual brightness range | 🚧 Manual | Start from the minimum nonzero slider setting in Settings and Control Center, sweep to maximum and back, and check slider state across both surfaces. Measure or visibly confirm the panel responds across the range, especially at the low end. Verify the minimum stays nonzero. |
 | Low-brightness stability | ❌ Manual | Hold the minimum visible setting in a dark room, change content, lock/wake repeatedly, and check for black frames, flicker or jumps. Use a photometer or fixed-exposure recording where available to corroborate panel output. |
