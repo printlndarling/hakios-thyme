@@ -735,7 +735,21 @@ router_close(struct hakios_qrtr_port *port)
 	port->closed++;
 }
 
-static const struct hakios_qrtr_ops router_ops = { router_open, router_send, router_lookup, router_close };
+static const struct hakios_qrtr_ops router_ops = {
+	.open = router_open,
+	.send = router_send,
+	.lookup = router_lookup,
+	.close = router_close,
+};
+
+#ifdef TEST_THYME
+static int
+router_poll(struct hakios_qrtr_port *port, uint32_t timeout_ms)
+{
+	check(port == &router && port->open && timeout_ms == 25, "poll does not reach the open QRTR port with its timeout");
+	return 7;
+}
+#endif
 
 /* A datagram from the server to the handle, as the router's thread would bring it. */
 static void
@@ -946,7 +960,19 @@ test_helpers(void)
 	check(qmi_handle_init(&qmi, 8192, &handle_ops, handle_handlers) == -ENXIO && qmi.sock == NULL, "a handle is made with no router there");
 	check(hakios_qmi_handle_init_transport(&qmi, 8192, &handle_ops, handle_handlers, &router_ops) == 0 &&
 	    qmi.sock != NULL, "an explicit transport cannot be used without the default router");
+#ifdef TEST_THYME
+	check(hakios_qmi_poll(&qmi, 25) == 0, "poll is not optional for a threaded transport");
+#endif
 	qmi_handle_release(&qmi);
+#ifdef TEST_THYME
+	check(hakios_qmi_poll(&qmi, 25) == -EINVAL, "poll accepts a closed handle");
+	struct hakios_qrtr_ops polled_ops = router_ops;
+	polled_ops.poll = router_poll;
+	check(hakios_qmi_handle_init_transport(&qmi, 8192, &handle_ops, handle_handlers, &polled_ops) == 0,
+	    "cannot initialize a polled transport");
+	check(hakios_qmi_poll(&qmi, 25) == 7, "poll does not return the transport outcome");
+	qmi_handle_release(&qmi);
+#endif
 
 	hakios_qmi_set_transport(&router_ops);
 	memset(&seen, 0, sizeof(seen));

@@ -52,6 +52,13 @@ jobs:
         run: python3 tools/kernel-version-test.py
       - name: The backup tool only reads, copies exactly, and proves every copy
         run: python3 tools/backup-partitions-test.py
+      - name: Thyme RAM soak preflight and completion evidence
+        run: python3 devices/thyme/tools/test-soak.py
+      - name: QMI helpers and QRTR routing on the host
+        run: |
+          tools/qmi-test/run.sh
+          QMI_TARGET=thyme tools/qmi-test/run.sh
+          tools/qmi-test/run-nas.sh
       - name: Saved var archives use the newest intact slot
         run: |
           python3 tools/var-store-read.py selftest
