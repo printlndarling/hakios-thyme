@@ -8847,6 +8847,68 @@ fastrpc_smmu_look(void)
 	    covering ? "" : " (the boot chain set nothing up for it)");
 }
 
+/* Inventory the first non-secure CDSP DMA stream after the GLINK probe.
+ * The DT's ignored SID bits must be considered when looking for overlaps.
+ */
+void hakios_thyme_cdsp_smmu_inspect(void);
+
+void
+hakios_thyme_cdsp_smmu_inspect(void)
+{
+	const uint32_t sid = 0x1001, sid_mask = 0x460;
+	const vm_size_t size = 0x100000;
+	vm_offset_t smmu = ml_io_map_unmappable(0x15000000, size, VM_WIMG_IO);
+	if (!smmu) {
+		printf("UMI cdsp: SMMU aperture unavailable\n");
+		return;
+	}
+
+	lck_mtx_lock(&hakios_smmu_lock);
+	uint32_t scr0 = rd(smmu), idr0 = rd(smmu + 0x20), idr1 = rd(smmu + 0x24);
+	uint32_t matches = idr0 & 0xff, contexts = idr1 & 0xff, stage2 = (idr1 >> 16) & 0xff;
+	uint32_t page = idr1 >> 31 ? 0x10000 : 0x1000;
+	uint32_t pages = 2u << ((idr1 >> 28) & 7);
+	printf("UMI cdsp: SMMU SCR0=%#x IDR0=%#x IDR1=%#x matches=%u contexts=%u stage2_only=%u\n",
+	    scr0, idr0, idr1, matches, contexts, stage2);
+	if ((idr0 & ((1u << 30) | (1u << 27))) != ((1u << 30) | (1u << 27)) ||
+	    !matches || !contexts || stage2 >= contexts || contexts > pages || 2u * page * pages != size) {
+		goto out;
+	}
+
+	bool wide = (scr0 & (1u << 3)) != 0;
+	uint32_t sid_bits = wide ? 0xffff : 0x7fff;
+	bool referenced[256] = { false };
+	uint32_t conflicts = 0, free_matches = 0, available = 0;
+	for (uint32_t n = 0; n < matches; n++) {
+		uint32_t smr = rd(smmu + 0x800 + 4 * n), s2cr = rd(smmu + 0xc00 + 4 * n);
+		if (!(wide ? s2cr & (1u << 10) : smr >> 31)) {
+			free_matches++;
+			continue;
+		}
+		uint32_t context = s2cr & 0xff, kind = (s2cr >> 16) & 3;
+		if (kind == 0) {
+			referenced[context] = true;
+		}
+		uint32_t stream = smr & sid_bits, mask = (smr >> 16) & sid_bits;
+		if (((sid ^ stream) & ~(sid_mask | mask)) == 0) {
+			conflicts++;
+			printf("UMI cdsp: SMMU overlap SMR=%u sid=%#x mask=%#x kind=%u context=%u\n",
+			    n, stream, mask, kind, context);
+		}
+	}
+	for (uint32_t n = stage2; n < contexts; n++) {
+		vm_offset_t cb = smmu + (pages + n) * page;
+		if (!referenced[n] && (rd(cb) & 1u) == 0 && (rd(cb + 0x58) & 0xc00001feu) == 0) {
+			available++;
+		}
+	}
+	printf("UMI cdsp: SMMU SID=%#x mask=%#x overlaps=%u free_matches=%u idle_stage1_banks=%u unmatched=%s\n",
+	    sid, sid_mask, conflicts, free_matches, available, scr0 & (1u << 10) ? "fault" : "untranslated");
+out:
+	lck_mtx_unlock(&hakios_smmu_lock);
+	ml_io_unmap(smmu, size);
+}
+
 static vm_offset_t fastrpc_smmu_base;
 static uint32_t fastrpc_smmu_index, fastrpc_smmu_old_smr, fastrpc_smmu_old_s2cr;
 static bool fastrpc_smmu_programmed;

@@ -41,6 +41,7 @@ extern bool hakios_thyme_cdsp_publish(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
 extern int hakios_thyme_cdsp_glink_step(unsigned, bool *, bool *) __attribute__((weak));
+extern void hakios_thyme_cdsp_smmu_inspect(void) __attribute__((weak));
 
 SYSCTL_DECL(_kern_hakios);
 
@@ -539,6 +540,9 @@ thyme_cdsp_glink_poll(void)
 		if (cdsp_glink_stage >= 5 && opened) {
 			cdsp_fastrpc_intents_ready = status == 1;
 			hakios_tl("UMI cdsp: FastRPC intent exchange %s\n", outcome);
+			if (status == 1 && cdsp_glink_stage >= 6 && hakios_thyme_cdsp_smmu_inspect != NULL) {
+				hakios_thyme_cdsp_smmu_inspect();
+			}
 		} else if (cdsp_glink_stage >= 4 && negotiated && !opened) {
 			hakios_tl("UMI cdsp: FastRPC channel handshake %s\n", outcome);
 		} else if (!negotiated) {
@@ -1831,6 +1835,7 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 
 #define VENUS_GCC_VIDEO_BASE    0x0010b000UL
 #define VENUS_GCC_AHB_CBCR      0x004u
+#define VENUS_GCC_AXI0_CBCR     0x024u
 #define VENUS_GCC_XO_CBCR       0x03cu
 #define VENUS_VIDEO_CC_BASE     0x0abf0000UL
 #define VENUS_MVS0_RCG_CMD      0xb94u
@@ -1884,7 +1889,7 @@ thyme_venus_set_rcg(vm_offset_t base, uint32_t cfg)
 }
 
 static void
-thyme_venus_core_probe(vm_offset_t vcc)
+thyme_venus_core_probe(vm_offset_t vcc, vm_offset_t gcc, bool probe_axi)
 {
 	uint32_t core = keys_reg(vcc, VENUS_MVS0C_CBCR);
 	uint32_t cfg = keys_reg(vcc, VENUS_MVS0_RCG_CFG);
@@ -1915,6 +1920,23 @@ thyme_venus_core_probe(vm_offset_t vcc)
 	hakios_tl("UMI venus: core clock test running=%d cbcr=%#x cfg=%#x expected_hz=%u\n",
 	    running, keys_reg(vcc, VENUS_MVS0C_CBCR), keys_reg(vcc, VENUS_MVS0_RCG_CFG),
 	    19200000u / div);
+
+	if (probe_axi && running) {
+		uint32_t axi = keys_reg(gcc, VENUS_GCC_AXI0_CBCR);
+		/* This is the video driver's AXI0 gate. A running inherited vote
+		 * is left in place; this test changes only a stopped, unvoted gate.
+		 */
+		bool idle = (axi & (VENUS_CLK_ENABLE | VENUS_CLK_OFF)) == VENUS_CLK_OFF;
+		if (idle) {
+			bool axi_on = thyme_venus_set_branch(gcc, VENUS_GCC_AXI0_CBCR, VENUS_CLK_ENABLE);
+			uint32_t active = keys_reg(gcc, VENUS_GCC_AXI0_CBCR);
+			bool restored = thyme_venus_set_branch(gcc, VENUS_GCC_AXI0_CBCR, axi);
+			hakios_tl("UMI venus: AXI0 running=%d before=%#x active=%#x restored=%#x ok=%d\n",
+			    axi_on, axi, active, keys_reg(gcc, VENUS_GCC_AXI0_CBCR), restored);
+		} else {
+			hakios_tl("UMI venus: AXI0 probe skipped (inherited gate %#x)\n", axi);
+		}
+	}
 
 	bool core_restored = !source_ready || thyme_venus_set_branch(vcc, VENUS_MVS0C_CBCR, core);
 	bool cfg_restored = !changed || thyme_venus_set_rcg(vcc, cfg);
@@ -1964,8 +1986,8 @@ thyme_venus_power_probe(uint32_t mode)
 		}
 		bool powered = thyme_venus_wait_reg(vcc, VENUS_MVS0C_GDSCR, VENUS_PWR_ON, VENUS_PWR_ON);
 		hakios_tl("UMI venus: mvs0c_gdsc after=%#x\n", keys_reg(vcc, VENUS_MVS0C_GDSCR));
-		if (powered && mode == 3) {
-			thyme_venus_core_probe(vcc);
+		if (powered && mode >= 3) {
+			thyme_venus_core_probe(vcc, gcc, mode == 4);
 		} else if (powered) {
 			hakios_tl("UMI venus: mvs0c_core cbcr=%#x\n", keys_reg(vcc, VENUS_MVS0C_CBCR));
 		}
@@ -1998,14 +2020,14 @@ thyme_venus_pil_boot(void)
 {
 	uint32_t v_en = 0, c_en = 0;
 
-	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && v_en >= 1 && v_en <= 3) {
+	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && v_en >= 1 && v_en <= 4) {
 		/* The GDSC alone is insufficient: stock PIL also votes the core clock and interconnect. */
 		thyme_venus_power_probe(v_en);
 		thyme_pil_boot_one("venus", "venus.mdt", "venus.b%02u",
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);
 	}
-	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 5) {
+	if (PE_parse_boot_argn("cdsp", &c_en, sizeof(c_en)) && c_en >= 1 && c_en <= 6) {
 		if (c_en >= 2 && (hakios_thyme_cdsp_publish == NULL || hakios_thyme_cdsp_kick == NULL ||
 		    !hakios_thyme_cdsp_publish())) {
 			hakios_tl("UMI cdsp: APSS SMP2P edge unavailable; PAS startup skipped\n");

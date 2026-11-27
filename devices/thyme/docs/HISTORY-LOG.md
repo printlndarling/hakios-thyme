@@ -1,5 +1,26 @@
 ## Chronological Verification Logs & Evidence
 
+## CDSP SMMU route survey
+
+- Thyme's Android DT assigns `cdsprpc-smd` stream `0x1001` with mask
+  `0x460`, and an IOVA pool starting at `0x80000000`. The `cdsp=6`
+  RAM diagnostic inventories existing routes and candidate context banks
+  after the FastRPC intent exchange, without modifying SMMU registers.
+  Overlap considers both masks, as in the
+  [ARM SMMU driver](https://raw.githubusercontent.com/torvalds/linux/master/drivers/iommu/arm/arm-smmu/arm-smmu.c).
+- The 90 s physical run with kernel `b2ef573e8d84` and root `7d8ba86fdb50`
+  found 87 stream match entries, 74 context banks, zero overlaps with
+  `0x1001/0x460`, 81 invalid match entries and 69 idle stage-1 candidates.
+  Unmatched streams fault. CDSP shut down, the watchdog quiesced and
+  the loader returned `1441823 0`. Local evidence: `logs/150800-run.log`,
+  SHA-256 `b0197bbc3cdab819f63c27eadcdd558fa8347ef725088f129934443cbf2c799c`.
+- Host checks covered legacy and extended stream IDs, overlapping masks,
+  reserved and faulted context banks and an invalid register aperture.
+  The first call still requires an owned stage-1 mapping. Xiaomi's
+  [FastRPC driver](https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/umi-q-oss/drivers/char/adsprpc.c)
+  encodes the low four SID bits above the 32-bit IOVA in the request
+  address; the session selector for this stream is 1.
+
 ## CDSP FastRPC intent exchange
 
 - The `cdsp=5` RAM diagnostic follows the
