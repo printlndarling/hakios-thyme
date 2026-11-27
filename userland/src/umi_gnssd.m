@@ -101,8 +101,8 @@ static void sim_stop(const char *why) {
     LOG("stopped simulated delivery (%s); Wi-Fi positioning active", why);
 }
 
-static void sim_push_fix(const struct umi_gnss_fix *fix) {
-    if (!ensure_sim_manager()) return;
+static bool sim_push_fix(const struct umi_gnss_fix *fix) {
+    if (!ensure_sim_manager()) return false;
     double lat = bits_to_double(fix->latitude_bits);
     double lon = bits_to_double(fix->longitude_bits);
     double hacc = (double)bits_to_float(fix->accuracy_bits);
@@ -120,13 +120,16 @@ static void sim_push_fix(const struct umi_gnss_fix *fix) {
     SEL s_app = sel_registerName("appendSimulatedLocation:");
     SEL s_start = sel_registerName("startLocationSimulation");
     SEL s_fl = sel_registerName("flush");
+    if (!loc || ![g_sim_mgr respondsToSelector:s_app] ||
+        (!g_sim_active && ![g_sim_mgr respondsToSelector:s_start])) return false;
     if ([g_sim_mgr respondsToSelector:s_clr]) ((void (*)(id, SEL))objc_msgSend)(g_sim_mgr, s_clr);
-    if ([g_sim_mgr respondsToSelector:s_app]) ((void (*)(id, SEL, id))objc_msgSend)(g_sim_mgr, s_app, loc);
-    if (!g_sim_active && [g_sim_mgr respondsToSelector:s_start]) {
+    ((void (*)(id, SEL, id))objc_msgSend)(g_sim_mgr, s_app, loc);
+    if (!g_sim_active) {
         ((void (*)(id, SEL))objc_msgSend)(g_sim_mgr, s_start);
         g_sim_active = true;
     }
     if ([g_sim_mgr respondsToSelector:s_fl]) ((void (*)(id, SEL))objc_msgSend)(g_sim_mgr, s_fl);
+    return true;
 }
 
 int main(void) {
@@ -136,14 +139,14 @@ int main(void) {
 
     bool waited_bb = false;
     bool lease_on = false;
-    time_t boot_t = time(NULL);
     time_t lease_since = 0;
     time_t last_renew = 0;
-    time_t last_fix_wall = 0;
+    time_t last_queued = 0;
     uint32_t last_seq = 0;
     uint32_t last_view = 0xffffffffu;
     uint32_t last_status = 0xffffffffu;
-    uint32_t delivered = 0;
+    uint32_t queued = 0;
+    int exit_status = 0;
     unsigned retries = 0;
 
     /* Give CommCenter a few seconds to bring SDX55M out of LPM before opening QMI LOC */
@@ -151,7 +154,14 @@ int main(void) {
 
     while (!g_stop) {
         @autoreleasepool {
-            time_t now = time(NULL);
+            struct timespec monotonic;
+            if (clock_gettime(CLOCK_MONOTONIC, &monotonic) != 0) {
+                LOG("cannot read the GNSS lease clock (err=%d)", errno);
+                exit_status = 1;
+                break;
+            }
+            // The modem lease uses elapsed time. UTC is only for CLLocation timestamps.
+            time_t now = monotonic.tv_sec;
             bool want = location_services_enabled();
             if (!want) {
                 if (lease_on) {
@@ -198,17 +208,18 @@ int main(void) {
                 }
                 if ((fix.flags & UMI_GNSS_POSITION) && fix.sequence != last_seq && fix.age_ms < 5000) {
                     last_seq = fix.sequence;
-                    last_fix_wall = now;
-                    sim_push_fix(&fix);
-                    delivered++;
-                    if (delivered <= 5 || delivered % 30 == 0) {
-                        LOG("delivered GNSS fix #%u to locationd (acc=%.1f m, view=%u, used=%u, age=%u ms)",
-                            delivered, (double)bits_to_float(fix.accuracy_bits),
-                            fix.satellites_view, fix.satellites_used, fix.age_ms);
+                    if (sim_push_fix(&fix)) {
+                        last_queued = now;
+                        queued++;
+                        if (queued <= 5 || queued % 30 == 0) {
+                            LOG("queued GNSS fix #%u for locationd (acc=%.1f m, view=%u, used=%u, age=%u ms)",
+                                queued, (double)bits_to_float(fix.accuracy_bits),
+                                fix.satellites_view, fix.satellites_used, fix.age_ms);
+                        }
                     }
                 }
             }
-            if (g_sim_active && last_fix_wall > 0 && now - last_fix_wall > 15) {
+            if (g_sim_active && last_queued > 0 && now - last_queued > 15) {
                 sim_stop("GNSS fix stale > 15 s");
             }
             /* If early boot raced CommCenter ONLINE (QMI_LOC_START returned error and latched failed),
@@ -223,12 +234,11 @@ int main(void) {
                 sleep(2);
                 continue;
             }
-            (void)boot_t;
         }
         sleep(1);
     }
     if (lease_on) (void)set_gnss_enable(0);
     sim_stop("shutdown");
-    LOG("exiting cleanly (delivered=%u)", delivered);
-    return 0;
+    LOG("exiting (fixes queued=%u)", queued);
+    return exit_status;
 }

@@ -1,5 +1,16 @@
 ## Chronological Verification Logs & Evidence
 
+## GNSS userspace lease timing
+
+- `umi_gnssd` now uses elapsed monotonic time for lease renewals, retry
+  delays and expiry of the last queued fix, so wall-clock corrections
+  do not delay those operations. The timestamp passed to CoreLocation
+  still uses UTC. The daemon counts a fix after submitting it to the
+  simulation manager.
+- The daemon compiled and linked as arm64 Mach-O against the iOS 16.5
+  SDK on WSL2. A clear-sky position and native app location acceptance
+  remain open.
+
 ## CDSP external-module callbacks (working-tree experiment)
 
 - The inherited `cdsp=13` RAM run used kernel `52f00a441635`, root
