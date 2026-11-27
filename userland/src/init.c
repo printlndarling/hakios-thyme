@@ -1217,7 +1217,7 @@ restore_var(void)
 	int status = 0;
 	pid_t pid;
 
-	if (wanted == NULL || strcmp(wanted, "1") != 0) {
+	if (var_kept || wanted == NULL || strcmp(wanted, "1") != 0) {
 		return;
 	}
 	printf("\n-- the data volume of the last boot --\n");

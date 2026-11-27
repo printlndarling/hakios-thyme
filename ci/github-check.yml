@@ -65,6 +65,10 @@ jobs:
           tools/qmi-test/run.sh
           QMI_TARGET=thyme tools/qmi-test/run.sh
           tools/qmi-test/run-nas.sh
+      - name: UFS archive writes require an unclaimed data region
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Idrivers/storage -o /tmp/hakios-ufs-archive tools/ufs-archive-test.c
+          /tmp/hakios-ufs-archive
       - name: Saved var archives use the newest intact slot
         run: |
           python3 tools/var-store-read.py selftest

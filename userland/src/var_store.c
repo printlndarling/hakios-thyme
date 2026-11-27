@@ -169,7 +169,7 @@ static int
 claim(void)
 {
 	if (sysctl_set_int("kern.hakios.var_busy", 1) != 0) {
-		printf("var_store: the store is claimed by another saver (%s)\n", strerror(errno));
+		printf("var_store: cannot claim the archive (%s)\n", strerror(errno));
 		return 0;
 	}
 	return 1;
@@ -1254,8 +1254,11 @@ save_once(void)
 		printf("var_store: %s: %s\n", DEVICE, strerror(errno));
 		return 0;
 	}
-	ok = claim() && save();
-	release();
+	ok = claim();
+	if (ok) {
+		ok = save();
+		release();
+	}
 	close(fd);
 	fd = -1;
 	return ok;
@@ -1273,8 +1276,16 @@ watch(int seconds)
 		    strerror(errno));
 		return 0;
 	}
+	int available = claim();
+
+	if (available) {
+		release();
+	}
 	close(fd);
 	fd = -1;
+	if (!available) {
+		return 0;
+	}
 	if (sysctl_set_int("kern.hakios.var_save", VAR_SAVE_IDLE) != 0) {
 		printf("var_store: this kernel does not keep the data volume (%s)\n", strerror(errno));
 		return 0;
@@ -1389,14 +1400,14 @@ main(int argc, char **argv, char **envp)
 		    strerror(errno));
 		return 1;
 	}
-	if (strcmp(what, "save") == 0) {
-		ok = claim() && save();
-		release();
+	if (strcmp(what, "save") == 0 || strcmp(what, "erase") == 0) {
+		ok = claim();
+		if (ok) {
+			ok = strcmp(what, "save") == 0 ? save() : erase();
+			release();
+		}
 	} else if (strcmp(what, "load") == 0) {
 		ok = load();
-	} else if (strcmp(what, "erase") == 0) {
-		ok = claim() && erase();        /* a write like any other: the claim first */
-		release();
 	} else {
 		show();
 		ok = 1;

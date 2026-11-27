@@ -62,6 +62,7 @@
 #include <libkern/crc.h>
 #include <vm/memory_types.h>
 #include "hakios.ufshc.h"
+#include "hakios.ufs_archive.h"
 
 extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, unsigned int flags);
 extern void IOSleep(unsigned int milliseconds);
@@ -271,6 +272,8 @@ ufs_sysctl_var_save(__unused struct sysctl_oid *oidp, __unused void *arg1, __unu
 SYSCTL_PROC(_kern_hakios, OID_AUTO, var_save, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0,
     ufs_sysctl_var_save, "I", "the data volume's saver: 1 registers, 2 is the kernel asking, 3 is done");
 
+static int ufs_archive_check(void);
+
 /* The claim on the store: 1 takes it, 0 gives it back; reading says which process holds it. */
 static int
 ufs_sysctl_var_busy(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
@@ -296,7 +299,10 @@ ufs_sysctl_var_busy(__unused struct sysctl_oid *oidp, __unused void *arg1, __unu
 			printf("var_store: the claim on the store was left by process %d, which is gone\n",
 			    ufs_var_busy_pid);
 		}
-		ufs_var_busy_pid = me;
+		error = ufs_archive_check();
+		if (error == 0) {
+			ufs_var_busy_pid = me;
+		}
 	} else if (value == 0) {
 		if (ufs_var_busy_pid == me || ufs_var_busy_pid == 0) {
 			ufs_var_busy_pid = 0;
@@ -589,6 +595,22 @@ ufs_read(uint32_t part, uint64_t offset, uint8_t *dst, uint64_t len)
 		ufs_native_out("a read failed");
 	}
 	return ufs_read_mailbox(part, offset, dst, len);
+}
+
+/* The caller holds ufs_write_mtx across both the media probe and the archive claim. */
+static int
+ufs_archive_check(void)
+{
+	if (!ufs_ready || ufs_write_part < 0) {
+		return EROFS;
+	}
+	uint32_t part = (uint32_t)ufs_write_part;
+	int error = ufs_archive_region_check(ufs_read, part, UFS_WRITE_FIRST * 4096, ufs_part_bytes(part));
+
+	if (error != 0) {
+		printf("var_store: darwin data volume check refused the archive claim (%d)\n", error);
+	}
+	return error;
 }
 
 /*
