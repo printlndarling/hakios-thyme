@@ -405,7 +405,7 @@ struct output {
 	bool            enabled;
 	void *          handler;                /* a block: ^(CVPixelBufferRef, CMTime) */
 	bool            said_shape;
-	uint64_t        delivered, refused;
+	uint64_t        delivered, refused, render_ticks, handler_ticks;
 	CVPixelBufferRef held[HELD];            /* the pictures given last, kept from the pool (see deliver) */
 	unsigned        held_next;
 	bool            said_pool;
@@ -1039,6 +1039,8 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	uint64_t began = mach_absolute_time();
 
 	dispatch_apply_f(job.pieces, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), &job, render_piece);
+	uint64_t render_ticks = mach_absolute_time() - began;
+	out->render_ticks += render_ticks;
 	if (job.still) {
 		static mach_timebase_info_data_t tb;
 
@@ -1046,7 +1048,7 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 			mach_timebase_info(&tb);
 		}
 		say("%s: %ux%u made of every pixel in %.0f ms", out->name, width, height,
-		    (double)(mach_absolute_time() - began) * tb.numer / tb.denom / 1e6);
+		    (double)render_ticks * tb.numer / tb.denom / 1e6);
 	}
 	CVPixelBufferUnlockBaseAddress(pb, 0);
 	CVBufferSetAttachment(pb, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVAttachmentMode_ShouldPropagate);
@@ -1067,7 +1069,9 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	}
 	CMTime pts = CMClockMakeHostTimeFromSystemUnits(f->time);
 
+	began = mach_absolute_time();
 	((pixel_buffer_handler)out->handler)(pb, pts);
+	out->handler_ticks += mach_absolute_time() - began;
 	/*
 	 * The moving picture's buffers are kept for HELD frames after they are given. The preview's pool
 	 * would otherwise hand a buffer straight back -- the graph lets go of it as soon as it has passed
@@ -1949,8 +1953,14 @@ stream_begin(CMBaseObjectRef o, bool graph)
 			(void)stream_stop(all_streams[i]);
 		}
 	}
-	s->running = true;
 	s->frames = 0;
+	for (int i = 0; i < OUTPUTS; i++) {
+		struct output *out = &s->out[i];
+
+		out->delivered = out->refused = 0;
+		out->render_ticks = out->handler_ticks = 0;
+	}
+	s->running = true;
 	say("stream: frames begin (format %d)", s->format_index);
 	if (pthread_create(&s->worker, NULL, worker, o) != 0) {
 		s->running = false;
@@ -1971,8 +1981,6 @@ stream_stop(CMBaseObjectRef o)
 {
 	struct stream *s = stream_of(o);
 
-	say("stream: stop (%llu frames, %llu pictures given)", (unsigned long long)s->frames,
-	    (unsigned long long)s->out[0].delivered);
 	pthread_mutex_lock(&s->lock);
 	s->graph_running = false;
 	s->stills_wanted = 0;
@@ -1985,6 +1993,22 @@ stream_stop(CMBaseObjectRef o)
 	if (s->worker_started) {
 		pthread_join(s->worker, NULL);
 		s->worker_started = false;
+		say("stream: stop (%llu frames, %llu pictures given)", (unsigned long long)s->frames,
+		    (unsigned long long)s->out[0].delivered);
+		mach_timebase_info_data_t tb;
+		mach_timebase_info(&tb);
+		double ms_per_tick = (double)tb.numer / tb.denom / 1e6;
+		for (int i = 0; i < OUTPUTS; i++) {
+			const struct output *out = &s->out[i];
+
+			if (out->delivered == 0 && out->refused == 0) {
+				continue;
+			}
+			double scale = out->delivered ? ms_per_tick / out->delivered : 0;
+			say("%s: %llu pictures, %llu pool misses, average %.2f ms ISP, %.2f ms graph callback",
+			    out->name, (unsigned long long)out->delivered, (unsigned long long)out->refused,
+			    out->render_ticks * scale, out->handler_ticks * scale);
+		}
 	}
 	still_reset();
 	return 0;
