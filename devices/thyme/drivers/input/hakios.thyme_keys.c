@@ -1706,6 +1706,16 @@ thyme_pil_boot_one(const char *tag, const char *mdt_name, const char *seg_fmt,
 #define VENUS_GCC_AHB_CBCR      0x004u
 #define VENUS_GCC_XO_CBCR       0x03cu
 #define VENUS_VIDEO_CC_BASE     0x0abf0000UL
+#define VENUS_MVS0_RCG_CMD      0xb94u
+#define VENUS_MVS0_RCG_CFG      0xb98u
+#define VENUS_MVS0C_DIV         0xc54u
+#define VENUS_VIDEO_AHB_CBCR    0xe58u
+#define VENUS_VIDEO_XO_CBCR     0xeecu
+#define VENUS_RCG_UPDATE        1u
+#define VENUS_RCG_ROOT_OFF      (1u << 31)
+#define VENUS_RCG_RATE_MASK    0x371fu
+#define VENUS_RCG_XO_DIV1      1u
+#define VENUS_CORE_RESET       (1u << 2)
 #define VENUS_MVS0C_GDSCR       0xbf8u
 #define VENUS_MVS0C_CBCR        0xc34u
 #define VENUS_CLK_ENABLE        1u
@@ -1725,8 +1735,72 @@ thyme_venus_wait_reg(vm_offset_t base, uint32_t offset, uint32_t mask, uint32_t 
 	return (keys_reg(base, offset) & mask) == expected;
 }
 
+static bool
+thyme_venus_set_branch(vm_offset_t base, uint32_t offset, uint32_t target)
+{
+	uint32_t reg = keys_reg(base, offset);
+	uint32_t enable = target & VENUS_CLK_ENABLE;
+
+	if ((reg & VENUS_CLK_ENABLE) != enable) {
+		keys_write(base, offset, (reg & ~VENUS_CLK_ENABLE) | enable);
+	}
+	const uint32_t mask = VENUS_CLK_ENABLE | VENUS_CLK_OFF;
+	return thyme_venus_wait_reg(base, offset, mask, target & mask);
+}
+
+static bool
+thyme_venus_set_rcg(vm_offset_t base, uint32_t cfg)
+{
+	keys_write(base, VENUS_MVS0_RCG_CFG, cfg);
+	keys_write(base, VENUS_MVS0_RCG_CMD, keys_reg(base, VENUS_MVS0_RCG_CMD) | VENUS_RCG_UPDATE);
+	return thyme_venus_wait_reg(base, VENUS_MVS0_RCG_CMD, VENUS_RCG_UPDATE, 0);
+}
+
 static void
-thyme_venus_power_probe(bool cycle_domain)
+thyme_venus_core_probe(vm_offset_t vcc)
+{
+	uint32_t core = keys_reg(vcc, VENUS_MVS0C_CBCR);
+	uint32_t cfg = keys_reg(vcc, VENUS_MVS0_RCG_CFG);
+	uint32_t cmd = keys_reg(vcc, VENUS_MVS0_RCG_CMD);
+	uint32_t ahb = keys_reg(vcc, VENUS_VIDEO_AHB_CBCR);
+	uint32_t xo = keys_reg(vcc, VENUS_VIDEO_XO_CBCR);
+	uint32_t div = (keys_reg(vcc, VENUS_MVS0C_DIV) & 3u) + 1u;
+
+	hakios_tl("UMI venus: core clock before cbcr=%#x cmd=%#x cfg=%#x div=%u ahb=%#x xo=%#x\n",
+	    core, cmd, cfg, div, ahb, xo);
+	if ((core & (VENUS_CLK_ENABLE | VENUS_CORE_RESET | VENUS_CLK_OFF)) != VENUS_CLK_OFF ||
+	    (cmd & (VENUS_RCG_ROOT_OFF | VENUS_RCG_UPDATE)) != VENUS_RCG_ROOT_OFF) {
+		hakios_tl("UMI venus: core clock probe skipped (branch or RCG in use)\n");
+		return;
+	}
+
+	/* The AHB/XO branches can report running with no local enable vote. Keep inherited votes. */
+	bool vote_xo = (xo & VENUS_CLK_OFF) != 0;
+	bool xo_on = !vote_xo || thyme_venus_set_branch(vcc, VENUS_VIDEO_XO_CBCR, VENUS_CLK_ENABLE);
+	bool vote_ahb = xo_on && (ahb & VENUS_CLK_OFF) != 0;
+	bool ahb_on = xo_on && (!vote_ahb ||
+	    thyme_venus_set_branch(vcc, VENUS_VIDEO_AHB_CBCR, VENUS_CLK_ENABLE));
+	uint32_t test_cfg = (cfg & ~VENUS_RCG_RATE_MASK) | VENUS_RCG_XO_DIV1;
+
+	bool changed = ahb_on && test_cfg != cfg;
+	bool source_ready = ahb_on && (!changed || thyme_venus_set_rcg(vcc, test_cfg));
+	bool running = source_ready && thyme_venus_set_branch(vcc, VENUS_MVS0C_CBCR, VENUS_CLK_ENABLE);
+	hakios_tl("UMI venus: core clock test running=%d cbcr=%#x cfg=%#x expected_hz=%u\n",
+	    running, keys_reg(vcc, VENUS_MVS0C_CBCR), keys_reg(vcc, VENUS_MVS0_RCG_CFG),
+	    19200000u / div);
+
+	bool core_restored = !source_ready || thyme_venus_set_branch(vcc, VENUS_MVS0C_CBCR, core);
+	bool cfg_restored = !changed || thyme_venus_set_rcg(vcc, cfg);
+	bool ahb_restored = !vote_ahb || thyme_venus_set_branch(vcc, VENUS_VIDEO_AHB_CBCR, ahb);
+	bool xo_restored = !vote_xo || thyme_venus_set_branch(vcc, VENUS_VIDEO_XO_CBCR, xo);
+	hakios_tl("UMI venus: core clock restore ok=%d cbcr=%#x cfg=%#x ahb=%#x xo=%#x\n",
+	    core_restored && cfg_restored && ahb_restored && xo_restored,
+	    keys_reg(vcc, VENUS_MVS0C_CBCR), keys_reg(vcc, VENUS_MVS0_RCG_CFG),
+	    keys_reg(vcc, VENUS_VIDEO_AHB_CBCR), keys_reg(vcc, VENUS_VIDEO_XO_CBCR));
+}
+
+static void
+thyme_venus_power_probe(uint32_t mode)
 {
 	const vm_offset_t gcc_pa = trunc_page(VENUS_GCC_VIDEO_BASE);
 	const vm_offset_t gcc_offset = VENUS_GCC_VIDEO_BASE - gcc_pa;
@@ -1741,7 +1815,7 @@ thyme_venus_power_probe(bool cycle_domain)
 	const uint32_t ahb = keys_reg(gcc, VENUS_GCC_AHB_CBCR);
 	const uint32_t xo = keys_reg(gcc, VENUS_GCC_XO_CBCR);
 	hakios_tl("UMI venus: gcc_video ahb=%#x xo=%#x\n", ahb, xo);
-	if (!cycle_domain) {
+	if (mode == 1) {
 		ml_io_unmap(gcc_mapping, gcc_size);
 		return;
 	}
@@ -1763,7 +1837,9 @@ thyme_venus_power_probe(bool cycle_domain)
 		}
 		bool powered = thyme_venus_wait_reg(vcc, VENUS_MVS0C_GDSCR, VENUS_PWR_ON, VENUS_PWR_ON);
 		hakios_tl("UMI venus: mvs0c_gdsc after=%#x\n", keys_reg(vcc, VENUS_MVS0C_GDSCR));
-		if (powered) {
+		if (powered && mode == 3) {
+			thyme_venus_core_probe(vcc);
+		} else if (powered) {
 			hakios_tl("UMI venus: mvs0c_core cbcr=%#x\n", keys_reg(vcc, VENUS_MVS0C_CBCR));
 		}
 		if ((gdsc & VENUS_SW_COLLAPSE) != 0) {
@@ -1795,9 +1871,9 @@ thyme_venus_pil_boot(void)
 {
 	uint32_t v_en = 0, c_en = 0;
 
-	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && (v_en == 1 || v_en == 2)) {
+	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && v_en >= 1 && v_en <= 3) {
 		/* The GDSC alone is insufficient: stock PIL also votes the core clock and interconnect. */
-		thyme_venus_power_probe(v_en == 2);
+		thyme_venus_power_probe(v_en);
 		thyme_pil_boot_one("venus", "venus.mdt", "venus.b%02u",
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);

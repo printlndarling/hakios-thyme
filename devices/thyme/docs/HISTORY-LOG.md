@@ -1,5 +1,34 @@
 ## Chronological Verification Logs & Evidence
 
+## Venus core clock and RAM payload headroom
+
+- The first `venus=3 cdsp=1` run (`b5087c04a781`) returned normally, but
+  the clock test stopped before applying the RCG rate. VIDEO_CC AHB reported
+  `0x0`: halt clear, software enable clear. Requiring the software vote on
+  the inherited bus clock prevented the core test and gave a misleading
+  restore failure. Log `105705-run.log`,
+  SHA-256 `170ea2a26306bd1f0ed03090a20bbda82b36d84fb242ea8cc4b319d8e43a74ac`.
+- The corrected 90 s run (`83e791adb999`) used the
+  [SM8250 MVS0 RCG crystal entry](https://raw.githubusercontent.com/torvalds/linux/master/drivers/clk/qcom/videocc-sm8250.c)
+  with the inherited divider of two. MVS0C moved from `CBCR=0x80000220`
+  to `0x221`, then returned to `0x80000220`. RCG CFG moved from
+  `0x100000` to `0x100001` and back, and GCC AHB/XO restored to
+  `0x80000000`. The expected core rate is 9.6 MHz from the crystal and
+  divider configuration. The test verified the hardware branch state.
+- The same run used the 48,467,968-byte root image with 128 free APFS blocks
+  (SHA-256 `7d8ba86fdb501b832356476bb1f082f60d55e235b22e59ff2ee4c320f6db50b3`).
+  Both root variants were clean in `apfsck -cw`, and an independent reader
+  matched all 992 entries against the staging tree in each image. The compact
+  image saved 524,288 bytes, leaving 534,976 bytes in the loader's payload
+  window. SpringBoard ran, CDSP shut down, the watchdog quiesced, and the
+  loader returned `1441823 0` and rebooted to Android without a kernel panic.
+  Log `110144-run.log`,
+  SHA-256 `eddfa3076e210f23c922417d0f3c755284925133781eb0db98c3c429b5092228`.
+- Venus firmware execution and HFI remain open. For the PAS path, the
+  [vendor Kona clock driver](https://android.googlesource.com/kernel/msm.git/+/48a207df39b112b995317644ca051838d6f93617/drivers/clk/qcom/videocc-kona.c)
+  couples the PLL-backed core rate to MMCX voltage. Check the stock PLL,
+  MMCX/MX, and PIL interconnect votes before retrying `AUTH_AND_RESET`.
+
 ## Cross-platform RAM launcher validation
 
 - On native Windows, `ram-boot.bat` and Python transferred the local
