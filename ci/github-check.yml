@@ -65,6 +65,8 @@ jobs:
           tools/qmi-test/run.sh
           QMI_TARGET=thyme tools/qmi-test/run.sh
           tools/qmi-test/run-nas.sh
+          cc -std=c11 -Wall -Wextra -Werror -Idrivers/modem -o /tmp/hakios-qmi-uim tools/qmi-test/test_uim.c
+          /tmp/hakios-qmi-uim
       - name: UFS archive writes require an unclaimed data region
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Idrivers/storage -o /tmp/hakios-ufs-archive tools/ufs-archive-test.c

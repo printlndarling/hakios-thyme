@@ -5777,6 +5777,7 @@ mhi_qmi_seal(uint8_t *request, size_t at)
  * whichever slot was first found holding one. */
 static struct {
 	unsigned primary_gw;
+	unsigned secondary_gw;
 	unsigned logical_aid_len;
 	uint8_t logical_aid[32];
 	unsigned ready_slot;
@@ -5798,6 +5799,8 @@ static int mhi_uim_dig_switched;
  * state (0 unknown, 1 detected, 2 PIN1 wanted, ..., 7 READY), its AID and
  * PIN1 state.  The layout is the one drivers/modem/hakios.mpss.c parses for
  * the other phone's modem. */
+#include "hakios.uim_status.h"
+
 static int
 mhi_uim_card_status(const uint8_t *frame, size_t length)
 {
@@ -5807,8 +5810,10 @@ mhi_uim_card_status(const uint8_t *frame, size_t length)
 	const uint8_t *qmi, *status = NULL;
 	size_t at, body, status_size = 0;
 	unsigned header, result = ~0u, error = ~0u, slots;
+	struct uim_inventory inventory;
 
-	mhi_uim_state.primary_gw = 0xffff;
+	mhi_uim_state.primary_gw = UIM_NO_SESSION;
+	mhi_uim_state.secondary_gw = UIM_NO_SESSION;
 	mhi_uim_state.logical_aid_len = 0;
 	mhi_uim_state.ready_slot = 0;
 	mhi_uim_state.ready_aid_len = 0;
@@ -5844,20 +5849,22 @@ mhi_uim_card_status(const uint8_t *frame, size_t length)
 		at += 3 + size;
 	}
 	hakios_tl("pcie2: AMSS: UIM card status: result %u, error %u\n", result, error);
-	if (status == NULL || status_size < 9) {
+	if (result != 0 || status == NULL || !uim_status_inventory(status, status_size, &inventory)) {
 		return 0;
 	}
-	slots = status[8];
-	mhi_uim_state.primary_gw = status[0] | (unsigned)status[1] << 8;
+	slots = inventory.slots;
+	mhi_uim_state.primary_gw = inventory.primary_gw;
+	mhi_uim_state.secondary_gw = inventory.secondary_gw;
+	mhi_uim_state.card_present = inventory.present;
+	hakios_tl("pcie2: AMSS: UIM inventory: %u detected slots, %u present, %u ready SIMs, "
+	    "primary GW index %#x, secondary GW index %#x\n",
+	    slots, inventory.present, inventory.ready, inventory.primary_gw, inventory.secondary_gw);
 	hakios_tl("pcie2: AMSS: UIM: primary GW application %u (slot %u), %u slots\n",
 	    status[0], status[1], slots);
 	at = 9;
 	for (unsigned slot = 0; slot < slots && at + 6 <= status_size; slot++) {
 		unsigned card = status[at], applications = status[at + 5];
 
-		if (card == 1) {
-			mhi_uim_state.card_present++;
-		}
 		hakios_tl("pcie2: AMSS: UIM slot %u: card %s (%u), UPIN state %u, error %u, %u applications\n",
 		    slot + 1, card < 3 ? cards[card] : "?", card, status[at + 1],
 		    status[at + 4], applications);
@@ -5882,15 +5889,6 @@ mhi_uim_card_status(const uint8_t *frame, size_t length)
 				if (slot == 0) {
 					mhi_uim_state.logical_aid_len = aid;
 					memcpy(mhi_uim_state.logical_aid, status + at + 7, aid);
-				}
-				if (aid != 0) {
-					char hex[3 * 32 + 1];
-					for (unsigned i = 0; i < aid; i++) {
-						snprintf(hex + i * 3, 4, " %02x", status[at + 7 + i]);
-					}
-					hex[aid * 3] = 0;
-					hakios_tl("pcie2: AMSS: UIM slot %u application %u: a ready %s, its AID%s\n",
-					    slot + 1, a, type == 2 ? "USIM" : "SIM", hex);
 				}
 			}
 			at += 7 + aid + 7;
@@ -6488,7 +6486,7 @@ mhi_uim_switch_allowed(void)
 	int on = 1;
 
 	PE_parse_boot_argn("pcie2_uiswitch", &on, sizeof(on));
-	return on != 0;
+	return on != 0 && mhi_uim_state.card_present <= 1;
 }
 
 /* UIM Switch Slot: TLV 1 the logical slot, TLV 2 the physical one (32 bits),
@@ -6506,7 +6504,7 @@ mhi_uim_switch_slot(struct mhi_channel *out, struct mhi_channel *in, unsigned no
 	uint8_t answer[512];
 
 	if (!mhi_uim_switch_allowed()) {
-		hakios_tl("pcie2: AMSS: UIM: the switch is off (pcie2_uiswitch=0): the card stays in slot %u, Android's posture\n",
+		hakios_tl("pcie2: AMSS: UIM: single-SIM slot switching disabled: preserving the card in slot %u\n",
 		    physical);
 		return 0;
 	}
@@ -6529,7 +6527,7 @@ mhi_uim_provision(struct mhi_channel *out, struct mhi_channel *in, unsigned node
 	unsigned aid = mhi_uim_state.logical_aid_len;
 
 	if (!mhi_uim_switch_allowed()) {
-		hakios_tl("pcie2: AMSS: UIM: the provisioning is off (pcie2_uiswitch=0): the primary GW application stays as the modem left it\n");
+		hakios_tl("pcie2: AMSS: UIM: single-SIM provisioning disabled: preserving the primary GW application\n");
 		return 0;
 	}
 	if (aid == 0 || aid > 32) {
@@ -15096,8 +15094,8 @@ mhi_bb_bridge_run(struct mhi_channel *out, struct mhi_channel *in, unsigned mode
 	}
 	__atomic_store_n(&mhi_bb_live, 1, __ATOMIC_RELEASE);
 	umi_bb_modem_ready();
-	hakios_tl("pcie2: bridge: CommCenter bridge live (primary_gw %#x, QMI/QMAP owned by CommCenter)\n",
-	    mhi_uim_state.primary_gw);
+	hakios_tl("pcie2: bridge: CommCenter bridge live (primary_gw %#x, secondary_gw %#x, QMI/QMAP owned by CommCenter)\n",
+	    mhi_uim_state.primary_gw, mhi_uim_state.secondary_gw);
 
 	for (;;) {
 		error = mhi_poll();

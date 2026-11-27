@@ -33,6 +33,11 @@ case "${SOAK_METAL_APPS:-0}" in
    XL_CMDLINE="$XL_CMDLINE metal=1 metal_apps=2" ;;
 *) echo "soak: SOAK_METAL_APPS must be 0 or 1" >&2; exit 1 ;;
 esac
+case "${SOAK_UIM_READONLY:-0}" in
+0) ;;
+1) XL_CMDLINE="$XL_CMDLINE pcie2_uiswitch=0 pcie2_no_sms=1" ;;
+*) echo "soak: SOAK_UIM_READONLY must be 0 or 1" >&2; exit 1 ;;
+esac
 python3 devices/thyme/ram-boot.py --check-loader "$XL_BOOT_IMAGE"
 ./xl check-payload
 

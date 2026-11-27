@@ -46,7 +46,7 @@ class SoakTest(unittest.TestCase):
         self.env = dict(
             os.environ, PATH=f"{self.root}:{os.environ['PATH']}", XL_ADB_SERIAL="",
             SYSTEM_IMAGE="image", SCENE="image", XL_BOOT_IMAGE="boot.img", XL_LOADER="image",
-            SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", TEST_METAL="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
+            SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", SOAK_UIM_READONLY="0", TEST_UIM_READONLY="0", TEST_METAL="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
             TEST_PRODUCT="thyme", TEST_FASTBOOT="", TEST_RUN_EXIT="0", TEST_PAYLOAD_EXIT="0",
         )
         apfs = self.root / "tools" / "apfs"
@@ -85,6 +85,12 @@ case "$1" in
             *:0) ;;
             *) exit 1 ;;
         esac
+        case "$XL_CMDLINE:$TEST_UIM_READONLY" in
+            *" pcie2_uiswitch=0 pcie2_no_sms=1:1") ;;
+            *" pcie2_uiswitch=0 "*) exit 1 ;;
+            *:0) ;;
+            *) exit 1 ;;
+        esac
         printf '%s\n' "$TEST_LOG" > logs/123456-run.log
         ln -s 123456-run.log logs/last.log
         printf 'result: returned 123 0\r  [logs/123456-run.log]\n'
@@ -118,6 +124,10 @@ esac
         result = self.soak(SOAK_METAL_APPS="1", TEST_METAL="1")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_explicit_read_only_uim_scene(self):
+        result = self.soak(SOAK_UIM_READONLY="1", TEST_UIM_READONLY="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_early_or_unclean_exit(self):
         for log in ("", GUARD, TIMER + "\npanic(cpu 7 caller 0x123): test"):
             with self.subTest(log=log):
@@ -143,6 +153,7 @@ esac
     def test_preflight_refuses_before_uploading(self):
         for overrides in (
             {"TEST_LEVEL": "39"}, {"TEST_PRODUCT": "umi"}, {"XL_ADB_SERIAL": "OTHER"},
+            {"SOAK_UIM_READONLY": "all"},
             {"TEST_FASTBOOT": "OTHER fastboot"}, {"SOAK_STEP": "00"}, {"TEST_PAYLOAD_EXIT": "1"}, {"SOAK_METAL_APPS": "all"},
             {"SOAK_METAL_APPS": "1", "TEST_METAL_BUNDLE": "0"},
         ):

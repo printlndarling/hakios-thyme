@@ -88,6 +88,15 @@ completion. A battery or thermal exit, a panic, or missing evidence fails the
 test. A completed timer is one uptime observation. Use the native app and
 long-term gates in the [checklist](../CHECKLIST.md) to record wider coverage.
 
+## Dual-SIM inventory
+
+With two active SIMs, `SOAK_UIM_READONLY=1` observes the modem's UIM
+inventory during the normal CommCenter boot. It disables the port's
+diagnostic slot switch, provisioning and SMS submit. The inventory
+counts present and READY SIM/USIM applications and reports the
+primary and secondary GW indices. Network registration and native
+line switching require their own checks.
+
 ## App-only Metal
 
 Use `--metal-apps` with a compatible RAM Boot bundle to expose Metal to
