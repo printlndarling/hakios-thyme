@@ -34,10 +34,10 @@ name, no attribute -- and both copies of the table (the primary one at the start
 backup at its end) are made, each with its CRC-32s, then read back here and checked the same way a
 firmware would.
 
-What this writes, into DIR: gpt-head.new and gpt-tail.new (the same 8 blocks, with the change),
-and it prints the f2fs size to shrink to and the dd commands that put the two on the phone. It
-refuses unless the old table checks out, userdata is the last partition, and no f2fs segment
-past the new end holds a single valid block.
+Without sb-after.bin, the non-wipe plan prints the requested f2fs size only. With a matching
+sb-after.bin (or in the explicit --wipe mode), it writes gpt-head.new and gpt-tail.new into DIR
+and prints the commands for those files. It refuses unless the old GPT checks out, userdata
+is last, and the proposed shrink removes no f2fs segment that holds valid blocks.
 """
 import re
 import struct
@@ -57,6 +57,8 @@ def header_of(block):
     if block[:8] != b'EFI PART':
         sys.exit('userdata-carve.py: no GPT header where one should be')
     size = struct.unpack_from('<I', block, 12)[0]
+    if not 92 <= size <= BS:
+        sys.exit('userdata-carve.py: invalid GPT header size')
     h = bytearray(block[:size])
     want = struct.unpack_from('<I', h, 16)[0]
     struct.pack_into('<I', h, 16, 0)
@@ -64,6 +66,7 @@ def header_of(block):
         'size': size, 'crc_right': crc(bytes(h)) == want,
         'my': struct.unpack_from('<Q', block, 24)[0], 'alternate': struct.unpack_from('<Q', block, 32)[0],
         'first_usable': struct.unpack_from('<Q', block, 40)[0], 'last_usable': struct.unpack_from('<Q', block, 48)[0],
+        'disk_guid': block[56:72],
         'entries_lba': struct.unpack_from('<Q', block, 72)[0], 'count': struct.unpack_from('<I', block, 80)[0],
         'entry_size': struct.unpack_from('<I', block, 84)[0], 'entries_crc': struct.unpack_from('<I', block, 88)[0],
     }
@@ -82,9 +85,10 @@ def seal(block, entries):
 def entries_of(blob, h, base):
     """the table bytes and its parsed entries, from blob that starts at LBA base"""
     at = (h['entries_lba'] - base) * BS
-    raw = blob[at:at + h['count'] * h['entry_size']]
-    if len(raw) != h['count'] * h['entry_size']:
+    size = h['count'] * h['entry_size']
+    if h['count'] == 0 or h['entry_size'] < 128 or at < 0 or at + size > len(blob):
         sys.exit('userdata-carve.py: the partition table is not within the saved blocks')
+    raw = blob[at:at + size]
     parsed = []
     for i in range(h['count']):
         e = raw[i * h['entry_size']:(i + 1) * h['entry_size']]
@@ -102,10 +106,18 @@ def check(name, head, tail, disk):
     ph = header_of(head[BS:2 * BS])
     bh = header_of(tail[7 * BS:8 * BS])
     praw, pe, _ = entries_of(head, ph, 0)
-    braw, be, _ = entries_of(tail, bh, disk - 8)
+    braw, _, _ = entries_of(tail, bh, disk - 8)
+    first, last = ph['first_usable'], ph['last_usable']
+    primary_end = ph['entries_lba'] + (len(praw) + BS - 1) // BS
+    backup_end = bh['entries_lba'] + (len(braw) + BS - 1) // BS
+    extents = sorted((e['first'], e['last']) for e in pe if e['type'].int != 0)
+    layout_ok = (2 <= ph['entries_lba'] < primary_end <= first <= last < bh['entries_lba'] < backup_end <= disk - 1
+                 and all(first <= start <= end <= last for start, end in extents)
+                 and all(a[1] < b[0] for a, b in zip(extents, extents[1:])))
     ok = (ph['crc_right'] and bh['crc_right'] and crc(praw) == ph['entries_crc'] and crc(braw) == bh['entries_crc']
           and ph['my'] == 1 and ph['alternate'] == disk - 1 and bh['my'] == disk - 1 and bh['alternate'] == 1
-          and praw == braw and ph['last_usable'] == bh['last_usable'] and ph['first_usable'] == bh['first_usable'])
+          and praw == braw and layout_ok
+          and all(ph[key] == bh[key] for key in ('first_usable', 'last_usable', 'count', 'entry_size', 'disk_guid')))
     print(f'{name}: primary header crc {"right" if ph["crc_right"] else "WRONG"}, table crc '
           f'{"right" if crc(praw) == ph["entries_crc"] else "WRONG"}; backup header crc '
           f'{"right" if bh["crc_right"] else "WRONG"}, table crc {"right" if crc(braw) == bh["entries_crc"] else "WRONG"}; '
@@ -120,8 +132,16 @@ def main():
         args.remove('--wipe')
     if len(args) not in (2, 3):
         sys.exit(__doc__)
-    d, gib = args[0], int(args[1])
+    d, size = args[:2]
+    try:
+        gib = int(size)
+    except ValueError:
+        sys.exit('userdata-carve.py: GIB must be a positive integer')
+    if gib <= 0:
+        sys.exit('userdata-carve.py: GIB must be a positive integer')
     name = args[2] if len(args) > 2 else 'darwin'
+    if not name or '\0' in name or len(name.encode('utf-16le')) > 72:
+        sys.exit('userdata-carve.py: invalid GPT partition name')
     head = open(f'{d}/gpt-head.bin', 'rb').read()
     tail = open(f'{d}/gpt-tail.bin', 'rb').read()
     if len(head) != 8 * BS or len(tail) != 8 * BS:
@@ -154,43 +174,57 @@ def main():
         print(f'userdata: lba {entries[u]["first"]}..{entries[u]["last"]} -> {entries[u]["first"]}..{part_end - 1} '
               f'({(part_end - entries[u]["first"]) * BS / 2**30:.2f} GiB), to be made again (fastboot -w): its data goes')
     else:
-        part_end, new_first = carve_f2fs(d, gib, entries, u, name)
+        part_end, new_first, shrink_blocks, verified = carve_f2fs(d, gib, entries, u, name)
     new_last = ph['last_usable']
+    if new_first > new_last:
+        sys.exit(f'userdata-carve.py: {gib} GiB does not leave room for an aligned partition')
     print(f'{name}: lba {new_first}..{new_last} ({(new_last - new_first + 1) * BS / 2**30:.3f} GiB), '
           f'entry {slot} (sda{slot + 1} under Android), type APFS container')
+    if not wipe and not verified:
+        print(f'F2FS resize target: {shrink_blocks} blocks of {BS} bytes')
+        print('To generate the GPT files, save the resized filesystem’s first block as sb-after.bin')
+        print('and rerun this plan before reboot. No GPT files were generated.')
+        return
     make_table(d, head, tail, disk, ph, bh, entries, u, slot, name, new_first, new_last, part_end, wipe)
 
 
-def carve_f2fs(d, gib, entries, u, name):
-    """userdata shrunk to its f2fs: (where userdata ends, where NAME begins)"""
-    sb = open(f'{d}/userdata-meta-before.bin', 'rb').read(BS)[1024:2048]
-
-    # the f2fs of userdata: where its main area is, and how its segments are filled
+def f2fs_geometry(path):
+    with open(path, 'rb') as source:
+        sb = source.read(BS)[1024:2048]
+    if len(sb) != 1024:
+        sys.exit(f'userdata-carve.py: truncated F2FS superblock in {path}')
     magic, = struct.unpack_from('<I', sb, 0)
-    log_bs, log_bps = struct.unpack_from('<I', sb, 16)[0], struct.unpack_from('<I', sb, 20)[0]
-    block_count, = struct.unpack_from('<Q', sb, 36)
-    segs_main, = struct.unpack_from('<I', sb, 68)
-    main_blkaddr, = struct.unpack_from('<I', sb, 92)
-    if magic != 0xf2f52010 or log_bs != 12:
-        sys.exit('userdata-carve.py: userdata does not begin with a plain f2fs of 4 KB blocks')
+    log_bs, log_bps = struct.unpack_from('<II', sb, 16)
+    if magic != 0xf2f52010 or log_bs != 12 or not 1 <= log_bps < 32:
+        sys.exit(f'userdata-carve.py: {path} does not contain plain F2FS with 4 KiB blocks')
+    blocks, = struct.unpack_from('<Q', sb, 36)
+    segments, = struct.unpack_from('<I', sb, 68)
+    main_block, = struct.unpack_from('<I', sb, 92)
+    return log_bps, blocks, segments, main_block
+
+
+def carve_f2fs(d, gib, entries, u, name):
+    """Plan the shrink and compare a post-shrink superblock when available."""
+    log_bps, block_count, segs_main, main_blkaddr = f2fs_geometry(f'{d}/userdata-meta-before.bin')
     per_seg = 1 << log_bps
     part_blocks = entries[u]['last'] - entries[u]['first'] + 1
-    if block_count > part_blocks:
-        sys.exit('userdata-carve.py: the f2fs is bigger than its partition')
+    if not (0 < main_blkaddr < block_count <= part_blocks and main_blkaddr + segs_main * per_seg <= block_count):
+        sys.exit('userdata-carve.py: the original F2FS geometry does not fit userdata')
     cut = gib * 2**30 // BS // per_seg            # segments taken off the end
+    if not 0 < cut < segs_main:
+        sys.exit('userdata-carve.py: requested shrink must leave at least one F2FS segment')
     new_segs = segs_main - cut
     new_blocks = main_blkaddr + new_segs * per_seg  # what F2FS_IOC_RESIZE_FS is asked for
     fs_blocks = block_count - cut * per_seg         # what the f2fs is then: its slack stays
     try:
-        after = open(f'{d}/sb-after.bin', 'rb').read(BS)[1024:2048]
+        after = f2fs_geometry(f'{d}/sb-after.bin')
     except FileNotFoundError:
         after = None
     if after is not None:
-        got, = struct.unpack_from('<Q', after, 36)
-        got_main, = struct.unpack_from('<I', after, 68)
-        print(f'f2fs on the phone now: {got} blocks, {got_main} segments in its main area')
-        if (got, got_main) != (fs_blocks, new_segs):
-            sys.exit(f'userdata-carve.py: expected {fs_blocks} blocks and {new_segs} segments after the shrink')
+        if after != (log_bps, fs_blocks, new_segs, main_blkaddr):
+            sys.exit(f'userdata-carve.py: expected {fs_blocks} blocks and {new_segs} segments '
+                     'with the same main-area start and segment size after the shrink')
+        print(f'F2FS readback: {fs_blocks} blocks, {new_segs} segments in the main area')
     part_end = entries[u]['first'] + fs_blocks                                        # userdata: exactly the f2fs
     new_start = (part_end + per_seg - 1) // per_seg * per_seg                          # 2 MB from the unit's start
     valid = {}
@@ -199,10 +233,10 @@ def carve_f2fs(d, gib, entries, u, name):
         if m:
             for k, e in enumerate(m[2].split()):
                 valid[int(m[1]) + k] = int(e.split('|')[1])
-    if len(valid) != segs_main:
+    if len(valid) != segs_main or any(not 0 <= n < segs_main for n in valid):
         sys.exit(f'userdata-carve.py: segment_info has {len(valid)} segments, the superblock {segs_main}')
     in_tail = [s for s in range(new_segs, segs_main) if valid[s]]
-    last_used = max(s for s in valid if valid[s])
+    last_used = max((s for s in valid if valid[s]), default=-1)
     print(f'f2fs: {block_count} blocks, main area from block {main_blkaddr}, {segs_main} segments of {per_seg} blocks; '
           f'the last segment holding data is {last_used}')
     if in_tail:
@@ -212,8 +246,7 @@ def carve_f2fs(d, gib, entries, u, name):
     print(f'userdata: lba {entries[u]["first"]}..{entries[u]["last"]} ({part_blocks * BS / 2**30:.2f} GiB) '
           f'-> {entries[u]["first"]}..{part_end - 1} ({fs_blocks * BS / 2**30:.2f} GiB, the f2fs exactly); '
           f'{new_start - part_end} blocks between it and {name} belong to neither')
-    carve_f2fs.new_blocks = new_blocks
-    return part_end, new_start
+    return part_end, new_start, new_blocks, after is not None
 
 
 def make_table(d, head, tail, disk, ph, bh, entries, u, slot, name, new_first, new_last, part_end, wipe):
@@ -226,7 +259,8 @@ def make_table(d, head, tail, disk, ph, bh, entries, u, slot, name, new_first, n
     e[:16] = APFS_CONTAINER.bytes_le
     e[16:32] = uuid.uuid4().bytes_le
     struct.pack_into('<QQQ', e, 32, new_first, new_last, 0)
-    e[56:56 + 2 * len(name)] = name.encode('utf-16le')
+    encoded_name = name.encode('utf-16le')
+    e[56:56 + len(encoded_name)] = encoded_name
     table[slot * es:(slot + 1) * es] = e
     table = bytes(table)
 
@@ -250,24 +284,18 @@ def make_table(d, head, tail, disk, ph, bh, entries, u, slot, name, new_first, n
     open(f'{d}/gpt-head.new', 'wb').write(new_head)
     open(f'{d}/gpt-tail.new', 'wb').write(new_tail)
     print(f'\nmade {d}/gpt-head.new and {d}/gpt-tail.new\n')
-    print('on the phone, in this order (adb root shell):')
-    if wipe:
-        print('  1. nothing to shrink: userdata is erased and made again in step 3')
-    else:
-        print(f'  1. /data/local/tmp/f2fs-resize /data {carve_f2fs.new_blocks}     # the filesystem first')
-        print(f'     and, with no reboot in between (the boot would grow it back), save its first block as sb-after.bin')
-        print(f'     and run this again: it checks the shrunk size and makes the table for it')
+    print('GPT write order for this plan (adb root shell):')
     # each copy: its table before its header, so that a write cut short leaves a header whose table
     # CRC is wrong (and the other copy is used) rather than a right header over a half-written table
     tl, tn = ph['entries_lba'], (ph['count'] * ph['entry_size'] + BS - 1) // BS
-    print(f'  2. the table: the primary copy, its table (lba {tl}..{tl + tn - 1}) and then its header (lba 1); '
+    print(f'  1. the table: the primary copy, its table (lba {tl}..{tl + tn - 1}) and then its header (lba 1); '
           f'then the backup')
     print(f'     dd if=gpt-head.new of=/dev/block/sda bs={BS} skip={tl} seek={tl} count={tn} conv=notrunc,fsync')
     print(f'     dd if=gpt-head.new of=/dev/block/sda bs={BS} skip=1 seek=1 count=1 conv=notrunc,fsync')
     print(f'     dd if=gpt-tail.new of=/dev/block/sda bs={BS} skip={changed_tail[0]} seek={disk - 8 + changed_tail[0]} '
           f'count={changed_tail[-1] - changed_tail[0] + 1} conv=notrunc,fsync')
     if wipe:
-        print('  3. adb reboot bootloader; fastboot -w   (userdata and metadata made again: Android starts as new)')
+        print('  2. adb reboot bootloader; fastboot -w   (userdata and metadata made again: Android starts as new)')
     return 0
 
 
