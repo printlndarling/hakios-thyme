@@ -25,6 +25,11 @@ for image in "$SYSTEM_IMAGE" "$SCENE" "$XL_BOOT_IMAGE" "$XL_LOADER"; do
 done
 
 # The thyme loader's run-payload window is 0x03f00000 bytes.
+export XL_USB_HANDOFF=${SOAK_USB_HANDOFF:-0}
+case "$XL_USB_HANDOFF" in
+0|1) ;;
+*) echo "soak: SOAK_USB_HANDOFF must be 0 or 1" >&2; exit 1 ;;
+esac
 export XL_MAX_PAYLOAD=66060288 XL_SECS=$SOAK_SECS XL_REBOOT_AFTER=1 XL_DETACH=0 XL_HOME=android XL_RAMDISK="$SCENE"
 export XL_CMDLINE="debug=0x8 rd=md0 $ARGS pcie2_test=1 pcie2_bhi=2 ufs=2 pcie2_msi=1 pcie2_sid=5 pcie2_mhi=2 pcie2_nr=0"
 case "${SOAK_METAL_APPS:-0}" in
@@ -80,13 +85,15 @@ trap 'exit 143' TERM HUP
 # Always start from Android and upload the chosen system image for this run.
 ./xl ramdisk "$SYSTEM_IMAGE" | tee "$evidence/ramdisk.log"
 
-(
-	for ((elapsed=SOAK_STEP; elapsed <= SOAK_SECS - 60; elapsed+=SOAK_STEP)); do
-		sleep "$SOAK_STEP" </dev/null >/dev/null 2>&1
-		./xl screenshot-live "$evidence/screen-$elapsed.png" || true
-	done
-) &
-capture_pid=$!
+if [ "$XL_USB_HANDOFF" = 0 ]; then
+	(
+		for ((elapsed=SOAK_STEP; elapsed <= SOAK_SECS - 60; elapsed+=SOAK_STEP)); do
+			sleep "$SOAK_STEP" </dev/null >/dev/null 2>&1
+			./xl screenshot-live "$evidence/screen-$elapsed.png" || true
+		done
+	) &
+	capture_pid=$!
+fi
 
 run_status=0
 ./xl run | tee "$evidence/host.log" || run_status=$?
@@ -107,6 +114,15 @@ if [ "$booted" != 1 ]; then
 fi
 recover=0
 echo "soak: Android boot completed"
+
+if [ "$XL_USB_HANDOFF" = 1 ]; then
+	if [ "$run_status" != 0 ]; then
+		echo "soak: USB handoff run failed" >&2
+		exit 1
+	fi
+	echo "soak: USB handoff reset observed; use the LAN session to capture live diagnostics"
+	exit 0
+fi
 
 log=$(tr -d '\r' < "$evidence/host.log" |
 	sed -nE 's/^result: returned [1-9][0-9]* 0 +\[(logs\/[0-9]{6}-run\.log)\]$/\1/p')

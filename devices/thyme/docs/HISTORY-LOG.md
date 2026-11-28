@@ -1,5 +1,38 @@
 ## Chronological Verification Logs & Evidence
 
+## EFI USB controller handoff on thyme (2026-11-28)
+
+- The guarded launcher stages the normal RAM payload and explicitly asks
+  the thyme EFI loader to stop USB before starting XNU. One validation run
+  rejected the Haven watchdog requirement because thyme uses the APSS
+  watchdog configured by XNU. The handoff now requires that setting and
+  the battery watcher. It retains the kernel timer and adds a loader
+  deadline for a kernel that overruns it.
+- The 150 s repeat used kernel `faedd6175a35`, loader `bcf01e13942a`,
+  boot image `50373c1ed61c` and debug scene `6933f21e8581`. Native Windows
+  recorded the EFI fastboot device disappearing after launch. In that
+  interval the pinned WSL2 client reached UID 0 on Darwin 22.5.0, read
+  DWC3 ID `0x33313130` and DSTS `0x00d2dd7c` with the device-controller
+  halted bit set. Fastboot reported zero devices. SSH also retrieved
+  kernel logs with battery telemetry. `com.apple.logd` was running,
+  and the scene lacked a `log` command for unified log streaming.
+- USB remained stopped until reset. Android completed boot 200 s after
+  the launch command, and the whole `logdump` SHA-256 matched before and
+  after. The USB-off run has live SSH evidence and an Android boot
+  result. Its final RAM log, including the timer marker, is lost on
+  cold reset. XNU Gadget enumeration and transfers remain open.
+- The 95 s normal RAM Boot with the same binaries kept fastboot
+  available, retrieved a 1080 × 2340 live framebuffer and read
+  DSTS `0x00831f28` with the halted bit clear at kernel startup. The
+  kernel log contains the APSS watchdog enable and the timer expiry.
+  It is retained at `logs/soak.9xx2hBha/kernel.log` with SHA-256
+  `d4a190d8c4a83e43393b57d521f100ad8fc1295a59b6d1a303e6279c8398a786`.
+- Local evidence is under `out/thyme-boot/usb-handoff.A9ysheV0/`.
+  `windows-usb.log` SHA-256
+  `4faab6c2d8f14e3dd4571bbdf78e42a8ed1536e2e667d77a849fddff69b1c214`.
+  `ssh-evidence.log` SHA-256
+  `3d286f2a8862e2de54ad6758a95292295221942cdc01198a59735cf317a32190`.
+
 ## Native Windows OpenSSH and USB loader ownership (2026-11-28)
 
 - HDB enrolled the public key generated on Windows alongside the WSL2

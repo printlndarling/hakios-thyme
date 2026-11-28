@@ -95,18 +95,51 @@ services have separate acceptance.
 
 ## USB device and host work
 
-During the authenticated Windows and WSL2 session, Windows still listed
-`VID_18D1&PID_D00D` as Android Bootloader Interface and `xl state`
-returned `loader`. The existing EFI fastboot endpoint continued to
-serve a live framebuffer capture. This is the starting point for
-controller handoff. The XNU-side DWC3 probe only reads the controller's
-identification and status. Initial device-mode work must coordinate
-ownership with the live loader and retain its timed return.
+### EFI USB handoff test
 
-1. Verify DWC3 ownership and the transition from the RAM Boot loader.
-   Bring up USB Device mode and validate enumeration, endpoint transfers,
-   disconnect and reconnect on the native host. The current kernel
-   provides the controller identification and status registers.
+The normal RAM Boot uses the loader's fastboot interface while XNU runs.
+The optional thyme handoff run closes EFI USB just before XNU starts.
+The loader's CPU continues to service the charger and storage mailbox.
+The XNU watchdog stays enabled and the loader has a separate deadline
+for a kernel that overruns its timer.
+Qualcomm's Stop contract ends access to the device protocol, so the
+loader cold-resets to Android when XNU hands control back. See the
+[Qualcomm EFI USB device protocol](https://github.com/SHIFTPHONES/android_bootable_bootloader_edk2/blob/sos-3.x/QcomModulePkg/Include/Protocol/EFIUsbDevice.h).
+
+Build a thyme RAM loader with `devices/thyme/build-loader.sh` and use the
+authenticated LAN debug image. With the cable attached and the handset
+in Android, run:
+
+```sh
+SOAK_USB_HANDOFF=1 SOAK_UIM_READONLY=1 SOAK_SECS=150 \
+  SCENE=PATH_TO_DEBUG_SCENE devices/thyme/soak.sh
+```
+
+Set `XL_BOOT_IMAGE` and `XL_LOADER` when using a separate build directory.
+Watch the native host for the removal of `VID_18D1&PID_D00D`. From the
+pinned LAN client, run `python3 tools/hdb.py --host PHONE_LAN_IP shell`
+and read `kern.hakios.usb_dwc3_id` and `kern.hakios.usb_dwc3_dsts` while
+the EFI interface is absent. On thyme, Windows observed the detach and
+the pinned WSL2 client read ID `0x33313130` and DSTS `0x00d2dd7c`. Bit 22
+of DSTS reports that the device controller halted. See the
+[DWC3 register definitions](https://github.com/torvalds/linux/blob/master/drivers/usb/dwc3/core.h).
+The handoff mode records Android boot completion. Capture diagnostics
+over SSH while the kernel is live, because it discards the RAM log at
+reset. Use standard RAM Boot for the final kernel log and the
+`loader_return_after expired` marker.
+
+### USB Gadget and services
+
+In standard RAM Boot, Windows lists `VID_18D1&PID_D00D` as the Android
+Bootloader Interface. The EFI fastboot endpoint can serve a live
+framebuffer capture while XNU runs. The XNU-side DWC3 probe reads the
+controller's identification and status. The next stage is to use the
+halted controller for an XNU device-mode driver and verify its shutdown
+during the timed return.
+
+1. Bring up the XNU USB Device driver with the EFI interface stopped.
+   Validate enumeration, endpoint transfers, disconnect, reconnect
+   and timed shutdown on the native host.
 2. Validate discovery and transport with usbmuxd and libimobiledevice,
    then implement and test trust and lockdown session handling. Export
    actual thyme hardware and OS information where the protocol permits,

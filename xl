@@ -28,6 +28,8 @@
 # Logs land in logs/. Environment for `run`:
 #   XL_CMDLINE  extra kernel boot-args; default "-v": the boot is shown as text on the phone's screen
 #               (XL_CMDLINE="" for a blank screen, XL_CMDLINE="-v systrace=1" to trace failing syscalls)
+#   XL_USB_HANDOFF=1   thyme developer run with EFI USB stopped and a cold reset on kernel return.
+#               Use with the guarded soak workflow and an authenticated LAN debug scene.
 #   XL_SECS     seconds after which the kernel returns to the loader on its own (default 8)
 #   XL_FOLLOW=N fetch the kernel's log every N seconds during a run (default 10; XL_FOLLOW= for never), so that a kernel
 #               that hangs leaves what it said in logs/<time>-run.log.live; after a hang `run` brings the phone back to
@@ -298,6 +300,15 @@ check_payload() (
 # whatever its arguments, gave no answer within 5 s; every first run of a session lived). Restart the phone into its own
 # bootloader between runs ("xl run" warns when this session has run a kernel already).
 run() { # run <oem command> <label>
+	local handoff=0
+	if [ "${XL_USB_HANDOFF:-0}" = 1 ] && [ "$1" != "oem selftest" ]; then
+		if [ "$2" != run ] || [ "${XL_DETACH:-0}" = 1 ] || [ "${XL_HOME:-android}" != android ] ||
+		    ! [[ ${XL_SECS:-8} =~ ^[1-9][0-9]{0,5}$ ]]; then
+			echo "xl: USB handoff requires a timed run to Android without a checkpoint or detach" >&2
+			return 1
+		fi
+		handoff=1
+	fi
 	if [ "$(state)" = loader ] && [ -f $PHONE.ran ]; then
 		echo "xl: warning: a kernel has already run in this session of the loader, and a second one has died at once every time it was tried"
 	fi
@@ -306,6 +317,10 @@ run() { # run <oem command> <label>
 	flock -n 8 || { echo "xl: a run is in progress, started from $(cat $PHONE.who 2>/dev/null) (xl stop ends it)"; return 1; }
 	pwd > $PHONE.who
 	local stamp log result
+	if [ "$handoff" = 1 ] && ! fb getvar usb-handoff | grep -Eq '^usb-handoff: reset[[:space:]]*$'; then
+		echo "xl: the loaded EFI does not support USB handoff" >&2
+		return 1
+	fi
 	stamp=$(date +%H%M%S); log="logs/$stamp-$2.log"
 	if [ "$1" != "oem selftest" ]; then
 		# The kernel hands control back after XL_SECS seconds even if it is just waiting.
@@ -330,6 +345,10 @@ run() { # run <oem command> <label>
 		fi
 		build_run_payload run-payload.bin || return 1
 		FB_TIMEOUT=30 fb stage run-payload.bin | grep -q OKAY || { echo "xl: upload failed"; return 1; }
+	fi
+	if [ "$handoff" = 1 ]; then
+		run_usb_handoff
+		return
 	fi
 	local live=; live_loader && live=1
 	fb $1 >/dev/null
@@ -384,6 +403,40 @@ run() { # run <oem command> <label>
 		echo "xl: XL_REBOOT_AFTER: the phone goes back to Android (it charges there)"
 		fb reboot >/dev/null
 	fi
+}
+
+# Qualcomm Stop is terminal. Wait for the unplugged controller's run to reset to Android.
+run_usb_handoff() {
+	local started=$SECONDS budget=${XL_SECS:-8} booted result
+	if ! fb oem run-no-usb | grep -q OKAY; then
+		echo "xl: USB handoff was not acknowledged" >&2
+		return 1
+	fi
+	echo "xl: USB handoff acknowledged; expecting a cold reset after a ${budget}s run"
+	sleep 2
+	while (( SECONDS - started < budget + 100 )); do
+		booted=$(timeout -k 2 3 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')
+		if [ "$booted" = 1 ]; then
+			if (( SECONDS - started < budget )); then
+				echo "xl: Android booted before the handoff run expired" >&2
+				return 1
+			fi
+			echo "xl: Android booted after USB handoff ($(( SECONDS - started ))s)"
+			return 0
+		fi
+		if in_fastboot; then
+			result=$(FB_TIMEOUT=5 fb getvar result | grep '^result:')
+			if [[ $result == "result: not-started "* ]]; then
+				fetch_log logs/usb-handoff-refused.log
+				echo "xl: USB handoff rejected by EFI [logs/usb-handoff-refused.log]" >&2
+				return 1
+			fi
+		fi
+		sleep 2
+	done
+	echo "xl: Android boot completion was not observed after USB handoff" >&2
+	recover_phone
+	return 2
 }
 
 recording() { # recording [file.mp4]

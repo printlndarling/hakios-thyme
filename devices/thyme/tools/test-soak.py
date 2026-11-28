@@ -47,7 +47,7 @@ class SoakTest(unittest.TestCase):
             os.environ, PATH=f"{self.root}:{os.environ['PATH']}", XL_ADB_SERIAL="",
             SYSTEM_IMAGE="image", SCENE="image", XL_BOOT_IMAGE="boot.img", XL_LOADER="image",
             SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", SOAK_UIM_READONLY="0", TEST_UIM_READONLY="0", TEST_METAL="0",
-            SOAK_DSDS_PROBE="0", TEST_DSDS_PROBE="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
+            SOAK_USB_HANDOFF="0", TEST_USB_HANDOFF="0", SOAK_DSDS_PROBE="0", TEST_DSDS_PROBE="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
             TEST_PRODUCT="thyme", TEST_FASTBOOT="", TEST_RUN_EXIT="0", TEST_PAYLOAD_EXIT="0",
         )
         self.env.pop("XL_FOLLOW", None)
@@ -101,6 +101,10 @@ case "$1" in
             *:0) ;;
             *) exit 1 ;;
         esac
+        [ "$XL_USB_HANDOFF" = "$TEST_USB_HANDOFF" ] || exit 1
+        if [ "$XL_USB_HANDOFF" = 1 ]; then
+            exit "$TEST_RUN_EXIT"
+        fi
         printf '%s\n' "$TEST_LOG" > logs/123456-run.log
         ln -s 123456-run.log logs/last.log
         printf 'result: returned 123 0\r  [logs/123456-run.log]\n'
@@ -143,6 +147,16 @@ esac
                            SOAK_UIM_READONLY="1", TEST_UIM_READONLY="1")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_usb_handoff_reset_and_failure(self):
+        result = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("USB handoff reset observed", result.stdout)
+        self.assertNotIn("timed return verified", result.stdout)
+        self.assertFalse(list((self.root / "logs").glob("soak.*/kernel.log")))
+        failed = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1", TEST_RUN_EXIT="2")
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("USB handoff run failed", failed.stderr)
+
     def test_early_or_unclean_exit(self):
         for log in ("", GUARD, TIMER + "\npanic(cpu 7 caller 0x123): test"):
             with self.subTest(log=log):
@@ -169,7 +183,7 @@ esac
         for overrides in (
             {"TEST_LEVEL": "39"}, {"TEST_PRODUCT": "umi"}, {"XL_ADB_SERIAL": "OTHER"},
             {"SOAK_UIM_READONLY": "all"}, {"SOAK_DSDS_PROBE": "all"},
-            {"TEST_FASTBOOT": "OTHER fastboot"}, {"SOAK_STEP": "00"}, {"TEST_PAYLOAD_EXIT": "1"}, {"SOAK_METAL_APPS": "all"},
+            {"TEST_FASTBOOT": "OTHER fastboot"}, {"SOAK_STEP": "00"}, {"SOAK_USB_HANDOFF": "all"}, {"TEST_PAYLOAD_EXIT": "1"}, {"SOAK_METAL_APPS": "all"},
             {"SOAK_METAL_APPS": "1", "TEST_METAL_BUNDLE": "0"},
         ):
             with self.subTest(overrides=overrides):

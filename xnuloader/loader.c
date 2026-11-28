@@ -2387,7 +2387,7 @@ psci_call(uint64_t function, uint64_t a1, uint64_t a2, uint64_t a3)
  */
 static int64_t
 run_on_other_cpu(uint64_t mpidr, uint64_t entry, uint64_t boot_args_pa, const struct kernel_live *live, uint64_t slide,
-    uint64_t budget)
+    uint64_t budget, int usb_handoff)
 {
 	uint64_t daif = 0, group1 = 0, started, last_pet, last_battery, last_beat_at, last_beat = 0, noted = 0;
 	int64_t status;
@@ -2483,6 +2483,11 @@ run_on_other_cpu(uint64_t mpidr, uint64_t entry, uint64_t boot_args_pa, const st
 				log_of_hung_kernel(live, slide);
 				status = OTHER_CPU_HUNG;
 			}
+		}
+		if (usb_handoff && status == 0 && seconds_since(started) >= budget + 60) {
+			print("usb: handoff return deadline expired\n");
+			log_of_hung_kernel(live, slide);
+			status = OTHER_CPU_HUNG;
 		}
 		if (block_enabled) {
 			block_poll();
@@ -2947,8 +2952,10 @@ choose_window(const struct payload_info *pi)
  */
 static int starts_with(const char *s, const char *prefix);
 
+static void usb_stop_for_handoff(void);
+
 static int
-run_kernel(int have_checkpoint, uint64_t checkpoint)
+run_kernel(int have_checkpoint, uint64_t checkpoint, int usb_handoff)
 {
 	static uint8_t map_buf[65536];
 	uint64_t map_size, map_key, desc_size;
@@ -3119,7 +3126,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	/* "bootcpu=N" among the kernel's arguments: run it on core N (see run_on_other_cpu) */
 	uint64_t this_mpidr = READ_SYSREG(MPIDR_EL1) & 0xFFFFFF, kernel_mpidr = this_mpidr;
 	/* "cpus=N" or "cpumask=M" there too: the kernel may have more cores than the one it starts on */
-	int more_cores = 0, battery_requested = 0, ufs_requested = 0;
+	int more_cores = 0, battery_requested = 0, watchdog_requested = 0, ufs_requested = 0;
 	/* "torch=N" (not 0) there too: the phone's flashlight is the kernel's (drivers/camera/hakios.torch.c) */
 	int torch_requested = 0;
 	/* "cam=5" there too: the phone's wide camera is Darwin's (drivers/camera/hakios.camera.c) */
@@ -3146,6 +3153,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		more_cores |= (starts_with(c, "cpus=") || starts_with(c, "cpumask=")) && (c == pi.cmdline || c[-1] == ' ');
 		battery_requested |= starts_with(c, "battery=1") && (c == pi.cmdline || c[-1] == ' ') &&
 		    (c[9] == 0 || c[9] == ' ');
+		watchdog_requested |= starts_with(c, "wdt=1") && (c == pi.cmdline || c[-1] == ' ') &&
+		    (c[5] == 0 || c[5] == ' ');
 		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
 		camera_requested |= starts_with(c, "cam=5") && (c == pi.cmdline || c[-1] == ' ') && (c[5] == 0 || c[5] == ' ');
 		baseband_requested |= (starts_with(c, "pcie2_mhi=2") && (c == pi.cmdline || c[-1] == ' ') &&
@@ -3198,15 +3207,25 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	}
 
 	/* Give the kernel the address of our return stub and the checkpoint to stop at. */
+	int has_return_stub = 0;
 	for (uint64_t *q = (uint64_t *)kern_lo; q < (uint64_t *)kern_hi; q++) {
 		if (*q == 0x545352444C554E58ULL /* "XNULDRST" */) {
 			q[1] = kernel_mpidr != this_mpidr ? (uint64_t)(uintptr_t)&other_cpu_return_stub :
 			    (uint64_t)(uintptr_t)&loader_return_stub;
 			q[2] = checkpoint;
 			q[3] = slide;
+			has_return_stub = 1;
 			print("return slot patched at %x, checkpoint %d\n", (uint64_t)(uintptr_t)q, checkpoint);
 			break;
 		}
+	}
+
+	/* Thyme arms its APSS watchdog in XNU. The loader's Haven watchdog is redwood-only. */
+	if (usb_handoff && (kernel_mpidr == this_mpidr || checkpoint != 0 || !watchdog_requested ||
+	    !battery_requested || !charger_enabled || block_write_requested || kernel_budget == 0 ||
+	    kernel_budget > 999999 || kernel_live == NULL || !has_return_stub)) {
+		print("usb: handoff requires a timed, read-only run with its watcher, wdt=1 and battery=1\n");
+		return 0;
 	}
 
 	/* --- boot_args ------------------------------------------------------ */
@@ -3633,6 +3652,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	}
 	print("jumping to %x\n", entry_va + slide);
 	flush_log();
+	if (usb_handoff) {
+		usb_stop_for_handoff();
+	}
 	screen_quiet_before_run = screen_quiet;
 	screen_quiet = 1;               /* the screen is the kernel's now; the log still takes every line */
 	/* From here on the kernel feeds the watchdog (boot-arg hv_wdt_pet, see loader_return.c in XNU). */
@@ -3667,7 +3689,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			jump_to_kernel((uint64_t)(uintptr_t)&loader_return_stub, 0);
 		}
 		if (kernel_mpidr != this_mpidr) {
-			int64_t status = run_on_other_cpu(kernel_mpidr, entry_va + slide, ba_pa, kernel_live, slide, kernel_budget);
+			int64_t status = run_on_other_cpu(kernel_mpidr, entry_va + slide, ba_pa, kernel_live, slide,
+			    kernel_budget, usb_handoff);
 
 			screen_quiet = screen_quiet_before_run;
 			wdt_set_ms(WDT_BITE_MS);
@@ -3914,6 +3937,28 @@ usb_wait(uint8_t endpoint)
 
 static int usb_rx_queued;       /* usb_poll_command() has left the receive for the next command with the controller */
 
+static void
+usb_stop_for_handoff(void)
+{
+	/* The run command and its reply are both complete, so neither bulk buffer is in flight. */
+	efi_status status = USB->free_transfer_buffer(usb_tx_buf);
+	if (!EFI_ERROR(status)) {
+		status = USB->free_transfer_buffer(usb_rx_buf);
+	}
+	if (!EFI_ERROR(status)) {
+		status = USB->stop();
+	}
+	if (EFI_ERROR(status)) {
+		print("usb: firmware device stop failed %x; resetting\n", status);
+		reboot();
+	}
+	/* Qualcomm's Stop contract disallows further access to this protocol. */
+	USB = NULL;
+	usb_tx_buf = usb_rx_buf = NULL;
+	usb_connected = usb_rx_queued = 0;
+	print("usb: firmware device stopped for kernel handoff\n");
+}
+
 static int64_t
 usb_rx(uint8_t *buf, uint64_t len)
 {
@@ -3937,7 +3982,7 @@ usb_tx(const uint8_t *data, uint64_t len)
 	return usb_wait(USB_EP_IN);
 }
 
-static void
+static int
 fb_reply(const char *code, const char *text)
 {
 	uint32_t n = 0;
@@ -3947,7 +3992,7 @@ fb_reply(const char *code, const char *text)
 	for (; *text && n < 63; text++) {
 		usb_tx_buf[n++] = (uint8_t)*text;
 	}
-	usb_tx(usb_tx_buf, n);
+	return usb_tx(usb_tx_buf, n) == n;
 }
 
 static void
@@ -4000,6 +4045,10 @@ fb_command(char *cmd)
 				fb_reply("OKAY", "0.5");
 			} else if (str_eq(var, "max-download-size")) {
 				fb_reply("OKAY", download_to_ramdisk ? "0xffffffff" : "0x03f00000");
+#ifdef LOADER_THYME
+			} else if (str_eq(var, "usb-handoff")) {
+				fb_reply("OKAY", "reset");
+#endif
 			} else if (str_eq(var, "result")) {
 				fb_reply("OKAY", last_result);
 			} else if (str_eq(var, "screen") && SCREEN.base != 0) {
@@ -4140,6 +4189,18 @@ fb_command(char *cmd)
 			fb_reply("OKAY", "");
 		} else if (starts_with(cmd, "oem run") || starts_with(cmd, "oem selftest")) {
 			int selftest = starts_with(cmd, "oem selftest");
+			int usb_handoff = starts_with(cmd, "oem run-no-usb");
+			if (usb_handoff) {
+#ifdef LOADER_THYME
+				if (!str_eq(cmd, "oem run-no-usb")) {
+					fb_reply("FAIL", "USB handoff takes no arguments");
+					return;
+				}
+#else
+				fb_reply("FAIL", "USB handoff is only available on thyme");
+				return;
+#endif
+			}
 			const char *arg = cmd + 7;
 			while (*arg == ' ') {
 				arg++;
@@ -4147,13 +4208,19 @@ fb_command(char *cmd)
 			int have_cp = selftest || (*arg >= '0' && *arg <= '9');
 			uint64_t cp = selftest ? CHECKPOINT_SELFTEST : parse_number(arg, 10);
 
+			int replied = fb_reply("OKAY", "");
+			if (usb_handoff && !replied) {
+				return;
+			}
 			set_result("running", cp, 0);
-			fb_reply("OKAY", "");
 			log_len = 0;
 			print("== XNULOADER run (usb) ==\n");
-			if (!run_kernel(have_cp, cp)) {
+			if (!run_kernel(have_cp, cp, usb_handoff)) {
 				set_result("not-started", 0, 0);
 				compose_logs(NULL, 0);
+			}
+			if (usb_handoff && USB == NULL) {
+				reboot();
 			}
 		} else if (starts_with(cmd, "oem hang")) {
 			fb_reply("OKAY", "watchdog test: not petting any more");
@@ -4584,7 +4651,7 @@ efi_main(efi_handle image, efi_system_table *st)
 
 	/* One-shot mode: run the kernel that came with the image, then reset. */
 	if (have_payload) {
-		run_kernel(0, 0);
+		run_kernel(0, 0, 0);
 	}
 	reboot();
 	return 0;

@@ -134,6 +134,7 @@ remains open until that test passes.
 |---|---|---|
 | LAN OpenSSH | 🚧 Hardware | WSL2 verified host pin, key rejection, reconnect, bidirectional transfer and execution of a RAM-only arm64 test binary. Native Windows OpenSSH verified the pinned host, shell and SFTP round trip using its own key. Native macOS and other Linux hosts remain pending. |
 | Live diagnostics | 🚧 | Kernel logs and DWC3 telemetry passed over SSH, and a live screenshot passed through the RAM Boot loader. Unified user-space logs, SSH screen capture, app controls, crash reports and service restart remain pending. |
+| EFI USB handoff | 🚧 Hardware | Windows observed the EFI fastboot interface detach. The pinned LAN client retained shell access and read `DSTS.DEVCTRLHLT=1`. Verify gadget initialization and exit once the XNU driver owns the controller. |
 | USB Gadget enumeration and endpoints | ❌ Hardware | Test attach, transfer, cable disconnect and reconnect on Windows, macOS and Linux. Verify RAM Boot return and power protection with the gadget enabled. |
 | usbmux, lockdown and trust | ❌ Hardware | Discover with libimobiledevice, pair and unpair, reject an untrusted host, reconnect, and read accurate system information. |
 | Standard iOS device services | ❌ Hardware | Exercise AFC transfer, application installation and launch, logs and screenshots with the open toolchain. |
