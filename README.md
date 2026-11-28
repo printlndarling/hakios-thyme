@@ -20,7 +20,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Audio & Haptics | **PASS** | Dual CS35L41 L/R + earpiece, 0-short-read mics (VoiceMemos), 15 s retry recovery, AW8697 CoreHaptics |
 | Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. In a paired RAM run, average rear delivery gaps dropped from 86–90 ms to 62–69 ms. Long viewfinder pauses, full switching latency and front quality remain [under test](devices/thyme/CHECKLIST.md#camera-photos-and-display). |
 | Cellular & VoLTE | **PASS** | SDX55M (`pcie2_mhi=2` native `AppleBaseband`/`CommCenter`), 4G LTE dual-stack + VoLTE (`Mav17`) |
-| Dual-SIM | **PARTIAL** | Both SIMs are READY and both NAS subscription queries return status. Concurrent registration and native line controls remain [under test](devices/thyme/CHECKLIST.md#cellular-phone-and-messages). |
+| Dual-SIM | **PARTIAL** | Both SIMs are READY. NAS measured NR on the first line and LTE on the second while both were searching. Concurrent registration and native line controls remain [under test](devices/thyme/CHECKLIST.md#cellular-phone-and-messages). |
 | GPS / everyday location | **PASS** | The operator confirmed that the map location and refresh worked on thyme. Open-sky satellite-only acquisition has a separate [checklist item](devices/thyme/CHECKLIST.md#maps-and-positioning). |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
 | Bluetooth (QCA6390) | **PASS** | 3 Mbaud H4, discovery, pairing with other phones, headphone connection, A2DP audio & BlueTool deepsleep |

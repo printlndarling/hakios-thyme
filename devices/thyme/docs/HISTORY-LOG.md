@@ -1,5 +1,31 @@
 ## Chronological Verification Logs & Evidence
 
+## Per-subscription signal while both SIMs are searching (2026-11-28)
+
+- The read-only NAS probe samples Get Signal Info beside Get Serving
+  System and reads Get System Selection Preference once for each
+  subscription. The [libqmi NAS message definitions](https://github.com/linux-mobile-broadband/libqmi/blob/main/data/qmi-service-nas.json)
+  describe the LTE/NR RSRP fields. Host replay checked the client and
+  message routing, malformed serving TLVs, unavailable RSRP, an RF
+  timeout followed by later registration samples, and client release.
+  The device and common QMI, NAS and guarded launcher regressions passed.
+- In a guarded 155 s RAM Boot using kernel `9b63dc04b583`, root
+  `d76a8d248df6` and the UIM read-only profile, both cards were READY and
+  both NAS clients bound. The first sample was unregistered on both.
+  Each first signal request returned QMI 74 (Information Unavailable).
+  In the next two searching samples line 1 measured NR at −107 and
+  −116 dBm and line 2 measured LTE at −97 and −98 dBm. The other RAT's
+  RSRP was unavailable on each line. Both clients read domain
+  preference `0x2` and different selection masks (`0x5c` and `0x50`).
+- Both lines had detectable RF during the HakiOS run. Concurrent
+  registration, attach/deregistration causes and native line controls
+  remain open. Android returned on the timer and reported
+  `LOADED,LOADED`, `NR_SA,LTE` and `dsds`. The `logdump` SHA-256 matched
+  before and after. Final log `logs/soak.Lp64BsJZ/kernel.log` has SHA-256
+  `a1139ab90da3c7d5b6495269b0413e66ee29dd67d9c570cc108fd20333356d41`.
+  The redacted extract and replay fixture are in
+  `out/thyme-boot/nas-rf.m01H9ebR/`.
+
 ## Vectorized Bayer preview and per-session pacing (2026-11-28)
 
 - Preview row caches now hold RGB values with both green sites averaged.
