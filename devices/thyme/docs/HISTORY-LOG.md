@@ -1,5 +1,42 @@
 ## Chronological Verification Logs & Evidence
 
+## Read-only Lockdown over thyme WinUSB (2026-11-28)
+
+- Windows Plug and Play enumerated the private HakiOS development USB
+  interface as a working USBDevice. Apple Mobile Device Service was
+  running. The operator reported that native Windows i4Tools did not
+  detect the interface in the earlier development runs.
+- In the first guarded run with kernel `be47ddbdb805`, the service
+  was offline and the real device refused port 62078. LAN SSH was
+  unreachable at the previously verified address. Registration of the
+  character device was moved to run after the root mount.
+- A second guarded 250 s run used kernel `bebe93e0cabe`, loader
+  `79f1fad4d1c6`, and an explicit debug companion image
+  `3143942c507a` that started the read-only userspace service.
+  Unmodified `idevice_id` found the USB device. libimobiledevice
+  returned `com.apple.mobile.lockdown` for QueryType and Ubuntu
+  `ideviceinfo 1.3.0 -s` printed Xiaomi Mi 10S, thyme, SM8250-AC and
+  HakiOS. USB carried a fragmented GetValue request and additional
+  requests on the same connection. Unknown values, StartSession,
+  SetValue and Pair returned errors.
+- Three native WinUSB opens passed version negotiation, fragmentation,
+  coalescing, malformed-frame recovery and a closed-port response
+  for 62079. SSH remained unavailable at the test address in this
+  run. USB session reopen passed. Service querying after USB detach
+  and reattachment remains pending.
+- Both guarded runs returned to Android and the full `logdump`
+  SHA-256 matched before and after each run. After the second return,
+  Android boot completion was confirmed and `idevice_id -l` showed
+  an empty device list.
+- The sanitizer wire replay passed, including stale response rejection
+  and timeout/offline cleanup. Three host adapter tests and eleven
+  guarded launcher tests passed.
+- Logs are in `out/thyme-boot/usb-lockdown.mLMIP4ih/`. Evidence from
+  the second run is in its `v2/` directory. `query.log` SHA-256
+  `353baa068cde9bb306a8a5a08a2325481ba376756a9028c5f2c60ef54c49d62a`.
+  `ideviceinfo.log` SHA-256
+  `f08424c655f91ae641652885f22e51d5304398e731614e9477be1f561b993646`.
+
 ## libimobiledevice discovery through WinUSB on thyme (2026-11-28)
 
 - The WSL2 bridge created a temporary private usbmuxd socket for the

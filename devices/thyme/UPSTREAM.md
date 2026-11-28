@@ -9,7 +9,7 @@
 
 ## Branches and compatibility
 
-Last checked on 2026-11-27.
+Branch tips last checked on 2026-11-28.
 
 | Upstream branch | Inspected tip | Use in this fork |
 |---|---|---|

@@ -194,7 +194,7 @@ The distinct product description is `HakiOS thyme usbmux test`. It uses
 the same private test VID/PID and WinUSB interface GUID. From native
 Windows run `.\devices\thyme\tools\test-usb-bulk.ps1 -UsbMux`. The probe
 requests a version, verifies the v1.0 wire response, and checks a closed
-port response for 62078. It exercises packet fragmentation, coalesced
+port response for 62079. It exercises packet fragmentation, coalesced
 frames and recovery after an invalid length. Check `mux_versions`,
 `mux_refused` and `mux_invalid` in `kern.hakios.thyme_usb` over LAN.
 Use profile 1 for byte loopback.
@@ -212,27 +212,75 @@ uses native Windows WinUSB to verify the physical device descriptor
 and usbmux version. `ListDevices` reports a development locator derived
 from the Windows USB interface path in the protocol's `SerialNumber`
 field. The physical serial is unavailable in this profile. A
-`Connect` request is forwarded to the verified interface and reports
-the matched on-wire closed-port reply. Pairing, service streams and
-i4Tools remain pending. See the upstream
+`Connect` request opens a new connection on the same verified interface.
+The device refuses every port while the service is offline and accepts
+only 62078 when the development Lockdown program has opened the node.
+The bridge relays one framed request at a time using the private WinUSB
+interface. See the upstream
 [USB filter](https://github.com/libimobiledevice/usbmuxd/blob/master/src/usb.c#L763)
 and [local socket handling](https://github.com/libimobiledevice/libusbmuxd/blob/master/src/libusbmuxd.c#L155).
+
+#### Read-only Lockdown over USB
+
+Build the arm64 probe with the local iPhoneOS 16.5 SDK. In a timed RAM
+Boot using USB profile 2 and the SSH scene, upload and run it from the
+RAM data volume in a dedicated terminal.
+
+```sh
+. ./xnu-env.sh
+xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
+  -O2 -Wall -Wextra -I drivers/core -framework CoreFoundation \
+  -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c
+python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
+python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
+python3 tools/hdb.py --host PHONE_LAN_IP shell /private/var/tmp/lockdown-usb
+```
+
+For an independent test of USB, package the probe in a dedicated
+SSH development scene. Append the job to a scratch copy of the
+scenario. The root image remains local because it contains Wi-Fi and
+SSH credentials.
+
+```sh
+work=$(mktemp -d)
+cp userland/rc.jobs.ssh "$work/rc.jobs.ssh"
+sed -i '1a /redwood/bin/lockdown-usb &' "$work/rc.jobs.ssh"
+SCENE=usb-lockdown RC_JOBS="$work/rc.jobs.ssh" \
+  EXTRA="$PWD/out/thyme-boot/lockdown-usb" devices/thyme/build-root.sh
+SOAK_USB_HANDOFF=1 SOAK_USB_GADGET=2 SOAK_UIM_READONLY=1 SOAK_SECS=250 \
+  SCENE=out/thyme-boot/root-usb-lockdown.apfs devices/thyme/soak.sh
+```
+
+Then read the advertised hardware on the computer using the original
+libimobiledevice command.
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py -- ideviceinfo -s
+```
+
+The root-only `/dev/hakios-lockdown` device connects the USB transport
+to the user-space program. The program supports `QueryType`, `GetValue`
+and `Goodbye`. `GetValue` exposes the model, board, SoC and system
+name. The wire protocol type is `com.apple.mobile.lockdown`. On the
+physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
+thyme, SM8250-AC and HakiOS. Pairing, trusted sessions and system
+services still need implementation. The native Windows i4Tools test
+with the private WinUSB identity did not detect the device.
 
 ### USB Gadget and services
 
 In standard RAM Boot, Windows lists `VID_18D1&PID_D00D` as the Android
 Bootloader Interface. The EFI fastboot endpoint can serve a live
 framebuffer capture while XNU runs. The XNU-side DWC3 probe reads the
-controller's identification and status. The next stage is to use the
-halted controller for an XNU device-mode driver and verify its shutdown
-during the timed return.
+controller's identification and status. The explicit development
+profiles take over the halted controller and return it before the timed
+reset.
 
-1. Extend the USB bulk transport to support queued I/O for system services.
-   Verify physical cable reconnect and native macOS and Linux enumeration.
+1. Verify physical cable reconnect and native macOS and Linux enumeration.
+   Extend the USB bulk transport to support concurrent system services.
 2. Validate discovery and transport with usbmuxd and libimobiledevice,
-   then implement and test trust and lockdown session handling. Export
-   actual thyme hardware and OS information where the protocol permits,
-   and document compatibility identifiers.
+   then implement and test pairing, trust and authenticated sessions.
+   Export other verified thyme hardware and OS information as needed.
 3. Verify AFC, installation proxy, logs and screenshots with the open
    tools. Use an approved developer app and temporary files in the RAM
    session.

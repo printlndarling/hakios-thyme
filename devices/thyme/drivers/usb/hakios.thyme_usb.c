@@ -5,6 +5,7 @@
  */
 #include <arm/caches_internal.h>
 #include <kern/clock.h>
+#include <kern/locks.h>
 #include <kern/startup.h>
 #include <kern/thread_call.h>
 #include <libkern/libkern.h>
@@ -12,16 +13,19 @@
 #include <os/atomic_private.h>
 #include <pexpert/device_tree.h>
 #include <pexpert/pexpert.h>
+#include <sys/conf.h>
 #include <sys/errno.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include <sys/uio.h>
+#include <sys/vnode.h>
+#include <miscfs/devfs/devfs.h>
+#include "hakios.thyme_usbmux.h"
 
 extern vm_offset_t ml_io_map(vm_offset_t pa, vm_size_t size);
 extern uint64_t kvtophys(vm_offset_t va);
 extern void hakios_battery_guard_state(int *, int *, int *, int *) __attribute__((weak));
 void hakios_thyme_usb_quiesce(void);
-extern void thyme_usbmux_reset(void);
-extern int thyme_usbmux_feed(const uint8_t *, unsigned, uint8_t *);
 
 #define MS_VENDOR_CODE          0x21
 #define DWC3_PA                 0x0a60c000UL
@@ -109,12 +113,112 @@ static unsigned bulk_packet = HIGH_SPEED_PACKET;
 static int pending_configuration = -1;
 static int bulk_out_packets, bulk_in_packets, bulk_out_bytes, bulk_in_bytes;
 static int reconnect_requested, reconnect_count;
-static int profile, mux_versions, mux_refused, mux_invalid;
+static int profile, mux_versions, mux_refused, mux_invalid, mux_connections, mux_replies;
+static LCK_GRP_DECLARE(mux_locks, "thyme-usbmux");
+static LCK_MTX_DECLARE(mux_lock, &mux_locks);
+static bool lockdown_open, lockdown_registered;
+static uint64_t lockdown_deadline;
 static bool have_transfer;
 static int stage, last_command, setup_count, reset_count, connect_count, disconnect_count;
 static int address_seen, configured, stalled, event_count, hw_status, hw_control;
 static int last_setup, last_index, session_changes;
 static bool take_controller(void);
+
+static int
+lockdown_dev_open(__unused dev_t dev, __unused int flags, __unused int type, __unused struct proc *proc)
+{
+	int error = ENXIO;
+	lck_mtx_lock(&mux_lock);
+	if (os_atomic_load(&stage, relaxed) == USB_RUNNING) {
+		error = EBUSY;
+		if (!lockdown_open && !thyme_usbmux_pending()) {
+			lockdown_open = true;
+			thyme_usbmux_service(true);
+			error = 0;
+		}
+	}
+	lck_mtx_unlock(&mux_lock);
+	return error;
+}
+
+static int
+lockdown_dev_close(__unused dev_t dev, __unused int flags, __unused int type, __unused struct proc *proc)
+{
+	lck_mtx_lock(&mux_lock);
+	lockdown_open = false;
+	thyme_usbmux_service(false);
+	wakeup(&lockdown_open);
+	lck_mtx_unlock(&mux_lock);
+	return 0;
+}
+
+static int
+lockdown_dev_read(__unused dev_t dev, struct uio *uio, __unused int flags)
+{
+	struct thyme_lockdown_message message;
+	if (uio_resid(uio) < sizeof(message)) {
+		return EMSGSIZE;
+	}
+	int error = 0;
+	unsigned length = 0;
+	lck_mtx_lock(&mux_lock);
+	while (lockdown_open && error == 0) {
+		int current_stage = os_atomic_load(&stage, relaxed);
+		if (current_stage != USB_RUNNING && current_stage != USB_RECONNECTING) {
+			break;
+		}
+		length = thyme_usbmux_request(&message);
+		if (length) {
+			break;
+		}
+		const struct timespec interval = { .tv_sec = 1 };
+		error = msleep(&lockdown_open, &mux_lock, PZERO | PCATCH, "hakios-lockdown", &interval);
+		if (error == EWOULDBLOCK) {
+			error = 0;
+		}
+	}
+	lck_mtx_unlock(&mux_lock);
+	if (!length) {
+		return error ? error : ENXIO;
+	}
+	return uiomove((char *)&message, (int)(sizeof(message.transaction) + length), uio);
+}
+
+static int
+lockdown_dev_write(__unused dev_t dev, struct uio *uio, __unused int flags)
+{
+	struct thyme_lockdown_message message;
+	user_ssize_t size = uio_resid(uio);
+	if (size <= (user_ssize_t)sizeof(message.transaction) ||
+	    size > (user_ssize_t)(sizeof(message.transaction) + THYME_LOCKDOWN_REPLY_MAX)) {
+		return EMSGSIZE;
+	}
+	int error = uiomove((char *)&message, (int)size, uio);
+	if (error) {
+		return error;
+	}
+	lck_mtx_lock(&mux_lock);
+	bool accepted = lockdown_open &&
+	    thyme_usbmux_submit(&message, (unsigned)size - sizeof(message.transaction));
+	lck_mtx_unlock(&mux_lock);
+	return accepted ? 0 : ESTALE;
+}
+
+static const struct cdevsw lockdown_cdevsw = {
+	.d_open = lockdown_dev_open, .d_close = lockdown_dev_close,
+	.d_read = lockdown_dev_read, .d_write = lockdown_dev_write,
+	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
+	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0,
+};
+
+static void
+reset_mux(void)
+{
+	lck_mtx_lock(&mux_lock);
+	thyme_usbmux_reset();
+	lockdown_deadline = 0;
+	lck_mtx_unlock(&mux_lock);
+}
 
 static int
 request_reconnect SYSCTL_HANDLER_ARGS
@@ -163,6 +267,8 @@ USB_STAT(profile, profile, "1 bulk echo, 2 usbmux");
 USB_STAT(mux_versions, mux_versions, "usbmux version replies queued");
 USB_STAT(mux_refused, mux_refused, "usbmux closed port resets queued");
 USB_STAT(mux_invalid, mux_invalid, "invalid or unsupported usbmux frames");
+USB_STAT(mux_connections, mux_connections, "usbmux Lockdown SYN/ACK replies queued");
+USB_STAT(mux_replies, mux_replies, "usbmux Lockdown data replies queued");
 SYSCTL_PROC(_kern_hakios_thyme_usb, OID_AUTO, reconnect, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
     NULL, 0, request_reconnect, "I", "write 1 as root to detach and reattach the RAM Boot USB test");
 
@@ -279,13 +385,15 @@ stop_bulk(void)
 	wr(DALEPENA, rd(DALEPENA) & ~BULK_ENDPOINTS);
 	bulk_ep = 0;
 	echo_length = 0;
-	thyme_usbmux_reset();
 	return ended;
 }
 
 static bool
 configure_bulk(unsigned config)
 {
+	if (profile == 2) {
+		reset_mux();
+	}
 	if (!stop_bulk()) {
 		return false;
 	}
@@ -306,27 +414,60 @@ configure_bulk(unsigned config)
 }
 
 static bool
+send_mux(unsigned response)
+{
+	echo_length = response;
+	if (!queue_bulk(BULK_IN, echo_length)) {
+		return false;
+	}
+	if (dma.echo[3] == 0) {
+		mux_versions++;
+	} else if (dma.echo[21] & 0x04) { /* TCP RST */
+		mux_refused++;
+	} else if (dma.echo[21] == 0x12) { /* TCP SYN/ACK */
+		mux_connections++;
+	} else if (response > 28) {
+		mux_replies++;
+	}
+	return true;
+}
+
+static bool
 pump_usbmux(unsigned received)
 {
+	lck_mtx_lock(&mux_lock);
 	int response = thyme_usbmux_feed(dma.echo, received, dma.echo);
 	/* If an unsupported complete frame was consumed, check for another in the same transfer. */
 	while (response < 0) {
 		mux_invalid++;
 		response = thyme_usbmux_feed(NULL, 0, dma.echo);
 	}
-	if (response == 0) {
-		return queue_bulk(BULK_OUT, bulk_packet);
+	bool pending = thyme_usbmux_pending();
+	if (pending) {
+		clock_interval_to_deadline(2, NSEC_PER_SEC, &lockdown_deadline);
+		wakeup(&lockdown_open);
 	}
-	echo_length = (unsigned)response;
-	if (!queue_bulk(BULK_IN, echo_length)) {
-		return false;
+	lck_mtx_unlock(&mux_lock);
+	if (response > 0) {
+		return send_mux((unsigned)response);
 	}
-	if (dma.echo[3] == 0) {
-		mux_versions++;
-	} else {
-		mux_refused++;
+	/* Keep the OUT pipe idle until this request is answered. */
+	return pending || queue_bulk(BULK_OUT, bulk_packet);
+}
+
+static bool
+poll_mux_reply(void)
+{
+	if (!lockdown_deadline || bulk_ep != 0) {
+		return true;
 	}
-	return true;
+	lck_mtx_lock(&mux_lock);
+	int response = thyme_usbmux_complete(dma.echo, mach_absolute_time() >= lockdown_deadline);
+	if (response > 0) {
+		lockdown_deadline = 0;
+	}
+	lck_mtx_unlock(&mux_lock);
+	return response == 0 || send_mux((unsigned)response);
 }
 
 static bool
@@ -574,6 +715,9 @@ end_transfer(void)
 static bool
 reset_link(void)
 {
+	if (profile == 2) {
+		reset_mux();
+	}
 	pending_configuration = -1;
 	configuration = 0;
 	configured = 0;
@@ -707,7 +851,26 @@ poll_events(__unused thread_call_param_t first, __unused thread_call_param_t sec
 	if (stage != USB_RUNNING) {
 		return;
 	}
+	if (profile == 2 && !lockdown_registered) {
+		vnode_t root = vfs_rootvnode();
+		if (root != NULL) {
+			vnode_put(root);
+			lockdown_registered = true;
+			int major = cdevsw_add(-1, &lockdown_cdevsw);
+			if (major >= 0 && devfs_make_node(makedev(major, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0600,
+			    "%s", THYME_LOCKDOWN_NODE + sizeof("/dev/") - 1) == NULL) {
+				cdevsw_remove(major, &lockdown_cdevsw);
+				major = -1;
+			}
+			if (major < 0) {
+				printf("thyme USB: cannot register the Lockdown service device\n");
+			}
+		}
+	}
 	if (os_atomic_xchg(&reconnect_requested, 0, acquire)) {
+		if (profile == 2) {
+			reset_mux();
+		}
 		hakios_thyme_usb_quiesce();
 		if (!(hw_status & DSTS_HALTED)) {
 			os_atomic_store(&stage, USB_FAILED, relaxed);
@@ -738,6 +901,11 @@ poll_events(__unused thread_call_param_t first, __unused thread_call_param_t sec
 			os_atomic_store(&stage, USB_FAILED, relaxed);
 			return;
 		}
+	}
+	if (profile == 2 && !poll_mux_reply()) {
+		hakios_thyme_usb_quiesce();
+		os_atomic_store(&stage, USB_FAILED, relaxed);
+		return;
 	}
 	schedule_events(1);
 }

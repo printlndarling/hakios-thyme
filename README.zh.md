@@ -18,16 +18,17 @@
 | Metal | **PARTIAL** | `hakios-metal` 可编译（已修 `metal_apps=1` `backboardd` 豁免）；系统 `MTLDevice` 稳定性待测 |
 | 触控与按键 | **PASS** | FTS521 多点触控、手势、电源键与音量键正常 |
 | 音频与触感 | **PASS** | 双 CS35L41 立体声+听筒（15 s 防休眠恢复）、语音备忘录零断流双麦、AW8697 CoreHaptics |
-| 相机与闪光灯 | **PASS** | 后摄 1080p ~51 fps S5KHMX + AK7377 对焦、前摄 S5K3T2、PM8150L 闪光灯（OIS `0x1c` 应答已验证） |
+| 相机与闪光灯 | **PARTIAL** | 前后摄均出真图。两轮对照 RAM 测试的后摄平均帧交付间隔由 86–90 ms 降至 62–69 ms。后摄跟手性、前摄清晰度、彩块和取景闪屏仍在验收。 |
 | 蜂窝与通话 | **PASS** | SDX55M（`pcie2_mhi=2` 原生 `AppleBaseband`/`CommCenter`）、4G LTE 双栈与 VoLTE（`Mav17`） |
-| 定位与 GNSS | **PARTIAL** | 设置开关、Wi-Fi 定位（百度地图实测蓝点）与 SDX55M QMI LOC 卫星流正常；室外 3D 定位待测 |
+| GPS 与日常定位 | **PASS** | 用户在真机确认定位和地图图层刷新。开阔天空下的纯卫星 3D 定位单独验收。 |
 | Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏唤醒、AP 踢下线与断电自动重连 |
 | 蓝牙（QCA6390） | **PASS** | 3 Mbaud H4、已实测正常连接蓝牙耳机（A2DP 音频播放）与其它手机配对、BlueTool 休眠 |
+| 真机调试与 USB | **PARTIAL** | WSL2 和 Windows 原生 OpenSSH 已验证。WinUSB 开发接口可经 WSL2 桥接运行原版 `ideviceinfo`，读取真实型号与 SoC。爱思助手原生识别、配对和其他管理服务待验收。见[真机调试说明](devices/thyme/docs/debug.md)。 |
 | 电池与温控 | **PASS** | 电量读取、`bq25970` 与 `fsa4480` 10 s 遥测、USB 充电、温控限频与低电量保护正常 |
 | 传感器（SLPI） | **PASS** | LSM6DSO、50 Hz `mag_cal` 指南针、前 `TCS3701` + 后 `TSL2540` 光感、气压计、计步与朝向 |
 | CDSP / 红外 / RTC / WDT | **PASS** | `CDSP` TZ 鉴权启动、SMP2P 就绪、GLINK 协商、FastRPC 能力查询、guest 会话挂接与释放、原厂独立计算进程创建、进程内 ASID 查询、反向监听器注册与进程释放、`/dev/hakios-ir`（38 kHz NEC）、SPMI RTC 校时、TRNG、APSS 硬件看门狗 |
 | NFC 与视频 VPU | **PARTIAL** | `/dev/hakios-nfc` NCI 2.0 握手就绪；Venus 固件准备与 MVS0C 核心时钟和 AXI0 门控可逆启停已验证，VPU 硬解待通 |
-| 中文界面与日常应用 | **PASS** | 开机默认简体中文界面、苹方字体、拼音输入法与预装百度地图 |
+| 中文界面与日常应用 | **PASS** | 开机默认简体中文界面、苹方字体及拼音输入法。百度地图需单独安装测试。 |
 | Sileo 与巨魔商店 | **PASS** | Sileo（11 个国内源）、TrollStore（预装 `ldid`）、TrollApps（6 个国内源）开箱即用 |
 | 持久化存储 | **TODO** | 默认纯内存启动。`modem_a` 只读 VFAT 就绪，按 GPT 生成的 HFSX 数据卷通过 QEMU 重启保留测试，[真机安装与持久化](docs/install-safe.md)待验收 |
 
@@ -91,7 +92,7 @@ devices/thyme/build-loader.sh
 ## 后续重点
 
 - **定位与蜂窝完善**：室外开阔天空下验证 `umi_gnssd` 3D 卫星定位注入，按需补充短信测试。
-- **视频硬解与 USB 设备连接**：打通 `pil-venus` VPU 硬件解码及 SM8250 `DWC3` USB Gadget / `usbmux` / `lockdownd`（用于电脑端爱思助手 / iTunes 连接）。
+- **视频硬解与 USB 设备连接**：推进 `pil-venus` VPU 硬解、配对与信任、标准设备管理服务，以及爱思助手和 iTunes 的原生识别。
 - **图形栈与持久化**：推进系统级 `MTLDevice` 支持以及安全可控的持久化存储方案。
 
 ## 上游与相关仓库

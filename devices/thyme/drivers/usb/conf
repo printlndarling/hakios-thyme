@@ -2,5 +2,5 @@
 driver THYME_USB
 	file    bsd/dev/hakios.thyme_usb.c
 	file    bsd/dev/hakios.thyme_usbmux.c
-	help    RAM Boot USB 2.0 device-mode probe with bulk loopback and usbmux discovery
+	help    RAM Boot USB 2.0 device-mode probe with bulk loopback and a user-space Lockdown channel
 	help    (usb_gadget=1 or 2 with an explicit EFI USB handoff).

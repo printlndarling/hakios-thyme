@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Replay the local usbmuxd framing and check what reaches the WinUSB transport."""
 
+from contextlib import contextmanager
 from pathlib import Path
 import plistlib
 import runpy
@@ -13,6 +14,7 @@ import unittest
 bridge = runpy.run_path(str(Path(__file__).with_name("usbmux-winusb.py")))
 HEADER = bridge["HEADER"]
 LOCATION = "15abcdef" * 8
+LOCKDOWN_HEADER = bridge["LOCKDOWN_HEADER"]
 
 
 class Transport:
@@ -20,9 +22,18 @@ class Transport:
         self.present = True
         self.calls = []
 
-    def probe(self, port=0, expected=None):
-        self.calls.append((port, expected))
+    def probe(self):
+        self.calls.append(("list",))
         return LOCATION if self.present else None
+
+    @contextmanager
+    def connect(self, port, location):
+        self.calls.append((port, location))
+        yield (b"connected" if port == 62078 else b"refused") if self.present else b"missing", self
+
+    def exchange(self, request):
+        self.calls.append(request)
+        return LOCKDOWN_HEADER.pack(5) + b"reply"
 
 
 class BridgeTest(unittest.TestCase):
@@ -39,6 +50,7 @@ class BridgeTest(unittest.TestCase):
         self.addCleanup(self.worker.join)
         self.addCleanup(self.server.shutdown)
 
+    @contextmanager
     def exchange(self, payload, version=1):
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(2)
@@ -47,10 +59,14 @@ class BridgeTest(unittest.TestCase):
             with client.makefile("rb") as stream:
                 length, version, message, tag = HEADER.unpack(stream.read(HEADER.size))
                 self.assertEqual((version, message, tag), (1, 8, 4123))
-                return plistlib.loads(stream.read(length - HEADER.size))
+                yield plistlib.loads(stream.read(length - HEADER.size)), client, stream
 
     def request(self, **fields):
-        return self.exchange(plistlib.dumps(fields))
+        return self.request_payload(plistlib.dumps(fields))
+
+    def request_payload(self, payload, version=1):
+        with self.exchange(payload, version) as (reply, _, _):
+            return reply
 
     def test_discovery_and_refused_port(self):
         entries = self.request(MessageType="ListDevices")["DeviceList"]
@@ -59,17 +75,30 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(properties["ProductID"], 1)
         self.assertTrue(properties["SerialNumber"].startswith("thyme-usb-"))
         identifier = entries[0]["DeviceID"]
-        reply = self.request(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62078))
+        reply = self.request(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62079))
         self.assertEqual(reply["Number"], 3)
-        self.assertEqual(self.server.transport.calls, [(0, None), (62078, LOCATION)])
+        self.assertEqual(self.server.transport.calls, [("list",), (62079, LOCATION)])
         self.server.transport.present = False
-        reply = self.request(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62078))
+        reply = self.request(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62079))
         self.assertEqual(reply["Number"], 2)
         self.assertEqual(self.request(MessageType="ListDevices"), {"DeviceList": []})
 
+    def test_connected_stream_forwards_binary_frame(self):
+        identifier = self.request(MessageType="ListDevices")["DeviceList"][0]["DeviceID"]
+        connect = plistlib.dumps(dict(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62078)))
+        message = LOCKDOWN_HEADER.pack(3) + b"one"
+        with self.exchange(connect) as (reply, client, stream):
+            self.assertEqual(reply["Number"], 0)
+            client.sendall(message[:2])
+            client.sendall(message[2:])
+            self.assertEqual(stream.read(9), LOCKDOWN_HEADER.pack(5) + b"reply")
+            client.sendall(LOCKDOWN_HEADER.pack(1024))
+            self.assertEqual(stream.read(), b"")
+        self.assertEqual(self.server.transport.calls, [("list",), (62078, LOCATION), message])
+
     def test_invalid_client_requests_stay_off_usb(self):
-        self.assertEqual(self.exchange(b"<plist>")["Number"], 1)
-        self.assertEqual(self.exchange(b"bad", version=0)["Number"], 6)
+        self.assertEqual(self.request_payload(b"<plist>")["Number"], 1)
+        self.assertEqual(self.request_payload(b"bad", version=0)["Number"], 6)
         self.assertEqual(self.request(MessageType="SavePairRecord")["Number"], 1)
         self.assertEqual(self.request(MessageType="Connect", DeviceID=1, PortNumber=65536)["Number"], 1)
         self.assertEqual(self.request(MessageType="Connect", DeviceID=1, PortNumber=62078)["Number"], 2)

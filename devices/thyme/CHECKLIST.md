@@ -45,7 +45,7 @@ Status legend:
 | 33W Wired Fast Charge | `bq25970@0x66` (`QUP15`) + `fsa4480@0x42` | P1 | 🚧 | Live 10 s I2C ADC & USB-C audio switch telemetry; active QC/PD pump control pending |
 | 30W Wireless / 10W Reverse Charge | `idt,p9415@0x3b` / `ln8282@0x55` (`QUP16`) | P1 | ❌ | QUP16 bus probed idle-high; active WLC power/pad bring-up pending |
 | Real-device debug bridge | Wi-Fi / OpenSSH, then USB | P0 | 🚧 | Key-only LAN shell and SFTP verified from native Windows and WSL2. Kernel logs and a deployed arm64 command verified from WSL2. See the [debug checklist](docs/debug.md). |
-| USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3` `id=0x33313130`) | P0 | ❌ | Read-only HW MMIO telemetry verified; XNU gadget, `usbmux`, `lockdownd` (i4Tools/iTunes) pending |
+| USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3` `id=0x33313130`) | P0 | 🚧 | Windows native WinUSB enumeration, bulk transfers, and usbmux v1 verified in the explicit development profile. See the USB acceptance table below. |
 | USB OTG Host Mode | `dwc3@a600000` / `a800000` | P1 | ❌ | External USB drives / HID / USB-C audio host unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | 🚧 | Read-only partition & `modem_a` VFAT LFN reader working; guarded writable RW persistence pending |
 | Real-Time Clock (RTC) | `qcom,pm8150_rtc` (`SPMI PPID 0x60`) | P1 | ✅ | SPMI RTC tick + `epoch=` Unix sync (`kern.hakios.umi_rtc_unix_time`) |
@@ -134,11 +134,11 @@ remains open until that test passes.
 |---|---|---|
 | LAN OpenSSH | 🚧 Hardware | WSL2 verified host pin, key rejection, reconnect, bidirectional transfer and execution of a RAM-only arm64 test binary. Native Windows OpenSSH verified the pinned host, shell and SFTP round trip using its own key. Native macOS and other Linux hosts remain pending. |
 | Live diagnostics | 🚧 | Kernel logs and DWC3 telemetry passed over SSH, and a live screenshot passed through the RAM Boot loader. Unified user-space logs, SSH screen capture, app controls, crash reports and service restart remain pending. |
-| EFI USB handoff | 🚧 Hardware | Windows observed the EFI fastboot interface detach. The pinned LAN client retained shell access and read `DSTS.DEVCTRLHLT=1`. Verify gadget initialization and exit once the XNU driver owns the controller. |
+| EFI USB handoff | 🚧 Hardware | Windows observed the EFI fastboot interface detach. The pinned LAN client retained shell access and read `DSTS.DEVCTRLHLT=1`. Timed RAM Boot with XNU gadget ownership returned to Android. |
 | USB Gadget enumeration and endpoints | 🚧 Hardware | Native WinUSB verified 1,536 bulk round trips across a software detach and reattach. Verify physical cable reconnect, native macOS/Linux enumeration and queued I/O for services. |
-| usbmux, lockdown and trust | 🚧 Hardware | Unmodified WSL2 libimobiledevice discovered the private USB profile via WinUSB before and after software reattachment. A real USB reply refused port 62078. Verify working lockdown sessions, pairing, trust and accurate system information. |
+| usbmux, lockdown and trust | 🚧 Hardware | Unmodified WSL2 libimobiledevice verified QueryType and GetValue over WinUSB with the user-space probe. The device reported Xiaomi Mi 10S, thyme, SM8250-AC and HakiOS. Pairing, trust, authenticated sessions and service recovery after cable reattachment remain open. |
 | Standard iOS device services | ❌ Hardware | Exercise AFC transfer, application installation and launch, logs and screenshots with the open toolchain. |
-| Vendor device tools | ❌ Manual | After the standard services pass, check i4Tools, 3uTools, iMazing and iTunes/Finder separately. Validate a legally acquired iOS device-check app and document any authorization dependence. |
+| Vendor device tools | ❌ Manual | The operator observed that native Windows i4Tools did not discover the private WinUSB development profile. Verify native host discovery, then test i4Tools, 3uTools, iMazing, iTunes/Finder and legally acquired device-check apps separately. |
 | USB OTG and external storage | ❌ Hardware | Verify host role detection, safe connect/disconnect and filesystem access with a test drive. |
 | USB keyboard and mouse | ❌ Hardware | Check USB HID enumeration and input in OTG mode. |
 | USB-C audio | ❌ Hardware | Test analog routing and digital USB audio separately. Check playback, microphone and unplug recovery. |

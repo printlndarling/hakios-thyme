@@ -3,6 +3,7 @@ param(
     [ValidateRange(5, 360)] [int] $WaitSeconds = 90,
     [ValidateRange(1, 6)] [int] $Rounds = 3,
     [switch] $UsbMux,
+    [switch] $BridgeStream,
     [ValidateRange(0, 65535)] [int] $BridgePort,
     [ValidatePattern("^[a-f0-9]{64}$")] [string] $BridgeLocation
 )
@@ -167,7 +168,7 @@ public static class ThymeUsbLoopback
     {
         byte[] malformed = { 0, 0, 0, 0, 0, 0, 0, 7 };
         byte[] propose = VersionRequest, version = VersionReply;
-        byte[] syn = ConnectRequest(62078), reset = ConnectRefused(62078);
+        byte[] syn = ConnectRequest(62079), reset = ConnectRefused(62079);
         Send(handle, malformed);
         var first = new byte[5];
         var rest = new byte[15];
@@ -186,33 +187,164 @@ public static class ThymeUsbLoopback
         Send(handle, combined);
         Expect(handle, version);
         Expect(handle, reset);
-        return "usbmux=1.0 fragmented=pass combined=pass malformed_recovery=pass lockdown_port=closed";
+        return "usbmux=1.0 fragmented=pass combined=pass malformed_recovery=pass unserved_port=closed";
+    }
+
+    private static string Location(string path)
+    {
+        using (var sha = SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant())))
+                .Replace("-", "").ToLowerInvariant();
+    }
+
+    private static bool Negotiate(IntPtr handle)
+    {
+        var descriptor = new byte[18];
+        uint count;
+        Check(WinUsb_GetDescriptor(handle, 1, 0, 0, descriptor, 18, out count), "USB device descriptor");
+        if (count != 18 || descriptor[8] != 9 || descriptor[9] != 0x12 || descriptor[10] != 1 ||
+            descriptor[11] != 0 || descriptor[12] != 3 || descriptor[13] != 1)
+            return false; // The separate loopback profile uses revision 0102.
+        Send(handle, VersionRequest);
+        Expect(handle, VersionReply);
+        return true;
     }
 
     public static string Probe(string path, int port, string expectedLocation)
     {
-        string location;
-        using (var sha = SHA256.Create())
-            location = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant())))
-                .Replace("-", "").ToLowerInvariant();
+        string location = Location(path);
         if (!String.IsNullOrEmpty(expectedLocation) && location != expectedLocation)
             return null;
         return WithPipes(path, (handle, packet) =>
         {
-            var descriptor = new byte[18];
-            uint count;
-            Check(WinUsb_GetDescriptor(handle, 1, 0, 0, descriptor, 18, out count), "USB device descriptor");
-            if (count != 18 || descriptor[8] != 9 || descriptor[9] != 0x12 || descriptor[10] != 1 ||
-                descriptor[11] != 0 || descriptor[12] != 3 || descriptor[13] != 1)
-                return null; // The separate loopback profile uses revision 0102.
-            Send(handle, VersionRequest);
-            Expect(handle, VersionReply);
+            if (!Negotiate(handle)) return null;
             if (port != 0)
             {
                 Send(handle, ConnectRequest(port));
                 Expect(handle, ConnectRefused(port));
             }
             return location;
+        });
+    }
+
+    private static uint Read32(byte[] bytes, int offset)
+    {
+        return ((uint)bytes[offset] << 24) | ((uint)bytes[offset + 1] << 16) |
+            ((uint)bytes[offset + 2] << 8) | bytes[offset + 3];
+    }
+
+    private static void Write32(byte[] bytes, int offset, uint value)
+    {
+        for (int i = 3; i >= 0; --i)
+        {
+            bytes[offset + i] = (byte)value;
+            value >>= 8;
+        }
+    }
+
+    private static byte[] ReadBulk(IntPtr handle, int length)
+    {
+        var bytes = new byte[length];
+        uint count;
+        Check(WinUsb_ReadPipe(handle, 0x81, bytes, (uint)length, out count, IntPtr.Zero), "usbmux bulk IN");
+        Array.Resize(ref bytes, (int)count);
+        return bytes;
+    }
+
+    private static byte[] ReceiveTcp(IntPtr handle, int maxPacket, int port)
+    {
+        byte[] frame = ReadBulk(handle, maxPacket);
+        if (frame.Length < 28 || Read32(frame, 0) != 6 || frame[8] != (port >> 8) ||
+            frame[9] != (byte)port || frame[10] != 0xc0 || frame[11] != 0 || frame[20] != 0x50)
+            throw new IOException("Unexpected usbmux TCP header");
+        uint length = Read32(frame, 4);
+        if (length < frame.Length || length > 508)
+            throw new IOException("Unexpected usbmux TCP length");
+        if (length > frame.Length)
+        {
+            int first = frame.Length;
+            byte[] rest = ReadBulk(handle, (int)length - first);
+            if (rest.Length != length - first) throw new IOException("Incomplete usbmux TCP frame");
+            Array.Resize(ref frame, (int)length);
+            Array.Copy(rest, 0, frame, first, rest.Length);
+        }
+        return frame;
+    }
+
+    private static void SendTcp(IntPtr handle, int port, uint seq, uint ack, byte flags,
+        byte[] data, int offset, int length)
+    {
+        var frame = new byte[28 + length];
+        Array.Copy(ConnectRequest(port), frame, 28);
+        Write32(frame, 4, (uint)frame.Length);
+        Write32(frame, 12, seq);
+        Write32(frame, 16, ack);
+        frame[21] = flags;
+        if (length > 0) Array.Copy(data, offset, frame, 28, length);
+        Send(handle, frame);
+    }
+
+    public static void Stream(string path, int port, string expectedLocation)
+    {
+        if (path == null || Location(path) != expectedLocation)
+        {
+            Console.WriteLine("missing");
+            return;
+        }
+        WithPipes(path, (handle, packet) =>
+        {
+            if (!Negotiate(handle))
+            {
+                Console.WriteLine("missing");
+                return null;
+            }
+            Send(handle, ConnectRequest(port));
+            byte[] reply = ReceiveTcp(handle, packet, port);
+            uint seq = 0x01234568;
+            if (reply.Length != 28 || Read32(reply, 16) != seq)
+                throw new IOException("Unexpected usbmux connection reply");
+            if (reply[21] == 0x14)
+            {
+                Console.WriteLine("refused");
+                return null;
+            }
+            if (port != 62078 || reply[21] != 0x12)
+                throw new IOException("Unexpected usbmux SYN/ACK");
+            uint ack = unchecked(Read32(reply, 12) + 1);
+            SendTcp(handle, port, seq, ack, 0x10, null, 0, 0);
+            Console.WriteLine("connected");
+            try
+            {
+                for (string line; (line = Console.ReadLine()) != null;)
+                {
+                    byte[] request = Convert.FromBase64String(line);
+                    if (request.Length <= 4 || request.Length > 1024 || Read32(request, 0) != request.Length - 4)
+                        throw new IOException("Invalid Lockdown request size");
+                    for (int offset = 0; offset < request.Length;)
+                    {
+                        int size = Math.Min(request.Length - offset, packet - 28);
+                        SendTcp(handle, port, seq, ack, 0x18, request, offset, size);
+                        seq = unchecked(seq + (uint)size);
+                        offset += size;
+                        reply = ReceiveTcp(handle, packet, port);
+                        if (Read32(reply, 12) != ack || Read32(reply, 16) != seq ||
+                            reply[21] != (offset == request.Length ? 0x18 : 0x10))
+                            throw new IOException("Unexpected Lockdown data or acknowledgement");
+                        if (offset < request.Length && reply.Length != 28)
+                            throw new IOException("Unexpected payload before the end of the Lockdown request");
+                    }
+                    int payload = reply.Length - 28;
+                    if (payload <= 4 || Read32(reply, 28) != payload - 4)
+                        throw new IOException("Invalid Lockdown response size");
+                    ack = unchecked(ack + (uint)payload);
+                    Console.WriteLine(Convert.ToBase64String(reply, 28, payload));
+                }
+            }
+            finally
+            {
+                SendTcp(handle, port, seq, ack, 0x04, null, 0, 0);
+            }
+            return null;
         });
     }
 
@@ -291,6 +423,12 @@ public static class ThymeUsbLoopback
     }
 }
 '@
+}
+
+if ($BridgeStream) {
+    if (!$BridgePort -or !$BridgeLocation) { throw 'A port and matching WinUSB location are required' }
+    [ThymeUsbLoopback]::Stream([ThymeUsbLoopback]::Find(), $BridgePort, $BridgeLocation)
+    return
 }
 
 if ($PSBoundParameters.ContainsKey('BridgePort')) {
