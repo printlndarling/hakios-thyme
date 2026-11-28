@@ -1,5 +1,34 @@
 ## Chronological Verification Logs & Evidence
 
+## Explicit Lockdown pairing approval in RAM on thyme (2026-11-28)
+
+- The first guarded run with `336e853af8bc` and companion
+  `60a5a3f591f5` needed a software USB reattach requested over
+  authenticated LAN SSH. The approved Pair passed, and some following
+  certificate-bearing requests generated a malformed-plist response.
+  The USB receive-completion path now synchronizes the aligned DMA
+  payload before reading it.
+- The 230 s repeat used kernel `e269d1193a54` and the same companion.
+  Two consecutive suites passed through unmodified libimobiledevice
+  1.3.0 with externally supplied records. The suite verified default
+  refusal, explicit Pair, ValidatePair on a new connection, denial
+  before approval, wrong host ID, wrong host certificate, wrong device
+  key and a device leaf from a different root.
+- A third suite exercised actual software USB reattachment. The record
+  remained valid during the same daemon lifetime while its root-only
+  RAM approval was present. Unsafe file permissions and removal
+  invalidated the approval. USB returned to configuration 1 with
+  reconnect count 1 and zero invalid mux frames. The test removed its
+  approval file. StartSession remained unavailable after Pair.
+- Both timers returned the phone to Android. The full `logdump` hash
+  matched before and after both runs. The development device list
+  was empty after Android booted.
+- Evidence is in `out/thyme-boot/usb-pair-approval.TkV4DaJ4/v2/`.
+  `pairing-test-1.log` and `pairing-test-2.log` each have SHA-256
+  `2ad4546cd5da30f695da7e002b52f1bbbb10cf4fd83081b991448de6e42727c9`.
+  `pairing-reattach.log` SHA-256
+  `7c134805fcd34eb43a82582bc68ae228121b02a38bdd84c18bb568daa465b454`.
+
 ## Certificate-bearing Lockdown messages on thyme USB (2026-11-28)
 
 - The guarded 240 s boot used kernel `336e853af8bc`, companion

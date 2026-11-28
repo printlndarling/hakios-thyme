@@ -233,7 +233,8 @@ mkdir -p out/thyme-boot
 xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
   -O2 -Wall -Wextra -I drivers/core -I userland/src \
   -framework CoreFoundation -framework Security -lresolv \
-  -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c
+  -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c \
+  devices/thyme/tools/lockdown-pairing.c
 python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell /private/var/tmp/lockdown-usb
@@ -266,9 +267,10 @@ to the user-space program. The program supports `QueryType`, `GetValue`
 and `Goodbye`. `GetValue` exposes the model, board, SoC and system
 name. The wire protocol type is `com.apple.mobile.lockdown`. On the
 physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
-thyme, SM8250-AC and HakiOS. Pairing, trusted sessions and system
-services still need implementation. The operator confirmed that i4Tools 9.22.032.0 stays on the connection
-help page. Windows enumerated the development interface as WINUSB while Apple
+thyme, SM8250-AC and HakiOS. The explicitly approved developer record
+works as described below. Trusted sessions and system services remain
+open. The operator confirmed that i4Tools 9.22.032.0 stays on the
+connection help page. Windows enumerated the development interface as WINUSB while Apple
 Mobile Device Service was running.
 
 #### Pairing protocol preparation
@@ -279,8 +281,41 @@ and lives for the daemon's lifetime. The private host adapter provides
 its per-process BUID and reports absent pair records while the
 Lockdown connection is open. In the guarded run, Ubuntu `idevicepair 1.3.0` read the device key
 and sent a 4,855-byte framed `Pair` request with three certificates.
-The device returned a matching `InvalidRequest` response. Approval,
-certificate validation, TLS sessions and record storage remain open.
+That request received a matching `InvalidRequest` response. The
+explicit approval described below applies to a separately enrolled
+host record.
+
+#### Explicit RAM-only developer approval
+
+The device reads one local approval from
+`/private/var/tmp/hakios-lockdown-approval.plist`. Install it as root
+through the existing authenticated HDB session with mode `0600`. It is a
+plist dictionary with `HostID` and `SystemBUID` UUID strings and
+`RootCertificateSHA256` and `HostCertificateSHA256` data values. Each
+digest contains the 32 SHA-256 bytes of its DER certificate. The
+daemon checks the two fingerprints, verifies both leaf certificates
+against that root and compares the device certificate's public key
+with the key it generated locally. [Security trust API](https://developer.apple.com/documentation/security/trust)
+
+A successful `Pair` keeps one record in RAM. `ValidatePair` checks the
+record and active approval again. Remove the approval file to revoke
+it. USB reattachment can retain the record within the same daemon
+lifetime. The device requires a future authenticated `StartSession`
+implementation before USB offers any management services.
+
+The integration test requires Ubuntu's libimobiledevice 1.3.0 tools,
+Python `cryptography` and enrolled HDB credentials. It generates a
+local ephemeral CA and client certificate, temporarily installs the
+approved pins, and exercises the positive and negative cases through
+the original libimobiledevice library.
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py -- \
+  python3 devices/thyme/tools/test-lockdown-pairing.py --hdb-state ssh/hdb --reattach
+```
+
+The last option detaches and reattaches the USB interface before
+`ValidatePair` to exercise recovery within the same RAM Boot.
 
 #### Discover the SSH address over USB
 

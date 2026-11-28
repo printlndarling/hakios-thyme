@@ -498,6 +498,8 @@ complete_bulk(unsigned ep)
 		if (residual > bulk_packet) {
 			return false;
 		}
+		/* Discard cache lines fetched while the controller owned the OUT buffer. */
+		flush_dcache64((uintptr_t)dma.echo, sizeof(dma.echo), 0);
 		echo_length = bulk_packet - residual;
 		bulk_out_packets++;
 		bulk_out_bytes += (int)echo_length;

@@ -1,4 +1,4 @@
-/* Read-only Lockdown development endpoint on the private thyme USB profile. */
+/* Lockdown development endpoint on the private thyme USB profile. */
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
 #include <arpa/inet.h>
@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include "hakios.thyme_usbmux.h"
 #include "hdb_network.h"
+#include "lockdown-pairing.h"
 
 static SecKeyRef
 create_device_key(void)
@@ -95,7 +96,8 @@ debug_address(void)
 }
 
 static void
-dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info, CFDataRef public_key)
+dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info, CFDataRef public_key,
+    struct lockdown_pairing *pairing, SecKeyRef key)
 {
 	CFTypeRef name = request ? CFDictionaryGetValue(request, CFSTR("Request")) : NULL;
 	if (!name || CFGetTypeID(name) != CFStringGetTypeID()) {
@@ -132,6 +134,14 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 		if (address) {
 			CFRelease(address);
 		}
+	} else if (CFEqual(name, CFSTR("Pair")) || CFEqual(name, CFSTR("ValidatePair"))) {
+		CFDictionarySetValue(reply, CFSTR("Request"), name);
+		CFStringRef error = lockdown_pair_request(pairing, request, key, CFEqual(name, CFSTR("ValidatePair")));
+		if (error) {
+			CFDictionarySetValue(reply, CFSTR("Error"), error);
+		} else {
+			CFDictionarySetValue(reply, CFSTR("Result"), CFSTR("Success"));
+		}
 	} else if (CFEqual(name, CFSTR("Goodbye"))) {
 		CFDictionarySetValue(reply, CFSTR("Request"), CFSTR("Goodbye"));
 	} else {
@@ -144,7 +154,8 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 }
 
 static CFDataRef
-reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictionaryRef info, CFDataRef public_key)
+reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictionaryRef info, CFDataRef public_key,
+    struct lockdown_pairing *pairing, SecKeyRef key)
 {
 	CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, message->data + sizeof(uint32_t), length);
 	if (!bytes) {
@@ -160,7 +171,7 @@ reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictio
 		}
 		return NULL;
 	}
-	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL, reply, info, public_key);
+	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL, reply, info, public_key, pairing, key);
 	if (list) {
 		CFRelease(list);
 	}
@@ -188,6 +199,7 @@ main(void)
 	if (!public_key) {
 		fputs("Lockdown device public key unavailable\n", stderr);
 	}
+	struct lockdown_pairing pairing = {0};
 	struct thyme_lockdown_message message;
 	const size_t header = sizeof(message.transaction) + sizeof(uint32_t);
 	int status = 0;
@@ -211,7 +223,7 @@ main(void)
 			status = 1;
 			break;
 		}
-		CFDataRef data = reply_data(&message, (size_t)n - header, info, public_key);
+		CFDataRef data = reply_data(&message, (size_t)n - header, info, public_key, &pairing, key);
 		if (!data || CFDataGetLength(data) > THYME_LOCKDOWN_MESSAGE_MAX - sizeof(size)) {
 			if (data) {
 				CFRelease(data);
@@ -237,6 +249,7 @@ main(void)
 			break;
 		}
 	}
+	lockdown_pair_clear(&pairing);
 	if (public_key) {
 		CFRelease(public_key);
 	}
