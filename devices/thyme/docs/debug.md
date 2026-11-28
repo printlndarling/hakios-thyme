@@ -90,7 +90,7 @@ On the same device, Windows OpenSSH 9.5.4.1 verified the device pin,
 authenticated with a Windows-generated key and received UID 0. Its
 SFTP upload and readback matched by SHA-256. The WSL2 client passed
 its smoke checks in the same boot. Native macOS, automatic discovery,
-unified log streaming, SSH screen capture and deployment of long-lived
+unified log streaming, screen power state and deployment of long-lived
 services have separate acceptance.
 
 ## USB device and host work
@@ -265,8 +265,9 @@ and `Goodbye`. `GetValue` exposes the model, board, SoC and system
 name. The wire protocol type is `com.apple.mobile.lockdown`. On the
 physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
 thyme, SM8250-AC and HakiOS. Pairing, trusted sessions and system
-services still need implementation. The native Windows i4Tools test
-with the private WinUSB identity did not detect the device.
+services still need implementation. The operator confirmed that i4Tools 9.22.032.0 stays on the connection
+help page. Windows enumerated the development interface as WINUSB while Apple
+Mobile Device Service was running.
 
 #### Discover the SSH address over USB
 
@@ -288,6 +289,24 @@ On thyme, WSL2 opened a pinned shell before and after software USB
 reattachment and transferred files after reattachment. Native Windows
 OpenSSH accepted the discovered address with its own enrolled key.
 Use `--usb` for shell, push and pull. Use `--host` for a LAN-only session.
+
+#### Capture a live screenshot over SSH
+
+Add `SOAK_HDB_SCREEN=1` to the guarded development boot command.
+Then run HDB after the display has started presenting frames.
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py -- \
+  python3 tools/hdb.py --usb screenshot screen.png
+```
+
+The command also supports `--host PHONE_LAN_IP`. The kernel returns a
+copy of a completed composited frame only to root with
+`hdb_screen=1`. The host validates the image data and saves an RGB PNG.
+The kernel releases the display lock before copying data to user space.
+The transfer uses the existing authenticated SSH connection.
+Physical thyme captures showed two different SpringBoard pages at
+1080×2340 with EFI USB already handed off.
 
 ### USB Gadget and services
 

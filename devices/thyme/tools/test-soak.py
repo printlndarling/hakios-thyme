@@ -101,6 +101,11 @@ case "$1" in
             *:0) ;;
             *) exit 1 ;;
         esac
+        case " $XL_CMDLINE :${TEST_HDB_SCREEN:-0}" in
+            *" hdb_screen=1 "*":1") ;;
+            *" hdb_screen="*) exit 25 ;;
+            *":1") exit 26 ;;
+        esac
         case " $XL_CMDLINE :$TEST_USB_GADGET" in
             *" usb_gadget=1 "*:1) ;;
             *" usb_gadget=2 "*:2) ;;
@@ -153,6 +158,13 @@ esac
         result = self.soak(SOAK_DSDS_PROBE="1", TEST_DSDS_PROBE="1",
                            SOAK_UIM_READONLY="1", TEST_UIM_READONLY="1")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_live_screenshot_requires_explicit_option(self):
+        enabled = self.soak(SOAK_HDB_SCREEN="1", TEST_HDB_SCREEN="1")
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        invalid = self.soak(SOAK_HDB_SCREEN="yes")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("SOAK_HDB_SCREEN must be 0 or 1", invalid.stderr)
 
     def test_usb_handoff_reset_and_failure(self):
         result = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1")

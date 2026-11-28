@@ -1,5 +1,33 @@
 ## Chronological Verification Logs & Evidence
 
+## Live HDB screenshots and i4Tools detection check (2026-11-28)
+
+- In the 210 s guarded USB handoff run with kernel `aac8bb9c05de` and
+  companion `f02b045dcc30`, WSL2 discovered the device over WinUSB,
+  authenticated over Wi-Fi and saved two 1080×2340 RGB PNGs without
+  EFI USB. The images show different SpringBoard pages. The PNG checks
+  decoded both images. USB configuration 1 was reported after capture.
+- A direct `sysctlbyname` probe measured 10,108,816 bytes as root.
+  UID 501 received EPERM with zero bytes. A later capture attempted
+  after a software USB reattach near the end of the timer did not
+  obtain an SSH address.
+- The 165 s regression with EFI ownership and the screenshot option
+  omitted returned ENOENT with zero bytes from the root query.
+  `xl screenshot-live` saved a valid 1080×2340 RGB PNG from the
+  original EFI framebuffer path.
+- The operator supplied an i4Tools screenshot showing the connection
+  help page with no device details. The installed executable reports
+  9.22.032.0. Windows PnP observed the healthy development interface
+  bound to WINUSB, and Apple Mobile Device Service was running.
+  Native device discovery, pairing and trust remain open.
+- Both guarded runs returned to Android. The full `logdump` SHA-256
+  matched the before-run value for both tests.
+- Evidence is in `out/thyme-boot/hdb-screen.bhDXXl1d/`.
+  `home.png` SHA-256
+  `9c7d11c6fbef4784ddab418d0798ba6d77873a872d1d3da5b2be1dc022fb3ace`.
+  `i4tools9-user.png` SHA-256
+  `7dbef5e40073bb4dd878fede9533d8b14f47cec13a7f8e89a893bc8f6b1ada2f`.
+
 ## Discover the HDB Wi-Fi address over the development USB link (2026-11-28)
 
 - A 155 s RAM Boot retained EFI log access. Wi-Fi joined the configured

@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **532 arguments**: 456 read by the kernel, 16 by the loader, 73 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **534 arguments**: 458 read by the kernel, 17 by the loader, 73 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (91)
+## GPU and display (92)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -85,6 +85,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `gpu_keep` | K | `hakios.gpu.cpp`, `hakios.thyme_gpu.cpp` | `CONFIG_GPU_KEEP` |  |
 | `gpu_log` | K | `hakios.adreno.c`, `hakios.thyme_adreno.c` | `CONFIG_GPU_LOG` |  |
 | `hakios_kver` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
+| `hdb_screen` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_HDB_SCREEN` |  |
 | `metal` | KU | `HakiosMetal.m`, `MiniIOMobileFramebuffer.cpp`, `inject_sb.c` | `CONFIG_METAL` |  |
 | `panel_dsi_probe` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_DSI_PROBE` |  |
 | `panel_rate_gpio` | K | `hakios.thyme_display.c` | `CONFIG_PANEL_RATE_GPIO` |  |
@@ -308,7 +309,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `umifts_scan` | K | `hakios.thyme_touch.c` | `CONFIG_UMIFTS_SCAN` |  |
 | `venus` | K | `hakios.thyme_keys.c` | `CONFIG_VENUS` |  |
 | `virtio_input` | K | `hakios.virtio_input.c` | `CONFIG_VIRTIO_INPUT` |  |
-| `wdt` | K | `hakios.thyme_keys.c` | `CONFIG_WDT` |  |
+| `wdt` | KL | `hakios.thyme_keys.c`, `loader.c` | `CONFIG_WDT` |  |
 
 ## Storage and APFS (44)
 
@@ -453,7 +454,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (162)
+## User space (163)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -615,6 +616,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ui_lite` | U | `inject_sb.c` | `CONFIG_UI_LITE` |  |
 | `umi_rtpok` | K | `hakios.thyme_baseband.cpp` | `CONFIG_UMI_RTPOK` |  |
 | `umi_vops` | K | `hakios.thyme_baseband.cpp` | `CONFIG_UMI_VOPS` |  |
+| `usb_gadget` | K | `hakios.thyme_usb.c` | `CONFIG_USB_GADGET` |  |
 | `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |
 | `wallpaper_cache` | U | `inject_sb.c` | `CONFIG_WALLPAPER_CACHE` |  |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check HDB key enrollment and USB address discovery."""
+"""Check HDB key enrollment, USB discovery and screenshot download."""
 import base64
 from contextlib import redirect_stdout
 import io
@@ -9,6 +9,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+import zlib
 
 import hdb
 
@@ -82,6 +83,51 @@ class USBDiscovery(unittest.TestCase):
             self.assertIn('StrictHostKeyChecking=yes', command)
             self.assertIn(f'HostKeyAlias={hdb.ALIAS}', command)
             self.assertEqual(command[-2:], ['root@192.168.10.6', '/usr/bin/id -u'])
+
+
+class Screenshot(unittest.TestCase):
+    def test_download_converts_bgrx_to_rgb_with_padded_rows(self):
+        frame = struct.pack('<4sIII', b'HKFB', 1, 2, 8) + bytes(
+            [1, 2, 3, 0, 99, 99, 99, 99, 4, 5, 6, 0, 99, 99, 99, 99]
+        )
+
+        def transport(args, *, stdout, timeout):
+            self.assertEqual(args[-2:], ['root@192.168.10.6', '/var/jb/usr/sbin/sysctl -b kern.hakios.hdb_framebuffer'])
+            stdout.write(frame)
+            return subprocess.CompletedProcess(args, 0)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'screen.png'
+            with patch.object(hdb.subprocess, 'run', side_effect=transport), redirect_stdout(io.StringIO()):
+                self.assertEqual(hdb.screenshot([], 'root@192.168.10.6', path), 0)
+            png = path.read_bytes()
+            self.assertTrue(png.startswith(b'\x89PNG\r\n\x1a\n'))
+            self.assertEqual(struct.unpack_from('>II', png, 16), (1, 2))
+            body_length, kind = struct.unpack_from('>I4s', png, 33)
+            self.assertEqual(kind, b'IDAT')
+            self.assertEqual(zlib.decompress(png[41:41 + body_length]), bytes([0, 3, 2, 1, 0, 6, 5, 4]))
+
+    def test_failed_and_partial_captures_leave_existing_file(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'screen.png'
+            path.write_bytes(b'existing')
+            with patch.object(hdb.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)):
+                self.assertEqual(hdb.screenshot([], 'root@192.168.10.6', path), 1)
+            self.assertEqual(path.read_bytes(), b'existing')
+
+            with patch.object(hdb.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
+                with self.assertRaisesRegex(ValueError, 'no framebuffer received'):
+                    hdb.screenshot([], 'root@192.168.10.6', path)
+            self.assertEqual(path.read_bytes(), b'existing')
+
+            def partial(args, *, stdout, timeout):
+                stdout.write(struct.pack('<4sIII', b'HKFB', 1080, 2340, 4320) + b'short')
+                return subprocess.CompletedProcess(args, 0)
+
+            with patch.object(hdb.subprocess, 'run', side_effect=partial):
+                with self.assertRaisesRegex(ValueError, 'incomplete framebuffer'):
+                    hdb.screenshot([], 'root@192.168.10.6', path)
+            self.assertEqual(path.read_bytes(), b'existing')
 
 
 if __name__ == '__main__':

@@ -11,6 +11,8 @@ import struct
 import subprocess
 import tempfile
 
+from framebuffer import write_snapshot_png
+
 PORT = 2222
 USB_ADDRESS = ['ideviceinfo', '-s', '-q', 'com.hakios.debug', '-k', 'SSHAddress']
 ALIAS = 'hakios-thyme-hdb'
@@ -109,6 +111,22 @@ def remote_path(value):
     return value
 
 
+def screenshot(flags, device, output):
+    with tempfile.TemporaryFile() as raw:
+        result = subprocess.run(
+            ['ssh', *flags, device, '/var/jb/usr/sbin/sysctl -b kern.hakios.hdb_framebuffer'],
+            stdout=raw, timeout=60,
+        )
+        if result.returncode:
+            return result.returncode
+        if raw.tell() == 0:
+            raise ValueError('no framebuffer received; check SOAK_HDB_SCREEN=1 and wait for the display')
+        raw.seek(0)
+        width, height = write_snapshot_png(output, raw)
+        print(f'hdb: {output} ({width}×{height})')
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state', type=Path, default=ROOT / 'ssh/hdb')
@@ -128,6 +146,8 @@ def main():
     pull = commands.add_parser('pull', help='copy a file from thyme using SFTP')
     pull.add_argument('source', type=remote_path)
     pull.add_argument('destination', type=Path)
+    screen = commands.add_parser('screenshot', help='save the current development framebuffer as a PNG')
+    screen.add_argument('output', type=Path)
     args = parser.parse_args()
 
     try:
@@ -135,13 +155,15 @@ def main():
             prepare(args.state, args.peer, args.authorize)
             return 0
         if not (args.host or args.usb):
-            parser.error('--host or --usb is required for shell, push and pull')
-        flags = client_flags(args.state, '-p' if args.action == 'shell' else '-P')
+            parser.error('--host or --usb is required for a device command')
+        flags = client_flags(args.state, '-P' if args.action in ('push', 'pull') else '-p')
         device = 'root@' + (usb_host() if args.usb else args.host)
         if args.action == 'shell':
             command = args.command[1:] if args.command[:1] == ['--'] else args.command
             target = [device, shlex.join(command)] if command else [device]
             return subprocess.call(['ssh', *flags, *target])
+        if args.action == 'screenshot':
+            return screenshot(flags, device, args.output)
         if args.action == 'push':
             files = [str(args.source.resolve()), f'{device}:{args.destination}']
         else:

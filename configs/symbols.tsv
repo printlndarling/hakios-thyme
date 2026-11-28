@@ -206,6 +206,7 @@ HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c,hakios.thyme
 HAPTIC_F0_PROBE	arg	haptic_f0_probe	Haptics and torch	k	hakios.thyme_haptic.c	measure the LRA's continuous-mode f0 and BEMF once, then restore its registers
 HAPTIC_F0_TRACE	arg	haptic_f0_trace	Haptics and torch	k	hakios.thyme_haptic.c	print 50 ms f0/BEMF register samples during the continuous-mode probe
 HAPTIC_GAIN	arg	haptic_gain	Haptics and torch	k	hakios.thyme_haptic.c	diagnostic AW8697 waveform gain, capped at 0x40
+HDB_SCREEN	arg	hdb_screen	GPU and display	k	MiniIOMobileFramebuffer.cpp	expose a root-only snapshot of the composited frame
 M2V_UTRACE	arg	m2v_utrace	User space	u	HakiosMetalCA.m	Turnip's GPU trace of every render pass (u_trace) into a file, printed during the run
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
 MDM_DUMP	arg	mdm_dump	Storage and APFS	k	hakios.ufs.c	
@@ -292,7 +293,7 @@ PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c
 PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	zero the real image in place, to keep the file's address and size while its content is wrong
 PCIE2_CARDSUB	arg	pcie2_cardsub	User space	k	hakios.thyme_pcie2.c	
 PCIE2_CC	arg	pcie2_cc	Loader	kl	hakios.thyme_pcie2.c,loader.c	
-PCIE2_DSDS_PROBE	arg	pcie2_dsds_probe	User space	k	hakios.thyme_pcie2.c	Query both NAS registrations on separate clients
+PCIE2_DSDS_PROBE	arg	pcie2_dsds_probe	User space	k	hakios.thyme_pcie2.c	Read both subscriptions on separate NAS clients
 PCIE2_EETRACE	arg	pcie2_eetrace	User space	k	hakios.thyme_pcie2.c	sample BHI_EXECENV and BHI_STATUS every millisecond for the first 500 ms after the doorbell, logging every change
 PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	
@@ -448,6 +449,7 @@ UMI_VOPS	arg	umi_vops	User space	k	hakios.thyme_baseband.cpp
 UMI_WIFI_RETURN	arg	umi_wifi_return	Wi-Fi	k	hakios.thyme_qca6390.c	return to the loader after the step-1 Wi-Fi survey
 UMI_WIFI_STEP	arg	umi_wifi_step	Wi-Fi	k	hakios.thyme_qca6390.c	choose a THYME QCA6390 firmware diagnostic step
 UMIFTS_SCAN	arg	umifts_scan	Touch and buttons	k	hakios.thyme_touch.c	select FTS521 scan mode, where N is 0x01 or 0x20
+USB_GADGET	arg	usb_gadget	User space	k	hakios.thyme_usb.c	
 USTACKS	arg	ustacks	Debugging	k	user_exception_trace.c	
 USTACKS_AT	arg	ustacks_at	Debugging	k	user_exception_trace.c	
 USTACKS_COUNT	arg	ustacks_count	Debugging	k	user_exception_trace.c	
@@ -463,7 +465,7 @@ VIRTIO_INPUT	arg	virtio_input	Touch and buttons	k	hakios.virtio_input.c
 VIRTIO_SOUND	arg	virtio_sound	Audio and battery	k	hakios.virtio_sound.c	
 WALLPAPER_CACHE	arg	wallpaper_cache	User space	u	inject_sb.c	the window that shows the wallpaper rasterized by the window server (CALayer's shouldRasterize), drawn from one texture instead of composed again
 WALLPAPER_FREEZE	arg	wallpaper_freeze	User space	u	inject_sb.c	the wallpaper as one still picture
-WDT	arg	wdt	Touch and buttons	k	hakios.thyme_keys.c	
+WDT	arg	wdt	Touch and buttons	kl	hakios.thyme_keys.c,loader.c	
 WIFI_AGAIN	arg	wifi_again	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	start the DSP although the one before it was shut down without having acknowledged a stop: THAT HAS RESET THE PHONE, twice of two
 WIFI_ASK	arg	wifi_ask	Wi-Fi	k	hakios.thyme_wifi.c,hakios.wifi.c	step 14 also asks that service a question (its capabilities) and writes down the beginning of an answer
 WIFI_BA	arg	wifi_ba	Wi-Fi	k	lx_80211.c	

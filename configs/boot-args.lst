@@ -218,6 +218,7 @@ haptic_effect	k
 haptic_f0_probe	k
 haptic_f0_trace	k
 haptic_gain	k
+hdb_screen	k
 hv_wdt_pet	k
 loader_return_after	kl
 m2v_utrace	u
@@ -479,6 +480,7 @@ umi_vops	k
 umi_wifi_return	k
 umi_wifi_step	k
 umifts_scan	k
+usb_gadget	k
 ustacks	k
 ustacks_at	k
 ustacks_count	k
@@ -496,7 +498,7 @@ virtio_net	k
 virtio_sound	k
 wallpaper_cache	u
 wallpaper_freeze	u
-wdt	k
+wdt	kl
 wifi	k
 wifi_again	k
 wifi_ask	k

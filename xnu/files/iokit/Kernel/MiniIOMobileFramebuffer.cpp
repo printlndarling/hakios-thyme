@@ -116,6 +116,8 @@ static uint8_t  gFBCalls[128];          /* how many calls of each selector were 
 #define kFBDefaultHeight        2436
 #define kFBDotsPerInch          458
 
+/* Boot-arg hdb_screen=1: expose a root-only snapshot of the composited frame. */
+static TUNABLE(uint32_t, gHDBScreen, "hdb_screen", 0);
 static TUNABLE(uint32_t, gFBWidth, "fbwidth", kFBDefaultWidth);
 static TUNABLE(uint32_t, gFBHeight, "fbheight", kFBDefaultHeight);
 /*
@@ -619,6 +621,55 @@ OSDefineMetaClassAndStructors(IOMobileFramebuffer, IOService);
 /* the display, for a second announcement once its panel timing has been switched */
 static IOMobileFramebuffer * gPublishedFramebuffer;
 
+/* Root-only snapshot of the composited panel image in an explicit debug boot. */
+static int
+hdbFramebuffer SYSCTL_HANDLER_ARGS
+{
+	if (gHDBScreen != 1) {
+		return ENOENT;
+	}
+	if (req->p == NULL || proc_suser(req->p) != 0) {
+		return EPERM;
+	}
+	IOMobileFramebuffer * fb = __atomic_load_n(&gPublishedFramebuffer, __ATOMIC_ACQUIRE);
+	if (fb == NULL || fb->fShadow == NULL) {
+		return ENXIO;
+	}
+	const uint32_t width = fb->fPanelWidth, height = fb->fPanelHeight;
+	if (width == 0 || height == 0 || width > 4096 || height > 4096 ||
+	    (uint64_t)width * height * 4 > 16u * 1024u * 1024u) {
+		return EOVERFLOW;
+	}
+	const uint32_t stride = width * 4;
+	const size_t pixels = (size_t)stride * height;
+	const struct {
+		char magic[4];
+		uint32_t width, height, stride;
+	} header = { { 'H', 'K', 'F', 'B' }, width, height, stride };
+	if (req->oldptr == USER_ADDR_NULL) {
+		return SYSCTL_OUT(req, NULL, sizeof(header) + pixels);
+	}
+	uint8_t * snapshot = (uint8_t *) IOMalloc(pixels);
+	if (snapshot == NULL) {
+		return ENOMEM;
+	}
+	IOLockLock(fb->fLock);
+	const bool ready = fb->fGraphics && fb->fSwapsShown != 0;
+	if (ready) {
+		memcpy(snapshot, fb->fShadow, pixels);
+	}
+	IOLockUnlock(fb->fLock);
+	/* Never hold the presenter lock across copyout to user memory. */
+	int error = ready ? SYSCTL_OUT(req, &header, sizeof(header)) : EAGAIN;
+	if (error == 0) {
+		error = SYSCTL_OUT(req, snapshot, pixels);
+	}
+	IOFree(snapshot, pixels);
+	return error;
+}
+SYSCTL_PROC(_kern_hakios, OID_AUTO, hdb_framebuffer, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_LOCKED,
+    NULL, 0, hdbFramebuffer, "S,hdb_framebuffer", "debug panel snapshot");
+
 static void
 setNumber(OSDictionary * dict, const char * key, uint64_t value)
 {
@@ -682,7 +733,7 @@ IOMobileFramebuffer::publishRefresh(void)
 extern "C" void
 hakios_fb_publish_refresh(void)
 {
-	IOMobileFramebuffer * fb = gPublishedFramebuffer;
+	IOMobileFramebuffer * fb = __atomic_load_n(&gPublishedFramebuffer, __ATOMIC_ACQUIRE);
 
 	if (fb != NULL) {
 		fb->publishModes();
@@ -873,7 +924,7 @@ IOMobileFramebuffer::start(IOService * provider)
 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
 	/* for who draws with the GPU (userland/src/eagl.c): a frame need not be waited for before it is handed over */
 	setProperty("HakiosWaitsForGPU", kOSBooleanTrue);
-	gPublishedFramebuffer = this;
+	__atomic_store_n(&gPublishedFramebuffer, this, __ATOMIC_RELEASE);
 	publishModes();
 	setName("disp0");
 	registerService();
@@ -2071,6 +2122,10 @@ IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 	if (!fGraphics) {
 		return;
 	}
+	/* show() already holds fLock. This is the other writer of fShadow. */
+	if (gHDBScreen == 1) {
+		IOLockLock(fLock);
+	}
 	fSettling = true;
 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
 		MiniIOSurface * s = surfaces[layer];
@@ -2093,6 +2148,9 @@ IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
 		blitPanel(0, (int32_t) fPanelHeight);
 	}
 	fStatSettled++;
+	if (gHDBScreen == 1) {
+		IOLockUnlock(fLock);
+	}
 }
 
 /* A swap's surfaces onto the panel, once the GPU is done with them. */

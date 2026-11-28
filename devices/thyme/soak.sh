@@ -53,6 +53,11 @@ case "${SOAK_DSDS_PROBE:-0}" in
    export XL_FOLLOW="${XL_FOLLOW-5}" XL_FOLLOW_KEEP="${XL_FOLLOW_KEEP-1}" ;;
 *) echo "soak: SOAK_DSDS_PROBE must be 0 or 1" >&2; exit 1 ;;
 esac
+case "${SOAK_HDB_SCREEN:-0}" in
+0) ;;
+1) XL_CMDLINE="$XL_CMDLINE hdb_screen=1" ;;
+*) echo "soak: SOAK_HDB_SCREEN must be 0 or 1" >&2; exit 1 ;;
+esac
 case "${SOAK_UIM_READONLY:-0}" in
 0) ;;
 1) XL_CMDLINE="$XL_CMDLINE pcie2_uiswitch=0 pcie2_no_sms=1" ;;
