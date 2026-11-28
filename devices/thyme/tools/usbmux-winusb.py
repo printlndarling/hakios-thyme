@@ -4,6 +4,7 @@
 import argparse
 import base64
 from contextlib import contextmanager
+import errno
 import os
 from pathlib import Path
 import plistlib
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 from xml.parsers.expat import ExpatError
 
 
@@ -24,8 +26,8 @@ CLIENT_VERSION, PLIST_PACKET = 1, 8
 BAD_COMMAND, BAD_DEVICE, CONNECTION_REFUSED, BAD_VERSION = 1, 2, 3, 6
 MAX_MESSAGE = 131072
 LOCKDOWN_HEADER = struct.Struct(">I")
-LOCKDOWN_REQUEST_MAX = 1024
-LOCKDOWN_REPLY_MAX = 480
+LOCKDOWN_MESSAGE_MAX = 32768
+MAX_ENCODED_LINE = 4 * ((LOCKDOWN_MESSAGE_MAX + 2) // 3) + 2
 PROBE = Path(__file__).with_name("test-usb-bulk.ps1").resolve()
 
 
@@ -83,13 +85,13 @@ class WinUSBSession:
     def line(self, timeout):
         if not select.select([self.process.stdout], [], [], timeout)[0]:
             raise TimeoutError("WinUSB session timed out")
-        return self.process.stdout.readline(1100).strip()
+        return self.process.stdout.readline(MAX_ENCODED_LINE).strip()
 
     def exchange(self, request):
         self.process.stdin.write(base64.b64encode(request) + b"\n")
         self.process.stdin.flush()
-        reply = base64.b64decode(self.line(5), validate=True)
-        if not LOCKDOWN_HEADER.size < len(reply) <= LOCKDOWN_REPLY_MAX:
+        reply = base64.b64decode(self.line(10), validate=True)
+        if not LOCKDOWN_HEADER.size < len(reply) <= LOCKDOWN_MESSAGE_MAX:
             raise ValueError("unexpected Lockdown response length")
         if LOCKDOWN_HEADER.unpack_from(reply)[0] != len(reply) - LOCKDOWN_HEADER.size:
             raise ValueError("incomplete Lockdown response")
@@ -113,9 +115,18 @@ def result(number):
     return {"MessageType": "Result", "Number": number}
 
 
+class MuxServer(socketserver.ThreadingUnixStreamServer):
+    def __init__(self, address, transport):
+        self.transport = transport
+        self.location = None
+        self.wire = threading.Lock()
+        self.buid = str(uuid.uuid4()).upper()
+        super().__init__(address, Client)
+
+
 class Client(socketserver.StreamRequestHandler):
     def handle(self):
-        self.connection.settimeout(8)
+        self.connection.settimeout(15)
         try:
             while True:
                 header = self.rfile.read(HEADER.size)
@@ -150,17 +161,39 @@ class Client(socketserver.StreamRequestHandler):
         self.wfile.write(HEADER.pack(HEADER.size + len(body), CLIENT_VERSION, PLIST_PACKET, tag) + body)
 
     def dispatch(self, request):
-        if not isinstance(request, dict) or request.get("MessageType") != "ListDevices":
+        if not isinstance(request, dict):
             return result(BAD_COMMAND)
-        try:
-            location = self.server.transport.probe()
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
-            print("WinUSB probe failed (" + type(error).__name__ + ")", file=sys.stderr)
-            location = None
-        self.server.location = location
+        command = request.get("MessageType")
+        if command == "ReadBUID":
+            return {"BUID": self.server.buid}
+        if command == "ReadPairRecord":
+            match = self.server.location
+            if match and request.get("PairRecordID") == attached(match)["Properties"]["SerialNumber"]:
+                return result(errno.ENOENT)
+            return result(BAD_DEVICE)
+        if command != "ListDevices":
+            return result(BAD_COMMAND)
+        if self.server.wire.acquire(blocking=False):
+            try:
+                self.server.location = self.server.transport.probe()
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                print("WinUSB probe failed (" + type(error).__name__ + ")", file=sys.stderr)
+                self.server.location = None
+            finally:
+                self.server.wire.release()
+        location = self.server.location
         return {"DeviceList": [attached(location)] if location else []}
 
     def connect(self, request, tag):
+        if not self.server.wire.acquire(timeout=2):
+            self.reply(result(CONNECTION_REFUSED), tag)
+            return
+        try:
+            self.connect_locked(request, tag)
+        finally:
+            self.server.wire.release()
+
+    def connect_locked(self, request, tag):
         raw_port = request.get("PortNumber")
         identifier = request.get("DeviceID")
         if type(raw_port) is not int or not 1 <= raw_port <= 65535 or type(identifier) is not int:
@@ -195,7 +228,7 @@ class Client(socketserver.StreamRequestHandler):
             if len(header) != LOCKDOWN_HEADER.size:
                 return
             size, = LOCKDOWN_HEADER.unpack(header)
-            if not 0 < size <= LOCKDOWN_REQUEST_MAX - len(header):
+            if not 0 < size <= LOCKDOWN_MESSAGE_MAX - len(header):
                 return
             payload = self.rfile.read(size)
             if len(payload) != size:
@@ -216,9 +249,7 @@ def main():
     transport = WinUSB()
     with tempfile.TemporaryDirectory(prefix="hakios-usbmux-") as directory:
         address = str(Path(directory) / "mux.sock")
-        with socketserver.UnixStreamServer(address, Client) as server:
-            server.transport = transport
-            server.location = None
+        with MuxServer(address, transport) as server:
             worker = threading.Thread(target=server.serve_forever)
             worker.start()
             try:

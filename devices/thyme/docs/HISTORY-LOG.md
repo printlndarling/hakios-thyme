@@ -1,5 +1,41 @@
 ## Chronological Verification Logs & Evidence
 
+## Certificate-bearing Lockdown messages on thyme USB (2026-11-28)
+
+- The guarded 240 s boot used kernel `336e853af8bc`, companion
+  `a30aff713cb0` and the WinUSB usbmux profile. The device generated
+  a temporary 2048-bit RSA key in RAM. The 512-byte framed
+  `DevicePublicKey` response crossed two USB transport segments.
+  OpenSSL parsed the 426-byte RSA public key.
+- Original Ubuntu `idevicepair 1.3.0` sent a framed `Pair` request
+  of 4,855 bytes through WinUSB. The request included a BUID and
+  all three certificates. The device certificate contained the same
+  public key the device advertised. The device responded with
+  `InvalidRequest` and the CLI exited with failure. Approval, trusted
+  sessions and i4Tools native discovery remain open.
+- The certificates from this client used SHA-1 with RSA and empty
+  subject and issuer names. Both leaf signatures matched the presented
+  root key when checked directly. Default OpenSSL chain verification
+  rejected the leaf certificates with error 18 in this fixture.
+  This fixture is retained for future trust validation.
+- A separate 32,768-byte framed GetValue returned the real board
+  name after software reattachment. HDB captured 1080×2340 RGB PNGs
+  before and after reattachment. OpenSSH authentication and the
+  USB reconnect counter also passed.
+- Three native WinUSB regression rounds passed closed-port,
+  fragmented and coalesced frame handling. The sanitizer replay
+  covered both directions at the 32 KiB limit and stale ACKs.
+  Four local bridge tests passed, including a separate BUID request
+  during an open Lockdown connection.
+- The timer returned to Android. The full `logdump` SHA-256 matched
+  before and after, and the development device list was empty once
+  Android booted.
+- Evidence is in `out/thyme-boot/usb-pair-wire.JI2BpW16/`.
+  `pair-wire.log` SHA-256
+  `ac286477f9def4d025f30bf2e3bfc64e054cc3df7bed23a7cf9b017526c29cb3`.
+  `max-frame.log` SHA-256
+  `69bdc49cb49a683ac646dfab2904f8d4e192018111963994363c6875d6085601`.
+
 ## Both bound NAS clients report registration and packet attach (2026-11-28)
 
 - In the 165 s guarded EFI-owned run with `aac8bb9c05de` and the

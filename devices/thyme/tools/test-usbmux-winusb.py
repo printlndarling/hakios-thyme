@@ -2,14 +2,15 @@
 """Replay the local usbmuxd framing and check what reaches the WinUSB transport."""
 
 from contextlib import contextmanager
+import errno
 from pathlib import Path
 import plistlib
 import runpy
 import socket
-import socketserver
 import tempfile
 import threading
 import unittest
+import uuid
 
 bridge = runpy.run_path(str(Path(__file__).with_name("usbmux-winusb.py")))
 HEADER = bridge["HEADER"]
@@ -40,9 +41,7 @@ class BridgeTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.path = str(Path(self.directory.name) / "mux.sock")
-        self.server = socketserver.UnixStreamServer(self.path, bridge["Client"])
-        self.server.transport = Transport()
-        self.server.location = None
+        self.server = bridge["MuxServer"](self.path, Transport())
         self.worker = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01})
         self.worker.start()
         self.addCleanup(self.directory.cleanup)
@@ -92,8 +91,27 @@ class BridgeTest(unittest.TestCase):
             client.sendall(message[:2])
             client.sendall(message[2:])
             self.assertEqual(stream.read(9), LOCKDOWN_HEADER.pack(5) + b"reply")
-            client.sendall(LOCKDOWN_HEADER.pack(1024))
+            client.sendall(LOCKDOWN_HEADER.pack(bridge["LOCKDOWN_MESSAGE_MAX"]))
             self.assertEqual(stream.read(), b"")
+        self.assertEqual(self.server.transport.calls, [("list",), (62078, LOCATION), message])
+
+    def test_pairing_metadata_is_available_during_a_lockdown_connection(self):
+        entry = self.request(MessageType="ListDevices")["DeviceList"][0]
+        identifier = entry["DeviceID"]
+        locator = entry["Properties"]["SerialNumber"]
+        connect = plistlib.dumps(dict(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62078)))
+        body = b"certificate" * 1000
+        message = LOCKDOWN_HEADER.pack(len(body)) + body
+        with self.exchange(connect) as (reply, client, stream):
+            self.assertEqual(reply["Number"], 0)
+            buid = self.request(MessageType="ReadBUID")["BUID"]
+            self.assertEqual(uuid.UUID(buid).version, 4)
+            self.assertEqual(self.request(MessageType="ReadBUID")["BUID"], buid)
+            self.assertEqual(self.request(MessageType="ReadPairRecord", PairRecordID=locator)["Number"], errno.ENOENT)
+            self.assertEqual(self.request(MessageType="ReadPairRecord", PairRecordID="elsewhere")["Number"], 2)
+            self.assertEqual(self.request(MessageType="ListDevices"), {"DeviceList": [entry]})
+            client.sendall(message)
+            self.assertEqual(stream.read(9), LOCKDOWN_HEADER.pack(5) + b"reply")
         self.assertEqual(self.server.transport.calls, [("list",), (62078, LOCATION), message])
 
     def test_invalid_client_requests_stay_off_usb(self):

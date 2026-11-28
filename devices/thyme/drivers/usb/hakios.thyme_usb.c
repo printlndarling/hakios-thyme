@@ -5,6 +5,7 @@
  */
 #include <arm/caches_internal.h>
 #include <kern/clock.h>
+#include <kern/kalloc.h>
 #include <kern/locks.h>
 #include <kern/startup.h>
 #include <kern/thread_call.h>
@@ -155,20 +156,25 @@ lockdown_dev_close(__unused dev_t dev, __unused int flags, __unused int type, __
 static int
 lockdown_dev_read(__unused dev_t dev, struct uio *uio, __unused int flags)
 {
-	struct thyme_lockdown_message message;
-	if (uio_resid(uio) < sizeof(message)) {
+	user_ssize_t capacity = uio_resid(uio);
+	if (capacity <= (user_ssize_t)sizeof(uint32_t)) {
 		return EMSGSIZE;
 	}
-	int error = 0;
-	unsigned length = 0;
+	struct thyme_lockdown_message *message = kalloc_data(sizeof(*message), Z_WAITOK);
+	if (message == NULL) {
+		return ENOMEM;
+	}
+	unsigned payload = capacity >= (user_ssize_t)sizeof(*message) ?
+	    sizeof(message->data) : (unsigned)capacity - sizeof(message->transaction);
+	int error = 0, length = 0;
 	lck_mtx_lock(&mux_lock);
 	while (lockdown_open && error == 0) {
 		int current_stage = os_atomic_load(&stage, relaxed);
 		if (current_stage != USB_RUNNING && current_stage != USB_RECONNECTING) {
 			break;
 		}
-		length = thyme_usbmux_request(&message);
-		if (length) {
+		length = thyme_usbmux_request(message, payload);
+		if (length != 0) {
 			break;
 		}
 		const struct timespec interval = { .tv_sec = 1 };
@@ -178,30 +184,38 @@ lockdown_dev_read(__unused dev_t dev, struct uio *uio, __unused int flags)
 		}
 	}
 	lck_mtx_unlock(&mux_lock);
-	if (!length) {
-		return error ? error : ENXIO;
+	if (length > 0) {
+		error = uiomove((char *)message, (int)sizeof(message->transaction) + length, uio);
+	} else if (length < 0) {
+		error = EMSGSIZE;
+	} else if (!error) {
+		error = ENXIO;
 	}
-	return uiomove((char *)&message, (int)(sizeof(message.transaction) + length), uio);
+	kfree_data(message, sizeof(*message));
+	return error;
 }
 
 static int
 lockdown_dev_write(__unused dev_t dev, struct uio *uio, __unused int flags)
 {
-	struct thyme_lockdown_message message;
 	user_ssize_t size = uio_resid(uio);
-	if (size <= (user_ssize_t)sizeof(message.transaction) ||
-	    size > (user_ssize_t)(sizeof(message.transaction) + THYME_LOCKDOWN_REPLY_MAX)) {
+	if (size <= (user_ssize_t)sizeof(uint32_t) || size > (user_ssize_t)sizeof(struct thyme_lockdown_message)) {
 		return EMSGSIZE;
 	}
-	int error = uiomove((char *)&message, (int)size, uio);
-	if (error) {
-		return error;
+	struct thyme_lockdown_message *message = kalloc_data(sizeof(*message), Z_WAITOK);
+	if (message == NULL) {
+		return ENOMEM;
 	}
-	lck_mtx_lock(&mux_lock);
-	bool accepted = lockdown_open &&
-	    thyme_usbmux_submit(&message, (unsigned)size - sizeof(message.transaction));
-	lck_mtx_unlock(&mux_lock);
-	return accepted ? 0 : ESTALE;
+	int error = uiomove((char *)message, (int)size, uio);
+	if (!error) {
+		lck_mtx_lock(&mux_lock);
+		bool accepted = lockdown_open &&
+		    thyme_usbmux_submit(message, (unsigned)size - sizeof(message->transaction));
+		lck_mtx_unlock(&mux_lock);
+		error = accepted ? 0 : ESTALE;
+	}
+	kfree_data(message, sizeof(*message));
+	return error;
 }
 
 static const struct cdevsw lockdown_cdevsw = {

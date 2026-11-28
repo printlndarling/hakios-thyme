@@ -1,13 +1,70 @@
 /* Read-only Lockdown development endpoint on the private thyme USB profile. */
 #include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <resolv.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include "hakios.thyme_usbmux.h"
 #include "hdb_network.h"
+
+static SecKeyRef
+create_device_key(void)
+{
+	const int bits = 2048;
+	CFNumberRef size = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &bits);
+	if (!size) {
+		return NULL;
+	}
+	const void *keys[] = { kSecAttrKeyType, kSecAttrKeySizeInBits, kSecAttrIsPermanent };
+	const void *values[] = { kSecAttrKeyTypeRSA, size, kCFBooleanFalse };
+	CFDictionaryRef attrs = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 3,
+	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFRelease(size);
+	if (!attrs) {
+		return NULL;
+	}
+	SecKeyRef key = SecKeyCreateRandomKey(attrs, NULL);
+	CFRelease(attrs);
+	return key;
+}
+
+static CFDataRef
+export_public_key(SecKeyRef key)
+{
+	SecKeyRef public = key ? SecKeyCopyPublicKey(key) : NULL;
+	if (!public) {
+		return NULL;
+	}
+	CFDataRef der = SecKeyCopyExternalRepresentation(public, NULL);
+	CFRelease(public);
+	if (!der) {
+		return NULL;
+	}
+	char encoded[512];
+	int length = b64_ntop(CFDataGetBytePtr(der), (size_t)CFDataGetLength(der), encoded, sizeof(encoded));
+	CFRelease(der);
+	if (length <= 0) {
+		return NULL;
+	}
+	CFMutableDataRef pem = CFDataCreateMutable(kCFAllocatorDefault, 0);
+	if (!pem) {
+		return NULL;
+	}
+	const UInt8 begin[] = "-----BEGIN RSA PUBLIC KEY-----\n";
+	const UInt8 end[] = "-----END RSA PUBLIC KEY-----\n";
+	CFDataAppendBytes(pem, begin, sizeof(begin) - 1);
+	for (int at = 0; at < length; at += 64) {
+		int count = length - at < 64 ? length - at : 64;
+		CFDataAppendBytes(pem, (const UInt8 *)encoded + at, count);
+		CFDataAppendBytes(pem, (const UInt8 *)"\n", 1);
+	}
+	CFDataAppendBytes(pem, end, sizeof(end) - 1);
+	return pem;
+}
 
 static CFDictionaryRef
 identity(void)
@@ -38,7 +95,7 @@ debug_address(void)
 }
 
 static void
-dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info)
+dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info, CFDataRef public_key)
 {
 	CFTypeRef name = request ? CFDictionaryGetValue(request, CFSTR("Request")) : NULL;
 	if (!name || CFGetTypeID(name) != CFStringGetTypeID()) {
@@ -57,6 +114,8 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 		if (!domain) {
 			if (!key) {
 				value = info;
+			} else if (CFEqual(key, CFSTR("DevicePublicKey"))) {
+				value = public_key;
 			} else if (CFGetTypeID(key) == CFStringGetTypeID()) {
 				value = CFDictionaryGetValue(info, key);
 			}
@@ -85,7 +144,7 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 }
 
 static CFDataRef
-reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictionaryRef info)
+reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictionaryRef info, CFDataRef public_key)
 {
 	CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, message->data + sizeof(uint32_t), length);
 	if (!bytes) {
@@ -101,7 +160,7 @@ reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictio
 		}
 		return NULL;
 	}
-	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL, reply, info);
+	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL, reply, info, public_key);
 	if (list) {
 		CFRelease(list);
 	}
@@ -122,6 +181,12 @@ main(void)
 	if (!info) {
 		close(fd);
 		return 1;
+	}
+	/* The key stays in this process and is regenerated on each launch. */
+	SecKeyRef key = create_device_key();
+	CFDataRef public_key = export_public_key(key);
+	if (!public_key) {
+		fputs("Lockdown device public key unavailable\n", stderr);
 	}
 	struct thyme_lockdown_message message;
 	const size_t header = sizeof(message.transaction) + sizeof(uint32_t);
@@ -146,8 +211,8 @@ main(void)
 			status = 1;
 			break;
 		}
-		CFDataRef data = reply_data(&message, (size_t)n - header, info);
-		if (!data || CFDataGetLength(data) > THYME_LOCKDOWN_REPLY_MAX - sizeof(size)) {
+		CFDataRef data = reply_data(&message, (size_t)n - header, info, public_key);
+		if (!data || CFDataGetLength(data) > THYME_LOCKDOWN_MESSAGE_MAX - sizeof(size)) {
 			if (data) {
 				CFRelease(data);
 			}
@@ -171,6 +236,12 @@ main(void)
 			status = 1;
 			break;
 		}
+	}
+	if (public_key) {
+		CFRelease(public_key);
+	}
+	if (key) {
+		CFRelease(key);
 	}
 	CFRelease(info);
 	close(fd);

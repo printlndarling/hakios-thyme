@@ -14,8 +14,10 @@
 enum { MUX_VERSION = 0, MUX_TCP = 6 };
 enum { TCP_FIN = 1, TCP_SYN = 2, TCP_RST = 4, TCP_PSH = 8, TCP_ACK = 16 };
 enum { LOCKDOWN_HEADER = 4, TCP_FRAME_HEADER = MUX_HEADER_SIZE + MUX_TCP_HEADER };
-
-_Static_assert(TCP_FRAME_HEADER + THYME_LOCKDOWN_REPLY_MAX < MUX_FRAME_MAX, "reply must end with a short packet at high speed");
+/* End each high-speed transfer with a short packet. */
+#define MUX_SEGMENT_MAX 480u
+_Static_assert(TCP_FRAME_HEADER + MUX_SEGMENT_MAX < MUX_FRAME_MAX, "reply must fit in one short high-speed packet");
+_Static_assert(THYME_LOCKDOWN_MESSAGE_MAX <= 65535u, "receive window is sixteen bits");
 
 static uint8_t stream[2 * MUX_FRAME_MAX];
 static unsigned used;
@@ -23,9 +25,9 @@ static bool negotiated, online;
 static uint16_t peer_port;
 static uint32_t peer_next, device_next, next_transaction;
 static struct thyme_lockdown_message request;
-static unsigned request_length, response_length;
+static unsigned request_length, response_length, response_offset;
 static bool request_complete, request_read;
-static uint8_t response[THYME_LOCKDOWN_REPLY_MAX];
+static uint8_t response[THYME_LOCKDOWN_MESSAGE_MAX];
 
 static uint16_t
 be16(const uint8_t *bytes)
@@ -60,7 +62,7 @@ static void
 close_stream(void)
 {
 	peer_port = 0;
-	request_length = response_length = 0;
+	request_length = response_length = response_offset = 0;
 	request_complete = request_read = false;
 }
 
@@ -81,16 +83,19 @@ thyme_usbmux_service(bool enabled)
 	}
 }
 
-unsigned
-thyme_usbmux_request(struct thyme_lockdown_message *message)
+int
+thyme_usbmux_request(struct thyme_lockdown_message *message, unsigned capacity)
 {
 	if (!request_complete || request_read) {
 		return 0;
 	}
+	if (request_length > capacity) {
+		return -1;
+	}
 	message->transaction = request.transaction;
 	memcpy(message->data, request.data, request_length);
 	request_read = true;
-	return request_length;
+	return (int)request_length;
 }
 
 bool
@@ -127,12 +132,28 @@ tcp_reply(uint8_t *reply, uint16_t source, uint16_t dest, uint32_t seq,
 	tcp[12] = (MUX_TCP_HEADER / 4) << 4;
 	tcp[13] = flags;
 	if ((flags & TCP_RST) == 0) {
-		put_be16(tcp + 14, THYME_LOCKDOWN_REQUEST_MAX);
+		put_be16(tcp + 14, THYME_LOCKDOWN_MESSAGE_MAX);
 	}
 	if (size != 0) {
 		memcpy(reply + TCP_FRAME_HEADER, data, size);
 	}
 	return (int)length;
+}
+
+static int
+send_response_segment(uint8_t *reply)
+{
+	unsigned remaining = response_length - response_offset;
+	unsigned size = remaining > MUX_SEGMENT_MAX ? MUX_SEGMENT_MAX : remaining;
+	bool last = size == remaining;
+	int length = tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port, device_next,
+	    peer_next, last ? TCP_ACK | TCP_PSH : TCP_ACK, response + response_offset, size);
+	device_next += size;
+	response_offset += size;
+	if (last) {
+		response_offset = response_length = 0;
+	}
+	return length;
 }
 
 int
@@ -150,12 +171,9 @@ thyme_usbmux_complete(uint8_t *reply, bool timeout)
 	if (!response_length) {
 		return 0;
 	}
-	int length = tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port,
-	    device_next, peer_next, TCP_ACK | TCP_PSH, response, response_length);
-	device_next += response_length;
 	request_complete = request_read = false;
-	request_length = response_length = 0;
-	return length;
+	request_length = 0;
+	return send_response_segment(reply);
 }
 
 static int
@@ -191,6 +209,9 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 	if (flags == (TCP_FIN | TCP_ACK) && size == 0) {
 		close_stream();
 		return tcp_reply(reply, dest, source, ack, seq + 1, TCP_FIN | TCP_ACK, NULL, 0);
+	}
+	if (response_length) {
+		return flags == TCP_ACK && size == 0 ? send_response_segment(reply) : -1;
 	}
 	if ((flags & ~TCP_PSH) != TCP_ACK) {
 		return -1;

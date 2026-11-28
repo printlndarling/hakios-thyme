@@ -216,7 +216,8 @@ field. The physical serial is unavailable in this profile. A
 The device refuses every port while the service is offline and accepts
 only 62078 when the development Lockdown program has opened the node.
 The bridge relays one framed request at a time using the private WinUSB
-interface. See the upstream
+interface. Requests and responses may use multiple USB packets, up to
+32 KiB including the Lockdown length prefix. See the upstream
 [USB filter](https://github.com/libimobiledevice/usbmuxd/blob/master/src/usb.c#L763)
 and [local socket handling](https://github.com/libimobiledevice/libusbmuxd/blob/master/src/libusbmuxd.c#L155).
 
@@ -230,7 +231,8 @@ RAM data volume in a dedicated terminal.
 . ./xnu-env.sh
 mkdir -p out/thyme-boot
 xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
-  -O2 -Wall -Wextra -I drivers/core -I userland/src -framework CoreFoundation \
+  -O2 -Wall -Wextra -I drivers/core -I userland/src \
+  -framework CoreFoundation -framework Security -lresolv \
   -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c
 python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
@@ -268,6 +270,17 @@ thyme, SM8250-AC and HakiOS. Pairing, trusted sessions and system
 services still need implementation. The operator confirmed that i4Tools 9.22.032.0 stays on the connection
 help page. Windows enumerated the development interface as WINUSB while Apple
 Mobile Device Service was running.
+
+#### Pairing protocol preparation
+
+The development daemon returns a 2048-bit `DevicePublicKey` as
+PKCS#1 PEM. The corresponding key is generated on-device in RAM
+and lives for the daemon's lifetime. The private host adapter provides
+its per-process BUID and reports absent pair records while the
+Lockdown connection is open. In the guarded run, Ubuntu `idevicepair 1.3.0` read the device key
+and sent a 4,855-byte framed `Pair` request with three certificates.
+The device returned a matching `InvalidRequest` response. Approval,
+certificate validation, TLS sessions and record storage remain open.
 
 #### Discover the SSH address over USB
 

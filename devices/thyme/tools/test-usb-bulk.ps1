@@ -20,6 +20,7 @@ using Microsoft.Win32.SafeHandles;
 
 public static class ThymeUsbLoopback
 {
+    private const int LockdownMessageMax = 32768;
     private static Guid InterfaceGuid = new Guid("A4083620-32F7-5F01-8504-C2BEFA7DF2A7");
 
     [StructLayout(LayoutKind.Sequential)]
@@ -318,7 +319,7 @@ public static class ThymeUsbLoopback
                 for (string line; (line = Console.ReadLine()) != null;)
                 {
                     byte[] request = Convert.FromBase64String(line);
-                    if (request.Length <= 4 || request.Length > 1024 || Read32(request, 0) != request.Length - 4)
+                    if (request.Length <= 4 || request.Length > LockdownMessageMax || Read32(request, 0) != request.Length - 4)
                         throw new IOException("Invalid Lockdown request size");
                     for (int offset = 0; offset < request.Length;)
                     {
@@ -327,17 +328,35 @@ public static class ThymeUsbLoopback
                         seq = unchecked(seq + (uint)size);
                         offset += size;
                         reply = ReceiveTcp(handle, packet, port);
-                        if (Read32(reply, 12) != ack || Read32(reply, 16) != seq ||
-                            reply[21] != (offset == request.Length ? 0x18 : 0x10))
-                            throw new IOException("Unexpected Lockdown data or acknowledgement");
-                        if (offset < request.Length && reply.Length != 28)
-                            throw new IOException("Unexpected payload before the end of the Lockdown request");
+                        if (offset < request.Length &&
+                            (reply.Length != 28 || reply[21] != 0x10 ||
+                             Read32(reply, 12) != ack || Read32(reply, 16) != seq))
+                            throw new IOException("Unexpected acknowledgement of the Lockdown request");
                     }
-                    int payload = reply.Length - 28;
-                    if (payload <= 4 || Read32(reply, 28) != payload - 4)
+                    if (reply.Length <= 32) throw new IOException("Missing framed Lockdown response");
+                    uint length = Read32(reply, 28);
+                    if (length == 0 || length > LockdownMessageMax - 4)
                         throw new IOException("Invalid Lockdown response size");
-                    ack = unchecked(ack + (uint)payload);
-                    Console.WriteLine(Convert.ToBase64String(reply, 28, payload));
+                    var response = new byte[4 + (int)length];
+                    for (int offset = 0;;)
+                    {
+                        int size = reply.Length - 28;
+                        if (size <= 0 || size > response.Length - offset ||
+                            Read32(reply, 12) != ack || Read32(reply, 16) != seq)
+                            throw new IOException("Unexpected Lockdown response segment");
+                        Array.Copy(reply, 28, response, offset, size);
+                        offset += size;
+                        ack = unchecked(ack + (uint)size);
+                        if (offset == response.Length)
+                        {
+                            if (reply[21] != 0x18) throw new IOException("Missing final Lockdown response flag");
+                            break;
+                        }
+                        if (reply[21] != 0x10) throw new IOException("Incomplete Lockdown response");
+                        SendTcp(handle, port, seq, ack, 0x10, null, 0, 0);
+                        reply = ReceiveTcp(handle, packet, port);
+                    }
+                    Console.WriteLine(Convert.ToBase64String(response));
                 }
             }
             finally
