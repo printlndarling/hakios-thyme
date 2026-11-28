@@ -1,7 +1,8 @@
 # Run on native Windows while thyme is in the private RAM Boot USB test mode.
 param(
     [ValidateRange(5, 360)] [int] $WaitSeconds = 90,
-    [ValidateRange(1, 6)] [int] $Rounds = 3
+    [ValidateRange(1, 6)] [int] $Rounds = 3,
+    [switch] $UsbMux
 )
 $ErrorActionPreference = 'Stop'
 
@@ -115,7 +116,64 @@ public static class ThymeUsbLoopback
         return found;
     }
 
-    public static string Run(string path, int seed)
+    private static void Send(IntPtr handle, byte[] packet)
+    {
+        uint count;
+        Check(WinUsb_WritePipe(handle, 0x01, packet, (uint)packet.Length, out count, IntPtr.Zero),
+            "usbmux bulk OUT");
+        if (count != packet.Length) throw new IOException("Short usbmux write");
+    }
+
+    private static void Expect(IntPtr handle, byte[] expected)
+    {
+        var packet = new byte[expected.Length];
+        uint count;
+        Check(WinUsb_ReadPipe(handle, 0x81, packet, (uint)packet.Length, out count, IntPtr.Zero),
+            "usbmux bulk IN");
+        if (count != expected.Length) throw new IOException("Unexpected usbmux response length " + count);
+        for (int i = 0; i < expected.Length; i++)
+            if (packet[i] != expected[i]) throw new IOException("usbmux response differs at byte " + i);
+    }
+
+    private static string TestUsbMux(IntPtr handle)
+    {
+        byte[] malformed = { 0, 0, 0, 0, 0, 0, 0, 7 };
+        byte[] propose = { 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0 };
+        byte[] version = { 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+        // Host source port 49152, lockdown port 62078, sequence 0x01234567.
+        byte[] syn = {
+            0, 0, 0, 6, 0, 0, 0, 28, 0xc0, 0, 0xf2, 0x7e,
+            1, 0x23, 0x45, 0x67, 0, 0, 0, 0, 0x50, 2, 0x02, 0,
+            0, 0, 0, 0
+        };
+        byte[] reset = {
+            0, 0, 0, 6, 0, 0, 0, 28, 0xf2, 0x7e, 0xc0, 0,
+            0, 0, 0, 0, 1, 0x23, 0x45, 0x68, 0x50, 0x14, 0, 0,
+            0, 0, 0, 0
+        };
+        Send(handle, malformed);
+        var first = new byte[5];
+        var rest = new byte[15];
+        Array.Copy(propose, first, first.Length);
+        Array.Copy(propose, first.Length, rest, 0, rest.Length);
+        Send(handle, first);
+        Send(handle, rest);
+        Expect(handle, version);
+        Send(handle, syn);
+        Expect(handle, reset);
+
+        // A single USB write can carry more than one frame.
+        var combined = new byte[propose.Length + syn.Length];
+        Array.Copy(propose, combined, propose.Length);
+        Array.Copy(syn, 0, combined, propose.Length, syn.Length);
+        Send(handle, combined);
+        Expect(handle, version);
+        Expect(handle, reset);
+        return "usbmux=1.0 fragmented=pass combined=pass malformed_recovery=pass lockdown_port=closed";
+    }
+
+    public static string Run(string path, int seed, bool usbMux)
     {
         using (SafeFileHandle file = CreateFile(path, 0xc0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
         {
@@ -140,6 +198,7 @@ public static class ThymeUsbLoopback
                 Check(WinUsb_SetPipePolicy(handle, 0x01, 3, 4, ref timeout), "OUT transfer timeout");
                 Check(WinUsb_SetPipePolicy(handle, 0x81, 3, 4, ref timeout), "IN transfer timeout");
 
+                if (usbMux) return TestUsbMux(handle);
                 var random = new Random(seed);
                 var received = new byte[packet];
                 var lengths = new int[] { 1, 7, 31, 63, 64, 65, 127, 128, 255, 256, 511, 512 };
@@ -194,5 +253,5 @@ if ($null -eq $path) { throw 'The HakiOS WinUSB test interface did not appear' }
 for ($round = 1; $round -le $Rounds; $round++) {
     $path = [ThymeUsbLoopback]::Find()
     if ($null -eq $path) { throw 'The WinUSB interface disappeared between rounds' }
-    "$(Get-Date -Format o) round=$round $([ThymeUsbLoopback]::Run($path, 20261128 + $round))"
+    "$(Get-Date -Format o) round=$round $([ThymeUsbLoopback]::Run($path, 20261128 + $round, $UsbMux.IsPresent))"
 }

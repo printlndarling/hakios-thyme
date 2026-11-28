@@ -20,6 +20,8 @@ extern vm_offset_t ml_io_map(vm_offset_t pa, vm_size_t size);
 extern uint64_t kvtophys(vm_offset_t va);
 extern void hakios_battery_guard_state(int *, int *, int *, int *) __attribute__((weak));
 void hakios_thyme_usb_quiesce(void);
+extern void thyme_usbmux_reset(void);
+extern int thyme_usbmux_feed(const uint8_t *, unsigned, uint8_t *);
 
 #define MS_VENDOR_CODE          0x21
 #define DWC3_PA                 0x0a60c000UL
@@ -107,6 +109,7 @@ static unsigned bulk_packet = HIGH_SPEED_PACKET;
 static int pending_configuration = -1;
 static int bulk_out_packets, bulk_in_packets, bulk_out_bytes, bulk_in_bytes;
 static int reconnect_requested, reconnect_count;
+static int profile, mux_versions, mux_refused, mux_invalid;
 static bool have_transfer;
 static int stage, last_command, setup_count, reset_count, connect_count, disconnect_count;
 static int address_seen, configured, stalled, event_count, hw_status, hw_control;
@@ -156,6 +159,10 @@ USB_STAT(bulk_in_packets, bulk_in_packets, "completed bulk IN transfers");
 USB_STAT(bulk_out_bytes, bulk_out_bytes, "bytes received on bulk OUT");
 USB_STAT(bulk_in_bytes, bulk_in_bytes, "bytes completed on bulk IN");
 USB_STAT(reconnects, reconnect_count, "completed software reattachments");
+USB_STAT(profile, profile, "1 bulk echo, 2 usbmux");
+USB_STAT(mux_versions, mux_versions, "usbmux version replies queued");
+USB_STAT(mux_refused, mux_refused, "usbmux closed port resets queued");
+USB_STAT(mux_invalid, mux_invalid, "invalid or unsupported usbmux frames");
 SYSCTL_PROC(_kern_hakios_thyme_usb, OID_AUTO, reconnect, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
     NULL, 0, request_reconnect, "I", "write 1 as root to detach and reattach the RAM Boot USB test");
 
@@ -272,6 +279,7 @@ stop_bulk(void)
 	wr(DALEPENA, rd(DALEPENA) & ~BULK_ENDPOINTS);
 	bulk_ep = 0;
 	echo_length = 0;
+	thyme_usbmux_reset();
 	return ended;
 }
 
@@ -298,6 +306,30 @@ configure_bulk(unsigned config)
 }
 
 static bool
+pump_usbmux(unsigned received)
+{
+	int response = thyme_usbmux_feed(dma.echo, received, dma.echo);
+	/* If an unsupported complete frame was consumed, check for another in the same transfer. */
+	while (response < 0) {
+		mux_invalid++;
+		response = thyme_usbmux_feed(NULL, 0, dma.echo);
+	}
+	if (response == 0) {
+		return queue_bulk(BULK_OUT, bulk_packet);
+	}
+	echo_length = (unsigned)response;
+	if (!queue_bulk(BULK_IN, echo_length)) {
+		return false;
+	}
+	if (dma.echo[3] == 0) {
+		mux_versions++;
+	} else {
+		mux_refused++;
+	}
+	return true;
+}
+
+static bool
 complete_bulk(unsigned ep)
 {
 	struct usb_trb *trb = &dma.trb[ep];
@@ -314,14 +346,14 @@ complete_bulk(unsigned ep)
 		echo_length = bulk_packet - residual;
 		bulk_out_packets++;
 		bulk_out_bytes += (int)echo_length;
-		return queue_bulk(BULK_IN, echo_length);
+		return profile == 2 ? pump_usbmux(echo_length) : queue_bulk(BULK_IN, echo_length);
 	}
 	if (residual != 0) {
 		return false;
 	}
 	bulk_in_packets++;
 	bulk_in_bytes += (int)echo_length;
-	return queue_bulk(BULK_OUT, bulk_packet);
+	return profile == 2 ? pump_usbmux(0) : queue_bulk(BULK_OUT, bulk_packet);
 }
 
 static bool
@@ -359,6 +391,9 @@ descriptor(uint16_t value, uint16_t language)
 	case 1:
 		if (index != 0) return 0;
 		memcpy(dma.reply, device, sizeof(device));
+		if (profile == 2) {
+			dma.reply[12] = 3;
+		}
 		return sizeof(device);
 	case 2:
 	case 7:
@@ -370,6 +405,10 @@ descriptor(uint16_t value, uint16_t language)
 			packet = packet == HIGH_SPEED_PACKET ? FULL_SPEED_PACKET : HIGH_SPEED_PACKET;
 		}
 		dma.reply[1] = (uint8_t)(value >> 8);
+		if (profile == 2) {
+			dma.reply[15] = 0xfe;
+			dma.reply[16] = 2;
+		}
 		dma.reply[22] = dma.reply[29] = (uint8_t)packet;
 		dma.reply[23] = dma.reply[30] = (uint8_t)(packet >> 8);
 		return sizeof(config);
@@ -393,7 +432,8 @@ descriptor(uint16_t value, uint16_t language)
 		if (language != 0x0409 || index > 2) {
 			return 0;
 		}
-		const char *string = index == 1 ? "HakiOS" : "HakiOS thyme USB test";
+		const char *product = profile == 2 ? "HakiOS thyme usbmux test" : "HakiOS thyme USB test";
+		const char *string = index == 1 ? "HakiOS" : product;
 		unsigned length = (unsigned)strlen(string);
 		dma.reply[0] = (uint8_t)(length * 2 + 2);
 		dma.reply[1] = 3;
@@ -765,7 +805,7 @@ thyme_usb_start(void)
 	const void *handoff;
 	unsigned size;
 	uint32_t enable = 0;
-	if (!PE_parse_boot_argn("usb_gadget", &enable, sizeof(enable)) || enable != 1 ||
+	if (!PE_parse_boot_argn("usb_gadget", &enable, sizeof(enable)) || (enable != 1 && enable != 2) ||
 	    SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
 	    SecureDTGetProperty(chosen, "hakios-usb-handoff", &handoff, &size) != kSuccess ||
 	    size != sizeof(uint32_t) || *(const uint32_t *)handoff != 1) {
@@ -776,6 +816,7 @@ thyme_usb_start(void)
 		os_atomic_store(&stage, USB_FAILED, relaxed);
 		return;
 	}
+	profile = (int)enable;
 	hs_phy = (volatile uint32_t *)(scratch + QSCRATCH_HS_PHY_CTRL);
 	base = ml_io_map(DWC3_PA, 0x1000);
 	dma_pa = kvtophys((vm_offset_t)&dma);
@@ -787,7 +828,7 @@ thyme_usb_start(void)
 		return;
 	}
 	os_atomic_store(&stage, USB_RUNNING, relaxed);
-	printf("thyme USB: USB 2.0 development loopback started, DSTS=%#x\n", rd(DSTS));
+	printf("thyme USB: USB 2.0 development profile %d started, DSTS=%#x\n", profile, rd(DSTS));
 	thread_call_enter(event_call);
 }
 

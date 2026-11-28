@@ -1,5 +1,39 @@
 ## Chronological Verification Logs & Evidence
 
+## usbmux 1.0 wire negotiation on thyme (2026-11-28)
+
+- The explicit USB profile uses the existing WinUSB GUID and the private
+  HakiOS test VID/PID. Windows sent a version 2 proposal and verified
+  version 1.0 replies. The guarded 150 s run used kernel `524001f77501`
+  and loader `79f1fad4d1c6`. Fragmented requests, combined frames,
+  recovery after invalid lengths and a closed-port response for
+  lockdown port 62078 passed in three native WinUSB opens before
+  software reattachment and in three new opens afterward.
+- Pinned SSH reported twelve version replies, twelve closed-port
+  resets, six rejected frames, two USB bus resets and configuration
+  1. The sanitizer replay covered every split point of a version frame
+  and TCP header bounds. Eleven guarded launcher tests passed.
+- Stock usbmuxd filters out the private VID/PID. These are raw USB
+  wire results. libimobiledevice discovery and pairing need a host
+  transport for the development identifier. The prepared RAM system
+  contains `/usr/libexec/lockdownd` and it starts with the lockdown job
+  unloaded.
+
+- The same kernel passed the 110 s profile 1 regression. Three WinUSB
+  opens transferred 768 byte-checked round trips and 329,886 bytes per
+  direction. An isolated local probe loaded the stock lockdown job
+  with its root-only Unix socket. The connection closed before a
+  `QueryType` reply. Launchctl reported the foreground service domain
+  during cleanup. Local lockdown activation and USB service access
+  still need validation.
+- Both sessions returned to completed Android boots. The whole
+  `logdump` SHA-256 matched the pre-test value after each run.
+- Local evidence is under `out/thyme-boot/usb-mux.B1dmILqZ/`.
+  `native-reattach.log` SHA-256
+  `054ee0bcf06119aaf05114432777439f0ebf07c4cf6877c6aa31373cb2545275`.
+  `ssh-final.log` SHA-256
+  `be1b00672603d48816dca1e45a789ecff10644c4908aa1369d6e14a470fc42d2`.
+
 ## XNU USB bulk loopback on thyme (2026-11-28)
 
 - The development gadget advertises bulk OUT `0x01` and IN `0x81`,

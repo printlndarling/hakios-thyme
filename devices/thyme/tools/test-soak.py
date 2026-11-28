@@ -103,7 +103,8 @@ case "$1" in
         esac
         case " $XL_CMDLINE :$TEST_USB_GADGET" in
             *" usb_gadget=1 "*:1) ;;
-            *" usb_gadget=1 "*) exit 1 ;;
+            *" usb_gadget=2 "*:2) ;;
+            *" usb_gadget="*) exit 1 ;;
             *:0) ;;
             *) exit 1 ;;
         esac
@@ -170,6 +171,15 @@ esac
         self.assertFalse((self.root / "uploaded").exists())
         result = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1",
                            SOAK_USB_GADGET="1", TEST_USB_GADGET="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_usbmux_profile_requires_handoff(self):
+        refused = self.soak(SOAK_USB_GADGET="2")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("requires SOAK_USB_HANDOFF=1", refused.stderr)
+        self.assertFalse((self.root / "uploaded").exists())
+        result = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1",
+                           SOAK_USB_GADGET="2", TEST_USB_GADGET="2")
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_early_or_unclean_exit(self):

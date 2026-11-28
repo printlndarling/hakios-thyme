@@ -181,6 +181,32 @@ assigned identity before distributing a device that enumerates. See
 [pid.codes' Test PID](https://pid.codes/1209/0001/) and the
 [Qualcomm USB wrapper registers](https://github.com/torvalds/linux/blob/master/drivers/usb/dwc3/dwc3-qcom.c).
 
+### usbmux version probe
+
+Choose the USB protocol profile in the same guarded RAM Boot workflow:
+
+```sh
+SOAK_USB_HANDOFF=1 SOAK_USB_GADGET=2 SOAK_UIM_READONLY=1 SOAK_SECS=150 \
+  SCENE=PATH_TO_DEBUG_SCENE devices/thyme/soak.sh
+```
+
+The distinct product description is `HakiOS thyme usbmux test`. It uses
+the same private test VID/PID and WinUSB interface GUID. From native
+Windows run `.\devices\thyme\tools\test-usb-bulk.ps1 -UsbMux`. The probe
+requests a version, verifies the v1.0 wire response, and checks a closed
+port response for 62078. It exercises packet fragmentation, coalesced
+frames and recovery after an invalid length. Check `mux_versions`,
+`mux_refused` and `mux_invalid` in `kern.hakios.thyme_usb` over LAN.
+Use profile 1 for byte loopback.
+
+The development VID/PID is outside the filter used by stock usbmuxd.
+A host transport that explicitly selects the HakiOS development
+interface is needed for libimobiledevice discovery on this profile.
+The kernel currently returns a closed port for lockdown. Pairing and
+tools such as i4Tools remain open. See the primary
+[USB filter](https://github.com/libimobiledevice/usbmuxd/blob/master/src/usb.c#L763)
+and [version handling](https://github.com/libimobiledevice/usbmuxd/blob/master/src/device.c#L533).
+
 ### USB Gadget and services
 
 In standard RAM Boot, Windows lists `VID_18D1&PID_D00D` as the Android
