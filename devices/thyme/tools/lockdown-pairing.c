@@ -15,6 +15,7 @@
 
 #define APPROVAL_PATH "/private/var/tmp/hakios-lockdown-approval.plist"
 #define CERTIFICATE_MAX 8192
+enum { PAIR_HOST_ID, PAIR_BUID, PAIR_ROOT, PAIR_HOST, PAIR_DEVICE, PAIR_PARTS };
 
 static CFDictionaryRef
 read_approval(void)
@@ -180,6 +181,38 @@ lockdown_pair_clear(struct lockdown_pairing *state)
 	}
 }
 
+bool
+lockdown_pair_authorized(struct lockdown_pairing *state, CFDictionaryRef request, struct lockdown_certificates *certs)
+{
+	if (!state->accepted) {
+		return false;
+	}
+	CFDictionaryRef approved = read_approval();
+	CFArrayRef record = state->accepted;
+	CFTypeRef host_id = CFArrayGetValueAtIndex(record, PAIR_HOST_ID);
+	CFTypeRef buid = CFArrayGetValueAtIndex(record, PAIR_BUID);
+	CFDataRef root = CFArrayGetValueAtIndex(record, PAIR_ROOT);
+	CFDataRef host = CFArrayGetValueAtIndex(record, PAIR_HOST);
+	bool permitted = approved &&
+	    uuid_matches(host_id, CFDictionaryGetValue(approved, CFSTR("HostID"))) &&
+	    uuid_matches(buid, CFDictionaryGetValue(approved, CFSTR("SystemBUID"))) &&
+	    pin_matches(root, CFDictionaryGetValue(approved, CFSTR("RootCertificateSHA256"))) &&
+	    pin_matches(host, CFDictionaryGetValue(approved, CFSTR("HostCertificateSHA256")));
+	if (approved) CFRelease(approved);
+	if (!permitted) {
+		lockdown_pair_clear(state);
+		return false;
+	}
+	if (request && (!uuid_matches(CFDictionaryGetValue(request, CFSTR("HostID")), host_id) ||
+	    !uuid_matches(CFDictionaryGetValue(request, CFSTR("SystemBUID")), buid))) {
+		return false;
+	}
+	if (certs) {
+		*certs = (struct lockdown_certificates){ root, host, CFArrayGetValueAtIndex(record, PAIR_DEVICE) };
+	}
+	return true;
+}
+
 CFStringRef
 lockdown_pair_request(struct lockdown_pairing *state, CFDictionaryRef request, SecKeyRef key, bool validate)
 {
@@ -212,7 +245,7 @@ lockdown_pair_request(struct lockdown_pairing *state, CFDictionaryRef request, S
 	    device_der && !CFEqual(host_der, root_der) && !CFEqual(device_der, root_der) &&
 	    !CFEqual(device_der, host_der) && matches_device_key(device, key)) {
 		const void *parts[] = { host_id, buid, root_der, host_der, device_der };
-		CFArrayRef normalized = CFArrayCreate(kCFAllocatorDefault, parts, 5, &kCFTypeArrayCallBacks);
+		CFArrayRef normalized = CFArrayCreate(kCFAllocatorDefault, parts, PAIR_PARTS, &kCFTypeArrayCallBacks);
 		if (normalized && (!validate || (state->accepted && CFEqual(state->accepted, normalized))) &&
 		    chain_valid(host, root) && chain_valid(device, root)) {
 			if (!validate) {

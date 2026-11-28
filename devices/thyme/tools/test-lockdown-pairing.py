@@ -9,9 +9,13 @@ import argparse
 from contextlib import contextmanager
 import ctypes as c
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 import plistlib
 import re
+import socket
+import ssl
+import struct
 import subprocess
 import sys
 import tempfile
@@ -27,6 +31,8 @@ from cryptography.x509.oid import NameOID
 APPROVAL = "/private/var/tmp/hakios-lockdown-approval.plist"
 HDB = Path(__file__).resolve().parents[3] / "tools/hdb.py"
 INVALID_HOST_ID, INVALID_PAIR_RECORD, UNKNOWN_ERROR = -21, -31, -256
+MUX_HEADER = struct.Struct("<IIII")
+PLIST_LENGTH = struct.Struct(">I")
 
 
 class PairRecord(c.Structure):
@@ -44,7 +50,6 @@ class Lockdown:
         self.lib.lockdownd_client_free.argtypes = [c.c_void_p]
         self.lib.lockdownd_pair.argtypes = [c.c_void_p, c.POINTER(PairRecord)]
         self.lib.lockdownd_validate_pair.argtypes = [c.c_void_p, c.POINTER(PairRecord)]
-        self.lib.lockdownd_start_session.argtypes = [c.c_void_p, c.c_char_p, c.c_void_p, c.c_void_p]
 
     @contextmanager
     def connection(self):
@@ -95,9 +100,10 @@ def certificate_fixture(public_key):
     root = issue("thyme pairing test root", root_key.public_key(), None, root_key, ca=True)
     other = issue("unapproved test root", other_key.public_key(), None, other_key, ca=True)
     host = issue("thyme pairing test host", host_key.public_key(), root, root_key)
-    device = issue("HakiOS thyme", public_key, root, root_key)
-    wrong_key = issue("HakiOS thyme", host_key.public_key(), root, root_key)
-    wrong_chain = issue("HakiOS thyme", public_key, other, other_key)
+    device = issue("thyme.hakios.test", public_key, root, root_key)
+    unpinned_host = issue("unpinned host", other_key.public_key(), root, root_key)
+    wrong_key = issue("thyme.hakios.test", host_key.public_key(), root, root_key)
+    wrong_chain = issue("thyme.hakios.test", public_key, other, other_key)
     host_id, buid = str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper()
     pins = {
         "HostID": host_id,
@@ -116,7 +122,120 @@ def certificate_fixture(public_key):
         ("different host certificate refused", record(device, host_cert=wrong_chain), INVALID_PAIR_RECORD),
         ("different device key refused", record(wrong_key), INVALID_PAIR_RECORD),
         ("wrong certificate issuer refused", record(wrong_chain), INVALID_PAIR_RECORD),
-    )
+    ), ((host.public_bytes(pem), host_key), (unpinned_host.public_bytes(pem), other_key))
+
+
+def receive(stream, size):
+    received = bytearray()
+    while len(received) < size:
+        segment = stream.recv(size - len(received))
+        if not segment:
+            raise EOFError("incomplete USB response")
+        received.extend(segment)
+    return bytes(received)
+
+
+def plist_request(stream, request):
+    body = plistlib.dumps(request)
+    stream.sendall(PLIST_LENGTH.pack(len(body)) + body)
+    length, = PLIST_LENGTH.unpack(receive(stream, PLIST_LENGTH.size))
+    if not 0 < length <= 32764:
+        raise ValueError("invalid Lockdown response length")
+    return plistlib.loads(receive(stream, length))
+
+
+def mux_request(address, request, switch=False):
+    @contextmanager
+    def connection():
+        with socket.socket(socket.AF_UNIX) as stream:
+            stream.settimeout(12)
+            stream.connect(address)
+            body = plistlib.dumps(request)
+            stream.sendall(MUX_HEADER.pack(MUX_HEADER.size + len(body), 1, 8, 1) + body)
+            length, version, message, tag = MUX_HEADER.unpack(receive(stream, MUX_HEADER.size))
+            if (version, message, tag) != (1, 8, 1) or not MUX_HEADER.size < length <= 131072:
+                raise ValueError("invalid USB mux response")
+            yield plistlib.loads(receive(stream, length - MUX_HEADER.size)), stream
+
+    if switch:
+        return connection()
+    with connection() as (reply, _):
+        return reply
+
+
+def session_test(locator, pins, record, credentials, hdb):
+    address = os.environ["USBMUXD_SOCKET_ADDRESS"].removeprefix("UNIX:")
+    entries = mux_request(address, {"MessageType": "ListDevices"})["DeviceList"]
+    device = next(item for item in entries if item["Properties"]["SerialNumber"] == locator)
+    start = {"Request": "StartSession", "HostID": pins["HostID"], "SystemBUID": pins["SystemBUID"]}
+    connect = {"MessageType": "Connect", "DeviceID": device["DeviceID"], "PortNumber": socket.htons(62078)}
+    device_der = x509.load_pem_x509_certificate(record.device_certificate).public_bytes(serialization.Encoding.DER)
+
+    def context(credential):
+        ctx = ssl.create_default_context(cadata=record.root_certificate.decode())
+        ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        if credential:
+            certificate, key = credential
+            # The temporary credential files stay on WSL tmpfs.
+            with tempfile.TemporaryDirectory(dir="/dev/shm", prefix="thyme-tls-") as directory:
+                bundle = Path(directory) / "client.pem"
+                fd = os.open(bundle, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(certificate)
+                    handle.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                   serialization.NoEncryption()))
+                ctx.load_cert_chain(bundle)
+        return ctx
+
+    with mux_request(address, connect, switch=True) as (reply, stream):
+        check("Lockdown socket connected", reply["Number"], 0)
+        for field in ("HostID", "SystemBUID"):
+            invalid = dict(start, **{field: str(uuid.uuid4())})
+            check(f"StartSession with different {field} refused", plist_request(stream, invalid).get("Error"), "InvalidHostID")
+    valid, unpinned = credentials
+    session_ids = set()
+    for credential, label in ((None, "missing certificate"), (unpinned, "unpinned leaf"), (valid, "approved leaf")):
+        with mux_request(address, connect, switch=True) as (reply, stream):
+            check("Lockdown socket connected", reply["Number"], 0)
+            response = plist_request(stream, start)
+            check("StartSession requests TLS", response.get("EnableSessionSSL"), True)
+            session_id = uuid.UUID(response["SessionID"])
+            check("fresh session ID", session_id in session_ids, False)
+            session_ids.add(session_id)
+            try:
+                tls = context(credential).wrap_socket(stream, server_hostname="thyme.hakios.test")
+            except ssl.SSLError:
+                if credential is valid:
+                    raise
+                print(f"TLS refused {label}", flush=True)
+                continue
+            with tls:
+                if credential is not valid:
+                    raise RuntimeError(f"TLS accepted {label}")
+                check("approved client received TLS", tls.version(), "TLSv1.2")
+                check("peer is paired device certificate", tls.getpeercert(binary_form=True) == device_der, True)
+                query = {"Request": "GetValue", "Key": "HardwareModel"}
+                body = plistlib.dumps(query)
+                tls.sendall(PLIST_LENGTH.pack(len(body))[:2])
+                tls.sendall(PLIST_LENGTH.pack(len(body))[2:] + body)
+                length, = PLIST_LENGTH.unpack(receive(tls, PLIST_LENGTH.size))
+                check("HardwareModel through fragmented TLS request", plistlib.loads(receive(tls, length)).get("Value"), "thyme")
+                check("unknown StopSession refused", plist_request(
+                    tls, {"Request": "StopSession", "SessionID": str(uuid.uuid4())}).get("Error"), "InvalidSessionID")
+                response = plist_request(tls, {"Request": "StopSession", "SessionID": str(session_id).upper()})
+                check("StopSession acknowledged", response, {"Request": "StopSession"})
+                check("StopSession closes TLS", tls.recv(1), b"")
+    with mux_request(address, connect, switch=True) as (reply, stream):
+        check("Lockdown socket reconnected", reply["Number"], 0)
+        start_reply = plist_request(stream, start)
+        check("StartSession after reconnect requests TLS", start_reply.get("EnableSessionSSL"), True)
+        with context(valid).wrap_socket(stream, server_hostname="thyme.hakios.test") as tls:
+            hdb("shell", "/var/jb/bin/rm", APPROVAL)
+            tls.sendall(PLIST_LENGTH.pack(len(body)) + body)
+            check("active TLS approval removed", tls.recv(1), b"")
+    with mux_request(address, connect, switch=True) as (reply, stream):
+        check("Lockdown socket after revocation connected", reply["Number"], 0)
+        check("StartSession after revocation refused", plist_request(stream, start).get("Error"), "InvalidHostID")
 
 
 def query(locator, key, *options):
@@ -137,7 +256,7 @@ def run(state, reattach):
         text=True, timeout=15,
     ).strip()
     public = serialization.load_pem_public_key(plistlib.loads(query(locator, "DevicePublicKey", "-x")))
-    pins, record, invalid = certificate_fixture(public)
+    pins, record, invalid, credentials = certificate_fixture(public)
     lockdown = Lockdown(locator)
 
     def hdb(*args):
@@ -174,8 +293,6 @@ def run(state, reattach):
                 raise RuntimeError("thyme did not reappear after USB reattachment")
         with lockdown.connection() as client:
             check("approved ValidatePair on reopened connection", lockdown.lib.lockdownd_validate_pair(client, record), 0)
-            check("StartSession remains unavailable",
-                  lockdown.lib.lockdownd_start_session(client, record.host_id, None, None), UNKNOWN_ERROR)
         hdb("shell", "/var/jb/usr/bin/chmod", "644", APPROVAL)
         with lockdown.connection() as client:
             check("world-readable approval refused", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)
@@ -183,7 +300,7 @@ def run(state, reattach):
         with lockdown.connection() as client:
             check("invalid policy cleared previous acceptance", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)
             check("approved Pair accepted again", lockdown.lib.lockdownd_pair(client, record), 0)
-        hdb("shell", "/var/jb/bin/rm", APPROVAL)
+        session_test(locator, pins, record, credentials, hdb)
         installed = False
         with lockdown.connection() as client:
             check("validate after removal refused", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)

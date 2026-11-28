@@ -27,6 +27,8 @@ BAD_COMMAND, BAD_DEVICE, CONNECTION_REFUSED, BAD_VERSION = 1, 2, 3, 6
 MAX_MESSAGE = 131072
 LOCKDOWN_HEADER = struct.Struct(">I")
 LOCKDOWN_MESSAGE_MAX = 32768
+TLS_HEADER = struct.Struct(">BBBH")
+TLS_PAYLOAD_MAX = 18432
 MAX_ENCODED_LINE = 4 * ((LOCKDOWN_MESSAGE_MAX + 2) // 3) + 2
 PROBE = Path(__file__).with_name("test-usb-bulk.ps1").resolve()
 
@@ -81,16 +83,32 @@ class WinUSB:
 class WinUSBSession:
     def __init__(self, process):
         self.process = process
+        self.tls = False
 
     def line(self, timeout):
         if not select.select([self.process.stdout], [], [], timeout)[0]:
             raise TimeoutError("WinUSB session timed out")
-        return self.process.stdout.readline(MAX_ENCODED_LINE).strip()
+        line = self.process.stdout.readline(MAX_ENCODED_LINE)
+        if not line.endswith(b"\n"):
+            raise ValueError("incomplete WinUSB response")
+        return line.strip()
+
+    def start_tls(self):
+        self.process.stdin.write(b"TLS\n")
+        self.process.stdin.flush()
+        self.tls = True
 
     def exchange(self, request):
         self.process.stdin.write(base64.b64encode(request) + b"\n")
         self.process.stdin.flush()
-        reply = base64.b64decode(self.line(10), validate=True)
+        line = self.line(10)
+        if self.tls and line == b"empty":
+            return b""
+        reply = base64.b64decode(line, validate=True)
+        if self.tls:
+            if not 0 < len(reply) <= LOCKDOWN_MESSAGE_MAX:
+                raise ValueError("unexpected TLS response length")
+            return reply
         if not LOCKDOWN_HEADER.size < len(reply) <= LOCKDOWN_MESSAGE_MAX:
             raise ValueError("unexpected Lockdown response length")
         if LOCKDOWN_HEADER.unpack_from(reply)[0] != len(reply) - LOCKDOWN_HEADER.size:
@@ -233,7 +251,34 @@ class Client(socketserver.StreamRequestHandler):
             payload = self.rfile.read(size)
             if len(payload) != size:
                 return
-            self.wfile.write(session.exchange(header + payload))
+            reply = session.exchange(header + payload)
+            # Only a successful StartSession reply changes the record framing.
+            if b"StartSession" in payload:
+                request = plistlib.loads(payload)
+                response = plistlib.loads(reply[len(header):])
+                if (isinstance(request, dict) and request.get("Request") == "StartSession" and
+                        isinstance(response, dict) and response.get("Request") == "StartSession" and
+                        response.get("EnableSessionSSL") is True and "Error" not in response):
+                    session.start_tls()
+                    self.wfile.write(reply)
+                    self.relay_tls(session)
+                    return
+            self.wfile.write(reply)
+
+    def relay_tls(self, session):
+        while True:
+            header = self.rfile.read(TLS_HEADER.size)
+            if len(header) != TLS_HEADER.size:
+                return
+            kind, major, minor, size = TLS_HEADER.unpack(header)
+            if not 20 <= kind <= 23 or major != 3 or minor > 3 or size > TLS_PAYLOAD_MAX:
+                return
+            payload = self.rfile.read(size)
+            if len(payload) != size:
+                return
+            reply = session.exchange(header + payload)
+            if reply:
+                self.wfile.write(reply)
 
 
 def main():

@@ -95,6 +95,34 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(stream.read(), b"")
         self.assertEqual(self.server.transport.calls, [("list",), (62078, LOCATION), message])
 
+    def test_tls_upgrade_relays_records_and_skips_empty_output(self):
+        identifier = self.request(MessageType="ListDevices")["DeviceList"][0]["DeviceID"]
+        connect = plistlib.dumps(dict(MessageType="Connect", DeviceID=identifier, PortNumber=socket.htons(62078)))
+        request = plistlib.dumps({"Request": "StartSession"})
+        response = plistlib.dumps({"Request": "StartSession", "EnableSessionSSL": True}, fmt=plistlib.FMT_BINARY)
+        first, second = b"\x16\x03\x01\x00\x01x", b"\x14\x03\x03\x00\x01y"
+        answer = b"\x16\x03\x03\x00\x01z"
+        answers = iter([LOCKDOWN_HEADER.pack(len(response)) + response, b"", answer])
+        seen = []
+
+        def exchange(frame):
+            seen.append(frame)
+            return next(answers)
+
+        self.server.transport.exchange = exchange
+        self.server.transport.start_tls = lambda: seen.append("tls")
+        with self.exchange(connect) as (reply, client, stream):
+            self.assertEqual(reply["Number"], 0)
+            client.sendall(LOCKDOWN_HEADER.pack(len(request)) + request)
+            self.assertEqual(stream.read(len(response) + LOCKDOWN_HEADER.size),
+                             LOCKDOWN_HEADER.pack(len(response)) + response)
+            client.sendall(first[:3])
+            client.sendall(first[3:] + second)
+            self.assertEqual(stream.read(len(answer)), answer)
+            client.sendall(b"\x17\x03\x03\x48\x01")
+            self.assertEqual(stream.read(), b"")
+        self.assertEqual(seen, [LOCKDOWN_HEADER.pack(len(request)) + request, "tls", first, second])
+
     def test_pairing_metadata_is_available_during_a_lockdown_connection(self):
         entry = self.request(MessageType="ListDevices")["DeviceList"][0]
         identifier = entry["DeviceID"]

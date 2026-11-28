@@ -13,7 +13,10 @@
 
 enum { MUX_VERSION = 0, MUX_TCP = 6 };
 enum { TCP_FIN = 1, TCP_SYN = 2, TCP_RST = 4, TCP_PSH = 8, TCP_ACK = 16 };
-enum { LOCKDOWN_HEADER = 4, TCP_FRAME_HEADER = MUX_HEADER_SIZE + MUX_TCP_HEADER };
+enum {
+	LOCKDOWN_HEADER = 4, TLS_HEADER = 5, TLS_MAX_PAYLOAD = 18432,
+	TCP_FRAME_HEADER = MUX_HEADER_SIZE + MUX_TCP_HEADER,
+};
 /* End each high-speed transfer with a short packet. */
 #define MUX_SEGMENT_MAX 480u
 _Static_assert(TCP_FRAME_HEADER + MUX_SEGMENT_MAX < MUX_FRAME_MAX, "reply must fit in one short high-speed packet");
@@ -26,7 +29,8 @@ static uint16_t peer_port;
 static uint32_t peer_next, device_next, next_transaction;
 static struct thyme_lockdown_message request;
 static unsigned request_length, response_length, response_offset;
-static bool request_complete, request_read;
+static bool request_complete, request_read, response_ready;
+static bool tls_stream, start_tls;
 static uint8_t response[THYME_LOCKDOWN_MESSAGE_MAX];
 
 static uint16_t
@@ -63,7 +67,8 @@ close_stream(void)
 {
 	peer_port = 0;
 	request_length = response_length = response_offset = 0;
-	request_complete = request_read = false;
+	request_complete = request_read = response_ready = false;
+	tls_stream = start_tls = false;
 }
 
 void
@@ -101,12 +106,19 @@ thyme_usbmux_request(struct thyme_lockdown_message *message, unsigned capacity)
 bool
 thyme_usbmux_submit(const struct thyme_lockdown_message *message, unsigned length)
 {
-	if (!request_complete || !request_read || response_length || message->transaction != request.transaction ||
-	    length <= LOCKDOWN_HEADER || length > sizeof(response) || be32(message->data) != length - LOCKDOWN_HEADER) {
+	bool upgrade = (message->transaction & THYME_LOCKDOWN_START_TLS) != 0;
+	if (!request_complete || !request_read || response_ready || length > sizeof(response) ||
+	    (message->transaction & ~THYME_LOCKDOWN_START_TLS) != request.transaction) {
+		return false;
+	}
+	if (tls_stream ? upgrade :
+	    (length <= LOCKDOWN_HEADER || be32(message->data) != length - LOCKDOWN_HEADER)) {
 		return false;
 	}
 	memcpy(response, message->data, length);
 	response_length = length;
+	response_ready = true;
+	start_tls = upgrade;
 	return true;
 }
 
@@ -152,6 +164,10 @@ send_response_segment(uint8_t *reply)
 	response_offset += size;
 	if (last) {
 		response_offset = response_length = 0;
+		if (start_tls) {
+			tls_stream = true;
+			start_tls = false;
+		}
 	}
 	return length;
 }
@@ -168,11 +184,15 @@ thyme_usbmux_complete(uint8_t *reply, bool timeout)
 		close_stream();
 		return length;
 	}
-	if (!response_length) {
+	if (!response_ready) {
 		return 0;
 	}
-	request_complete = request_read = false;
+	request_complete = request_read = response_ready = false;
 	request_length = 0;
+	if (!response_length) {
+		return tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port,
+		    device_next, peer_next, TCP_ACK, NULL, 0);
+	}
 	return send_response_segment(reply);
 }
 
@@ -223,16 +243,21 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 	if (size <= sizeof(request.data) - request_length) {
 		memcpy(request.data + request_length, tcp + header, size);
 		request_length += size;
-		if (request_length < LOCKDOWN_HEADER) {
+		unsigned framing = tls_stream ? TLS_HEADER : LOCKDOWN_HEADER;
+		if (request_length < framing) {
 			return tcp_reply(reply, dest, source, device_next, peer_next, TCP_ACK, NULL, 0);
 		}
-		uint32_t expected = be32(request.data);
-		if (expected > 0 && expected <= sizeof(request.data) - LOCKDOWN_HEADER &&
-		    request_length <= expected + LOCKDOWN_HEADER) {
-			if (request_length < expected + LOCKDOWN_HEADER) {
+		uint32_t expected = tls_stream ? be16(request.data + 3) : be32(request.data);
+		bool valid = tls_stream ?
+		    request.data[0] >= 20 && request.data[0] <= 23 &&
+		    request.data[1] == 3 && request.data[2] <= 3 && expected <= TLS_MAX_PAYLOAD :
+		    expected > 0 && expected <= sizeof(request.data) - framing;
+		if (valid && request_length <= expected + framing) {
+			if (request_length < expected + framing) {
 				return tcp_reply(reply, dest, source, device_next, peer_next, TCP_ACK, NULL, 0);
 			}
-			request.transaction = ++next_transaction;
+			next_transaction = (next_transaction + 1) & (THYME_LOCKDOWN_START_TLS - 1);
+			request.transaction = next_transaction | (tls_stream ? THYME_LOCKDOWN_TLS_RECORD : 0);
 			request_complete = true;
 			return 0;
 		}

@@ -8,8 +8,13 @@
 #define THYME_LOCKDOWN_MESSAGE_MAX 32768u
 #define THYME_LOCKDOWN_NODE "/dev/hakios-lockdown"
 
-/* Device node reads a native-endian transaction ID and a framed plist.
- * A write must return that ID and exactly one framed response. */
+#define THYME_LOCKDOWN_TLS_RECORD 0x80000000u
+#define THYME_LOCKDOWN_START_TLS  0x40000000u
+
+/* The native-endian transaction ID precedes a framed plist or, when
+ * TLS_RECORD is set, one TLS record. Echo the ID on write. A TLS write
+ * can contain zero or more outbound TLS records. Set START_TLS on a
+ * plist reply to upgrade this stream once the complete reply is sent. */
 struct thyme_lockdown_message {
 	uint32_t transaction;
 	uint8_t data[THYME_LOCKDOWN_MESSAGE_MAX];

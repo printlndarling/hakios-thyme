@@ -199,7 +199,7 @@ static int
 lockdown_dev_write(__unused dev_t dev, struct uio *uio, __unused int flags)
 {
 	user_ssize_t size = uio_resid(uio);
-	if (size <= (user_ssize_t)sizeof(uint32_t) || size > (user_ssize_t)sizeof(struct thyme_lockdown_message)) {
+	if (size < (user_ssize_t)sizeof(uint32_t) || size > (user_ssize_t)sizeof(struct thyme_lockdown_message)) {
 		return EMSGSIZE;
 	}
 	struct thyme_lockdown_message *message = kalloc_data(sizeof(*message), Z_WAITOK);

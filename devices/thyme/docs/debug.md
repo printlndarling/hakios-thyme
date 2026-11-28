@@ -230,11 +230,17 @@ RAM data volume in a dedicated terminal.
 ```sh
 . ./xnu-env.sh
 mkdir -p out/thyme-boot
+# Use OpenSSL 3 headers for the Darwin arm64 cross-build. This example uses
+# the headers shipped by Ubuntu libnode-dev.
+openssl_headers=/usr/include/node/openssl/archs/darwin64-arm64-cc/no-asm/include
+jb_lib="$PWD/jb/root/var/jb/usr/lib"
 xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
   -O2 -Wall -Wextra -I drivers/core -I userland/src \
+  -I "$openssl_headers" -I /usr/include/node \
   -framework CoreFoundation -framework Security -lresolv \
+  "$jb_lib/libssl.3.dylib" "$jb_lib/libcrypto.3.dylib" -Wl,-rpath,/var/jb/usr/lib \
   -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c \
-  devices/thyme/tools/lockdown-pairing.c
+  devices/thyme/tools/lockdown-pairing.c devices/thyme/tools/lockdown-tls.c
 python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell /private/var/tmp/lockdown-usb
@@ -268,7 +274,7 @@ and `Goodbye`. `GetValue` exposes the model, board, SoC and system
 name. The wire protocol type is `com.apple.mobile.lockdown`. On the
 physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
 thyme, SM8250-AC and HakiOS. The explicitly approved developer record
-works as described below. Trusted sessions and system services remain
+works as described below. Standard client TLS and system services remain
 open. The operator confirmed that i4Tools 9.22.032.0 stays on the
 connection help page. Windows enumerated the development interface as WINUSB while Apple
 Mobile Device Service was running.
@@ -300,14 +306,31 @@ with the key it generated locally. [Security trust API](https://developer.apple.
 A successful `Pair` keeps one record in RAM. `ValidatePair` checks the
 record and active approval again. Remove the approval file to revoke
 it. USB reattachment can retain the record within the same daemon
-lifetime. The device requires a future authenticated `StartSession`
-implementation before USB offers any management services.
+lifetime.
+
+#### Read-only authenticated Lockdown session
+
+A successful `StartSession` reply upgrades that connection to TLS 1.2.
+The device presents the
+paired device certificate, requires proof of the exact approved host
+certificate, and rechecks the active RAM approval before processing
+encrypted requests. This supports encrypted read-only queries and ends
+the session on StopSession or revocation. Open a fresh connection for
+another session. System management services are still pending.
+
+The OpenSSL backend in upstream libimobiledevice 1.3.0 presents the
+pair record's root certificate as the TLS client identity. This
+development profile requires the separately approved host leaf. The
+private adapter does not provide stored host credentials.
+[libimobiledevice OpenSSL client](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/idevice.c#L978-L1006)
 
 The integration test requires Ubuntu's libimobiledevice 1.3.0 tools,
 Python `cryptography` and enrolled HDB credentials. It generates a
 local ephemeral CA and client certificate, temporarily installs the
-approved pins, and exercises the positive and negative cases through
-the original libimobiledevice library.
+approved pins, and uses the original libimobiledevice library for
+Pair and ValidatePair. Python's TLS client exercises the encrypted
+session using the approved host private key and verifies the paired
+device certificate.
 
 ```sh
 python3 devices/thyme/tools/usbmux-winusb.py -- \
@@ -367,9 +390,9 @@ reset.
 
 1. Verify physical cable reconnect and native macOS and Linux enumeration.
    Extend the USB bulk transport to support concurrent system services.
-2. Validate discovery and transport with usbmuxd and libimobiledevice,
-   then implement and test pairing, trust and authenticated sessions.
-   Export other verified thyme hardware and OS information as needed.
+2. Verify stock host discovery and encrypted Lockdown compatibility,
+   then test the standard device trust prompt. Export other verified
+   thyme hardware and OS information as needed.
 3. Verify AFC, installation proxy, logs and screenshots with the open
    tools. Use an approved developer app and temporary files in the RAM
    session.

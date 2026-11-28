@@ -316,11 +316,20 @@ public static class ThymeUsbLoopback
             Console.WriteLine("connected");
             try
             {
+                bool tls = false;
                 for (string line; (line = Console.ReadLine()) != null;)
                 {
+                    if (line == "TLS" && !tls)
+                    {
+                        tls = true;
+                        continue;
+                    }
                     byte[] request = Convert.FromBase64String(line);
-                    if (request.Length <= 4 || request.Length > LockdownMessageMax || Read32(request, 0) != request.Length - 4)
-                        throw new IOException("Invalid Lockdown request size");
+                    bool framed = tls ? request.Length >= 5 && request.Length <= 18437 &&
+                        request[0] >= 20 && request[0] <= 23 && request[1] == 3 && request[2] <= 3 &&
+                        (request[3] * 256 + request[4]) == request.Length - 5 :
+                        request.Length > 4 && request.Length <= LockdownMessageMax && Read32(request, 0) == request.Length - 4;
+                    if (!framed) throw new IOException("Invalid Lockdown request frame");
                     for (int offset = 0; offset < request.Length;)
                     {
                         int size = Math.Min(request.Length - offset, packet - 28);
@@ -333,30 +342,32 @@ public static class ThymeUsbLoopback
                              Read32(reply, 12) != ack || Read32(reply, 16) != seq))
                             throw new IOException("Unexpected acknowledgement of the Lockdown request");
                     }
-                    if (reply.Length <= 32) throw new IOException("Missing framed Lockdown response");
-                    uint length = Read32(reply, 28);
-                    if (length == 0 || length > LockdownMessageMax - 4)
-                        throw new IOException("Invalid Lockdown response size");
-                    var response = new byte[4 + (int)length];
-                    for (int offset = 0;;)
+                    if (tls && reply.Length == 28 && reply[21] == 0x10 &&
+                        Read32(reply, 12) == ack && Read32(reply, 16) == seq)
                     {
-                        int size = reply.Length - 28;
-                        if (size <= 0 || size > response.Length - offset ||
-                            Read32(reply, 12) != ack || Read32(reply, 16) != seq)
-                            throw new IOException("Unexpected Lockdown response segment");
-                        Array.Copy(reply, 28, response, offset, size);
-                        offset += size;
-                        ack = unchecked(ack + (uint)size);
-                        if (offset == response.Length)
-                        {
-                            if (reply[21] != 0x18) throw new IOException("Missing final Lockdown response flag");
-                            break;
-                        }
-                        if (reply[21] != 0x10) throw new IOException("Incomplete Lockdown response");
-                        SendTcp(handle, port, seq, ack, 0x10, null, 0, 0);
-                        reply = ReceiveTcp(handle, packet, port);
+                        Console.WriteLine("empty");
+                        continue;
                     }
-                    Console.WriteLine(Convert.ToBase64String(response));
+                    using (var response = new MemoryStream())
+                    {
+                        while (true)
+                        {
+                            int size = reply.Length - 28;
+                            if (size <= 0 || size > LockdownMessageMax - response.Length ||
+                                Read32(reply, 12) != ack || Read32(reply, 16) != seq)
+                                throw new IOException("Unexpected Lockdown response segment");
+                            response.Write(reply, 28, size);
+                            ack = unchecked(ack + (uint)size);
+                            if (reply[21] == 0x18) break;
+                            if (reply[21] != 0x10) throw new IOException("Incomplete Lockdown response");
+                            SendTcp(handle, port, seq, ack, 0x10, null, 0, 0);
+                            reply = ReceiveTcp(handle, packet, port);
+                        }
+                        byte[] bytes = response.ToArray();
+                        if (!tls && (bytes.Length <= 4 || Read32(bytes, 0) != bytes.Length - 4))
+                            throw new IOException("Invalid Lockdown response length");
+                        Console.WriteLine(Convert.ToBase64String(bytes));
+                    }
                 }
             }
             finally

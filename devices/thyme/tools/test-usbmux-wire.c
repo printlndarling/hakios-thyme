@@ -145,6 +145,57 @@ large_record(uint8_t *reply)
 	thyme_usbmux_service(false);
 }
 
+static void
+tls_upgrade(uint8_t *reply)
+{
+	const uint8_t plist[] = {0, 0, 0, 1, 'x'};
+	const uint8_t record[] = {22, 3, 1, 0, 1, 42};
+	const uint8_t oversize[] = {22, 3, 1, 0x48, 1};
+	struct thyme_lockdown_message message;
+	thyme_usbmux_reset();
+	thyme_usbmux_service(true);
+	open_lockdown(reply);
+	assert(data(plist, sizeof(plist), 0, 1, reply) == 0);
+	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(plist));
+	uint32_t start = message.transaction;
+	assert((start & THYME_LOCKDOWN_TLS_RECORD) == 0);
+	message.transaction |= THYME_LOCKDOWN_START_TLS;
+	assert(!thyme_usbmux_submit(&message, 0));
+	assert(thyme_usbmux_submit(&message, sizeof(plist)));
+	assert(thyme_usbmux_complete(reply, false) == 28 + sizeof(plist));
+
+	assert(data(record, 3, sizeof(plist), sizeof(plist) + 1, reply) == 28);
+	assert(!thyme_usbmux_pending());
+	assert(data(record + 3, 3, sizeof(plist) + 3, sizeof(plist) + 1, reply) == 0);
+	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(record));
+	assert((message.transaction & THYME_LOCKDOWN_TLS_RECORD) != 0);
+	assert(memcmp(message.data, record, sizeof(record)) == 0);
+	uint32_t transaction = message.transaction;
+	message.transaction = start;
+	assert(!thyme_usbmux_submit(&message, sizeof(record)));
+	message.transaction = transaction | THYME_LOCKDOWN_START_TLS;
+	assert(!thyme_usbmux_submit(&message, 0));
+	message.transaction = transaction;
+	assert(thyme_usbmux_submit(&message, 0));
+	assert(!thyme_usbmux_submit(&message, 0));
+	assert(thyme_usbmux_complete(reply, false) == 28);
+	assert(reply[21] == 0x10);
+	unsigned seq = sizeof(plist) + sizeof(record);
+	assert(data(record, sizeof(record), seq, sizeof(plist) + 1, reply) == 0);
+	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(record));
+	assert(thyme_usbmux_submit(&message, sizeof(record)));
+	assert(thyme_usbmux_complete(reply, false) == 28 + sizeof(record));
+	assert(reply[21] == 0x18 && memcmp(reply + 28, record, sizeof(record)) == 0);
+	assert(data(oversize, sizeof(oversize), seq + sizeof(record), seq + 1, reply) == 28);
+	assert(reply[21] == 0x14);
+	open_lockdown(reply);
+	assert(data(plist, sizeof(plist), 0, 1, reply) == 0);
+	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(plist));
+	assert((message.transaction & THYME_LOCKDOWN_TLS_RECORD) == 0);
+	thyme_usbmux_reset();
+	thyme_usbmux_service(false);
+}
+
 int
 main(void)
 {
@@ -184,6 +235,7 @@ main(void)
 	assert(thyme_usbmux_feed(syn, sizeof(syn), reply) < 0);
 	lockdown_mailbox(reply);
 	large_record(reply);
-	puts("usbmux v1 replay passed (small and 32 KiB records, stale ACKs and closed ports)");
+	tls_upgrade(reply);
+	puts("usbmux v1 replay passed (small and 32 KiB records, stale ACKs, closed ports and TLS upgrade)");
 	return 0;
 }

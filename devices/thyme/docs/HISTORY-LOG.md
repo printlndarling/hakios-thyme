@@ -1,5 +1,36 @@
 ## Chronological Verification Logs & Evidence
 
+## Authenticated Lockdown session over WinUSB on thyme (2026-11-28)
+
+- The 240 s guarded boot used kernel `de21a78ef697`, companion
+  `abeca8fc7e25` and the WinUSB development profile. The interface
+  enumerated before the Lockdown daemon was ready. A retry after
+  startup read the actual `HardwareModel` with `ideviceinfo -s`.
+- Two integration suites passed. Both used unmodified libimobiledevice
+  1.3.0 for Pair and ValidatePair and Python TLS for StartSession.
+  The first suite included a software USB reattach. It was followed
+  by a WinUSB discovery and pinned HDB shell with controller stage 2,
+  reconnect count 1 and zero invalid mux frames.
+- The device refused both identifier mismatches, a missing certificate
+  and an unapproved leaf signed by the same CA. The approved client
+  verified the exact paired device certificate and read `thyme`
+  after sending a Lockdown request across two TLS records. A StopSession
+  with an unknown ID failed. The correct ID closed TLS. Removing
+  the RAM approval closed an active session and refused a fresh one.
+- Windows still reported the private interface bound to WINUSB with
+  Apple Mobile Device Service running. Stock client TLS, native Windows
+  recognition and USB management services remain open.
+- The timer returned the phone to Android. The full logdump SHA-256
+  matched before and after, and the private USB device list was empty
+  under Android.
+- Evidence is in `out/thyme-boot/usb-tls.tT8aadYn/`.
+  `pairing-tls.log` SHA-256
+  `3699e6e1065424316fe7b7af0530541806432c7ccc72b89e53a58c8afb1b12e3`.
+  `pairing-tls-repeat.log` SHA-256
+  `88af7518be69ba168e3166f7427d09459953f60b8fb45748883dbb43e58d70a9`.
+  `usb-after-tls.log` SHA-256
+  `1d16fa10b93cb43c759ba2d60f3fb3a790720f4863a1ebaf1d98d68b272170e2`.
+
 ## Explicit Lockdown pairing approval in RAM on thyme (2026-11-28)
 
 - The first guarded run with `336e853af8bc` and companion

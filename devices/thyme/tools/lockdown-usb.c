@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include "hakios.thyme_usbmux.h"
 #include "hdb_network.h"
-#include "lockdown-pairing.h"
+#include "lockdown-tls.h"
 
 static SecKeyRef
 create_device_key(void)
@@ -97,7 +97,7 @@ debug_address(void)
 
 static void
 dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info, CFDataRef public_key,
-    struct lockdown_pairing *pairing, SecKeyRef key)
+    struct lockdown_pairing *pairing, SecKeyRef key, struct lockdown_tls *tls, bool encrypted)
 {
 	CFTypeRef name = request ? CFDictionaryGetValue(request, CFSTR("Request")) : NULL;
 	if (!name || CFGetTypeID(name) != CFStringGetTypeID()) {
@@ -134,7 +134,24 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 		if (address) {
 			CFRelease(address);
 		}
-	} else if (CFEqual(name, CFSTR("Pair")) || CFEqual(name, CFSTR("ValidatePair"))) {
+	} else if (!encrypted && CFEqual(name, CFSTR("StartSession"))) {
+		CFDictionarySetValue(reply, CFSTR("Request"), name);
+		struct lockdown_certificates certs;
+		if (!lockdown_pair_authorized(pairing, request, &certs)) {
+			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("InvalidHostID"));
+		} else if (!lockdown_tls_start(tls, &certs, key)) {
+			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("SessionFailed"));
+		} else {
+			CFDictionarySetValue(reply, CFSTR("SessionID"), tls->id);
+			CFDictionarySetValue(reply, CFSTR("EnableSessionSSL"), kCFBooleanTrue);
+		}
+	} else if (encrypted && CFEqual(name, CFSTR("StopSession"))) {
+		CFDictionarySetValue(reply, CFSTR("Request"), name);
+		CFTypeRef id = CFDictionaryGetValue(request, CFSTR("SessionID"));
+		if (!id || !CFEqual(id, tls->id)) {
+			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("InvalidSessionID"));
+		}
+	} else if (!encrypted && (CFEqual(name, CFSTR("Pair")) || CFEqual(name, CFSTR("ValidatePair")))) {
 		CFDictionarySetValue(reply, CFSTR("Request"), name);
 		CFStringRef error = lockdown_pair_request(pairing, request, key, CFEqual(name, CFSTR("ValidatePair")));
 		if (error) {
@@ -153,31 +170,90 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 	}
 }
 
-static CFDataRef
-reply_data(const struct thyme_lockdown_message *message, size_t length, CFDictionaryRef info, CFDataRef public_key,
-    struct lockdown_pairing *pairing, SecKeyRef key)
+static bool
+parse_size(const uint8_t *frame, size_t *size)
 {
-	CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, message->data + sizeof(uint32_t), length);
-	if (!bytes) {
-		return NULL;
-	}
+	uint32_t wire;
+	memcpy(&wire, frame, sizeof(wire));
+	*size = ntohl(wire);
+	return *size > 0 && *size <= THYME_LOCKDOWN_MESSAGE_MAX - sizeof(wire);
+}
+
+/* Input and output can alias after CF has copied the incoming plist. */
+static size_t
+frame_reply(const uint8_t *payload, size_t length, uint8_t *output, size_t capacity,
+    CFDictionaryRef info, CFDataRef public_key, struct lockdown_pairing *pairing,
+    SecKeyRef key, struct lockdown_tls *tls, bool encrypted, bool *stop)
+{
+	CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, payload, (CFIndex)length);
+	if (!bytes) return 0;
 	CFPropertyListRef list = CFPropertyListCreateWithData(kCFAllocatorDefault, bytes, kCFPropertyListImmutable, NULL, NULL);
 	CFRelease(bytes);
 	CFMutableDictionaryRef reply = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
 	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	if (!reply) {
-		if (list) {
-			CFRelease(list);
-		}
-		return NULL;
+		if (list) CFRelease(list);
+		return 0;
 	}
-	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL, reply, info, public_key, pairing, key);
-	if (list) {
-		CFRelease(list);
-	}
+	dispatch(list && CFGetTypeID(list) == CFDictionaryGetTypeID() ? list : NULL,
+	    reply, info, public_key, pairing, key, tls, encrypted);
+	if (list) CFRelease(list);
+	CFTypeRef request = CFDictionaryGetValue(reply, CFSTR("Request"));
+	*stop = encrypted && request && CFEqual(request, CFSTR("StopSession")) &&
+	    !CFDictionaryContainsKey(reply, CFSTR("Error"));
 	CFDataRef data = CFPropertyListCreateData(kCFAllocatorDefault, reply, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
 	CFRelease(reply);
-	return data;
+	size_t written = 0;
+	if (data) {
+		size_t encoded = (size_t)CFDataGetLength(data);
+		if (capacity >= sizeof(uint32_t) && encoded <= capacity - sizeof(uint32_t)) {
+			uint32_t wire = htonl((uint32_t)encoded);
+			memcpy(output, &wire, sizeof(wire));
+			memcpy(output + sizeof(wire), CFDataGetBytePtr(data), encoded);
+			written = sizeof(wire) + encoded;
+		}
+		CFRelease(data);
+	}
+	return written;
+}
+
+static int
+process_tls(struct lockdown_tls *tls, struct thyme_lockdown_message *message, size_t length,
+    CFDictionaryRef info, CFDataRef public_key, struct lockdown_pairing *pairing, SecKeyRef key)
+{
+	bool keep = lockdown_tls_receive(tls, message->data, length);
+	if (keep && SSL_is_init_finished(tls->connection)) {
+		keep = lockdown_pair_authorized(pairing, NULL, NULL);
+		if (!keep) SSL_shutdown(tls->connection);
+	}
+	while (keep && tls->plaintext_length >= sizeof(uint32_t)) {
+		size_t size;
+		if (!parse_size(tls->plaintext, &size)) {
+			SSL_shutdown(tls->connection);
+			keep = false;
+			break;
+		}
+		size_t frame_size = sizeof(uint32_t) + size;
+		if (tls->plaintext_length < frame_size) break;
+		bool stop;
+		size_t reply = frame_reply(tls->plaintext + sizeof(uint32_t), size, message->data,
+		    sizeof(message->data), info, public_key, pairing, key, tls, true, &stop);
+		size_t written = 0;
+		if (!reply || !SSL_write_ex(tls->connection, message->data, reply, &written) || written != reply) {
+			keep = false;
+			break;
+		}
+		tls->plaintext_length -= frame_size;
+		memmove(tls->plaintext, tls->plaintext + frame_size, tls->plaintext_length);
+		OPENSSL_cleanse(tls->plaintext + tls->plaintext_length, frame_size);
+		if (stop) {
+			SSL_shutdown(tls->connection);
+			keep = false;
+		}
+	}
+	int output = lockdown_tls_output(tls, message->data, sizeof(message->data));
+	if (!keep || output < 0) lockdown_tls_clear(tls);
+	return output < 0 ? 0 : output;
 }
 
 int
@@ -200,8 +276,9 @@ main(void)
 		fputs("Lockdown device public key unavailable\n", stderr);
 	}
 	struct lockdown_pairing pairing = {0};
+	struct lockdown_tls tls = {0};
 	struct thyme_lockdown_message message;
-	const size_t header = sizeof(message.transaction) + sizeof(uint32_t);
+	const size_t header = sizeof(message.transaction);
 	int status = 0;
 	for (;;) {
 		ssize_t n = read(fd, &message, sizeof(message));
@@ -216,31 +293,32 @@ main(void)
 			status = 1;
 			break;
 		}
-		uint32_t size;
-		memcpy(&size, message.data, sizeof(size));
-		if (ntohl(size) != (size_t)n - header) {
-			fputs("invalid Lockdown frame length\n", stderr);
-			status = 1;
-			break;
-		}
-		CFDataRef data = reply_data(&message, (size_t)n - header, info, public_key, &pairing, key);
-		if (!data || CFDataGetLength(data) > THYME_LOCKDOWN_MESSAGE_MAX - sizeof(size)) {
-			if (data) {
-				CFRelease(data);
+		size_t length = (size_t)n - header;
+		if (message.transaction & THYME_LOCKDOWN_TLS_RECORD) {
+			length = (size_t)process_tls(&tls, &message, length, info, public_key, &pairing, key);
+		} else {
+			lockdown_tls_clear(&tls);
+			size_t size;
+			if (length <= sizeof(uint32_t) || !parse_size(message.data, &size) || length != sizeof(uint32_t) + size) {
+				fputs("invalid Lockdown frame length\n", stderr);
+				status = 1;
+				break;
 			}
-			fputs("cannot encode a bounded Lockdown reply\n", stderr);
-			status = 1;
-			break;
+			bool stop;
+			length = frame_reply(message.data + sizeof(uint32_t), size, message.data, sizeof(message.data),
+			    info, public_key, &pairing, key, &tls, false, &stop);
+			if (!length) {
+				fputs("cannot encode a bounded Lockdown reply\n", stderr);
+				status = 1;
+				break;
+			}
+			if (tls.connection) message.transaction |= THYME_LOCKDOWN_START_TLS;
 		}
-		size_t length = (size_t)CFDataGetLength(data);
-		size = htonl((uint32_t)length);
-		memcpy(message.data, &size, sizeof(size));
-		memcpy(message.data + sizeof(size), CFDataGetBytePtr(data), length);
-		CFRelease(data);
 		do {
 			n = write(fd, &message, header + length);
 		} while (n < 0 && errno == EINTR);
 		if (n < 0 && errno == ESTALE) {
+			lockdown_tls_clear(&tls);
 			continue; /* USB disconnected during the user-space request. */
 		}
 		if (n != (ssize_t)(header + length)) {
@@ -249,6 +327,7 @@ main(void)
 			break;
 		}
 	}
+	lockdown_tls_clear(&tls);
 	lockdown_pair_clear(&pairing);
 	if (public_key) {
 		CFRelease(public_key);
