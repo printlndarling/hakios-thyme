@@ -111,8 +111,20 @@ With two active SIMs, `SOAK_UIM_READONLY=1` observes the modem's UIM
 inventory during the normal CommCenter boot. It disables the port's
 diagnostic slot switch, provisioning and SMS submit. The inventory
 counts present and READY SIM/USIM applications and reports the
-primary and secondary GW indices. Network registration and native
-line switching require their own checks.
+primary and secondary GW indices.
+
+To sample network registration on both lines, enable the optional probe
+and keep the UIM observation profile.
+
+```sh
+SOAK_UIM_READONLY=1 SOAK_DSDS_PROBE=1 SOAK_SECS=160 devices/thyme/soak.sh
+```
+
+The dedicated NAS clients bind to the two subscriptions and query their
+registration and radio state three times. By default, the launcher keeps
+five-second log snapshots alongside the live kernel log in `logs/`.
+The kernel labels the samples `DSDS NAS subscription`. Native line controls
+have a separate acceptance check.
 
 ## App-only Metal
 
