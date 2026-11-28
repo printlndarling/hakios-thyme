@@ -479,6 +479,7 @@ struct stream {
 	volatile bool   running;
 	volatile bool   graph_running;  /* the capture graph has started this stream: frames may be given out */
 	bool            worker_started;
+	uint64_t        worker_begin_ticks;
 	int             torch;
 	uint64_t        frames, stills_given;
 };
@@ -1089,8 +1090,14 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 		CVPixelBufferRelease(pb);
 	}
 	if (out->delivered++ == 0) {
-		say("%s: the first picture given (%ux%u %c%c%c%c)", out->name, width, height, pf >> 24, pf >> 16 & 255,
-		    pf >> 8 & 255, pf & 255);
+		mach_timebase_info_data_t tb;
+		mach_timebase_info(&tb);
+		double ms_per_tick = (double)tb.numer / tb.denom / 1e6;
+		double elapsed = (double)(mach_absolute_time() - s->worker_begin_ticks) * ms_per_tick;
+
+		say("%s: the first picture given (%ux%u %c%c%c%c) %.0f ms after %s worker start",
+		    out->name, width, height, pf >> 24, pf >> 16 & 255, pf >> 8 & 255, pf & 255, elapsed,
+		    s->camera->name);
 	}
 }
 
@@ -1960,6 +1967,7 @@ stream_begin(CMBaseObjectRef o, bool graph)
 		out->delivered = out->refused = 0;
 		out->render_ticks = out->handler_ticks = 0;
 	}
+	s->worker_begin_ticks = mach_absolute_time();
 	s->running = true;
 	say("stream: frames begin (format %d)", s->format_index);
 	if (pthread_create(&s->worker, NULL, worker, o) != 0) {

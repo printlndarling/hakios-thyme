@@ -1601,6 +1601,7 @@ static int
 uprobe(unsigned stage)
 {
 	if (uc.active) return EBUSY;
+	uint64_t began = mach_absolute_time(), table_begin = 0, table_end = 0;
 	uc.panic = false;
 	uc.core = umap(0x0c440000, 0x1100);
 	uc.config = umap(0x0c40a000, 0x1000);
@@ -1738,7 +1739,7 @@ uprobe(unsigned stage)
 			hakios_tl("UMI camera: the lens motor's supply failed errno=%d\n", vaf_error);
 		}
 		ums(10);
-		uvcm_scan();
+		if (stage != 8) uvcm_scan();
 		for (unsigned step = 0; step < 6; ++step) {
 			if (step == 2 || step == 4 || step == 5) {
 				unsigned g = step == 2 ? 0 : step == 4 ? 1 : 2;
@@ -1845,7 +1846,8 @@ uprobe(unsigned stage)
 		/* The lens motor's initialisation, the module file's: power down, up,
 		 * ring control, SAC3 with its timing, then 0x190 and 0x12c.
 		 */
-		uvcm_scan();                    /* (the bus is up now: the sensor answers) */
+		/* Probe the whole bus in diagnostics. The iOS path uses the known AK7377 address. */
+		if (stage != 8) uvcm_scan();
 		/* AK7377 initSettings (com.qti.sensormodule.umi_semco_s5khmx.bin) requires
 		 * >= 1 ms after waking from standby (reg 0x02 = 0x00) before position writes;
 		 * without that pause the chip NACKed every initial position write and left
@@ -1893,7 +1895,9 @@ uprobe(unsigned stage)
 			hakios_tl("UMI camera: module sensor-version source register 0x000e=%#x\n", selector);
 		else hakios_tl("UMI camera: module sensor-version source did not answer\n");
 	}
+	table_begin = mach_absolute_time();
 	error = stage >= 3 ? umode_prepare(selector >> 8) : 0;
+	table_end = mach_absolute_time();
 	if (!error && stage >= 4) error = uisp_probe();
 	/* cam=6 on the front runs the CSID's own test pattern through lite1: it
 	 * proves the lite1 CSID/IFE path without the PHY or the sensor.
@@ -1910,7 +1914,19 @@ uprobe(unsigned stage)
 done:
 	if (!uc_keep) ucleanup();
 	if (stage == 7) hakios_tl("UMI camera: capture finished error=%d\n", error);
-	else if (stage == 8) hakios_tl("UMI camera: iOS session start error=%d\n", error);
+	else if (stage == 8) {
+		if (!error) {
+			uint64_t rails_and_probe, tables, stream;
+
+			absolutetime_to_nanoseconds(table_begin - began, &rails_and_probe);
+			absolutetime_to_nanoseconds(table_end - table_begin, &tables);
+			absolutetime_to_nanoseconds(mach_absolute_time() - table_end, &stream);
+			hakios_tl("UMI camera: %s startup power and probe=%llu ms tables=%llu ms stream setup=%llu ms\n",
+			    ufront ? "front" : "rear", rails_and_probe / NSEC_PER_MSEC, tables / NSEC_PER_MSEC,
+			    stream / NSEC_PER_MSEC);
+		}
+		hakios_tl("UMI camera: iOS session start error=%d\n", error);
+	}
 	else hakios_tl("UMI camera: sensor probe finished error=%d; sensor stream was not started\n", error);
 	return error;
 }
