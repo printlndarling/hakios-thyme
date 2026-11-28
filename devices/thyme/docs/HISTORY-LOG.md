@@ -1,5 +1,36 @@
 ## Chronological Verification Logs & Evidence
 
+## XNU USB bulk loopback on thyme (2026-11-28)
+
+- The development gadget advertises bulk OUT `0x01` and IN `0x81`,
+  activates them after SET_CONFIGURATION and echoes one packet at a time.
+  Native Windows finds the WinUSB interface through the Microsoft OS
+  properties descriptor. The earlier EP0-only profile was absent from
+  i4Tools during the operator's test. i4Tools discovery remains pending
+  until usbmux, lockdown and pairing are available.
+- In the 175 s RAM Boot test, kernel `570edd94c02c` and loader
+  `79f1fad4d1c6` exposed 512-byte bulk packets. Three independent
+  WinUSB handle opens transferred 768 packet pairs and 329,886 bytes
+  per direction. The host compared every byte. SSH read the same
+  device-side totals and configuration 1.
+
+- The 165 s repeat with kernel `60f04a21d5f4` repeated the Windows
+  transfers, then requested a development detach over pinned LAN SSH.
+  Windows observed the test interface disappear at 14:20:06.68 and
+  return with WinUSB at 14:20:07.57. The kernel reported two bus resets,
+  two connect events, one software reconnect and configuration 1.
+  Three new WinUSB handles reproduced all three payload SHA-256 values.
+  The device's final counters were 1,536 transfers and 659,772 bytes
+  in each direction with zero stalled control requests.
+
+- Both guarded sessions completed Android boot with matching whole
+  `logdump` SHA-256 before and after. The 165 s session returned to
+  completed Android boot 215 s after launch. Evidence is in
+  `out/thyme-boot/usb-bulk.WZIV6Wuz/`. The reconnect PnP log's SHA-256 is
+  `5b6fe7a96bd0a781acff4727e7ea647b9447b814b6aecf8f19f8b7bdeb7f63c5`
+  and the final SSH counter log's SHA-256 is
+  `37b01b9a1203c4795312f3b1f86b181daea5e7746cf0083a9fd441100497fb1c`.
+
 ## XNU USB 2.0 EP0 on thyme (2026-11-28)
 
 - The control endpoint probe starts only after explicit RAM Boot

@@ -128,7 +128,7 @@ over SSH while the kernel is live, because it discards the RAM log at
 reset. Use standard RAM Boot for the final kernel log and the
 `loader_return_after expired` marker.
 
-### XNU USB 2.0 control endpoint probe
+### XNU USB 2.0 bulk loopback
 
 Build the kernel with `CONFIG_HAKIOS_THYME_USB=y` (included in
 `make thyme_defconfig`) and rebuild the thyme loader. Use the debug RAM
@@ -150,12 +150,31 @@ python3 tools/hdb.py --host PHONE_LAN_IP shell /var/jb/usr/sbin/sysctl kern.haki
 Stage 2 denotes a running controller. The `connect`, `reset`, `setup`,
 `address` and `configuration` fields show separate progress through USB
 enumeration. The Qualcomm USB2 session-valid override follows the
-charger report and is restored when the kernel leaves. The test
-descriptor identifies the device as HakiOS thyme with control endpoint
-EP0. Its Microsoft OS descriptors advertise the in-box WinUSB driver.
-Windows reported problem code 0 and the XNU probe reached configuration
-1. USB data services need bulk endpoints and a registered device
-interface. See [Microsoft's WinUSB device requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/automatic-installation-of-winusb).
+charger report and is restored when the kernel leaves. Microsoft OS
+descriptors advertise WinUSB and register the test interface GUID on
+Windows. See [Microsoft's WinUSB device requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/automatic-installation-of-winusb).
+
+From a native Windows PowerShell session, run:
+
+```powershell
+.\devices\thyme\tools\test-usb-bulk.ps1 -WaitSeconds 90 -Rounds 3
+```
+
+The probe echoes one packet from bulk OUT `0x01` to bulk IN `0x81` before
+arming the next receive. The runner verifies lengths and bytes across
+three WinUSB handle opens by default. PHY and bulk counters are readable
+over LAN even while Windows uses the USB interface.
+
+To exercise software detach and reattachment, request a reconnect from
+the authenticated debug client after the first round set:
+
+```sh
+python3 tools/hdb.py --host PHONE_LAN_IP shell /var/jb/usr/sbin/sysctl -w kern.hakios.thyme_usb.reconnect=1
+```
+
+Wait for `reconnects` to increment and `configuration` to return to 1,
+then rerun the WinUSB loopback. Physical cable reattachment is a separate
+test.
 
 `1209:0001` is non-unique and reserved for private testing. Obtain an
 assigned identity before distributing a device that enumerates. See
@@ -171,9 +190,8 @@ controller's identification and status. The next stage is to use the
 halted controller for an XNU device-mode driver and verify its shutdown
 during the timed return.
 
-1. Add XNU bulk data endpoints after the Windows EP0 milestone.
-   Validate transfers, cable reconnect, timed shutdown and native
-   enumeration on macOS and Linux.
+1. Extend the USB bulk transport to support queued I/O for system services.
+   Verify physical cable reconnect and native macOS and Linux enumeration.
 2. Validate discovery and transport with usbmuxd and libimobiledevice,
    then implement and test trust and lockdown session handling. Export
    actual thyme hardware and OS information where the protocol permits,
