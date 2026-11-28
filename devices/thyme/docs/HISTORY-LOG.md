@@ -1,5 +1,26 @@
 ## Chronological Verification Logs & Evidence
 
+## Live system version and Windows device discovery check (2026-11-29)
+
+- The 180 s guarded run used kernel `de21a78ef697` and companion
+  `dfcb5c5402c2`. Unmodified `ideviceinfo -s` over WinUSB read HakiOS
+  and the Xiaomi Mi 10S, thyme and SM8250-AC hardware fields. The
+  returned compatibility version `16.5` and build `20F66` were compared
+  with the active system plist retrieved over pinned HDB.
+- The approved Pair, ValidatePair and mutual TLS suite passed again.
+  The compatibility fields describe the running software image.
+- With HakiOS connected and its WinUSB interface present, the native
+  i4Tools 9.23.010.0 window still displayed its connection help page.
+  The installed Apple Mobile Device USB driver INF lists VID_05AC,
+  and the HakiOS development interface enumerates as 1209:0001.
+- The guard returned the phone to Android. The full logdump SHA-256
+  matched before and after the run.
+- Evidence is in `out/thyme-boot/usb-version.fowf86QP/`.
+  `identity-verified.log` SHA-256
+  `b3ea90ba2f174ba18dcee525d5d61c50000654e92f1cb7c1b88bf8c61449fa4b`.
+  `pairing-tls.log` SHA-256
+  `88af7518be69ba168e3166f7427d09459953f60b8fb45748883dbb43e58d70a9`.
+
 ## Authenticated Lockdown session over WinUSB on thyme (2026-11-28)
 
 - The 240 s guarded boot used kernel `de21a78ef697`, companion

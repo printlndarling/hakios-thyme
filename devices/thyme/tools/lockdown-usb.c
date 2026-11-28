@@ -67,17 +67,47 @@ export_public_key(SecKeyRef key)
 	return pem;
 }
 
+/* Compatibility fields describe the live system image. The HakiOS and
+ * Xiaomi identity is provided independently of Apple's image metadata. */
+static void
+read_system_version(CFMutableDictionaryRef info)
+{
+	FILE *file = fopen("/System/Library/CoreServices/SystemVersion.plist", "rb");
+	if (!file) return;
+	uint8_t buffer[4096];
+	size_t length = fread(buffer, 1, sizeof(buffer), file);
+	bool complete = length > 0 && feof(file) && !ferror(file);
+	fclose(file);
+	if (!complete) return;
+	CFDataRef data = CFDataCreate(kCFAllocatorDefault, buffer, (CFIndex)length);
+	if (!data) return;
+	CFPropertyListRef plist = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL, NULL);
+	CFRelease(data);
+	if (plist && CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+		CFTypeRef version = CFDictionaryGetValue(plist, CFSTR("ProductVersion"));
+		CFTypeRef build = CFDictionaryGetValue(plist, CFSTR("ProductBuildVersion"));
+		if (version && CFGetTypeID(version) == CFStringGetTypeID() && CFStringGetLength(version) > 0) {
+			CFDictionarySetValue(info, CFSTR("ProductVersion"), version);
+		}
+		if (build && CFGetTypeID(build) == CFStringGetTypeID() && CFStringGetLength(build) > 0) {
+			CFDictionarySetValue(info, CFSTR("BuildVersion"), build);
+		}
+	}
+	if (plist) CFRelease(plist);
+}
+
 static CFDictionaryRef
 identity(void)
 {
-	const void *keys[] = {
-		CFSTR("DeviceName"), CFSTR("HardwareModel"), CFSTR("HardwarePlatform"), CFSTR("ProductName"),
-	};
-	const void *values[] = {
-		CFSTR("Xiaomi Mi 10S"), CFSTR("thyme"), CFSTR("SM8250-AC"), CFSTR("HakiOS"),
-	};
-	return CFDictionaryCreate(kCFAllocatorDefault, keys, values, sizeof(keys) / sizeof(keys[0]),
+	CFMutableDictionaryRef info = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
 	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	if (!info) return NULL;
+	CFDictionarySetValue(info, CFSTR("DeviceName"), CFSTR("Xiaomi Mi 10S"));
+	CFDictionarySetValue(info, CFSTR("HardwareModel"), CFSTR("thyme"));
+	CFDictionarySetValue(info, CFSTR("HardwarePlatform"), CFSTR("SM8250-AC"));
+	CFDictionarySetValue(info, CFSTR("ProductName"), CFSTR("HakiOS"));
+	read_system_version(info);
+	return info;
 }
 
 /* The address is a discovery hint. Authorization belongs to OpenSSH. */

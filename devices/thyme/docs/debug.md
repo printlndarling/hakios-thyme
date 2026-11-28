@@ -272,12 +272,18 @@ The root-only `/dev/hakios-lockdown` device connects the USB transport
 to the user-space program. The program supports `QueryType`, `GetValue`
 and `Goodbye`. `GetValue` exposes the model, board, SoC and system
 name. The wire protocol type is `com.apple.mobile.lockdown`. On the
-physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
-thyme, SM8250-AC and HakiOS. The explicitly approved developer record
-works as described below. Standard client TLS and system services remain
-open. The operator confirmed that i4Tools 9.22.032.0 stays on the
-connection help page. Windows enumerated the development interface as WINUSB while Apple
-Mobile Device Service was running.
+physical thyme, unmodified `ideviceinfo -s` returns Xiaomi Mi 10S,
+thyme, SM8250-AC and HakiOS. `ProductVersion` and `BuildVersion` report
+the compatibility metadata from the running image's SystemVersion
+plist. The verified image reports 16.5 and 20F66. The explicitly
+approved developer record works as described below. Standard client
+TLS and system services remain open.
+
+Windows enumerated the development interface as 1209:0001 with
+WINUSB while Apple Mobile Device Service was running. The Apple USB
+driver on that host lists VID_05AC. i4Tools 9.22.032.0 in the operator
+screenshot and 9.23.010.0 in the follow-up run both stayed on the
+connection help page. Native Windows discovery remains open.
 
 #### Pairing protocol preparation
 
