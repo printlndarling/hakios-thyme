@@ -14,14 +14,14 @@ decode_certificate(CFDataRef data)
 }
 
 static int
-verify_client(X509_STORE_CTX *store, void *host)
+verify_client(X509_STORE_CTX *store, void *client)
 {
 	if (X509_verify_cert(store) != 1) {
 		return 0;
 	}
 	unsigned char approved[EVP_MAX_MD_SIZE], peer[EVP_MAX_MD_SIZE];
 	unsigned int approved_size, peer_size;
-	if (!X509_digest(host, EVP_sha256(), approved, &approved_size) ||
+	if (!X509_digest(client, EVP_sha256(), approved, &approved_size) ||
 	    !X509_digest(X509_STORE_CTX_get0_cert(store), EVP_sha256(), peer, &peer_size) ||
 	    approved_size != peer_size || CRYPTO_memcmp(approved, peer, peer_size) != 0) {
 		X509_STORE_CTX_set_error(store, X509_V_ERR_CERT_REJECTED);
@@ -34,11 +34,11 @@ void
 lockdown_tls_clear(struct lockdown_tls *tls)
 {
 	SSL_free(tls->connection);
-	X509_free(tls->host);
+	X509_free(tls->client);
 	if (tls->id) CFRelease(tls->id);
 	OPENSSL_cleanse(tls->plaintext, tls->plaintext_length);
 	tls->connection = NULL;
-	tls->host = NULL;
+	tls->client = NULL;
 	tls->id = NULL;
 	tls->plaintext_length = 0;
 }
@@ -52,14 +52,15 @@ lockdown_tls_start(struct lockdown_tls *tls, const struct lockdown_certificates 
 
 	X509 *root = decode_certificate(certs->root);
 	X509 *device = decode_certificate(certs->device);
-	tls->host = decode_certificate(certs->host);
+	tls->client = decode_certificate(certs->client);
+	tls->root_client = certs->root_client;
 	CFDataRef key_data = key ? SecKeyCopyExternalRepresentation(key, NULL) : NULL;
 	const unsigned char *cursor = key_data ? CFDataGetBytePtr(key_data) : NULL;
 	EVP_PKEY *private_key = key_data ? d2i_AutoPrivateKey(NULL, &cursor, CFDataGetLength(key_data)) : NULL;
 	if (key_data) CFRelease(key_data);
 
 	SSL_CTX *context = SSL_CTX_new(TLS_server_method());
-	bool ready = tls->id && root && device && tls->host && private_key && context &&
+	bool ready = tls->id && root && device && tls->client && private_key && context &&
 	    SSL_CTX_set_min_proto_version(context, TLS1_2_VERSION) == 1 &&
 	    SSL_CTX_set_max_proto_version(context, TLS1_2_VERSION) == 1 &&
 	    X509_STORE_add_cert(SSL_CTX_get_cert_store(context), root) == 1 &&
@@ -72,7 +73,7 @@ lockdown_tls_start(struct lockdown_tls *tls, const struct lockdown_certificates 
 		SSL_CTX_set_options(context, SSL_OP_NO_TICKET | SSL_OP_NO_RENEGOTIATION);
 		SSL_CTX_set_session_cache_mode(context, SSL_SESS_CACHE_OFF);
 		SSL_CTX_set_verify(context, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
-		SSL_CTX_set_cert_verify_callback(context, verify_client, tls->host);
+		SSL_CTX_set_cert_verify_callback(context, verify_client, tls->client);
 		tls->connection = SSL_new(context);
 	}
 	SSL_CTX_free(context);

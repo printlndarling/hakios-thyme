@@ -253,7 +253,8 @@ process_tls(struct lockdown_tls *tls, struct thyme_lockdown_message *message, si
 {
 	bool keep = lockdown_tls_receive(tls, message->data, length);
 	if (keep && SSL_is_init_finished(tls->connection)) {
-		keep = lockdown_pair_authorized(pairing, NULL, NULL);
+		struct lockdown_certificates certs;
+		keep = lockdown_pair_authorized(pairing, NULL, &certs) && certs.root_client == tls->root_client;
 		if (!keep) SSL_shutdown(tls->connection);
 	}
 	while (keep && tls->plaintext_length >= sizeof(uint32_t)) {

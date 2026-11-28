@@ -7,7 +7,8 @@
 
 struct lockdown_tls {
 	SSL *connection;
-	X509 *host;
+	X509 *client;
+	bool root_client;
 	CFStringRef id;
 	size_t plaintext_length;
 	uint8_t plaintext[THYME_LOCKDOWN_MESSAGE_MAX];

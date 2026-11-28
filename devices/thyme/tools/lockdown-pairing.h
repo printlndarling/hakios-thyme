@@ -10,7 +10,8 @@ struct lockdown_pairing {
 };
 
 struct lockdown_certificates {
-	CFDataRef root, host, device;
+	CFDataRef root, client, device;
+	bool root_client;
 };
 
 /* Recheck the active RAM approval. The returned certificates borrow state. */

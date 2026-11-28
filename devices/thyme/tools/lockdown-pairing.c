@@ -193,7 +193,9 @@ lockdown_pair_authorized(struct lockdown_pairing *state, CFDictionaryRef request
 	CFTypeRef buid = CFArrayGetValueAtIndex(record, PAIR_BUID);
 	CFDataRef root = CFArrayGetValueAtIndex(record, PAIR_ROOT);
 	CFDataRef host = CFArrayGetValueAtIndex(record, PAIR_HOST);
-	bool permitted = approved &&
+	CFTypeRef role = approved ? CFDictionaryGetValue(approved, CFSTR("TLSClientCertificate")) : NULL;
+	bool root_client = role && CFEqual(role, CFSTR("RootCertificate"));
+	bool permitted = approved && (!role || root_client || CFEqual(role, CFSTR("HostCertificate"))) &&
 	    uuid_matches(host_id, CFDictionaryGetValue(approved, CFSTR("HostID"))) &&
 	    uuid_matches(buid, CFDictionaryGetValue(approved, CFSTR("SystemBUID"))) &&
 	    pin_matches(root, CFDictionaryGetValue(approved, CFSTR("RootCertificateSHA256"))) &&
@@ -208,7 +210,10 @@ lockdown_pair_authorized(struct lockdown_pairing *state, CFDictionaryRef request
 		return false;
 	}
 	if (certs) {
-		*certs = (struct lockdown_certificates){ root, host, CFArrayGetValueAtIndex(record, PAIR_DEVICE) };
+		*certs = (struct lockdown_certificates){
+			.root = root, .client = root_client ? root : host,
+			.device = CFArrayGetValueAtIndex(record, PAIR_DEVICE), .root_client = root_client,
+		};
 	}
 	return true;
 }

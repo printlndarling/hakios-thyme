@@ -276,8 +276,8 @@ physical thyme, unmodified `ideviceinfo -s` returns Xiaomi Mi 10S,
 thyme, SM8250-AC and HakiOS. `ProductVersion` and `BuildVersion` report
 the compatibility metadata from the running image's SystemVersion
 plist. The verified image reports 16.5 and 20F66. The explicitly
-approved developer record works as described below. Standard client
-TLS and system services remain open.
+approved developer record also supports encrypted queries from
+OpenSSL-based ideviceinfo 1.3.0. System services remain open.
 
 Windows enumerated the development interface as 1209:0001 with
 WINUSB while Apple Mobile Device Service was running. The Apple USB
@@ -289,9 +289,8 @@ connection help page. Native Windows discovery remains open.
 
 The development daemon returns a 2048-bit `DevicePublicKey` as
 PKCS#1 PEM. The corresponding key is generated on-device in RAM
-and lives for the daemon's lifetime. The private host adapter provides
-its per-process BUID and reports absent pair records while the
-Lockdown connection is open. In the guarded run, Ubuntu `idevicepair 1.3.0` read the device key
+and lives for the daemon's lifetime. The private host adapter defaults
+to a per-process BUID and absent pair records. In an earlier guarded run, Ubuntu `idevicepair 1.3.0` read the device key
 and sent a 4,855-byte framed `Pair` request with three certificates.
 That request received a matching `InvalidRequest` response. The
 explicit approval described below applies to a separately enrolled
@@ -317,18 +316,29 @@ lifetime.
 #### Read-only authenticated Lockdown session
 
 A successful `StartSession` reply upgrades that connection to TLS 1.2.
-The device presents the
-paired device certificate, requires proof of the exact approved host
-certificate, and rechecks the active RAM approval before processing
-encrypted requests. This supports encrypted read-only queries and ends
+The device presents the paired device certificate, requires proof of
+the exact approved client certificate, and rechecks the active RAM
+approval before processing encrypted requests. This supports encrypted read-only queries and ends
 the session on StopSession or revocation. Open a fresh connection for
 another session. System management services are still pending.
 
-The OpenSSL backend in upstream libimobiledevice 1.3.0 presents the
-pair record's root certificate as the TLS client identity. This
-development profile requires the separately approved host leaf. The
-private adapter does not provide stored host credentials.
+The default TLS client identity is the approved host leaf. The OpenSSL
+backend in libimobiledevice 1.3.0 presents the pair record's root as its
+client certificate. For a dedicated development record, set the RAM
+approval's `TLSClientCertificate` string to `RootCertificate` to select
+the exact pinned root instead. The selected certificate must pass
+OpenSSL's normal TLS client validation and prove possession of the
+private key. Changing the selection revokes active sessions using the
+previous identity. Use a development CA for this test. The original
+client does not verify the device certificate, so use this profile on
+the controlled test cable and private bridge.
 [libimobiledevice OpenSSL client](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/idevice.c#L978-L1006)
+
+The bridge reads a local record only when given `--pair-record PATH`.
+The file must be a regular file owned by the current user with group and
+other access disabled. Add the device locator from `idevice_id -l` as
+`PairRecordID` to the usual pair-record dictionary. The bridge provides
+the matching record and its `SystemBUID` to the scoped host process.
 
 The integration test requires Ubuntu's libimobiledevice 1.3.0 tools,
 Python `cryptography` and enrolled HDB credentials. It generates a
@@ -344,7 +354,17 @@ python3 devices/thyme/tools/usbmux-winusb.py -- \
 ```
 
 The last option detaches and reattaches the USB interface before
-`ValidatePair` to exercise recovery within the same RAM Boot.
+`ValidatePair` to exercise recovery within the same RAM Boot. To include
+unmodified ideviceinfo with the pairing-root identity, use this test
+fixture. Its private key lives in the host's temporary RAM directory.
+
+```sh
+fixture=$(mktemp -d /dev/shm/thyme-pair.XXXXXXXX)
+python3 devices/thyme/tools/usbmux-winusb.py --pair-record "$fixture/pair.plist" -- \
+  python3 devices/thyme/tools/test-lockdown-pairing.py --hdb-state ssh/hdb --reattach \
+  --stock-record "$fixture/pair.plist"
+rmdir "$fixture"
+```
 
 #### Discover the SSH address over USB
 
@@ -407,12 +427,13 @@ reset.
 
 1. Verify physical cable reconnect and native macOS and Linux enumeration.
    Extend the USB bulk transport to support concurrent system services.
-2. Verify stock host discovery and encrypted Lockdown compatibility,
-   then test the standard device trust prompt. Export other verified
-   thyme hardware and OS information as needed.
-3. Verify AFC, installation proxy, logs and screenshots with the open
-   tools. Use an approved developer app and temporary files in the RAM
-   session.
+2. Verify native host discovery and the standard device trust prompt.
+   Export other verified thyme hardware and OS information as needed.
+3. Add authenticated service-port connections to StartService and verify
+   AFC, installation proxy, logs and screenshots with the open tools.
+   The libimobiledevice AFC factory closes its Lockdown session before
+   opening the service connection. Use an approved developer app and
+   temporary files in the RAM session. [libimobiledevice service factory](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/service.c#L77-L109)
 4. Test host identification and device management separately in
    i4Tools, 3uTools, iMazing, iTunes and Finder wherever available.
    Keep vendor-service and authorization results separate. Flashing

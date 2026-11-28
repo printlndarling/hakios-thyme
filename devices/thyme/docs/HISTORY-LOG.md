@@ -1,5 +1,32 @@
 ## Chronological Verification Logs & Evidence
 
+## Unmodified ideviceinfo opens an approved TLS session (2026-11-29)
+
+- The 240 s guarded run used kernel `de21a78ef697` and companion
+  `14b4a168905a`. The private WSL2 bridge supplied a temporary
+  pair record scoped to the actual WinUSB device locator. The pairing
+  root key stayed in WSL tmpfs.
+- Three suites passed. OpenSSL-based ideviceinfo 1.3.0 read
+  `HardwareModel=thyme` over TLS when the RAM policy explicitly selected
+  the pinned pairing root. The default host-leaf policy refused the root.
+  The test also confirmed refusal without approval and after revocation.
+- The pinned Python client still passed TLS with the approved host leaf.
+  Missing certificates and a different leaf from the same CA were
+  refused. Changing the selected role closed an active stock client
+  session on its next request.
+- A software USB reattach retained the approved Pair record within the
+  daemon lifetime. The pinned HDB shell then read DWC3 stage 2,
+  reconnect count 1 and zero invalid mux frames.
+- The guard returned to Android. The complete logdump digest matched
+  before and after, and the private USB device list was empty.
+- Evidence is in `out/thyme-boot/usb-stock-tls.d5jsgnIO/`.
+  `stock-pairing.log` SHA-256
+  `63f44969696f73da6fe39159af53bbba5365ffe21c3e381bbfa35b8a954d9c6e`.
+  `stock-pairing-repeat.log` SHA-256
+  `a6b3920457182496b0f69cfd0bbfe3118a61bbc3e36934cccede27732fa4acb8`.
+  `stock-pairing-role.log` SHA-256
+  `9f2d4402033f4bae2f9c49cbcfd5af9d56160a4dd4771d59b61121103829eb4d`.
+
 ## Native Windows HDB discovers the LAN address over WinUSB (2026-11-29)
 
 - The 180 s guarded run used kernel `de21a78ef697` and companion

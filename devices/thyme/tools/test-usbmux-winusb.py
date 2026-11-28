@@ -142,6 +142,38 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(stream.read(9), LOCKDOWN_HEADER.pack(5) + b"reply")
         self.assertEqual(self.server.transport.calls, [("list",), (62078, LOCATION), message])
 
+    def test_explicit_record_only_for_the_attached_device(self):
+        entry = self.request(MessageType="ListDevices")["DeviceList"][0]
+        locator = entry["Properties"]["SerialNumber"]
+        path = Path(self.directory.name) / "pair.plist"
+        self.server.pair_record = path
+        fixture = {
+            "PairRecordID": locator, "HostID": str(uuid.uuid4()), "SystemBUID": str(uuid.uuid4()),
+            "RootCertificate": b"test root", "RootPrivateKey": b"test key",
+            "HostCertificate": b"test host", "DeviceCertificate": b"test device",
+        }
+        stale = dict(fixture, PairRecordID=locator + "-different")
+        def read_record():
+            return self.request(MessageType="ReadPairRecord", PairRecordID=locator)
+
+        self.assertEqual(read_record()["Number"], errno.ENOENT)
+        path.write_bytes(plistlib.dumps(stale))
+        path.chmod(0o600)
+        self.assertEqual(read_record()["Number"], errno.ENOENT)
+        path.write_bytes(plistlib.dumps(fixture))
+        self.assertEqual(plistlib.loads(read_record()["PairRecordData"]), fixture)
+        self.assertEqual(self.request(MessageType="ReadBUID")["BUID"], fixture["SystemBUID"])
+        self.assertEqual(self.request(MessageType="ReadPairRecord", PairRecordID="elsewhere")["Number"], 2)
+
+        path.chmod(0o644)
+        self.assertEqual(read_record()["Number"], errno.ENOENT)
+        path.chmod(0o600)
+        link = path.with_name("link.plist")
+        link.symlink_to(path)
+        self.server.pair_record = link
+        self.assertEqual(read_record()["Number"], errno.ENOENT)
+        self.assertNotEqual(self.request(MessageType="ReadBUID")["BUID"], fixture["SystemBUID"])
+
     def test_invalid_client_requests_stay_off_usb(self):
         self.assertEqual(self.request_payload(b"<plist>")["Number"], 1)
         self.assertEqual(self.request_payload(b"bad", version=0)["Number"], 6)

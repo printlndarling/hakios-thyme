@@ -47,16 +47,19 @@ class Lockdown:
         self.lib.idevice_new.argtypes = [c.POINTER(c.c_void_p), c.c_char_p]
         self.lib.idevice_free.argtypes = [c.c_void_p]
         self.lib.lockdownd_client_new.argtypes = [c.c_void_p, c.POINTER(c.c_void_p), c.c_char_p]
+        self.lib.lockdownd_client_new_with_handshake.argtypes = self.lib.lockdownd_client_new.argtypes
         self.lib.lockdownd_client_free.argtypes = [c.c_void_p]
+        self.lib.lockdownd_get_value.argtypes = [c.c_void_p, c.c_char_p, c.c_char_p, c.POINTER(c.c_void_p)]
         self.lib.lockdownd_pair.argtypes = [c.c_void_p, c.POINTER(PairRecord)]
         self.lib.lockdownd_validate_pair.argtypes = [c.c_void_p, c.POINTER(PairRecord)]
 
     @contextmanager
-    def connection(self):
+    def connection(self, handshake=False):
         device, client = c.c_void_p(), c.c_void_p()
         check("idevice_new", self.lib.idevice_new(c.byref(device), self.locator), 0)
         try:
-            check("lockdownd_client_new", self.lib.lockdownd_client_new(device, c.byref(client), b"thyme-pair-test"), 0)
+            connect = self.lib.lockdownd_client_new_with_handshake if handshake else self.lib.lockdownd_client_new
+            check(connect.__name__, connect(device, c.byref(client), b"thyme-pair-test"), 0)
             try:
                 yield client
             finally:
@@ -75,7 +78,7 @@ def make_key():
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-def issue(subject, key, issuer, signing, ca=False):
+def issue(subject, key, issuer, signing, ca=False, tls_client=False):
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
     now = datetime.now(timezone.utc)
     return (
@@ -88,7 +91,7 @@ def issue(subject, key, issuer, signing, ca=False):
         .not_valid_after(now + timedelta(days=1))
         .add_extension(x509.BasicConstraints(ca=ca, path_length=0 if ca else None), critical=True)
         .add_extension(x509.KeyUsage(
-            digital_signature=not ca, content_commitment=False, key_encipherment=not ca,
+            digital_signature=not ca or tls_client, content_commitment=False, key_encipherment=not ca,
             data_encipherment=False, key_agreement=False, key_cert_sign=ca, crl_sign=ca,
             encipher_only=False, decipher_only=False), critical=True)
         .sign(signing, hashes.SHA256())
@@ -97,7 +100,7 @@ def issue(subject, key, issuer, signing, ca=False):
 
 def certificate_fixture(public_key):
     root_key, host_key, other_key = make_key(), make_key(), make_key()
-    root = issue("thyme pairing test root", root_key.public_key(), None, root_key, ca=True)
+    root = issue("thyme pairing test root", root_key.public_key(), None, root_key, ca=True, tls_client=True)
     other = issue("unapproved test root", other_key.public_key(), None, other_key, ca=True)
     host = issue("thyme pairing test host", host_key.public_key(), root, root_key)
     device = issue("thyme.hakios.test", public_key, root, root_key)
@@ -122,7 +125,8 @@ def certificate_fixture(public_key):
         ("different host certificate refused", record(device, host_cert=wrong_chain), INVALID_PAIR_RECORD),
         ("different device key refused", record(wrong_key), INVALID_PAIR_RECORD),
         ("wrong certificate issuer refused", record(wrong_chain), INVALID_PAIR_RECORD),
-    ), ((host.public_bytes(pem), host_key), (unpinned_host.public_bytes(pem), other_key))
+    ), ((host.public_bytes(pem), host_key), (unpinned_host.public_bytes(pem), other_key),
+        (root.public_bytes(pem), root_key))
 
 
 def receive(stream, size):
@@ -192,9 +196,11 @@ def session_test(locator, pins, record, credentials, hdb):
         for field in ("HostID", "SystemBUID"):
             invalid = dict(start, **{field: str(uuid.uuid4())})
             check(f"StartSession with different {field} refused", plist_request(stream, invalid).get("Error"), "InvalidHostID")
-    valid, unpinned = credentials
+    valid, unpinned, root = credentials
     session_ids = set()
-    for credential, label in ((None, "missing certificate"), (unpinned, "unpinned leaf"), (valid, "approved leaf")):
+    cases = ((None, "missing certificate"), (unpinned, "unpinned leaf"),
+             (root, "pairing root with default policy"), (valid, "approved leaf"))
+    for credential, label in cases:
         with mux_request(address, connect, switch=True) as (reply, stream):
             check("Lockdown socket connected", reply["Number"], 0)
             response = plist_request(stream, start)
@@ -204,8 +210,8 @@ def session_test(locator, pins, record, credentials, hdb):
             session_ids.add(session_id)
             try:
                 tls = context(credential).wrap_socket(stream, server_hostname="thyme.hakios.test")
-            except ssl.SSLError:
-                if credential is valid:
+            except ssl.SSLError as error:
+                if credential is valid or isinstance(error, ssl.SSLCertVerificationError):
                     raise
                 print(f"TLS refused {label}", flush=True)
                 continue
@@ -244,7 +250,40 @@ def query(locator, key, *options):
     )
 
 
-def run(state, reattach):
+@contextmanager
+def stock_pair_record(path, locator, record, root_key):
+    if path is None:
+        yield
+        return
+    if Path("/dev/shm") not in path.resolve().parents:
+        raise ValueError("put the temporary stock client pair record under /dev/shm")
+    data = {
+        "PairRecordID": locator, "HostID": record.host_id.decode(), "SystemBUID": record.system_buid.decode(),
+        "DeviceCertificate": record.device_certificate, "RootCertificate": record.root_certificate,
+        "HostCertificate": record.host_certificate,
+        "RootPrivateKey": root_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                                                 serialization.NoEncryption()),
+    }
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            plistlib.dump(data, stream, fmt=plistlib.FMT_BINARY)
+        yield
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def check_stock_client(locator, accepts):
+    reply = subprocess.run(["ideviceinfo", "-u", locator, "-k", "HardwareModel"], capture_output=True, timeout=18)
+    if accepts and (reply.returncode != 0 or reply.stdout.strip() != b"thyme"):
+        raise RuntimeError(f"stock ideviceinfo could not open its TLS session (status {reply.returncode})")
+    if not accepts and reply.stdout.strip() == b"thyme":
+        raise RuntimeError("stock ideviceinfo read HardwareModel without root authorization")
+    print("Stock ideviceinfo over TLS read HardwareModel=thyme" if accepts else
+          "Stock ideviceinfo did not authenticate with the pairing root", flush=True)
+
+
+def run(state, reattach, stock_record=None):
     ids = subprocess.check_output(["idevice_id", "-l"], text=True, timeout=15).split()
     if len(ids) != 1 or not re.fullmatch(r"thyme-usb-[a-f0-9]{20}", ids[0]):
         raise ValueError("expected one thyme development device")
@@ -263,17 +302,24 @@ def run(state, reattach):
         subprocess.run([sys.executable, str(HDB), "--state", str(state), "--host", address, *args],
                        check=True, timeout=15)
 
+    tmp = APPROVAL + "." + uuid.uuid4().hex
+
+    def stage_policy(policy):
+        with tempfile.TemporaryDirectory(prefix="thyme-pair-test-") as directory:
+            source = Path(directory) / "approval.plist"
+            source.write_bytes(plistlib.dumps(policy))
+            hdb("push", str(source), tmp)
+        hdb("shell", "/var/jb/usr/bin/chmod", "600", tmp)
+
+    def install(policy):
+        stage_policy(policy)
+        hdb("shell", "/var/jb/bin/ln", tmp, APPROVAL)
+
     with lockdown.connection() as client:
         check("pair without approval refused", lockdown.lib.lockdownd_pair(client, record), UNKNOWN_ERROR)
-    tmp = APPROVAL + "." + uuid.uuid4().hex
     installed = False
     try:
-        with tempfile.TemporaryDirectory(prefix="thyme-pair-test-") as directory:
-            policy = Path(directory) / "approval.plist"
-            policy.write_bytes(plistlib.dumps(pins))
-            hdb("push", str(policy), tmp)
-        hdb("shell", "/var/jb/usr/bin/chmod", "600", tmp)
-        hdb("shell", "/var/jb/bin/ln", tmp, APPROVAL)
+        install(pins)
         installed = True
         hdb("shell", "/var/jb/bin/rm", tmp)
         with lockdown.connection() as client:
@@ -300,10 +346,31 @@ def run(state, reattach):
         with lockdown.connection() as client:
             check("invalid policy cleared previous acceptance", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)
             check("approved Pair accepted again", lockdown.lib.lockdownd_pair(client, record), 0)
-        session_test(locator, pins, record, credentials, hdb)
-        installed = False
-        with lockdown.connection() as client:
-            check("validate after removal refused", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)
+        with stock_pair_record(stock_record, locator, record, credentials[2][1]):
+            if stock_record:
+                check_stock_client(locator, accepts=False)
+            session_test(locator, pins, record, credentials, hdb)
+            installed = False
+            with lockdown.connection() as client:
+                check("validate after removal refused", lockdown.lib.lockdownd_validate_pair(client, record), INVALID_HOST_ID)
+            if stock_record:
+                check_stock_client(locator, accepts=False)
+                install(dict(pins, TLSClientCertificate="RootCertificate"))
+                installed = True
+                hdb("shell", "/var/jb/bin/rm", tmp)
+                with lockdown.connection() as client:
+                    check("Pair under explicit pairing-root policy", lockdown.lib.lockdownd_pair(client, record), 0)
+                check_stock_client(locator, accepts=True)
+                check_stock_client(locator, accepts=True)
+                with lockdown.connection(handshake=True) as client:
+                    stage_policy(pins)
+                    hdb("shell", "/var/jb/usr/bin/mv", "-f", tmp, APPROVAL)
+                    value = c.c_void_p()
+                    status = lockdown.lib.lockdownd_get_value(client, None, b"HardwareModel", c.byref(value))
+                    check("changing the certificate role closed the active stock TLS session", status != 0, True)
+                hdb("shell", "/var/jb/bin/rm", APPROVAL)
+                installed = False
+                check_stock_client(locator, accepts=False)
     finally:
         if installed:
             hdb("shell", "/var/jb/bin/rm", "-f", APPROVAL)
@@ -314,5 +381,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hdb-state", type=Path, required=True)
     parser.add_argument("--reattach", action="store_true", help="also exercise software USB reattachment before validation")
+    parser.add_argument("--stock-record", type=Path, help="temporary pair record path passed to the bridge under /dev/shm")
     args = parser.parse_args()
-    run(args.hdb_state, args.reattach)
+    run(args.hdb_state, args.reattach, args.stock_record)

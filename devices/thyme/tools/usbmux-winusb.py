@@ -14,6 +14,7 @@ import re
 import select
 import socket
 import socketserver
+import stat
 import struct
 import subprocess
 import sys
@@ -27,6 +28,7 @@ HEADER = struct.Struct("<IIII")
 CLIENT_VERSION, PLIST_PACKET = 1, 8
 BAD_COMMAND, BAD_DEVICE, CONNECTION_REFUSED, BAD_VERSION = 1, 2, 3, 6
 MAX_MESSAGE = 131072
+PAIR_RECORD_MAX = 16384
 LOCKDOWN_HEADER = struct.Struct(">I")
 LOCKDOWN_MESSAGE_MAX = 32768
 TLS_HEADER = struct.Struct(">BBBH")
@@ -154,11 +156,41 @@ def result(number):
     return {"MessageType": "Result", "Number": number}
 
 
+def read_pair_record(path, locator):
+    if path is None:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as source:
+            attributes = os.fstat(source.fileno())
+            if (not stat.S_ISREG(attributes.st_mode) or attributes.st_uid != os.geteuid() or
+                    attributes.st_mode & 0o077 or not 0 < attributes.st_size <= PAIR_RECORD_MAX):
+                return None
+            data = source.read(PAIR_RECORD_MAX + 1)
+        if not 0 < len(data) <= PAIR_RECORD_MAX:
+            return None
+        record = plistlib.loads(data)
+        if not isinstance(record, dict) or record.get("PairRecordID") != locator:
+            return None
+        for name in ("HostID", "SystemBUID"):
+            value = record.get(name)
+            if not isinstance(value, str) or len(value) != 36 or uuid.UUID(value).int == 0:
+                return None
+        for name in ("RootCertificate", "RootPrivateKey", "HostCertificate", "DeviceCertificate"):
+            value = record.get(name)
+            if not isinstance(value, bytes) or not value:
+                return None
+        return data, record["SystemBUID"]
+    except (OSError, ValueError, OverflowError, ExpatError):
+        return None
+
+
 # The socket adapter is only constructed inside WSL. Native Windows
 # imports this program for direct WinUSB discovery.
 class MuxServer(getattr(socketserver, "ThreadingUnixStreamServer", socketserver.BaseServer)):
-    def __init__(self, address, transport):
+    def __init__(self, address, transport, pair_record=None):
         self.transport = transport
+        self.pair_record = pair_record
         self.location = None
         self.wire = threading.Lock()
         self.buid = str(uuid.uuid4()).upper()
@@ -205,13 +237,15 @@ class Client(socketserver.StreamRequestHandler):
         if not isinstance(request, dict):
             return result(BAD_COMMAND)
         command = request.get("MessageType")
-        if command == "ReadBUID":
-            return {"BUID": self.server.buid}
-        if command == "ReadPairRecord":
-            match = self.server.location
-            if match and request.get("PairRecordID") == attached(match)["Properties"]["SerialNumber"]:
-                return result(errno.ENOENT)
-            return result(BAD_DEVICE)
+        if command in ("ReadBUID", "ReadPairRecord"):
+            location = self.server.location
+            locator = attached(location)["Properties"]["SerialNumber"] if location else None
+            if command == "ReadPairRecord" and (not locator or request.get("PairRecordID") != locator):
+                return result(BAD_DEVICE)
+            pair = read_pair_record(self.server.pair_record, locator) if locator else None
+            if command == "ReadBUID":
+                return {"BUID": pair[1] if pair else self.server.buid}
+            return {"PairRecordData": pair[0]} if pair else result(errno.ENOENT)
         if command != "ListDevices":
             return result(BAD_COMMAND)
         if self.server.wire.acquire(blocking=False):
@@ -322,6 +356,7 @@ def ssh_address(transport):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pair-record", type=Path, help="read a private local pair record for the attached device")
     parser.add_argument("--ssh-address", action="store_true", help="query the HDB Wi-Fi address directly over WinUSB")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="WSL client command to run with the private socket")
     args = parser.parse_args()
@@ -329,8 +364,8 @@ def main():
     if command and command[0] == "--":
         command = command[1:]
     if args.ssh_address:
-        if command:
-            parser.error("--ssh-address does not take a client command")
+        if command or args.pair_record:
+            parser.error("--ssh-address does not take a client command or pair record")
         try:
             print(ssh_address(WinUSB()))
         except (OSError, ValueError, ExpatError, subprocess.SubprocessError) as error:
@@ -344,7 +379,7 @@ def main():
     transport = WinUSB()
     with tempfile.TemporaryDirectory(prefix="hakios-usbmux-") as directory:
         address = str(Path(directory) / "mux.sock")
-        with MuxServer(address, transport) as server:
+        with MuxServer(address, transport, args.pair_record) as server:
             worker = threading.Thread(target=server.serve_forever)
             worker.start()
             try:
