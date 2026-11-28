@@ -15022,13 +15022,13 @@ mhi_dsds_poll(struct mhi_channel *out, uint64_t now)
 			return;
 		}
 
-		uint8_t request[14], frame[32];
+		uint8_t request[11], frame[32];
 		unsigned message = line->bound ? NAS_GET_SERVING_SYSTEM : NAS_BIND_SUBSCRIPTION;
 		size_t at = mhi_qmi_open(request, ++line->txn, message);
 		if (!line->bound) {
-			/* NAS uses zero-based subscription IDs, unlike WDS. */
-			uint8_t subscription[4] = { (uint8_t)i, 0, 0, 0 };
-			at = mhi_qmi_put(request, at, 1, subscription, sizeof(subscription));
+			/* NAS Bind uses a one-byte enum for the zero-based subscription ID. */
+			uint8_t subscription = (uint8_t)i;
+			at = mhi_qmi_put(request, at, 1, &subscription, sizeof(subscription));
 		}
 		mhi_qmi_seal(request, at);
 		size_t len = mhi_qrtr_put3_frame(frame, 1, local_port,
