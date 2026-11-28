@@ -41,7 +41,7 @@ extern bool hakios_thyme_cdsp_publish(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_kick(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_edge_summary(void) __attribute__((weak));
 extern int hakios_thyme_cdsp_glink_step(unsigned, bool *, bool *) __attribute__((weak));
-extern void hakios_thyme_cdsp_smmu_inspect(void) __attribute__((weak));
+extern void hakios_thyme_smmu_inspect(const char *, uint32_t, uint32_t) __attribute__((weak));
 extern int hakios_thyme_cdsp_capability_probe(unsigned) __attribute__((weak));
 extern int hakios_thyme_cdsp_image_probe(void) __attribute__((weak));
 extern void hakios_thyme_cdsp_dma_restore(void) __attribute__((weak));
@@ -543,8 +543,8 @@ thyme_cdsp_glink_poll(void)
 		if (cdsp_glink_stage >= 5 && opened) {
 			cdsp_fastrpc_intents_ready = status == 1;
 			hakios_tl("UMI cdsp: FastRPC intent exchange %s\n", outcome);
-			if (status == 1 && cdsp_glink_stage >= 6 && hakios_thyme_cdsp_smmu_inspect != NULL) {
-				hakios_thyme_cdsp_smmu_inspect();
+			if (status == 1 && cdsp_glink_stage >= 6 && hakios_thyme_smmu_inspect != NULL) {
+				hakios_thyme_smmu_inspect("cdsp", 0x1001, 0x460);
 			}
 			if (status == 1 && cdsp_glink_stage >= 7 && hakios_thyme_cdsp_capability_probe != NULL) {
 				int error = hakios_thyme_cdsp_capability_probe(cdsp_glink_stage);
@@ -2031,9 +2031,17 @@ thyme_venus_pil_boot(void)
 {
 	uint32_t v_en = 0, c_en = 0;
 
-	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && v_en >= 1 && v_en <= 4) {
+	if (PE_parse_boot_argn("venus", &v_en, sizeof(v_en)) && v_en >= 1 && v_en <= 5) {
+		if (v_en == 5) {
+			/* The non_secure_cb stream and mask in thyme's Android DT. */
+			if (hakios_thyme_smmu_inspect != NULL) {
+				hakios_thyme_smmu_inspect("venus", 0x2100, 0x400);
+			} else {
+				hakios_tl("UMI venus: SMMU survey unavailable\n");
+			}
+		}
 		/* The GDSC alone is insufficient: stock PIL also votes the core clock and interconnect. */
-		thyme_venus_power_probe(v_en);
+		thyme_venus_power_probe(v_en >= 4 ? 4 : v_en);
 		thyme_pil_boot_one("venus", "venus.mdt", "venus.b%02u",
 		    UMI_VENUS_PAS_ID, UMI_VENUS_PA, UMI_VENUS_SIZE,
 		    false, &venus_ready, &venus_segments);

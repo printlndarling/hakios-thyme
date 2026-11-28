@@ -8851,19 +8851,16 @@ fastrpc_smmu_look(void)
 	    covering ? "" : " (the boot chain set nothing up for it)");
 }
 
-/* Inventory the first non-secure CDSP DMA stream after the GLINK probe.
- * The DT's ignored SID bits must be considered when looking for overlaps.
- */
-void hakios_thyme_cdsp_smmu_inspect(void);
+/* Read-only inventory for a device's DMA stream. Include the ignored SID bits from its DT. */
+void hakios_thyme_smmu_inspect(const char *, uint32_t, uint32_t);
 
 void
-hakios_thyme_cdsp_smmu_inspect(void)
+hakios_thyme_smmu_inspect(const char *device, uint32_t sid, uint32_t sid_mask)
 {
-	const uint32_t sid = 0x1001, sid_mask = 0x460;
 	const vm_size_t size = 0x100000;
 	vm_offset_t smmu = ml_io_map_unmappable(0x15000000, size, VM_WIMG_IO);
 	if (!smmu) {
-		printf("UMI cdsp: SMMU aperture unavailable\n");
+		printf("UMI %s: SMMU aperture unavailable\n", device);
 		return;
 	}
 
@@ -8872,8 +8869,8 @@ hakios_thyme_cdsp_smmu_inspect(void)
 	uint32_t matches = idr0 & 0xff, contexts = idr1 & 0xff, stage2 = (idr1 >> 16) & 0xff;
 	uint32_t page = idr1 >> 31 ? 0x10000 : 0x1000;
 	uint32_t pages = 2u << ((idr1 >> 28) & 7);
-	printf("UMI cdsp: SMMU SCR0=%#x IDR0=%#x IDR1=%#x matches=%u contexts=%u stage2_only=%u\n",
-	    scr0, idr0, idr1, matches, contexts, stage2);
+	printf("UMI %s: SMMU SCR0=%#x IDR0=%#x IDR1=%#x matches=%u contexts=%u stage2_only=%u\n",
+	    device, scr0, idr0, idr1, matches, contexts, stage2);
 	if ((idr0 & ((1u << 30) | (1u << 27))) != ((1u << 30) | (1u << 27)) ||
 	    !matches || !contexts || stage2 >= contexts || contexts > pages || 2u * page * pages != size) {
 		goto out;
@@ -8896,8 +8893,8 @@ hakios_thyme_cdsp_smmu_inspect(void)
 		uint32_t stream = smr & sid_bits, mask = (smr >> 16) & sid_bits;
 		if (((sid ^ stream) & ~(sid_mask | mask)) == 0) {
 			conflicts++;
-			printf("UMI cdsp: SMMU overlap SMR=%u sid=%#x mask=%#x kind=%u context=%u\n",
-			    n, stream, mask, kind, context);
+			printf("UMI %s: SMMU overlap SMR=%u sid=%#x mask=%#x kind=%u context=%u\n",
+			    device, n, stream, mask, kind, context);
 		}
 	}
 	for (uint32_t n = stage2; n < contexts; n++) {
@@ -8906,8 +8903,8 @@ hakios_thyme_cdsp_smmu_inspect(void)
 			available++;
 		}
 	}
-	printf("UMI cdsp: SMMU SID=%#x mask=%#x overlaps=%u free_matches=%u idle_stage1_banks=%u unmatched=%s\n",
-	    sid, sid_mask, conflicts, free_matches, available, scr0 & (1u << 10) ? "fault" : "untranslated");
+	printf("UMI %s: SMMU SID=%#x mask=%#x overlaps=%u free_matches=%u idle_stage1_banks=%u unmatched=%s\n",
+	    device, sid, sid_mask, conflicts, free_matches, available, scr0 & (1u << 10) ? "fault" : "untranslated");
 out:
 	lck_mtx_unlock(&hakios_smmu_lock);
 	ml_io_unmap(smmu, size);
