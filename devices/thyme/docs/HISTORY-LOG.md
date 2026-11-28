@@ -1,5 +1,39 @@
 ## Chronological Verification Logs & Evidence
 
+## libimobiledevice discovery through WinUSB on thyme (2026-11-28)
+
+- The WSL2 bridge created a temporary private usbmuxd socket for the
+  client process. Native Windows validated the USB descriptor
+  `1209:0001` revision `0103` and negotiated usbmux over the physical
+  bulk endpoints. The bridge uses a locator derived from the Windows
+  interface path as the development identifier.
+- In the guarded 165 s boot with kernel `524001f77501` and loader
+  `79f1fad4d1c6`, the unmodified libimobiledevice library listed one
+  USB device. The unmodified libusbmuxd library received
+  `ECONNREFUSED` for port 62078 after the WinUSB transport validated the
+  matching on-device RST/ACK. SSH reported one refused port and zero
+  invalid frames.
+- The Ubuntu `idevice_id 1.3.0` client listed the same locator before and
+  after an authenticated software detach and reattach. The final
+  device counters showed four version replies, two bus resets, one
+  software reconnect and one refused port.
+- In the independent local service check, the stock `lockdownd` job
+  loaded in the foreground domain with IPv4 and IPv6 listeners bound
+  to loopback and its root-only Unix socket. The local IPv4 connection
+  reset before the `QueryType` response. Launchctl showed a live process
+  after the failure. The cleanup issued bootout for the temporary job.
+
+- With the test device back in Android, `idevice_id -l` produced an
+  empty list. The separate 95 s loopback regression passed 768
+  WinUSB round trips with the original payload hashes. The adapter
+  omitted that active profile. Both RAM Boot runs completed Android
+  startup and the whole `logdump` SHA-256 matched the pre-test value.
+- Evidence is in `out/thyme-boot/usb-hostmux.V09pGNgp/`.
+  `libimobiledevice.log` SHA-256
+  `697ebc24ded9d899a733d194b5a2412112031715dea0ef27ba244519dc3ee695`.
+  `device-after.log` SHA-256
+  `f8bb904e47e28a9e671ab89f00a7b2e86ea61018f80e3588ffc5a41b91256a9c`.
+
 ## usbmux 1.0 wire negotiation on thyme (2026-11-28)
 
 - The explicit USB profile uses the existing WinUSB GUID and the private

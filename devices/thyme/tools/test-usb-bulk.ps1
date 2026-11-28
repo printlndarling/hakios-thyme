@@ -2,7 +2,9 @@
 param(
     [ValidateRange(5, 360)] [int] $WaitSeconds = 90,
     [ValidateRange(1, 6)] [int] $Rounds = 3,
-    [switch] $UsbMux
+    [switch] $UsbMux,
+    [ValidateRange(0, 65535)] [int] $BridgePort,
+    [ValidatePattern("^[a-f0-9]{64}$")] [string] $BridgeLocation
 )
 $ErrorActionPreference = 'Stop'
 
@@ -52,6 +54,9 @@ public static class ThymeUsbLoopback
         IntPtr security, uint disposition, uint flags, IntPtr template);
     [DllImport("winusb.dll", SetLastError = true)]
     private static extern bool WinUsb_Initialize(SafeFileHandle file, out IntPtr handle);
+    [DllImport("winusb.dll", SetLastError = true)]
+    private static extern bool WinUsb_GetDescriptor(IntPtr handle, byte type, byte index, ushort language,
+        [Out] byte[] buffer, uint length, out uint transferred);
     [DllImport("winusb.dll")]
     private static extern bool WinUsb_Free(IntPtr handle);
     [DllImport("winusb.dll", SetLastError = true)]
@@ -135,23 +140,34 @@ public static class ThymeUsbLoopback
             if (packet[i] != expected[i]) throw new IOException("usbmux response differs at byte " + i);
     }
 
+    private static readonly byte[] VersionRequest = {
+        0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    private static readonly byte[] VersionReply = {
+        0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+
+    private static byte[] ConnectRequest(int port)
+    {
+        return new byte[] {
+            0, 0, 0, 6, 0, 0, 0, 28, 0xc0, 0, (byte)(port >> 8), (byte)port,
+            1, 0x23, 0x45, 0x67, 0, 0, 0, 0, 0x50, 2, 0x02, 0, 0, 0, 0, 0
+        };
+    }
+
+    private static byte[] ConnectRefused(int port)
+    {
+        return new byte[] {
+            0, 0, 0, 6, 0, 0, 0, 28, (byte)(port >> 8), (byte)port, 0xc0, 0,
+            0, 0, 0, 0, 1, 0x23, 0x45, 0x68, 0x50, 0x14, 0, 0, 0, 0, 0, 0
+        };
+    }
+
     private static string TestUsbMux(IntPtr handle)
     {
         byte[] malformed = { 0, 0, 0, 0, 0, 0, 0, 7 };
-        byte[] propose = { 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0 };
-        byte[] version = { 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-        // Host source port 49152, lockdown port 62078, sequence 0x01234567.
-        byte[] syn = {
-            0, 0, 0, 6, 0, 0, 0, 28, 0xc0, 0, 0xf2, 0x7e,
-            1, 0x23, 0x45, 0x67, 0, 0, 0, 0, 0x50, 2, 0x02, 0,
-            0, 0, 0, 0
-        };
-        byte[] reset = {
-            0, 0, 0, 6, 0, 0, 0, 28, 0xf2, 0x7e, 0xc0, 0,
-            0, 0, 0, 0, 1, 0x23, 0x45, 0x68, 0x50, 0x14, 0, 0,
-            0, 0, 0, 0
-        };
+        byte[] propose = VersionRequest, version = VersionReply;
+        byte[] syn = ConnectRequest(62078), reset = ConnectRefused(62078);
         Send(handle, malformed);
         var first = new byte[5];
         var rest = new byte[15];
@@ -173,7 +189,34 @@ public static class ThymeUsbLoopback
         return "usbmux=1.0 fragmented=pass combined=pass malformed_recovery=pass lockdown_port=closed";
     }
 
-    public static string Run(string path, int seed, bool usbMux)
+    public static string Probe(string path, int port, string expectedLocation)
+    {
+        string location;
+        using (var sha = SHA256.Create())
+            location = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant())))
+                .Replace("-", "").ToLowerInvariant();
+        if (!String.IsNullOrEmpty(expectedLocation) && location != expectedLocation)
+            return null;
+        return WithPipes(path, (handle, packet) =>
+        {
+            var descriptor = new byte[18];
+            uint count;
+            Check(WinUsb_GetDescriptor(handle, 1, 0, 0, descriptor, 18, out count), "USB device descriptor");
+            if (count != 18 || descriptor[8] != 9 || descriptor[9] != 0x12 || descriptor[10] != 1 ||
+                descriptor[11] != 0 || descriptor[12] != 3 || descriptor[13] != 1)
+                return null; // The separate loopback profile uses revision 0102.
+            Send(handle, VersionRequest);
+            Expect(handle, VersionReply);
+            if (port != 0)
+            {
+                Send(handle, ConnectRequest(port));
+                Expect(handle, ConnectRefused(port));
+            }
+            return location;
+        });
+    }
+
+    private static string WithPipes(string path, Func<IntPtr, int, string> action)
     {
         using (SafeFileHandle file = CreateFile(path, 0xc0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
         {
@@ -198,39 +241,7 @@ public static class ThymeUsbLoopback
                 Check(WinUsb_SetPipePolicy(handle, 0x01, 3, 4, ref timeout), "OUT transfer timeout");
                 Check(WinUsb_SetPipePolicy(handle, 0x81, 3, 4, ref timeout), "IN transfer timeout");
 
-                if (usbMux) return TestUsbMux(handle);
-                var random = new Random(seed);
-                var received = new byte[packet];
-                var lengths = new int[] { 1, 7, 31, 63, 64, 65, 127, 128, 255, 256, 511, 512 };
-                int total = 0;
-                using (var outputBytes = new MemoryStream())
-                {
-                    for (int i = 0; i < 256; i++)
-                    {
-                        int length = i < lengths.Length ? Math.Min(lengths[i], packet) :
-                            (i % 4 == 0 ? random.Next(1, packet + 1) : packet);
-                        var sent = new byte[length];
-                        random.NextBytes(sent);
-                        uint count;
-                        Check(WinUsb_WritePipe(handle, 0x01, sent, (uint)length, out count, IntPtr.Zero),
-                            "Bulk OUT transfer " + (i + 1) + " length " + length);
-                        if (count != length) throw new IOException("Short bulk OUT write at transfer " + (i + 1));
-                        Check(WinUsb_ReadPipe(handle, 0x81, received, (uint)length, out count, IntPtr.Zero),
-                            "Bulk IN transfer " + (i + 1) + " length " + length);
-                        if (count != length) throw new IOException("Short bulk IN read at transfer " + (i + 1));
-                        for (int offset = 0; offset < length; offset++)
-                            if (received[offset] != sent[offset])
-                                throw new IOException("Bulk data mismatch at transfer " + (i + 1) + ", byte " + offset);
-                        outputBytes.Write(received, 0, length);
-                        total += length;
-                    }
-                    outputBytes.Position = 0;
-                    using (var sha = SHA256.Create())
-                    {
-                        string hash = BitConverter.ToString(sha.ComputeHash(outputBytes)).Replace("-", "").ToLowerInvariant();
-                        return "packet=" + packet + " transfers=256 bytes_each_direction=" + total + " sha256=" + hash;
-                    }
-                }
+                return action(handle, packet);
             }
             finally
             {
@@ -238,8 +249,54 @@ public static class ThymeUsbLoopback
             }
         }
     }
+
+    public static string Run(string path, int seed, bool usbMux)
+    {
+        return WithPipes(path, (handle, packet) =>
+        {
+            if (usbMux) return TestUsbMux(handle);
+            var random = new Random(seed);
+            var received = new byte[packet];
+            var lengths = new int[] { 1, 7, 31, 63, 64, 65, 127, 128, 255, 256, 511, 512 };
+            int total = 0;
+            using (var outputBytes = new MemoryStream())
+            {
+                for (int i = 0; i < 256; i++)
+                {
+                    int length = i < lengths.Length ? Math.Min(lengths[i], packet) :
+                        (i % 4 == 0 ? random.Next(1, packet + 1) : packet);
+                    var sent = new byte[length];
+                    random.NextBytes(sent);
+                    uint count;
+                    Check(WinUsb_WritePipe(handle, 0x01, sent, (uint)length, out count, IntPtr.Zero),
+                        "Bulk OUT transfer " + (i + 1) + " length " + length);
+                    if (count != length) throw new IOException("Short bulk OUT write at transfer " + (i + 1));
+                    Check(WinUsb_ReadPipe(handle, 0x81, received, (uint)length, out count, IntPtr.Zero),
+                        "Bulk IN transfer " + (i + 1) + " length " + length);
+                    if (count != length) throw new IOException("Short bulk IN read at transfer " + (i + 1));
+                    for (int offset = 0; offset < length; offset++)
+                        if (received[offset] != sent[offset])
+                            throw new IOException("Bulk data mismatch at transfer " + (i + 1) + ", byte " + offset);
+                    outputBytes.Write(received, 0, length);
+                    total += length;
+                }
+                outputBytes.Position = 0;
+                using (var sha = SHA256.Create())
+                {
+                    string hash = BitConverter.ToString(sha.ComputeHash(outputBytes)).Replace("-", "").ToLowerInvariant();
+                    return "packet=" + packet + " transfers=256 bytes_each_direction=" + total + " sha256=" + hash;
+                }
+            }
+        });
+    }
 }
 '@
+}
+
+if ($PSBoundParameters.ContainsKey('BridgePort')) {
+    $device = [ThymeUsbLoopback]::Find()
+    if ($null -ne $device) { [ThymeUsbLoopback]::Probe($device, $BridgePort, $BridgeLocation) }
+    return
 }
 
 $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)

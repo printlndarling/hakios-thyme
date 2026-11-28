@@ -200,12 +200,23 @@ frames and recovery after an invalid length. Check `mux_versions`,
 Use profile 1 for byte loopback.
 
 The development VID/PID is outside the filter used by stock usbmuxd.
-A host transport that explicitly selects the HakiOS development
-interface is needed for libimobiledevice discovery on this profile.
-The kernel currently returns a closed port for lockdown. Pairing and
-tools such as i4Tools remain open. See the primary
+On WSL2, run the unmodified libimobiledevice client through the
+development adapter:
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py -- idevice_id -l
+```
+
+The adapter creates a private Unix socket for its child process and
+uses native Windows WinUSB to verify the physical device descriptor
+and usbmux version. `ListDevices` reports a development locator derived
+from the Windows USB interface path in the protocol's `SerialNumber`
+field. The physical serial is unavailable in this profile. A
+`Connect` request is forwarded to the verified interface and reports
+the matched on-wire closed-port reply. Pairing, service streams and
+i4Tools remain pending. See the upstream
 [USB filter](https://github.com/libimobiledevice/usbmuxd/blob/master/src/usb.c#L763)
-and [version handling](https://github.com/libimobiledevice/usbmuxd/blob/master/src/device.c#L533).
+and [local socket handling](https://github.com/libimobiledevice/libusbmuxd/blob/master/src/libusbmuxd.c#L155).
 
 ### USB Gadget and services
 
