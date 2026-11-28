@@ -1,5 +1,40 @@
 ## Chronological Verification Logs & Evidence
 
+## Skip redundant camera lens-bus scans at startup (2026-11-28)
+
+- Native rear sessions now talk directly to the previously verified
+  AK7377 address `0x18`. The full bus scan remains available in
+  the camera diagnostics. The power-up waits, sensor mode tables,
+  focus write and readback, and DMA handling stay on their established
+  paths. The kernel logs its power/probe, table and stream-setup
+  intervals. The media worker logs its first delivery to each output.
+- Built arm64 kernels for the timing-only baseline `ee881c570bdf`
+  and the targeted change `f53e5580e5d5`, and the arm64 media library.
+  The NV12 preview boundary test passed. The two guarded runs used the
+  same camera-switch root `9e1c194529cf` and loader `11f4e0271c65`.
+  The kernel sources used for the comparison differed only in the
+  two scan call sites. Each run allowed 122 s.
+- Each run delivered three rear and two front first pictures. On
+  switches back to the rear, worker start to first PrimaryScaler
+  delivery fell from 3,099–3,346 ms to 1,762–1,780 ms. The initial
+  rear launch fell from 2,395 ms to 1,488 ms. Across all three rear
+  starts the power/probe range fell from 1,072–1,666 ms to 78–89 ms.
+  Table programming on the optimized path took 1,198–1,468 ms.
+- Front worker-to-first delivery was 1,329–1,454 ms in the baseline
+  and 1,433–1,502 ms after the change. The timings measure graph
+  delivery from worker startup. Screen presentation and tap-to-viewfinder
+  delay remain manual checks, along with motion and front preview quality.
+- The captured AK7377 position checks read back `0x4800` after the
+  targeted starts. Both final logs showed five clean DMA guard reports,
+  and both timed runs returned to completed Android boots. The whole
+  `logdump` SHA-256 matched the pre-test value after each run.
+  Baseline `logs/soak.lYpUme6c/kernel.log`, SHA-256
+  `4740071a3e185e147b1be0fa1515f60a1c4d71be8d763d2a27eb5e7c589d1459`.
+  Targeted `logs/soak.kxcRm4ka/kernel.log`, SHA-256
+  `6f0bdfd44493e02947d74cb05a63786a2bf4d430c786fc5204fed49e6053f184`.
+  The rolling extracts are `baseline.samples` and `targeted.samples`
+  under `out/thyme-boot/camera-start.VynBEb6I/`.
+
 ## Venus non-secure DMA route (2026-11-28)
 
 - The stock Android `qcom,vidc@aa00000/non_secure_cb` on thyme gives

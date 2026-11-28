@@ -18,7 +18,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | Metal | **PARTIAL** | `hakios-metal` builds (`metal_apps=1` compositor fix); system `MTLDevice` stability pending |
 | Touch & Buttons | **PASS** | FTS521 multi-touch, gestures, power & volume keys |
 | Audio & Haptics | **PASS** | Dual CS35L41 L/R + earpiece, 0-short-read mics (VoiceMemos), 15 s retry recovery, AW8697 CoreHaptics |
-| Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. Native preview pacing, switching latency, and front preview quality remain [under test](devices/thyme/CHECKLIST.md#camera-photos-and-display). |
+| Camera & Torch | **PARTIAL** | Rear S5KHMX and front S5K3T2 produce real frames, with AK7377 AF and PM8150L flash. The rear worker delivered first pictures in 1.76–1.78 s after lens switches. Viewfinder pacing, full switching latency and front quality remain [under test](devices/thyme/CHECKLIST.md#camera-photos-and-display). |
 | Cellular & VoLTE | **PASS** | SDX55M (`pcie2_mhi=2` native `AppleBaseband`/`CommCenter`), 4G LTE dual-stack + VoLTE (`Mav17`) |
 | GPS / everyday location | **PASS** | The operator confirmed that the map location and refresh worked on thyme. Open-sky satellite-only acquisition has a separate [checklist item](devices/thyme/CHECKLIST.md#maps-and-positioning). |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
