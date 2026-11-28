@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Use OpenSSH for a development RAM boot of HakiOS on thyme."""
 import argparse
+import base64
+import binascii
 import ipaddress
 import os
 from pathlib import Path
 import shlex
+import struct
 import subprocess
 import tempfile
 
@@ -42,11 +45,32 @@ def key(state, name):
     return ' '.join(public.split()[:2])
 
 
-def prepare(state, peer):
+def read_public_key(path):
+    with path.open('rb') as source:
+        data = source.read(4097)
+    lines = data.splitlines()
+    if len(data) > 4096 or len(lines) != 1:
+        raise ValueError(f'{path}: expected one OpenSSH Ed25519 public key line')
+    fields = lines[0].split(maxsplit=2)
+    algorithm = b'ssh-ed25519'
+    try:
+        if len(fields) >= 2 and fields[0] == algorithm:
+            blob = base64.b64decode(fields[1], validate=True)
+            header = struct.pack('>I11sI', len(algorithm), algorithm, 32)
+            if blob.startswith(header) and len(blob) == len(header) + 32:
+                return f'{algorithm.decode()} {base64.b64encode(blob).decode()}'
+    except binascii.Error:
+        pass
+    raise ValueError(f'{path}: expected an OpenSSH Ed25519 public key without options')
+
+
+def prepare(state, peer, authorized_files=()):
+    additional = [read_public_key(path) for path in authorized_files]
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     client = key(state, 'client_key')
     host = key(state, 'host_key')
-    write_private(state / 'authorized_keys', f'from="{peer}" {client}\n')
+    keys = dict.fromkeys([client, *additional])
+    write_private(state / 'authorized_keys', ''.join(f'from="{peer}" {public}\n' for public in keys))
     write_private(state / 'known_hosts', f'{ALIAS} {host}\n')
     write_private(state / 'peer', f'{peer}\n')
     print(f'hdb: development credentials ready in {state}')
@@ -60,7 +84,7 @@ def client_flags(state, port_flag):
     # Use only the key pinned at image preparation, even if an address is reused.
     return ['-F', 'none', port_flag, str(PORT), '-i', str(state / 'client_key'),
             '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
-            '-o', 'GlobalKnownHostsFile=none', '-o', f'UserKnownHostsFile="{state / "known_hosts"}"',
+            '-o', 'GlobalKnownHostsFile=none', '-o', f'UserKnownHostsFile="{(state / "known_hosts").as_posix()}"',
             '-o', f'HostKeyAlias={ALIAS}', '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=15',
             '-o', 'ServerAliveCountMax=2']
 
@@ -78,6 +102,8 @@ def main():
     commands = parser.add_subparsers(dest='action', required=True)
     init = commands.add_parser('prepare', help='create the development keys and configure the allowed host')
     init.add_argument('peer', metavar='HOST_LAN_IP', type=lan_ip)
+    init.add_argument('--authorize', metavar='ED25519_PUB', type=Path, action='append', default=[],
+                      help='also authorize a public key generated on the same LAN peer')
     shell = commands.add_parser('shell', help='open a shell or execute arguments on thyme')
     shell.add_argument('command', nargs=argparse.REMAINDER)
     push = commands.add_parser('push', help='copy a file to thyme using SFTP')
@@ -90,7 +116,7 @@ def main():
 
     try:
         if args.action == 'prepare':
-            prepare(args.state, args.peer)
+            prepare(args.state, args.peer, args.authorize)
             return 0
         if not args.host:
             parser.error('--host is required for shell, push and pull')
