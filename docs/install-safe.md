@@ -85,15 +85,15 @@ The last container ends immediately before block 2042368, where HFSX
 begins. The prefix file is 8,365,539,328 bytes. A prefix that would cross
 the data boundary is refused.
 
-For a host boot test, build `FLASHBOOT=1 CRYPTEXES=flash SHARE=1` in a
-separate workspace with the matching extracted userland. The QEMU image
-used `REST=1 RAM_ROOT_SLACK=128 RC_JOBS=rc.jobs.unlock` and omitted the
-optional package manager and phone audio firmware. This leaves a 4 MiB
-Boot container with empty cryptex mount points and a companion Redwood
-container with the flash-root init and jobs. A payload with the phone
-audio firmware, graphics and Bluetooth build options occupied
-87,561,224 bytes. The loader's payload limit is 63 MiB, including the
-kernel and both containers.
+For a host boot test, build in a separate workspace with the matching
+extracted userland and locally supplied firmware. The verified recipe
+used `FLASHBOOT=1 CRYPTEXES=flash SHARE=1 REST=1 GL=1 BLUETOOTH=1 ADSP=1
+CHECK=1 RAM_ROOT_SLACK=128 RC_JOBS=rc.jobs.unlock`. It keeps one
+compressed DSP firmware copy in Boot. Footprint for the kernel and both
+containers was 56,038,408 bytes, within the loader's 63 MiB limit. The
+optional package manager was omitted from this test. QEMU verified
+image loading and the `/fw` mount. Phone audio, GPU and radio operation
+need their own hardware tests.
 
 ```sh
 python3 xnuloader/mkpayload.py -o qemu/payload.bin kernel=hakios-kernel \

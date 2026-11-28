@@ -53,10 +53,11 @@
 #                      M2V=1        (with TURNIP=1) and UniXNU's Metal on Vulkan (tools/mk-m2v.sh: AdrenoMetal's
 #                                   frontend over metal2vulkan), in bin/m2v_test, which opens it as a Metal device
 #                                   and draws (src/m2v_test.m; RC_JOBS=rc.jobs.m2vtest)
-#                      ADSP=1       with the audio DSP's firmware from ../fw-audio in fw/ (20 MB; for the
-#                                   kernel's adsp_step=N, drivers/audio/hakios.adsp.c, which runs before the root is
-#                                   mounted). Not beside GL=1: the two do not fit the 64 MB the loader takes with
-#                                   the kernel. adsp=1 needs none of it: the system image has the firmware in /fw.
+#                      ADSP=1       with the audio DSP's firmware from ../fw-audio (about 20 MB uncompressed).
+#                                   For RAM boot it goes in root.apfs, whose payload may exceed the loader's limit
+#                                   with GL=1. The usual adsp=1 RAM boot can take the firmware from system.apfs.
+#                                   FLASHBOOT=1 stages the DSP image once in the Boot container and keeps the
+#                                   calibration and speaker protection files in root.apfs.
 #                      MODEM=1      stage checked local MPSS firmware from ../fw-modem in system.apfs /fw.
 #                                   This does not start the modem; the XNU MPSS driver is still required.
 #                      SDX55=1      stage the SDX55M's boot images (../fw-modem-sdx55m: qdsp6sw.mbn, the 84 MB AMSS,
@@ -98,6 +99,10 @@ LD="-Wl,-e,_start -Wl,-pagezero_size,0x100000000"
 DYN="xnu-clang -arch arm64 -isysroot ${THEOS:-$HOME/theos}/sdks/iPhoneOS16.5.sdk -O1"
 DARWIN=../sysimage
 CACHE=$DARWIN/20F66__iPhone10,3_6
+flashboot_available=
+if [ -n "$FLASHBOOT" ] && [ -f "$CACHE/dyld_shared_cache_arm64" ]; then
+	flashboot_available=1
+fi
 # sysimage/rootfs and sysimage/cryptex must be this copy's own directories of hard links, the way
 # tools/new-workspace.sh makes them. A symlink to another copy's tree makes sysroot a symlink too, because
 # cp -a does not follow one, and then every rm -rf and mv below edits the shared extraction in place. That
@@ -828,12 +833,13 @@ if [ -f ../fw-camera/com.qti.tuned.thyme_sunny_s5k3t2_front.bin ]; then
 	../tools/camtuning.py ../fw-camera/com.qti.tuned.thyme_sunny_s5k3t2_front.bin \
 		root/fw/camera-s5k3t2.isp >/dev/null
 fi
-# ... and with ADSP=1 the image of the audio DSP, from the same place into ../fw-audio (drivers/audio/hakios.adsp.c):
-# adsp.mdt and adsp.b00 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
-# the loader takes.
+# ... and with ADSP=1 the image of the audio DSP from ../fw-audio. The kernel
+# searches both RAM disks before falling back to the mounted /fw. The flash
+# recipe stages the image in Boot.
 if [ -n "$ADSP" ] && [ -f ../fw-audio/adsp.mdt ]; then
-	mkdir -p root/fw
-	install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b[0-9][0-9] root/fw/
+	if [ -z "$flashboot_available" ]; then
+		install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b[0-9][0-9] root/fw/
+	fi
 	# The DSP's calibration and the speaker amplifiers' protection firmware: the
 	# audio stack reads them beside the DSP image in fw/.
 	if [ -d ../fw-audio/acdbdata ]; then
@@ -937,10 +943,10 @@ python3 ../tools/apfs/mkapfs.py -z --plain fw --slack "${RAM_ROOT_SLACK:-256}" -
 # "c=2", and bsd/vm/vm_unix.c takes a shared cache from Cryptexes/OS). CRYPTEX_IMAGE=FILE:
 # Apple's own image of the cryptex as it is instead of this one remade (2.6 GB against 1 GB: too much
 # for the phone's memory beside Darwin, not for QEMU's). Upload it with `xl ramdisk userland/flashboot.apfs`.
-# CRYPTEXES=flash: the boot volume alone (20 MB) -- the cryptexes are Apple's images as they are on the
+# CRYPTEXES=flash: the boot volume alone -- the cryptexes are Apple's images as they are on the
 # flash, in darwin right after the Darwin volume (../tools/darwin-write.py put them there), and init mounts
 # them from there, the same containers 1 and 2 of the root's own device.
-if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
+if [ -n "$flashboot_available" ]; then
 	rm -rf flashboot flashboot.os
 	mkdir -p flashboot/sbin flashboot/redwood flashboot/dev flashboot/flash flashboot/Cryptexes/OS flashboot/Cryptexes/App
 	cp obj/stage0 flashboot/sbin/launchd
@@ -963,7 +969,7 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 	# from the Darwin volume's /fw, which src/init.c (flash_root) binds to this
 	if [ -f ../fw-audio/adsp.mdt ]; then
 		mkdir -p flashboot/fw
-		cp ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] flashboot/fw/
+		install -m 0644 ../fw-audio/adsp.mdt ../fw-audio/adsp.b[0-9][0-9] flashboot/fw/
 	fi
 	if [ -f ../fw-audio/aw882xx_acf.bin ]; then
 		mkdir -p flashboot/fw
@@ -982,7 +988,9 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 		done
 		echo "  the package manager's prefix: $(du -sh flashboot/jb | cut -f1) as /jb of the boot volume"
 	fi
-	python3 ../tools/apfs/mkapfs.py -z --plain fw -o flashboot.boot.apfs Boot=flashboot | tail -1
+	# apfs_lib decodes compressed firmware from Boot for the early kernel
+	# readers. Keep the on-disk representation compressed in the payload.
+	python3 ../tools/apfs/mkapfs.py -z -o flashboot.boot.apfs Boot=flashboot | tail -1
 	[ -z "$CHECK" ] || ../tools/apfs/check-image.sh flashboot.boot.apfs Boot=flashboot
 	# the third container: Apple's App cryptex as it is (10 MB; unpack.sh), for the boot volume's Cryptexes/App
 	APP=""

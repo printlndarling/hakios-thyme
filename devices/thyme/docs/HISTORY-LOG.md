@@ -1,5 +1,30 @@
 ## Chronological Verification Logs & Evidence
 
+## Flash-root boot with audio, graphics and Bluetooth build options (2026-11-28)
+
+- With `FLASHBOOT=1 CRYPTEXES=flash GL=1 BLUETOOTH=1 ADSP=1`, the DSP
+  firmware now lives in the Boot APFS container once, with filesystem
+  compression. Boot was 11,268,096 bytes and Redwood was 27,693,056 bytes.
+  The complete XNUP payload shrank from 87,561,224 to 56,038,408 bytes,
+  within the unchanged 63 MiB limit. The optional package manager was
+  outside this build.
+- Both APFS images passed `apfsck -cw` and full readback with the kernel's
+  APFS library. All 20 DSP firmware files matched their sources byte for
+  byte in Boot and were absent from Redwood. The calibration, speaker
+  protection files and QCA6390 Bluetooth files remained in Redwood.
+  Before and after builds of the ordinary RAM Boot recipe matched on
+  all 988 entries, including path, type, mode, ownership, size and data
+  checksum. The census SHA-256 was
+  `ea69f485bcaf8a6b8d352eace9d67381ac33e304444f83918418262c4384229a`.
+- QEMU loaded the payload directly from the ESP, bound Boot's firmware
+  directory to the new root at `/fw`, mounted both disk cryptexes and
+  reached SpringBoard and the shell bootstrap. The host stopped the run
+  after 95 seconds. The read-only disk's SHA-256 was unchanged.
+  The log `out/thyme-boot/flash-root.eySFnims/qemu-flash-full.log` has
+  SHA-256 `3f9950c93dc60a5a9a3a3206466a56f3aad735b35e348b68641a2599222781c7`.
+  The run verified boot and image content in QEMU. Phone operation of
+  the audio DSP, GPU and radio requires physical validation.
+
 ## Read-only Darwin flash-root boot in QEMU (2026-11-28)
 
 - The host packer validated the raw 16.5 APFS superblocks and assembled
