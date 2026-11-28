@@ -292,6 +292,7 @@ PCIE2_BHI	arg	pcie2_bhi	User space	k	hakios.thyme_pcie2.c
 PCIE2_BHI_BAD	arg	pcie2_bhi_bad	User space	k	hakios.thyme_pcie2.c	zero the real image in place, to keep the file's address and size while its content is wrong
 PCIE2_CARDSUB	arg	pcie2_cardsub	User space	k	hakios.thyme_pcie2.c	
 PCIE2_CC	arg	pcie2_cc	Loader	kl	hakios.thyme_pcie2.c,loader.c	
+PCIE2_DSDS_PROBE	arg	pcie2_dsds_probe	User space	k	hakios.thyme_pcie2.c	Query both NAS registrations on separate clients
 PCIE2_EETRACE	arg	pcie2_eetrace	User space	k	hakios.thyme_pcie2.c	sample BHI_EXECENV and BHI_STATUS every millisecond for the first 500 ms after the doorbell, logging every change
 PCIE2_EXID	arg	pcie2_exid	User space	k	hakios.thyme_pcie2.c	
 PCIE2_IMG	arg	pcie2_img	User space	k	hakios.thyme_pcie2.c	

@@ -312,6 +312,7 @@ pcie2_bhi	k
 pcie2_bhi_bad	k
 pcie2_cardsub	k
 pcie2_cc	kl
+pcie2_dsds_probe	k
 pcie2_eetrace	k
 pcie2_exid	k
 pcie2_img	k
