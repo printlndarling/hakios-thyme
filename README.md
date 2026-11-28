@@ -24,7 +24,7 @@ Boots Apple's open-source Darwin/XNU kernel (`xnu-8796.121.2`) directly from RAM
 | GPS / everyday location | **PASS** | The operator confirmed that the map location and refresh worked on thyme. Open-sky satellite-only acquisition has a separate [checklist item](devices/thyme/CHECKLIST.md#maps-and-positioning). |
 | Wi-Fi (QCA6390) | **PASS** | 2.4/5 GHz WPA2, DHCP/TLS, locale (`CN`), 65 s lock/wake, AP deauth & power auto-rejoin |
 | Bluetooth (QCA6390) | **PASS** | 3 Mbaud H4, discovery, pairing with other phones, headphone connection, A2DP audio & BlueTool deepsleep |
-| Live device debugging | **PARTIAL** | P0. [LAN SSH](devices/thyme/docs/debug.md) verified on thyme from WSL2 for shell, kernel logs, telemetry, SFTP and execution of an uploaded program. USB Gadget and standard iOS services are pending. |
+| Live device debugging | **PARTIAL** | P0. [LAN SSH](devices/thyme/docs/debug.md) verified on thyme from WSL2 and native Windows OpenSSH. WSL2 also passed kernel logs, telemetry and execution of an uploaded program. USB Gadget and standard iOS services are pending. |
 | Battery & Thermal | **PASS** | Fuel gauge, `bq25970` & `fsa4480` 10 s I2C telemetry, USB charging, thermal cap & `battery_stop` guard |
 | Sensors (SLPI) | **PASS** | LSM6DSO, `mag_cal` 50 Hz AK0991x compass, front `TCS3701` + rear `TSL2540` ALS, `BMP285` baro, pedometer, orient |
 | Hexagon CDSP / IR / RTC / WDT | **PASS** | `CDSP` TrustZone boot/shutdown, SMP2P ready, GLINK negotiation, a FastRPC capability query, guest-session attach/release, and stock compute-process create/release, an in-process ASID query and reverse-listener registration, `/dev/hakios-ir` (38 kHz NEC), SPMI RTC Unix sync, TRNG, active APSS WDT |

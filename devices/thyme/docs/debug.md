@@ -40,6 +40,41 @@ its host pin, use the same absolute directory with `hdb.py --state`
 and the build's `HDB_STATE`. The RAM Boot timeout and shutdown guards
 remain in force during SSH sessions.
 
+## Windows-native OpenSSH
+
+Generate a separate client key with Windows OpenSSH in your Windows
+user profile. Keep the private key on Windows. Before building the
+development scene, pass only its public key to HDB from WSL2.
+
+```powershell
+New-Item -ItemType Directory -Path "$env:USERPROFILE/.ssh" -Force
+ssh-keygen.exe -t ed25519 -f "$env:USERPROFILE/.ssh/hakios-thyme"
+```
+
+```sh
+python3 tools/hdb.py prepare HOST_LAN_IP --authorize /mnt/c/Users/USER/.ssh/hakios-thyme.pub
+SCENE=ssh devices/thyme/build-root.sh
+```
+
+The build adds the Windows public key beside the WSL client's key.
+Both are limited to the configured LAN peer. Copy only the public
+`ssh/hdb/known_hosts` file to your Windows SSH directory. Use these
+OpenSSH config settings on Windows, with your device address and local
+paths. The same entry can be used by `ssh.exe` and `scp.exe`.
+
+```sshconfig
+Host hakios-thyme-hdb
+    HostName PHONE_LAN_IP
+    User root
+    Port 2222
+    IdentityFile ~/.ssh/hakios-thyme
+    UserKnownHostsFile ~/.ssh/hakios-thyme-known_hosts
+    GlobalKnownHostsFile none
+    HostKeyAlias hakios-thyme-hdb
+    StrictHostKeyChecking yes
+    IdentitiesOnly yes
+```
+
 ## Verified LAN functions
 
 A 240-second protected RAM Boot on thyme accepted shell commands from
@@ -51,15 +86,22 @@ log. Use `shell /var/jb/sbin/dmesg` for the current kernel buffer.
 `xl screenshot-live` also captured the screen during the run through
 the loader's existing live USB control channel.
 
-The native Windows OpenSSH client reached the device and verified its
-pinned key. Windows refused the private key at the WSL UNC path because
-its Windows permissions were too open. A Windows-native key and
-authorized public-key enrollment are still needed to verify shell and
-file transfer there. Native macOS, automatic discovery, unified log
-streaming, SSH screen capture and deployment of long-lived services
-have separate acceptance.
+On the same device, Windows OpenSSH 9.5.4.1 verified the device pin,
+authenticated with a Windows-generated key and received UID 0. Its
+SFTP upload and readback matched by SHA-256. The WSL2 client passed
+its smoke checks in the same boot. Native macOS, automatic discovery,
+unified log streaming, SSH screen capture and deployment of long-lived
+services have separate acceptance.
 
 ## USB device and host work
+
+During the authenticated Windows and WSL2 session, Windows still listed
+`VID_18D1&PID_D00D` as Android Bootloader Interface and `xl state`
+returned `loader`. The existing EFI fastboot endpoint continued to
+serve a live framebuffer capture. This is the starting point for
+controller handoff. The XNU-side DWC3 probe only reads the controller's
+identification and status. Initial device-mode work must coordinate
+ownership with the live loader and retain its timed return.
 
 1. Verify DWC3 ownership and the transition from the RAM Boot loader.
    Bring up USB Device mode and validate enumeration, endpoint transfers,

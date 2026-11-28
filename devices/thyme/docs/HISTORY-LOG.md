@@ -1,5 +1,33 @@
 ## Chronological Verification Logs & Evidence
 
+## Native Windows OpenSSH and USB loader ownership (2026-11-28)
+
+- HDB enrolled the public key generated on Windows alongside the WSL2
+  client. Both entries retained the configured peer restriction. The
+  regression verifies duplicate removal, Windows line endings, and
+  rejection of malformed or option-prefixed inputs before changing
+  credentials. The private keys stayed in their respective host
+  environments.
+- One guarded 200 s run used kernel `faedd6175a35`, loader
+  `11f4e0271c65` and debug root `6933f21e8581`. Windows OpenSSH
+  9.5.4.1 verified the pinned device key, reached UID 0 and passed the
+  SFTP round trip. The SHA-256 of both files was
+  `451f41f452b21ad36b7a6d6f08179d5df485e613469d6ae3df7f2b5f8b774ad9`.
+  In the same run WSL2 passed shell, SFTP, upload and arm64 execution,
+  kernel log, DWC3 ID, bad key rejection and reconnect.
+- During the authenticated session, Windows listed the connected
+  cable as Android Bootloader Interface (`VID_18D1&PID_D00D`).
+  `xl state` returned `loader` and the EFI channel still delivered
+  a 1080×2340 PNG. This records the controller ownership that the
+  USB Gadget handoff needs to change.
+- The timer returned to a completed Android boot. The whole
+  `logdump` SHA-256 matched before and after. Final kernel log
+  `logs/soak.o3LGTgsP/kernel.log` has SHA-256
+  `604af1b9434dff2ad4f66644c99d23094ebd3e95d945dfc72ee882e245880ed6`.
+  The redacted host notes are in `out/thyme-boot/hdb-native.GZ0xZ0oH/`.
+  Windows check SHA-256
+  `ce408db33a22576163708f920138321002338f533e10dfd596877ce7f13b3eb0`.
+
 ## P0 Wi-Fi OpenSSH debug scene on thyme (2026-11-28)
 
 - The initial development boot requested DHCP before joining the Wi-Fi
