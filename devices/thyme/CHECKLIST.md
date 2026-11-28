@@ -44,6 +44,7 @@ Status legend:
 | USB Charging & Fuel Gauge | `PM8150B` + gauge | P0 | ✅ | Live mV/mA/`%`, USB charging, `battery_stop` guard |
 | 33W Wired Fast Charge | `bq25970@0x66` (`QUP15`) + `fsa4480@0x42` | P1 | 🚧 | Live 10 s I2C ADC & USB-C audio switch telemetry; active QC/PD pump control pending |
 | 30W Wireless / 10W Reverse Charge | `idt,p9415@0x3b` / `ln8282@0x55` (`QUP16`) | P1 | ❌ | QUP16 bus probed idle-high; active WLC power/pad bring-up pending |
+| Real-device debug bridge | Wi-Fi / OpenSSH, then USB | P0 | 🚧 | Key-only LAN shell, kernel logs, SFTP and a deployed arm64 command verified from WSL2. See the [debug checklist](docs/debug.md). |
 | USB Data Gadget (PC Connect) | `dwc3@a600000` (`snps,dwc3` `id=0x33313130`) | P0 | ❌ | Read-only HW MMIO telemetry verified; XNU gadget, `usbmux`, `lockdownd` (i4Tools/iTunes) pending |
 | USB OTG Host Mode | `dwc3@a600000` / `a800000` | P1 | ❌ | External USB drives / HID / USB-C audio host unsupported |
 | UFS Internal Storage | `ufshc@1d84000` (`hakios.ufs.c`) | P0 | 🚧 | Read-only partition & `modem_a` VFAT LFN reader working; guarded writable RW persistence pending |
@@ -126,6 +127,20 @@ build ID, operation, observed outcome and available log or capture. A
 hardware, driver or UI milestone belongs in the earlier sections.
 **Manual** marks interaction or equipment still needed. The acceptance status
 remains open until that test passes.
+
+### Real-device debugging and USB
+
+| Feature | Status | Acceptance on thyme |
+|---|---|---|
+| LAN OpenSSH | 🚧 Hardware | WSL2 verified host pin, key rejection, reconnect, bidirectional transfer and execution of a RAM-only arm64 test binary. Windows OpenSSH reached the service but refused the WSL key path permissions. Native macOS and other Linux hosts remain pending. |
+| Live diagnostics | 🚧 | Kernel logs and DWC3 telemetry passed over SSH, and a live screenshot passed through the RAM Boot loader. Unified user-space logs, SSH screen capture, app controls, crash reports and service restart remain pending. |
+| USB Gadget enumeration and endpoints | ❌ Hardware | Test attach, transfer, cable disconnect and reconnect on Windows, macOS and Linux. Verify RAM Boot return and power protection with the gadget enabled. |
+| usbmux, lockdown and trust | ❌ Hardware | Discover with libimobiledevice, pair and unpair, reject an untrusted host, reconnect, and read accurate system information. |
+| Standard iOS device services | ❌ Hardware | Exercise AFC transfer, application installation and launch, logs and screenshots with the open toolchain. |
+| Vendor device tools | ❌ Manual | After the standard services pass, check i4Tools, 3uTools, iMazing and iTunes/Finder separately. Validate a legally acquired iOS device-check app and document any authorization dependence. |
+| USB OTG and external storage | ❌ Hardware | Verify host role detection, safe connect/disconnect and filesystem access with a test drive. |
+| USB keyboard and mouse | ❌ Hardware | Check USB HID enumeration and input in OTG mode. |
+| USB-C audio | ❌ Hardware | Test analog routing and digital USB audio separately. Check playback, microphone and unplug recovery. |
 
 ### Camera, Photos, and Display
 

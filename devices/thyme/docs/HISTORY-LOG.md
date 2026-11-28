@@ -1,5 +1,36 @@
 ## Chronological Verification Logs & Evidence
 
+## P0 Wi-Fi OpenSSH debug scene on thyme (2026-11-28)
+
+- The initial development boot requested DHCP before joining the Wi-Fi
+  profile and got no address. Reusing the normal Wi-Fi join command
+  obtained an address on the next boot. OpenSSH then refused startup
+  because its privilege separation user is named `sshd` while Procursus
+  supplies `_sshd` (UID 75). The development launcher now adapts the
+  account with the existing `pw` tool in the writable RAM prefix.
+  Both diagnostic attempts returned to completed Android boots through
+  the loader's stop command.
+- In the guarded 240 s repeat, kernel `faedd6175a35` and development
+  root `86bd02dcb42f` kept OpenSSH on the private en0 address. From WSL2,
+  the pinned client reached UID 0, read Darwin release 22.5.0, read the
+  actual DWC3 ID (`0x33313130`), and returned 131,071 bytes of kernel log.
+  SFTP upload and download matched byte for byte. The uploaded arm64
+  fixture ran from the RAM data volume. Wrong client and server keys
+  were refused, and an authenticated reconnect succeeded.
+- A live loader screenshot during the same run was a 1080×2340 PNG.
+  Windows-native OpenSSH reached the LAN listener and verified the
+  supplied pin, then refused the private key's WSL UNC permissions.
+  Native Windows key enrollment, native macOS, USB Gadget, usbmux and
+  standard iOS services remain open.
+- The final timer returned to Android and the whole `logdump` hash
+  still matched. The two map-free system images retained
+  `83e304d77605`. Both the debug APFS readback and the regular
+  credential-free image build passed. The kernel log
+  `logs/soak.5Oy5OThO/kernel.log` has SHA-256
+  `41dfc64335e9f4b6c171a3a1b4454aa196c18cff2db87b1b84e313d63ce46bc9`.
+  Host checks are retained in `out/thyme-boot/hdb.H3CQpUK9/live-test.log`
+  (SHA-256 `3a6d39b7d86a496b52bd64902d4ba2c2b2bb354d9396ba8de9d1ce4f55be8f49`).
+
 ## Per-subscription signal while both SIMs are searching (2026-11-28)
 
 - The read-only NAS probe samples Get Signal Info beside Get Serving
