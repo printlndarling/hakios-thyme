@@ -1,4 +1,4 @@
-/* Exercise the same NV12 slice boundaries as Camera's preview workers. */
+/* Exercise Bayer order and the NV12 slice boundaries of Camera's preview workers. */
 #include "camera_isp.h"
 
 #include <stdio.h>
@@ -32,6 +32,45 @@ check_chroma(const uint8_t *plane)
 	return 0;
 }
 
+/* Each 2x2 source cell has distinct red and blue and two different green sites. */
+static int
+check_bayer(struct isp *isp)
+{
+	struct hakios_camera_frame frame = { .width = 4, .height = 4, .stride = 5, .black = 64 };
+	uint8_t raw[20], bgra[8 * 8 * 4];
+	const uint16_t red = 112, green[2] = { 160, 224 }, blue = 312;
+	const uint8_t expect[] = { isp->gamma[blue * 4], isp->gamma[(green[0] + green[1]) * 2], isp->gamma[red * 4], 255 };
+
+	for (unsigned bayer = 0; bayer < 4; bayer++) {
+		uint16_t cell[4];
+		unsigned g = 0;
+
+		for (unsigned i = 0; i < 4; i++) {
+			cell[i] = 64 + (i == bayer ? red : i == 3 - bayer ? blue : green[g++]);
+		}
+		for (unsigned y = 0; y < 4; y++) {
+			uint8_t *row = raw + y * frame.stride;
+
+			row[4] = 0;
+			for (unsigned x = 0; x < 4; x++) {
+				uint16_t value = cell[(y & 1) * 2 + (x & 1)];
+
+				row[x] = (uint8_t)(value >> 2);
+				row[4] |= (value & 3) << (x * 2);
+			}
+		}
+		frame.bayer = bayer;
+		isp_render_bgra(isp, &frame, raw, bgra, 8 * 4, 8, 8, 0, 8);
+		for (size_t i = 0; i < sizeof(bgra); i += 4) {
+			if (memcmp(bgra + i, expect, sizeof(expect)) != 0) {
+				fprintf(stderr, "Bayer order %u produced wrong BGRA for pixel %zu\n", bayer, i / 4);
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
 int
 main(void)
 {
@@ -61,5 +100,9 @@ main(void)
 	if (result == 0) {
 		puts("NV12 preview keeps chroma inside the rendered rows and preserves row padding");
 	}
-	return result;
+	if (result == 0 && check_bayer(&isp) == 0) {
+		puts("Preview preserves RGB ordering and averages both green sites in all four Bayer orders");
+		return 0;
+	}
+	return 1;
 }

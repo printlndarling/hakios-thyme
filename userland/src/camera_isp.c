@@ -675,21 +675,21 @@ prepare_preview(const struct isp *isp, const struct hakios_camera_frame *f, uint
 	return area;
 }
 
-typedef uint16_t bayer_cell[4];
+typedef float preview_rgb __attribute__((vector_size(16)));
 
 struct preview_cache {
-	bayer_cell *cells[2];
+	preview_rgb *cells[2];
 	float (*gains)[3];
 	uint32_t cell_rows[2], gain_row;
 };
 
 /* A Bayer row can be used by several output rows, and also by the next Bayer pair. */
-static const bayer_cell *
+static const preview_rgb *
 preview_cells(struct preview_cache *cache, const struct hakios_camera_frame *f, const uint8_t *raw,
-    const struct preview_crop *area, uint32_t row)
+    const struct preview_crop *area, uint32_t row, int red, int green_first, int blue)
 {
 	unsigned bank = row & 1u;
-	bayer_cell *samples = cache->cells[bank];
+	preview_rgb *samples = cache->cells[bank];
 
 	if (cache->cell_rows[bank] != row) {
 		const uint8_t *top = raw + (size_t)row * 2 * f->stride;
@@ -698,9 +698,10 @@ preview_cells(struct preview_cache *cache, const struct hakios_camera_frame *f, 
 			int values[4];
 
 			cell(top, f->stride, area->first_cell + x, values);
-			for (unsigned at = 0; at < 4; at++) {
-				samples[x][at] = (uint16_t)values[at];
-			}
+			/* Average the two green sites before weighting the cell. */
+			samples[x] = (preview_rgb){
+				values[red], (values[green_first] + values[3 - green_first]) * 0.5f, values[blue], 0
+			};
 		}
 		cache->cell_rows[bank] = row;
 	}
@@ -717,6 +718,7 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 	struct pipe p;
 
 	cell_places(f->bayer, &r, &b);
+	int green_first = (r == 0 || r == 3) ? 1 : 0, green_second = 3 - green_first;
 	pipe_init(isp, &p);
 	if (isp->turned) {
 		row = height - 1 - row;         /* (and each line from its end, below) */
@@ -734,8 +736,8 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 		cy1 = cy0 + 1 > cells_h - 1 ? cells_h - 1 : cy0 + 1;
 		ty = fy < (float)cy0 ? 0 : fy - cy0;
 		v_at = cells_h > 1 ? (float)cy0 / (cells_h - 1) : 0;
-		const bayer_cell *top = preview_cells(cache, f, raw, area, cy0);
-		const bayer_cell *bottom = preview_cells(cache, f, raw, area, cy1);
+		const preview_rgb *top = preview_cells(cache, f, raw, area, cy0, r, green_first, b);
+		const preview_rgb *bottom = preview_cells(cache, f, raw, area, cy1, r, green_first, b);
 		static const float no_shading[3] = { 1, 1, 1 };
 
 		if (isp->lsc.on && cache->gain_row != cy0) {
@@ -750,20 +752,13 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 			uint32_t cx0 = columns[x].left, cx1 = cx0 + 1 < cells_w ? cx0 + 1 : cx0;
 			cx0 -= area->first_cell;
 			cx1 -= area->first_cell;
-			float tx = columns[x].fraction, c[3] = { 0, 0, 0 };
+			float tx = columns[x].fraction;
 			const float *gains = isp->lsc.on ? cache->gains[cx0] : no_shading;
-			const uint16_t *samples[] = { top[cx0], top[cx1], bottom[cx0], bottom[cx1] };
 
-			for (int k = 0; k < 4; k++) {
-				const uint16_t *v = samples[k];
-				float w = (k & 1 ? tx : 1 - tx) * (k & 2 ? ty : 1 - ty);
-
-				c[0] += w * v[r];
-				c[2] += w * v[b];
-				for (int j = 0; j < 4; j++) {
-					c[1] += j != r && j != b ? w * v[j] * 0.5f : 0;
-				}
-			}
+			preview_rgb c = top[cx0] * ((1 - tx) * (1 - ty));
+			c += top[cx1] * (tx * (1 - ty));
+			c += bottom[cx0] * ((1 - tx) * ty);
+			c += bottom[cx1] * (tx * ty);
 			pixel(isp, &p, c[0] * gains[0], c[1] * gains[1], c[2] * gains[2], rgb + 3 * (isp->turned ? width - 1 - x : x));
 		}
 		return;
@@ -775,12 +770,10 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 
 	for (uint32_t x = 0; x < width; x++, at += step) {
 		uint32_t cx = (uint32_t)(at >> 16);
-		int v[4], g = 0;
+		int v[4];
 
 		cell(top, f->stride, cx, v);
-		for (int j = 0; j < 4; j++) {
-			g += j != r && j != b ? v[j] : 0;
-		}
+		int g = v[green_first] + v[green_second];
 		if (isp->lsc.on) {
 			lsc_at(isp, cells_w > 1 ? (float)cx / (cells_w - 1) : 0, v_pos, gains);
 		}
@@ -855,7 +848,7 @@ isp_render_nv12(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	}
 	struct preview_column columns[width];
 	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
-	bayer_cell cells[2][area.cell_count];
+	preview_rgb cells[2][area.cell_count];
 	float gains[isp->lsc.on ? area.cell_count : 1][3];
 	struct preview_cache cache = { { cells[0], cells[1] }, gains, { UINT32_MAX, UINT32_MAX }, UINT32_MAX };
 
@@ -888,7 +881,7 @@ isp_render_bgra(const struct isp *isp, const struct hakios_camera_frame *f, cons
 	}
 	struct preview_column columns[width];
 	struct preview_crop area = prepare_preview(isp, f, width, height, columns);
-	bayer_cell cells[2][area.cell_count];
+	preview_rgb cells[2][area.cell_count];
 	float gains[isp->lsc.on ? area.cell_count : 1][3];
 	struct preview_cache cache = { { cells[0], cells[1] }, gains, { UINT32_MAX, UINT32_MAX }, UINT32_MAX };
 
