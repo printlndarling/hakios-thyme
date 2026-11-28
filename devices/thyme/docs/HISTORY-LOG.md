@@ -1,5 +1,38 @@
 ## Chronological Verification Logs & Evidence
 
+## Venus non-secure DMA route (2026-11-28)
+
+- The stock Android `qcom,vidc@aa00000/non_secure_cb` on thyme gives
+  SID `0x2100`, mask `0x400`, and a DMA pool at `0x25800000`
+  spanning `0xba800000` bytes. The
+  [SM8250 Linux device tree](https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/sm8250.dtsi)
+  confirms the non-secure stream and the separate configuration and
+  memory interconnect paths.
+- Opt-in `venus=5` inventories that stream with the existing locked
+  APSS SMMU survey, then runs the same clock and firmware preparation as
+  mode 4. The survey counts stream overlaps and candidate stage-1 banks
+  without changing the SMMU. Clang ASan/UBSan fixtures passed with
+  legacy and extended IDs, overlaps through either mask, unavailable
+  mappings and invalid aperture geometry. The build linked
+  `7a8221f8bb85` using the two modified sources from the commit, excluding local CDSP experiments.
+- The physical RAM run with `venus=5 cdsp=6` found no existing match
+  for either the Venus or CDSP stream. It showed 87 stream entries,
+  81 free entries, 74 context banks, and 69 idle stage-1 candidates.
+  Unmatched streams fault. The MVS0C and AXI0 probes restored their
+  original settings, Venus loaded 14 segments after PAS INIT_IMAGE and
+  MEM_SETUP, and CDSP authenticated and repeated its route survey.
+  Local excerpt `out/thyme-boot/venus.wo2Kth6z/registers-live.log`,
+  SHA-256 `c2e50dc49b30e3b195d4866d9d58023d4227b43ba61538e532a8302281b6d768`.
+- After 105 s on root `d76a8d248df6`, CDSP shut down and the
+  watchdog quiesced. The timer returned to Android, which reported
+  boot complete. The whole `logdump` SHA-256 matched before and after.
+  Final log `logs/soak.cPqQtgar/kernel.log`, SHA-256
+  `f4d2cf09612d1cbe226cf78eab708d814709ee0dfbd2e79b7d8be40ad2cacb8c`.
+- The stock PIL node requests 200 MHz for both its core and AHB clocks
+  and a peak interconnect vote of 304,000 kB/s. Those are additional
+  startup dependencies beyond verifying the reversible crystal and AXI0
+  gates. The normal diagnostic keeps PAS execution disabled for Venus.
+
 ## Size the HFSX data volume from the proposed GPT (2026-11-28)
 
 - Compared the proposed LUN 0 layouts off-device. The clear-data GPT

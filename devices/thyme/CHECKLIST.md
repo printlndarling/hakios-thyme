@@ -58,7 +58,7 @@ Status legend:
 | All 8 CPU Cores Online | P1 | 🚧 | 7 cores active (`bootcpu=7 cpus=7`); CPU0 reserved by UEFI loader |
 | CPU Idle / Deep Sleep | P0 | 🚧 | ARM64 `WFI`/`WFE` + display blanking working; PSCI `CPU_SUSPEND` power collapse pending |
 | GPU Dynamic Frequency Scaling | P1 | ✅ | GMU HFI `305 / 400 / 441.6 / 525 / 587 MHz` runtime scaling verified |
-| VPU Hardware Video Decode | P0 | 🚧 | `venus=1` prepares firmware, `venus=2` cycles GCC/MVS0C power, `venus=3` verifies the reversible MVS0C XO clock path, and `venus=4` also verifies the AXI0 gate. PAS execution and HFI decode pending. |
+| VPU Hardware Video Decode | P0 | 🚧 | `venus=1` prepares firmware, `venus=2` cycles GCC/MVS0C power, `venus=3` verifies the reversible MVS0C XO clock path, and `venus=4` also verifies the AXI0 gate. `venus=5` surveyed the non-secure DMA stream on thyme. PAS execution, an owned SMMU mapping and HFI decode remain pending. |
 | VPU Hardware Video Encode | P0 | ❌ | Depends on `pil-venus` HFI encode pipeline |
 | ISP Pipeline (`Spectra 480` vs SW) | P1 | 🚧 | SW 5×5 Malvar-He-Cutler + sharpen + AE/AF; HW IFE/IPE/HDR pending |
 | Hexagon DSPs (`ADSP`, `SLPI`, `CDSP`) | P1 | ✅ | `ADSP` and `SLPI` operational; `cdsp=2` verified TZ startup, fresh SMP2P ready and clean shutdown |
