@@ -240,7 +240,8 @@ xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
   -framework CoreFoundation -framework Security -lresolv \
   "$jb_lib/libssl.3.dylib" "$jb_lib/libcrypto.3.dylib" -Wl,-rpath,/var/jb/usr/lib \
   -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c \
-  devices/thyme/tools/lockdown-pairing.c devices/thyme/tools/lockdown-tls.c
+  devices/thyme/tools/lockdown-pairing.c devices/thyme/tools/lockdown-tls.c \
+  devices/thyme/tools/afc-ram.c
 python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell /private/var/tmp/lockdown-usb
@@ -389,6 +390,34 @@ implemented requests are `All` and `Goodbye`. The integration test above
 also exercises this service when passed `--diagnostics` after
 `--stock-record`.
 
+#### AFC transfers within the development RAM volume
+
+The service `com.apple.afc` uses port 62081 with the same single-use
+StartService and independent TLS admission as diagnostics. Its remote
+root maps to `/private/var/tmp/hakios-afc` and opens only on ramfs.
+Paths are resolved within that directory. Symlinks and parent path
+components are rejected. The volume supports directories, file
+metadata, open, read, write, seek, tell, close and removal.
+
+A write request can carry up to 1 MiB. Reads may return shorter chunks,
+so callers should read until EOF. Each file is capped at 16 MiB and the
+daemon tracks a shared 32 MiB write budget across sessions. The AFC
+volume information reports that development budget. Reconnecting to
+USB preserves files until the RAM Boot ends and clears open handles.
+
+The integration test uses the original libimobiledevice AFC API. It
+checks bidirectional bytes, software USB reattachment and confinement
+to the RAM directory. The optional `--large` argument sends a single
+1 MiB write request.
+
+```sh
+fixture=$(mktemp -d /dev/shm/thyme-afc.XXXXXXXX)
+python3 devices/thyme/tools/usbmux-winusb.py --pair-record "$fixture/pair.plist" -- \
+  python3 devices/thyme/tools/test-afc-ram.py --hdb-state ssh/hdb \
+  --stock-record "$fixture/pair.plist"
+rmdir "$fixture"
+```
+
 #### Discover the SSH address over USB
 
 When the development scene contains both HDB and the USB Lockdown
@@ -452,10 +481,11 @@ reset.
    Extend the USB bulk transport to support concurrent system services.
 2. Verify native host discovery and the standard device trust prompt.
    Export other verified thyme hardware and OS information as needed.
-3. Extend authenticated service-port connections to AFC, installation
-   proxy, logs and screenshots. The libimobiledevice AFC factory closes
-   its Lockdown session before opening the service connection. Use an
-   approved developer app and temporary files in the RAM session. [libimobiledevice service factory](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/service.c#L77-L109)
+3. Extend AFC coverage and add authenticated installation proxy, logs
+   and screenshots. The installer opens its proxy while Lockdown is
+   still connected and keeps it open during AFC upload. Verify multiple
+   USB streams before testing installation with an approved developer
+   app and files in RAM. [ideviceinstaller connection flow](https://github.com/libimobiledevice/ideviceinstaller/blob/master/src/ideviceinstaller.c#L817-L958)
 4. Test host identification and device management separately in
    i4Tools, 3uTools, iMazing, iTunes and Finder wherever available.
    Keep vendor-service and authorization results separate. Flashing

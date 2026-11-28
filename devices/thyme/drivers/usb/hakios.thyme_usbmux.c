@@ -25,13 +25,13 @@ _Static_assert(THYME_LOCKDOWN_MESSAGE_MAX <= 65535u, "receive window is sixteen 
 static uint8_t stream[2 * MUX_FRAME_MAX];
 static unsigned used;
 static bool negotiated, online;
-static uint16_t peer_port, local_port;
+static uint16_t peer_port, local_port, offered_port, response_port;
 static uint32_t peer_next, device_next, next_transaction;
 static struct thyme_lockdown_message request;
 static unsigned request_length, response_length, response_offset;
 static bool request_complete, request_read, response_ready;
 static bool tls_stream, start_tls;
-static bool diagnostics_offered, new_service, offer_diagnostics, abort_response;
+static bool new_service, abort_response;
 static uint8_t response[THYME_LOCKDOWN_MESSAGE_MAX];
 
 static uint16_t
@@ -66,17 +66,18 @@ put_be32(uint8_t *bytes, uint32_t value)
 static void
 close_stream(void)
 {
-	peer_port = local_port = 0;
+	peer_port = local_port = response_port = 0;
 	request_length = response_length = response_offset = 0;
 	request_complete = request_read = response_ready = false;
-	tls_stream = start_tls = new_service = offer_diagnostics = abort_response = false;
+	tls_stream = start_tls = new_service = abort_response = false;
 }
 
 void
 thyme_usbmux_reset(void)
 {
 	used = 0;
-	negotiated = diagnostics_offered = false;
+	negotiated = false;
+	offered_port = 0;
 	close_stream();
 }
 
@@ -85,7 +86,7 @@ thyme_usbmux_service(bool enabled)
 {
 	online = enabled;
 	if (!online) {
-		diagnostics_offered = false;
+		offered_port = 0;
 	}
 	if (!online && !request_complete) {
 		close_stream();
@@ -110,7 +111,8 @@ thyme_usbmux_request(struct thyme_lockdown_message *message, unsigned capacity)
 bool
 thyme_usbmux_submit(const struct thyme_lockdown_message *message, unsigned length)
 {
-	const uint32_t controls = THYME_LOCKDOWN_START_TLS | THYME_LOCKDOWN_OFFER_DIAGNOSTICS | THYME_LOCKDOWN_ABORT;
+	const uint32_t controls = THYME_LOCKDOWN_START_TLS | THYME_LOCKDOWN_OFFER_DIAGNOSTICS |
+	    THYME_LOCKDOWN_OFFER_AFC | THYME_LOCKDOWN_ABORT;
 	uint32_t action = message->transaction & controls;
 	if (!request_complete || !request_read || response_ready || length > sizeof(response) ||
 	    (message->transaction & ~controls) != request.transaction) {
@@ -122,7 +124,8 @@ thyme_usbmux_submit(const struct thyme_lockdown_message *message, unsigned lengt
 		return true;
 	}
 	if (tls_stream) {
-		if (action && (action != THYME_LOCKDOWN_OFFER_DIAGNOSTICS || !length || local_port != THYME_LOCKDOWN_PORT)) {
+		if (action && ((!length || local_port != THYME_LOCKDOWN_PORT) ||
+		    (action != THYME_LOCKDOWN_OFFER_DIAGNOSTICS && action != THYME_LOCKDOWN_OFFER_AFC))) {
 			return false;
 		}
 	} else if ((action && action != THYME_LOCKDOWN_START_TLS) ||
@@ -133,7 +136,8 @@ thyme_usbmux_submit(const struct thyme_lockdown_message *message, unsigned lengt
 	response_length = length;
 	response_ready = true;
 	start_tls = action == THYME_LOCKDOWN_START_TLS;
-	offer_diagnostics = action == THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	response_port = action == THYME_LOCKDOWN_OFFER_DIAGNOSTICS ? THYME_DIAGNOSTICS_PORT :
+	    action == THYME_LOCKDOWN_OFFER_AFC ? THYME_AFC_PORT : 0;
 	return true;
 }
 
@@ -179,9 +183,9 @@ send_response_segment(uint8_t *reply)
 	response_offset += size;
 	if (last) {
 		response_offset = response_length = 0;
-		if (offer_diagnostics) {
-			diagnostics_offered = true;
-			offer_diagnostics = false;
+		if (response_port) {
+			offered_port = response_port;
+			response_port = 0;
 		}
 		if (start_tls) {
 			tls_stream = true;
@@ -227,14 +231,14 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 	}
 	unsigned size = length - header;
 	if (flags == TCP_SYN && size == 0) {
-		bool diagnostics = dest == THYME_DIAGNOSTICS_PORT && diagnostics_offered;
-		if ((!diagnostics && dest != THYME_LOCKDOWN_PORT) || !online || peer_port) {
+		bool service = offered_port && dest == offered_port;
+		if ((!service && dest != THYME_LOCKDOWN_PORT) || !online || peer_port) {
 			return tcp_reply(reply, dest, source, 0, seq + 1, TCP_RST | TCP_ACK, NULL, 0);
 		}
 		peer_port = source;
 		local_port = dest;
-		if (diagnostics) {
-			diagnostics_offered = false;
+		if (service) {
+			offered_port = 0;
 			new_service = tls_stream = true;
 		}
 		peer_next = seq + 1;
@@ -281,9 +285,10 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 			if (request_length < expected + framing) {
 				return tcp_reply(reply, dest, source, device_next, peer_next, TCP_ACK, NULL, 0);
 			}
-			next_transaction = (next_transaction + 1) & (THYME_LOCKDOWN_ABORT - 1);
+			next_transaction = (next_transaction + 1) & (THYME_LOCKDOWN_OFFER_AFC - 1);
 			request.transaction = next_transaction | (tls_stream ? THYME_LOCKDOWN_TLS_RECORD : 0) |
 			    (local_port == THYME_DIAGNOSTICS_PORT ? THYME_LOCKDOWN_DIAGNOSTICS : 0) |
+			    (local_port == THYME_AFC_PORT ? THYME_LOCKDOWN_AFC : 0) |
 			    (new_service ? THYME_LOCKDOWN_NEW_SERVICE : 0);
 			new_service = false;
 			request_complete = true;

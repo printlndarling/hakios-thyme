@@ -6,6 +6,7 @@
 
 #define THYME_LOCKDOWN_PORT 62078u
 #define THYME_DIAGNOSTICS_PORT 62080u
+#define THYME_AFC_PORT 62081u
 #define THYME_LOCKDOWN_MESSAGE_MAX 32768u
 #define THYME_LOCKDOWN_NODE "/dev/hakios-lockdown"
 
@@ -15,14 +16,16 @@
 #define THYME_LOCKDOWN_NEW_SERVICE 0x10000000u
 #define THYME_LOCKDOWN_OFFER_DIAGNOSTICS 0x08000000u
 #define THYME_LOCKDOWN_ABORT 0x04000000u
+#define THYME_LOCKDOWN_AFC 0x02000000u
+#define THYME_LOCKDOWN_OFFER_AFC 0x01000000u
 
 /* The native-endian transaction ID precedes a framed plist or, when
  * TLS_RECORD is set, one TLS record. Echo the ID on write. A TLS write
  * can contain zero or more outbound TLS records. Set START_TLS on a
  * plist reply to upgrade this stream once the complete reply is sent.
- * DIAGNOSTICS identifies a service stream, and NEW_SERVICE marks its
- * first record. OFFER_DIAGNOSTICS admits one service connection after
- * this TLS reply. ABORT with no payload resets the current stream. */
+ * DIAGNOSTICS or AFC identifies a service, and NEW_SERVICE marks its
+ * first record. OFFER_DIAGNOSTICS or OFFER_AFC admits one connection
+ * to that service after this TLS reply. ABORT resets the current stream. */
 struct thyme_lockdown_message {
 	uint32_t transaction;
 	uint8_t data[THYME_LOCKDOWN_MESSAGE_MAX];

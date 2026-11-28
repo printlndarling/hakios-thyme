@@ -32,6 +32,7 @@ PAIR_RECORD_MAX = 16384
 LOCKDOWN_HEADER = struct.Struct(">I")
 LOCKDOWN_MESSAGE_MAX = 32768
 DIAGNOSTICS_PORT = 62080
+AFC_PORT = 62081
 TLS_HEADER = struct.Struct(">BBBH")
 TLS_PAYLOAD_MAX = 18432
 MAX_ENCODED_LINE = 4 * ((LOCKDOWN_MESSAGE_MAX + 2) // 3) + 2
@@ -73,7 +74,7 @@ class WinUSB:
         options = f"-BridgeStream -BridgePort {port} -BridgeLocation {location}"
         with subprocess.Popen(self.argv(options), stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
             session = WinUSBSession(process)
-            session.tls = port == DIAGNOSTICS_PORT
+            session.tls = port in (DIAGNOSTICS_PORT, AFC_PORT)
             try:
                 state = session.line(10)
                 if state not in (b"connected", b"refused", b"missing"):
@@ -293,7 +294,7 @@ class Client(socketserver.StreamRequestHandler):
                     return
                 connected = True
                 self.reply(result(0), tag)
-                if port == DIAGNOSTICS_PORT:
+                if port in (DIAGNOSTICS_PORT, AFC_PORT):
                     self.relay_tls(session)
                 else:
                     self.relay_lockdown(session)

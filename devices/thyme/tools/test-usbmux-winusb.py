@@ -124,9 +124,14 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(stream.read(), b"")
         self.assertEqual(seen, [LOCKDOWN_HEADER.pack(len(request)) + request, "tls", first, second])
 
-    def test_diagnostics_port_relays_tls_from_the_first_record(self):
+    def test_service_port_relays_tls_from_the_first_record(self):
         device = self.request(MessageType="ListDevices")["DeviceList"][0]
-        port = bridge["DIAGNOSTICS_PORT"]
+        for port in (bridge["DIAGNOSTICS_PORT"], bridge["AFC_PORT"]):
+            with self.subTest(port=port):
+                self.check_service_port(device, port)
+
+    def check_service_port(self, device, port):
+        self.server.transport.calls.clear()
         self.server.transport.ports.add(port)
         connect = plistlib.dumps(dict(MessageType="Connect", DeviceID=device["DeviceID"], PortNumber=socket.htons(port)))
         client_record = bytes.fromhex("160301000102")
@@ -141,7 +146,7 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(reply["Number"], 0)
             client.sendall(client_record)
             self.assertEqual(stream.read(len(server_record)), server_record)
-        self.assertEqual(self.server.transport.calls, [("list",), (port, LOCATION), client_record])
+        self.assertEqual(self.server.transport.calls, [(port, LOCATION), client_record])
 
     def test_pairing_metadata_is_available_during_a_lockdown_connection(self):
         entry = self.request(MessageType="ListDevices")["DeviceList"][0]

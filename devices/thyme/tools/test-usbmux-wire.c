@@ -206,12 +206,12 @@ tls_upgrade(uint8_t *reply)
 }
 
 static void
-diagnostics_service(uint8_t *reply)
+service_admission(uint8_t *reply, uint16_t port, uint32_t service_flag, uint32_t offer_flag)
 {
 	const uint8_t plist[] = {0, 0, 0, 1, 'x'};
 	const uint8_t record[] = {22, 3, 1, 0, 1, 42};
 	struct thyme_lockdown_message message;
-	const uint16_t port = THYME_DIAGNOSTICS_PORT;
+	const uint16_t other = port == THYME_DIAGNOSTICS_PORT ? THYME_AFC_PORT : THYME_DIAGNOSTICS_PORT;
 
 	thyme_usbmux_reset();
 	thyme_usbmux_service(true);
@@ -221,25 +221,26 @@ diagnostics_service(uint8_t *reply)
 	open_lockdown(reply);
 	assert(data(plist, sizeof(plist), 0, 1, reply) == 0);
 	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(plist));
-	message.transaction |= THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	message.transaction |= offer_flag;
 	assert(!thyme_usbmux_submit(&message, sizeof(plist)));
-	message.transaction ^= THYME_LOCKDOWN_OFFER_DIAGNOSTICS | THYME_LOCKDOWN_START_TLS;
+	message.transaction ^= offer_flag | THYME_LOCKDOWN_START_TLS;
 	assert(thyme_usbmux_submit(&message, sizeof(plist)));
 	assert(thyme_usbmux_complete(reply, false) == 28 + sizeof(plist));
 
 	assert(data(record, sizeof(record), sizeof(plist), sizeof(plist) + 1, reply) == 0);
 	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(record));
-	message.transaction |= THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	message.transaction |= offer_flag;
 	assert(!thyme_usbmux_submit(&message, 0));
 	assert(thyme_usbmux_submit(&message, sizeof(record)));
 	assert(thyme_usbmux_complete(reply, false) == 28 + sizeof(record));
 
 	assert(tcp(THYME_LOCKDOWN_PORT, 4, NULL, 0, sizeof(plist) + sizeof(record), 0, reply) == 0);
 	assert(thyme_usbmux_feed(version, sizeof(version), reply) == 20);
+	assert(tcp(other, 2, NULL, 0, UINT32_MAX, 0, reply) == 28 && reply[21] == 0x14);
 	assert(tcp(port, 2, NULL, 0, UINT32_MAX, 0, reply) == 28 && reply[21] == 0x12);
 	assert(tcp(port, 0x18, record, sizeof(record), 0, 1, reply) == 0);
 	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(record));
-	const uint32_t flags = THYME_LOCKDOWN_DIAGNOSTICS | THYME_LOCKDOWN_TLS_RECORD;
+	const uint32_t flags = service_flag | THYME_LOCKDOWN_TLS_RECORD;
 	assert((message.transaction & (flags | THYME_LOCKDOWN_NEW_SERVICE)) == (flags | THYME_LOCKDOWN_NEW_SERVICE));
 	assert(thyme_usbmux_submit(&message, 0));
 	assert(thyme_usbmux_complete(reply, false) == 28 && reply[21] == 0x10);
@@ -247,9 +248,9 @@ diagnostics_service(uint8_t *reply)
 	assert(tcp(port, 0x18, record, sizeof(record), sizeof(record), 1, reply) == 0);
 	assert(thyme_usbmux_request(&message, sizeof(message.data)) == sizeof(record));
 	assert((message.transaction & (flags | THYME_LOCKDOWN_NEW_SERVICE)) == flags);
-	message.transaction |= THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	message.transaction |= offer_flag;
 	assert(!thyme_usbmux_submit(&message, sizeof(record)));
-	message.transaction ^= THYME_LOCKDOWN_OFFER_DIAGNOSTICS | THYME_LOCKDOWN_ABORT;
+	message.transaction ^= offer_flag | THYME_LOCKDOWN_ABORT;
 	assert(thyme_usbmux_submit(&message, 0));
 	assert(thyme_usbmux_complete(reply, false) == 28 && reply[21] == 0x14);
 	assert(reply[8] == (uint8_t)(port >> 8) && reply[9] == (uint8_t)port);
@@ -298,7 +299,8 @@ main(void)
 	lockdown_mailbox(reply);
 	large_record(reply);
 	tls_upgrade(reply);
-	diagnostics_service(reply);
-	puts("usbmux v1 replay passed (small and 32 KiB records, stale ACKs, closed ports, TLS upgrade and diagnostics admission)");
+	service_admission(reply, THYME_DIAGNOSTICS_PORT, THYME_LOCKDOWN_DIAGNOSTICS, THYME_LOCKDOWN_OFFER_DIAGNOSTICS);
+	service_admission(reply, THYME_AFC_PORT, THYME_LOCKDOWN_AFC, THYME_LOCKDOWN_OFFER_AFC);
+	puts("usbmux v1 replay passed (small and 32 KiB records, stale ACKs, closed ports, TLS upgrade and service admission)");
 	return 0;
 }

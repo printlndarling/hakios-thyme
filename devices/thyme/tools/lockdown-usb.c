@@ -13,6 +13,7 @@
 #include "hakios.thyme_usbmux.h"
 #include "hdb_network.h"
 #include "lockdown-tls.h"
+#include "afc-ram.h"
 
 static SecKeyRef
 create_device_key(void)
@@ -129,30 +130,32 @@ debug_address(void)
 
 /* The current USB carrier allows one socket at a time. Keep the grant
  * across Lockdown teardown until the new service proves the same identity. */
-struct diagnostics_offer {
+struct service_offer {
 	CFArrayRef record;
 	bool root_client;
+	int port;
 	time_t deadline;
 };
 
 static void
-clear_offer(struct diagnostics_offer *offer)
+clear_offer(struct service_offer *offer)
 {
 	if (offer->record) CFRelease(offer->record);
-	*offer = (struct diagnostics_offer){0};
+	*offer = (struct service_offer){0};
 }
 
 static bool
-open_diagnostics(struct diagnostics_offer *offer, struct lockdown_pairing *pairing,
-    struct lockdown_tls *tls, SecKeyRef key)
+open_service(struct service_offer *offer, struct lockdown_pairing *pairing,
+    struct lockdown_tls *tls, SecKeyRef key, struct afc_ram *afc, int port)
 {
 	lockdown_tls_clear(tls);
+	afc_ram_close(afc);
 	struct timespec now;
 	struct lockdown_certificates certs;
-	bool allowed = offer->record && clock_gettime(CLOCK_MONOTONIC, &now) == 0 &&
+	bool allowed = offer->record && offer->port == port && clock_gettime(CLOCK_MONOTONIC, &now) == 0 &&
 	    now.tv_sec < offer->deadline && lockdown_pair_authorized(pairing, NULL, &certs) &&
 	    certs.root_client == offer->root_client && CFEqual(offer->record, pairing->accepted);
-	bool ready = allowed && lockdown_tls_start(tls, &certs, key);
+	bool ready = allowed && lockdown_tls_start(tls, &certs, key, port == THYME_AFC_PORT ? AFC_REQUEST_MAX : THYME_LOCKDOWN_MESSAGE_MAX);
 	clear_offer(offer);
 	return ready;
 }
@@ -207,7 +210,7 @@ dispatch_diagnostics(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDi
 static void
 dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef info, CFDataRef public_key,
     struct lockdown_pairing *pairing, SecKeyRef key, struct lockdown_tls *tls, bool encrypted,
-    struct diagnostics_offer *offer)
+    struct service_offer *offer)
 {
 	CFTypeRef name = request ? CFDictionaryGetValue(request, CFSTR("Request")) : NULL;
 	if (!name || CFGetTypeID(name) != CFStringGetTypeID()) {
@@ -249,7 +252,7 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 		struct lockdown_certificates certs;
 		if (!lockdown_pair_authorized(pairing, request, &certs)) {
 			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("InvalidHostID"));
-		} else if (!lockdown_tls_start(tls, &certs, key)) {
+		} else if (!lockdown_tls_start(tls, &certs, key, THYME_LOCKDOWN_MESSAGE_MAX)) {
 			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("SessionFailed"));
 		} else {
 			CFDictionarySetValue(reply, CFSTR("SessionID"), tls->id);
@@ -258,18 +261,20 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 	} else if (CFEqual(name, CFSTR("StartService"))) {
 		CFDictionarySetValue(reply, CFSTR("Request"), name);
 		CFTypeRef service = CFDictionaryGetValue(request, CFSTR("Service"));
+		const int port = service && CFEqual(service, CFSTR("com.apple.mobile.diagnostics_relay")) ? THYME_DIAGNOSTICS_PORT :
+		    service && CFEqual(service, CFSTR("com.apple.afc")) ? THYME_AFC_PORT : 0;
 		if (!encrypted) {
 			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("SessionInactive"));
-		} else if (!service || !CFEqual(service, CFSTR("com.apple.mobile.diagnostics_relay"))) {
+		} else if (!port) {
 			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("InvalidService"));
 		} else {
-			const int port = THYME_DIAGNOSTICS_PORT;
 			CFNumberRef number = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &port);
 			struct timespec now;
 			if (number && clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
 				clear_offer(offer);
 				offer->record = CFRetain(pairing->accepted);
 				offer->root_client = tls->root_client;
+				offer->port = port;
 				offer->deadline = now.tv_sec + 15;
 				CFDictionarySetValue(reply, CFSTR("Port"), number);
 				CFDictionarySetValue(reply, CFSTR("EnableServiceSSL"), kCFBooleanTrue);
@@ -317,7 +322,7 @@ static size_t
 frame_reply(const uint8_t *payload, size_t length, uint8_t *output, size_t capacity,
     CFDictionaryRef info, CFDataRef public_key, struct lockdown_pairing *pairing,
     SecKeyRef key, struct lockdown_tls *tls, bool encrypted, bool diagnostics,
-    struct diagnostics_offer *offer, bool *stop, bool *offered)
+    struct service_offer *offer, bool *stop, bool *offered)
 {
 	CFDataRef bytes = CFDataCreate(kCFAllocatorDefault, payload, (CFIndex)length);
 	if (!bytes) return 0;
@@ -360,10 +365,12 @@ frame_reply(const uint8_t *payload, size_t length, uint8_t *output, size_t capac
 static int
 process_tls(struct lockdown_tls *tls, struct thyme_lockdown_message *message, size_t length,
     CFDictionaryRef info, CFDataRef public_key, struct lockdown_pairing *pairing, SecKeyRef key,
-    struct diagnostics_offer *offer)
+    struct service_offer *offer, struct afc_ram *afc)
 {
 	bool diagnostics = (message->transaction & THYME_LOCKDOWN_DIAGNOSTICS) != 0;
-	if ((message->transaction & THYME_LOCKDOWN_NEW_SERVICE) && !open_diagnostics(offer, pairing, tls, key)) {
+	bool file_service = (message->transaction & THYME_LOCKDOWN_AFC) != 0;
+	int port = file_service ? THYME_AFC_PORT : diagnostics ? THYME_DIAGNOSTICS_PORT : THYME_LOCKDOWN_PORT;
+	if ((message->transaction & THYME_LOCKDOWN_NEW_SERVICE) && !open_service(offer, pairing, tls, key, afc, port)) {
 		message->transaction |= THYME_LOCKDOWN_ABORT;
 		return 0;
 	}
@@ -372,20 +379,32 @@ process_tls(struct lockdown_tls *tls, struct thyme_lockdown_message *message, si
 	if (keep && SSL_is_init_finished(tls->connection)) {
 		struct lockdown_certificates certs;
 		keep = lockdown_pair_authorized(pairing, NULL, &certs) && certs.root_client == tls->root_client;
+		if (keep && file_service && afc->root < 0) keep = afc_ram_open(afc);
 		if (!keep) SSL_shutdown(tls->connection);
 	}
-	while (keep && tls->plaintext_length >= sizeof(uint32_t)) {
-		size_t size;
-		if (!parse_size(tls->plaintext, &size)) {
+	size_t header = file_service ? AFC_HEADER_SIZE : sizeof(uint32_t);
+	while (keep && tls->plaintext_length >= header) {
+		size_t frame_size = 0;
+		if (file_service) {
+			frame_size = afc_request_size(tls->plaintext);
+		} else {
+			size_t size;
+			if (parse_size(tls->plaintext, &size)) frame_size = header + size;
+		}
+		if (!frame_size) {
 			SSL_shutdown(tls->connection);
 			keep = false;
 			break;
 		}
-		size_t frame_size = sizeof(uint32_t) + size;
 		if (tls->plaintext_length < frame_size) break;
-		bool stop, offered;
-		size_t reply = frame_reply(tls->plaintext + sizeof(uint32_t), size, message->data,
-		    sizeof(message->data), info, public_key, pairing, key, tls, true, diagnostics, offer, &stop, &offered);
+		bool stop = false, offered = false;
+		size_t reply;
+		if (file_service) {
+			reply = afc_ram_reply(afc, tls->plaintext, frame_size, message->data, sizeof(message->data));
+		} else {
+			reply = frame_reply(tls->plaintext + header, frame_size - header, message->data,
+			    sizeof(message->data), info, public_key, pairing, key, tls, true, diagnostics, offer, &stop, &offered);
+		}
 		size_t written = 0;
 		if (!reply || !SSL_write_ex(tls->connection, message->data, reply, &written) || written != reply) {
 			keep = false;
@@ -401,8 +420,14 @@ process_tls(struct lockdown_tls *tls, struct thyme_lockdown_message *message, si
 		}
 	}
 	int output = lockdown_tls_output(tls, message->data, sizeof(message->data));
-	if (!keep || output < 0) lockdown_tls_clear(tls);
-	if (publish_offer && output > 0) message->transaction |= THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	if (!keep || output < 0) {
+		lockdown_tls_clear(tls);
+		afc_ram_close(afc);
+	}
+	if (publish_offer && output > 0) {
+		message->transaction |= offer->port == THYME_AFC_PORT ?
+		    THYME_LOCKDOWN_OFFER_AFC : THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
+	}
 	return output < 0 ? 0 : output;
 }
 
@@ -427,7 +452,8 @@ main(void)
 	}
 	struct lockdown_pairing pairing = {0};
 	struct lockdown_tls tls = {0};
-	struct diagnostics_offer offer = {0};
+	struct service_offer offer = {0};
+	struct afc_ram afc = {.root = -1};
 	struct thyme_lockdown_message message;
 	const size_t header = sizeof(message.transaction);
 	int status = 0;
@@ -446,9 +472,10 @@ main(void)
 		}
 		size_t length = (size_t)n - header;
 		if (message.transaction & THYME_LOCKDOWN_TLS_RECORD) {
-			length = (size_t)process_tls(&tls, &message, length, info, public_key, &pairing, key, &offer);
+			length = (size_t)process_tls(&tls, &message, length, info, public_key, &pairing, key, &offer, &afc);
 		} else {
 			lockdown_tls_clear(&tls);
+			afc_ram_close(&afc);
 			size_t size;
 			if (length <= sizeof(uint32_t) || !parse_size(message.data, &size) || length != sizeof(uint32_t) + size) {
 				fputs("invalid Lockdown frame length\n", stderr);
@@ -470,6 +497,7 @@ main(void)
 		} while (n < 0 && errno == EINTR);
 		if (n < 0 && errno == ESTALE) {
 			lockdown_tls_clear(&tls);
+			afc_ram_close(&afc);
 			continue; /* USB disconnected during the user-space request. */
 		}
 		if (n != (ssize_t)(header + length)) {
@@ -478,6 +506,7 @@ main(void)
 			break;
 		}
 	}
+	afc_ram_close(&afc);
 	clear_offer(&offer);
 	lockdown_tls_clear(&tls);
 	lockdown_pair_clear(&pairing);

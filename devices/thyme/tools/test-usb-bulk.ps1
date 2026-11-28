@@ -309,14 +309,14 @@ public static class ThymeUsbLoopback
                 Console.WriteLine("refused");
                 return null;
             }
-            if ((port != 62078 && port != 62080) || reply[21] != 0x12)
+            if ((port != 62078 && port != 62080 && port != 62081) || reply[21] != 0x12)
                 throw new IOException("Unexpected usbmux SYN/ACK");
             uint ack = unchecked(Read32(reply, 12) + 1);
             SendTcp(handle, port, seq, ack, 0x10, null, 0, 0);
             Console.WriteLine("connected");
             try
             {
-                bool tls = port == 62080;
+                bool tls = port == 62080 || port == 62081;
                 for (string line; (line = Console.ReadLine()) != null;)
                 {
                     if (line == "TLS" && !tls)

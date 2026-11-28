@@ -1,5 +1,32 @@
 ## Chronological Verification Logs & Evidence
 
+## Standard AFC file transfer in RAM on thyme (2026-11-29)
+
+- The 300 s guarded run used kernel `4fbb328832d1` and companion
+  `36034857e270`. The unmodified libimobiledevice AFC API opened the
+  authenticated service on port 62081 and wrote 100 KiB, then 1 MiB,
+  as single AFC requests in separate suites.
+- Each suite read back the file after software USB reattachment with
+  a matching SHA-256. File metadata, directory listing, EOF, seek,
+  tell, ranged reads and removal passed. The larger suite also
+  rejected the old handle after reconnect.
+- The service confined writes to `/private/var/tmp/hakios-afc` on
+  ramfs. Attempts to follow a symlink to the system image, traverse a
+  parent component or open the system file from the AFC root failed.
+  Removing the RAM approval stopped an active AFC connection.
+- The unmodified ideviceinfo and idevicediagnostics TLS regressions
+  passed. HDB read controller stage 2, configuration 1, two software
+  reconnects and zero invalid mux frames.
+- The guard returned to Android. The full logdump SHA-256 matched
+  before and after, and private USB discovery was empty.
+- Evidence is in `out/thyme-boot/usb-afc.KRRZT0y6/`.
+  `afc-transfer.log` SHA-256
+  `e164861361f2516f999d27cdfb60d380629ed9e1028061e99df9abc6bc97cb69`.
+  `afc-large.log` SHA-256
+  `a7f7304b7b02a7ef47edfe76fbe502a758669e2e446a2c1881d7e1a552d7bb4c`.
+  `diagnostics-regression.log` SHA-256
+  `6b1d5e24dcc9031869f3ea4e92e69db9a4aeb76cbcb2f20b6f6328fc5fea568f`.
+
 ## Standard USB diagnostics through StartService (2026-11-29)
 
 - The 240 s guarded run used kernel `18a239f6c58f` and companion

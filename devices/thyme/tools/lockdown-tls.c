@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <openssl/err.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static X509 *
 decode_certificate(CFDataRef data)
@@ -36,15 +37,19 @@ lockdown_tls_clear(struct lockdown_tls *tls)
 	SSL_free(tls->connection);
 	X509_free(tls->client);
 	if (tls->id) CFRelease(tls->id);
-	OPENSSL_cleanse(tls->plaintext, tls->plaintext_length);
+	if (tls->plaintext) {
+		OPENSSL_cleanse(tls->plaintext, tls->plaintext_length);
+		free(tls->plaintext);
+	}
 	tls->connection = NULL;
 	tls->client = NULL;
 	tls->id = NULL;
-	tls->plaintext_length = 0;
+	tls->plaintext = NULL;
+	tls->plaintext_length = tls->plaintext_capacity = 0;
 }
 
 bool
-lockdown_tls_start(struct lockdown_tls *tls, const struct lockdown_certificates *certs, SecKeyRef key)
+lockdown_tls_start(struct lockdown_tls *tls, const struct lockdown_certificates *certs, SecKeyRef key, size_t capacity)
 {
 	CFUUIDRef uuid = CFUUIDCreate(kCFAllocatorDefault);
 	tls->id = uuid ? CFUUIDCreateString(kCFAllocatorDefault, uuid) : NULL;
@@ -80,12 +85,14 @@ lockdown_tls_start(struct lockdown_tls *tls, const struct lockdown_certificates 
 
 	BIO *input = tls->connection ? BIO_new(BIO_s_mem()) : NULL;
 	BIO *output = tls->connection ? BIO_new(BIO_s_mem()) : NULL;
-	if (!input || !output) {
+	tls->plaintext = tls->connection ? malloc(capacity) : NULL;
+	if (!input || !output || !tls->plaintext) {
 		BIO_free(input);
 		BIO_free(output);
 		lockdown_tls_clear(tls);
 		return false;
 	}
+	tls->plaintext_capacity = capacity;
 	SSL_set_bio(tls->connection, input, output);
 	SSL_set_accept_state(tls->connection);
 	return true;
@@ -106,7 +113,7 @@ lockdown_tls_receive(struct lockdown_tls *tls, const uint8_t *bytes, size_t leng
 		}
 		return true;
 	}
-	size_t available = sizeof(tls->plaintext) - tls->plaintext_length, read_size = 0;
+	size_t available = tls->plaintext_capacity - tls->plaintext_length, read_size = 0;
 	if (!available) {
 		return false;
 	}
