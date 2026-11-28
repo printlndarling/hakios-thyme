@@ -151,5 +151,27 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.server.transport.calls, [])
 
 
+class DirectAddressTest(unittest.TestCase):
+    def test_reads_the_debug_address_over_the_same_lockdown_port(self):
+        transport = Transport()
+
+        def exchange(frame):
+            self.assertEqual(plistlib.loads(frame[LOCKDOWN_HEADER.size:]),
+                             {"Request": "GetValue", "Domain": "com.hakios.debug", "Key": "SSHAddress"})
+            reply = plistlib.dumps({"Value": "192.168.10.6"})
+            return LOCKDOWN_HEADER.pack(len(reply)) + reply
+
+        transport.exchange = exchange
+        self.assertEqual(bridge["ssh_address"](transport), "192.168.10.6")
+        self.assertEqual(transport.calls, [("list",), (62078, LOCATION)])
+
+    def test_device_absence_refuses_a_connection(self):
+        transport = Transport()
+        transport.present = False
+        with self.assertRaisesRegex(ValueError, "no thyme development WinUSB device"):
+            bridge["ssh_address"](transport)
+        self.assertEqual(transport.calls, [("list",)])
+
+
 if __name__ == "__main__":
     unittest.main()

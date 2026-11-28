@@ -5,9 +5,11 @@ import argparse
 import base64
 from contextlib import contextmanager
 import errno
+import ipaddress
 import os
 from pathlib import Path
 import plistlib
+import queue
 import re
 import select
 import socket
@@ -35,7 +37,9 @@ PROBE = Path(__file__).with_name("test-usb-bulk.ps1").resolve()
 
 class WinUSB:
     def __init__(self):
-        self.path = subprocess.check_output(["wslpath", "-aw", str(PROBE)], text=True).strip()
+        self.path = str(PROBE) if sys.platform == "win32" else subprocess.check_output(
+            ["wslpath", "-aw", str(PROBE)], text=True,
+        ).strip()
 
     def argv(self, options):
         quoted = self.path.replace("'", "''")
@@ -86,9 +90,26 @@ class WinUSBSession:
         self.tls = False
 
     def line(self, timeout):
-        if not select.select([self.process.stdout], [], [], timeout)[0]:
-            raise TimeoutError("WinUSB session timed out")
-        line = self.process.stdout.readline(MAX_ENCODED_LINE)
+        if sys.platform == "win32":
+            # Windows select() only accepts sockets. A timed-out read is
+            # unblocked when connect() closes the child process.
+            result = queue.SimpleQueue()
+            def read():
+                try:
+                    result.put(self.process.stdout.readline(MAX_ENCODED_LINE))
+                except OSError as error:
+                    result.put(error)
+            threading.Thread(target=read, daemon=True).start()
+            try:
+                line = result.get(timeout=timeout)
+            except queue.Empty as error:
+                raise TimeoutError("WinUSB session timed out") from error
+            if isinstance(line, OSError):
+                raise line
+        else:
+            if not select.select([self.process.stdout], [], [], timeout)[0]:
+                raise TimeoutError("WinUSB session timed out")
+            line = self.process.stdout.readline(MAX_ENCODED_LINE)
         if not line.endswith(b"\n"):
             raise ValueError("incomplete WinUSB response")
         return line.strip()
@@ -133,7 +154,9 @@ def result(number):
     return {"MessageType": "Result", "Number": number}
 
 
-class MuxServer(socketserver.ThreadingUnixStreamServer):
+# The socket adapter is only constructed inside WSL. Native Windows
+# imports this program for direct WinUSB discovery.
+class MuxServer(getattr(socketserver, "ThreadingUnixStreamServer", socketserver.BaseServer)):
     def __init__(self, address, transport):
         self.transport = transport
         self.location = None
@@ -281,13 +304,40 @@ class Client(socketserver.StreamRequestHandler):
                 self.wfile.write(reply)
 
 
+def ssh_address(transport):
+    location = transport.probe()
+    if location is None:
+        raise ValueError("no thyme development WinUSB device found")
+    body = plistlib.dumps({"Request": "GetValue", "Domain": "com.hakios.debug", "Key": "SSHAddress"})
+    with transport.connect(62078, location) as (state, session):
+        if state != b"connected":
+            raise ValueError("the thyme development Lockdown service is unavailable")
+        reply = session.exchange(LOCKDOWN_HEADER.pack(len(body)) + body)
+    response = plistlib.loads(reply[LOCKDOWN_HEADER.size:])
+    address = response.get("Value") if isinstance(response, dict) else None
+    if not isinstance(address, str):
+        raise ValueError("the development scene did not report a Wi-Fi address")
+    return str(ipaddress.IPv4Address(address))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ssh-address", action="store_true", help="query the HDB Wi-Fi address directly over WinUSB")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="WSL client command to run with the private socket")
     args = parser.parse_args()
     command = args.command
     if command and command[0] == "--":
         command = command[1:]
+    if args.ssh_address:
+        if command:
+            parser.error("--ssh-address does not take a client command")
+        try:
+            print(ssh_address(WinUSB()))
+        except (OSError, ValueError, ExpatError, subprocess.SubprocessError) as error:
+            parser.exit(1, f"WinUSB discovery failed: {error}\n")
+        return 0
+    if sys.platform == "win32":
+        parser.error("use --ssh-address on native Windows or run the socket bridge within WSL")
     if not command:
         parser.error("supply a client command after --")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 
 from framebuffer import write_snapshot_png
@@ -31,10 +32,16 @@ def lan_ip(value):
 
 
 def usb_host():
+    command = USB_ADDRESS
+    native_windows = sys.platform == 'win32'
+    if native_windows:
+        probe = ROOT / 'devices/thyme/tools/usbmux-winusb.py'
+        command = [sys.executable, str(probe), '--ssh-address']
     try:
-        info = subprocess.run(USB_ADDRESS, capture_output=True, text=True, check=True, timeout=20)
+        info = subprocess.run(command, capture_output=True, text=True, check=True, timeout=35 if native_windows else 20)
     except FileNotFoundError as error:
-        raise ValueError('USB discovery requires ideviceinfo on PATH') from error
+        dependency = 'the bundled WinUSB probe' if native_windows else 'ideviceinfo on PATH'
+        raise ValueError(f'USB discovery requires {dependency}') from error
     except subprocess.SubprocessError as error:
         raise ValueError('USB discovery could not query the thyme development device') from error
     try:

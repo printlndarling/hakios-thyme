@@ -89,7 +89,7 @@ the loader's existing live USB control channel.
 On the same device, Windows OpenSSH 9.5.4.1 verified the device pin,
 authenticated with a Windows-generated key and received UID 0. Its
 SFTP upload and readback matched by SHA-256. The WSL2 client passed
-its smoke checks in the same boot. Native macOS, automatic discovery,
+its smoke checks in the same boot. Native macOS discovery,
 unified log streaming, screen power state and deployment of long-lived
 services have separate acceptance.
 
@@ -350,11 +350,20 @@ The last option detaches and reattaches the USB interface before
 
 When the development scene contains both HDB and the USB Lockdown
 probe, HDB can read the current DHCP address from the phone before each
-connection. Keep the original `ideviceinfo` on PATH.
+connection. On WSL2, keep the original `ideviceinfo` on PATH.
 
 ```sh
 python3 devices/thyme/tools/usbmux-winusb.py -- \
   python3 tools/hdb.py --usb shell /var/jb/usr/bin/uname -r
+```
+
+On native Windows, HDB uses the repository's WinUSB probe directly.
+Use a Windows-local state directory with the Windows private
+`client_key` enrolled in the image and the corresponding device pin
+in `known_hosts`.
+
+```powershell
+python.exe .\tools\hdb.py --state PATH_TO_WINDOWS_HDB_STATE --usb shell /var/jb/usr/bin/uname -r
 ```
 
 The probe reads `SSHAddress` in the `com.hakios.debug` domain. It
@@ -364,7 +373,9 @@ The address can change whenever DHCP assigns a new lease. HDB uses the
 address for the TCP connection and verifies the enrolled SSH host key.
 On thyme, WSL2 opened a pinned shell before and after software USB
 reattachment and transferred files after reattachment. Native Windows
-OpenSSH accepted the discovered address with its own enrolled key.
+HDB also discovered the address over WinUSB, authenticated with its own
+enrolled key, transferred a test file over SFTP, and recovered after
+software USB reattachment. A different host pin failed verification.
 Use `--usb` for shell, push and pull. Use `--host` for a LAN-only session.
 
 #### Capture a live screenshot over SSH

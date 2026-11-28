@@ -1,5 +1,23 @@
 ## Chronological Verification Logs & Evidence
 
+## Native Windows HDB discovers the LAN address over WinUSB (2026-11-29)
+
+- The 180 s guarded run used kernel `de21a78ef697` and companion
+  `8f6d80358d94`. The native Windows Python client read the current
+  DHCP address directly from the development Lockdown endpoint.
+- Windows OpenSSH authenticated with its own enrolled key, returned
+  UID 0, and passed SFTP upload and readback with matching SHA-256.
+  The client refused a different pinned host key.
+- After the software USB reattach, native HDB rediscovered the address
+  and opened a pinned SSH shell. DWC3 readouts showed stage 2,
+  reconnect count 1, and zero invalid mux frames.
+- Android returned after the guard reset. The native probe reported
+  the development interface absent, and the full logdump digest
+  matched before and after.
+- Evidence is in `out/thyme-boot/hdb-windows-usb.LdJWH8yE/`.
+  `native-verified.log` SHA-256
+  `51954997d3a08c0966fcdd601408d09b7a02ebf1084780024d58769491e51cb1`.
+
 ## Live system version and Windows device discovery check (2026-11-29)
 
 - The 180 s guarded run used kernel `de21a78ef697` and companion

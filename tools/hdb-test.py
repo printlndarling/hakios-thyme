@@ -61,6 +61,15 @@ class USBDiscovery(unittest.TestCase):
             self.assertEqual(hdb.usb_host(), '192.168.10.6')
         run.assert_called_once_with(hdb.USB_ADDRESS, capture_output=True, text=True, check=True, timeout=20)
 
+    def test_windows_queries_the_bundled_winusb_probe(self):
+        info = subprocess.CompletedProcess([], 0, stdout='192.168.10.6', stderr='')
+        with patch.object(hdb.sys, 'platform', 'win32'), \
+                patch.object(hdb.subprocess, 'run', return_value=info) as run:
+            self.assertEqual(hdb.usb_host(), '192.168.10.6')
+        probe = hdb.ROOT / 'devices/thyme/tools/usbmux-winusb.py'
+        run.assert_called_once_with([hdb.sys.executable, str(probe), '--ssh-address'], capture_output=True,
+                                    text=True, check=True, timeout=35)
+
     def test_rejects_absent_public_and_ambiguous_addresses(self):
         for stdout in ('', '203.0.113.5', '169.254.0.2', '192.168.10.6\n192.168.10.7', '-oProxyCommand=x'):
             with self.subTest(stdout=stdout):
