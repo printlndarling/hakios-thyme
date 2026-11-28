@@ -57,6 +57,7 @@ __pycache__/
 
 /userland/*
 !/userland/build.sh
+!/userland/hdb_sshd_config
 !/userland/sileo-seed.sh
 !/userland/share/
 !/userland/share/sileo/

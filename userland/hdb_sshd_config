@@ -1,0 +1,17 @@
+AddressFamily inet
+Port 2222
+HostKey /redwood/etc/hdb/host_key
+AuthorizedKeysFile /redwood/etc/hdb/authorized_keys
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+UsePAM no
+StrictModes yes
+DisableForwarding yes
+PermitUserEnvironment no
+PermitUserRC no
+UseDNS no
+PidFile /var/run/hdb-sshd.pid
+Subsystem sftp internal-sftp

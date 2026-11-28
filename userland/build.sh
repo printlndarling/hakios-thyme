@@ -28,6 +28,8 @@
 #                      RC_JOBS=<file> what the job com.hakios.demo runs: rc.jobs (default), or
 #                                   rc.jobs.unlock, which also swipes the lock screen away (for the phone,
 #                                   where nothing else can touch the screen yet).
+#                                   rc.jobs.ssh enables key-only LAN debugging for the peer from
+#                                   tools/hdb.py prepare. HDB_STATE can override ../ssh/hdb.
 #                                   A job list cannot assume a shell. Darwin 16.5's own root has none at all
 #                                   -- /bin is df and ps, and nothing else -- so a line beginning /bin/sh
 #                                   fails with "No such file or directory" and status 127 on a flash-root
@@ -224,11 +226,33 @@ else
 	done
 fi
 
+hdb_state=
+if [ "${RC_JOBS##*/}" = rc.jobs.ssh ]; then
+	hdb_state=${HDB_STATE:-../ssh/hdb}
+	if [ -n "$SHARE" ] || [ -n "$PREBUILT" ]; then
+		echo "build.sh: rc.jobs.ssh requires a local compile with SHARE unset" >&2
+		exit 1
+	fi
+	for f in peer authorized_keys host_key; do
+		if [ ! -s "$hdb_state/$f" ]; then
+			echo "build.sh: missing $hdb_state/$f (run tools/hdb.py prepare)" >&2
+			exit 1
+		fi
+	done
+	$DYN -o obj/hdb_ssh src/hdb_ssh.c
+fi
+
 # --- the small image ------------------------------------------------------------------------------
 rm -rf root
 mkdir -p root/sbin root/bin root/etc root/share root/LaunchDaemons
 cp obj/init root/sbin/init
 cp obj/child root/bin/child
+if [ -n "$hdb_state" ]; then
+	install -m 0755 obj/hdb_ssh root/bin/
+	install -d -m 0700 root/etc/hdb
+	install -m 0600 "$hdb_state/peer" "$hdb_state/authorized_keys" "$hdb_state/host_key" root/etc/hdb/
+	install -m 0600 hdb_sshd_config root/etc/hdb/sshd_config
+fi
 # The data volume into the flash and back (src/var_store.c), and the job that saves it when a run
 # ends: the program and its job together, away from the Darwin job list below, which several working
 # copies are editing at once.
@@ -664,26 +688,6 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	# Metal's compiled shader stages (HakiosMetalCA.m: HM_CACHE_DIR): in /var/db so that var_store keeps them (it
 	# leaves tmp out), open to every user like tmp, since the window server may not be root
 	printf 'd\t1777\t0\t0\t/private/var/db/hakios-metal-cache\n' >> root/etc/var.skel
-	# A key of ours for root, when there is one: ssh/authorized_keys, never in the repository (like
-	# fw-*). dropbear from the package manager's prefix reads it and lets us in over the phone's
-	# Wi-Fi, which saves rebuilding an image for every question one wants to ask a running Darwin. It
-	# refuses a key whose directory anyone but its owner may write, hence the 700.
-	# SHARE=1: no keys in an image that is going to somebody else. ssh_host_ed25519_key is a
-	# private key, and it would be leaving this machine inside a 2.5 GB container
-	if [ -z "$SHARE" ] && [ -f ../ssh/authorized_keys ]; then
-		mkdir -p root/var/root/.ssh
-		printf 'd\t700\t0\t0\t/private/var/root/.ssh\n' >> root/etc/var.skel
-		# the key that lets us in, and the host's own key beside it: made here and not on the
-		# phone, because ssh-keygen asks who uid 0 is and gets "No user exists for uid 0" --
-		# it asks through libiosexec, which reads a database the bootstrap does not ship (see
-		# init.c, where it is now built at every boot); the key is made here all the same,
-		# since nothing should depend on the order of those two
-		for k in authorized_keys ssh_host_ed25519_key ssh_host_ed25519_key.pub; do
-			[ -f ../ssh/$k ] || continue
-			cp ../ssh/$k root/var/root/.ssh/$k
-			printf 'f\t600\t0\t0\t/private/var/root/.ssh/%s\t/var/root/.ssh/%s\n' $k $k >> root/etc/var.skel
-		done
-	fi
 	# the third-party install helper (rc.jobs.apptest5): a list line cannot carry ">> FILE 2>&1",
 	# and the /var/jb graft's links have to be replaced by real files before an app can exec
 	cp bin/hk-appinstall.sh root/bin/hk-appinstall.sh
@@ -890,11 +894,10 @@ echo "build.sh: fw/: $(ls -1 root/fw 2>/dev/null | wc -l) files from ../fw-*:${f
 # private key for ssh. Both are one small file inside 2.5 GB, and nobody would notice either leave.
 secrets=
 [ -f root/fw/network ] && secrets="$secrets fw/network (the name and passphrase of your Wi-Fi)"
-[ -f root/var/root/.ssh/ssh_host_ed25519_key ] &&
-	secrets="$secrets /var/root/.ssh/ssh_host_ed25519_key (a private key)"
+[ -f root/etc/hdb/host_key ] && secrets="$secrets /redwood/etc/hdb/host_key (a private key)"
 if [ -n "$secrets" ]; then
 	echo "build.sh: this image carries:$secrets"
-	echo "build.sh: do not pass it on as it is; SHARE=1 builds the same image without them."
+	echo "build.sh: use a regular scene with SHARE=1 when making an image for others."
 fi
 # When the Darwin volume on the phone's flash is to become the root (boot-arg root_apfs=ufs_darwin,
 # with flashboot.apfs resident; src/init.c, flash_root): an empty directory to hide Darwin's
