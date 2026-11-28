@@ -47,7 +47,7 @@ class SoakTest(unittest.TestCase):
             os.environ, PATH=f"{self.root}:{os.environ['PATH']}", XL_ADB_SERIAL="",
             SYSTEM_IMAGE="image", SCENE="image", XL_BOOT_IMAGE="boot.img", XL_LOADER="image",
             SOAK_SECS="5", SOAK_STEP="1", SOAK_METAL_APPS="0", SOAK_UIM_READONLY="0", TEST_UIM_READONLY="0", TEST_METAL="0",
-            SOAK_USB_HANDOFF="0", TEST_USB_HANDOFF="0", SOAK_DSDS_PROBE="0", TEST_DSDS_PROBE="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
+            SOAK_USB_HANDOFF="0", TEST_USB_HANDOFF="0", SOAK_USB_GADGET="0", TEST_USB_GADGET="0", SOAK_DSDS_PROBE="0", TEST_DSDS_PROBE="0", TEST_METAL_BUNDLE="1", TEST_LEVEL="75", TEST_LOG=TIMER,
             TEST_PRODUCT="thyme", TEST_FASTBOOT="", TEST_RUN_EXIT="0", TEST_PAYLOAD_EXIT="0",
         )
         self.env.pop("XL_FOLLOW", None)
@@ -98,6 +98,12 @@ case "$1" in
             *" pcie2_dsds_probe=1 "*:1)
                 [ "$XL_FOLLOW:$XL_FOLLOW_KEEP" = '5:1' ] || exit 1 ;;
             *" pcie2_dsds_probe=1 "*) exit 1 ;;
+            *:0) ;;
+            *) exit 1 ;;
+        esac
+        case " $XL_CMDLINE :$TEST_USB_GADGET" in
+            *" usb_gadget=1 "*:1) ;;
+            *" usb_gadget=1 "*) exit 1 ;;
             *:0) ;;
             *) exit 1 ;;
         esac
@@ -156,6 +162,15 @@ esac
         failed = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1", TEST_RUN_EXIT="2")
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("USB handoff run failed", failed.stderr)
+
+    def test_usb_gadget_requires_handoff(self):
+        refused = self.soak(SOAK_USB_GADGET="1")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("requires SOAK_USB_HANDOFF=1", refused.stderr)
+        self.assertFalse((self.root / "uploaded").exists())
+        result = self.soak(SOAK_USB_HANDOFF="1", TEST_USB_HANDOFF="1",
+                           SOAK_USB_GADGET="1", TEST_USB_GADGET="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_early_or_unclean_exit(self):
         for log in ("", GUARD, TIMER + "\npanic(cpu 7 caller 0x123): test"):

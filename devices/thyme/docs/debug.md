@@ -128,6 +128,40 @@ over SSH while the kernel is live, because it discards the RAM log at
 reset. Use standard RAM Boot for the final kernel log and the
 `loader_return_after expired` marker.
 
+### XNU USB 2.0 control endpoint probe
+
+Build the kernel with `CONFIG_HAKIOS_THYME_USB=y` (included in
+`make thyme_defconfig`) and rebuild the thyme loader. Use the debug RAM
+scene and launch from Android with the cable connected:
+
+```sh
+SOAK_USB_HANDOFF=1 SOAK_USB_GADGET=1 SOAK_UIM_READONLY=1 SOAK_SECS=175 \
+  SCENE=PATH_TO_DEBUG_SCENE devices/thyme/soak.sh
+```
+
+Use `XL_KERNEL` with an out-of-tree kernel binary. The probe requires the
+loader's handoff property and verifies that DWC3 is halted before
+reprogramming it. Inspect the controller from the pinned LAN client:
+
+```sh
+python3 tools/hdb.py --host PHONE_LAN_IP shell /var/jb/usr/sbin/sysctl kern.hakios.thyme_usb
+```
+
+Stage 2 denotes a running controller. The `connect`, `reset`, `setup`,
+`address` and `configuration` fields show separate progress through USB
+enumeration. The Qualcomm USB2 session-valid override follows the
+charger report and is restored when the kernel leaves. The test
+descriptor identifies the device as HakiOS thyme with control endpoint
+EP0. Its Microsoft OS descriptors advertise the in-box WinUSB driver.
+Windows reported problem code 0 and the XNU probe reached configuration
+1. USB data services need bulk endpoints and a registered device
+interface. See [Microsoft's WinUSB device requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/automatic-installation-of-winusb).
+
+`1209:0001` is non-unique and reserved for private testing. Obtain an
+assigned identity before distributing a device that enumerates. See
+[pid.codes' Test PID](https://pid.codes/1209/0001/) and the
+[Qualcomm USB wrapper registers](https://github.com/torvalds/linux/blob/master/drivers/usb/dwc3/dwc3-qcom.c).
+
 ### USB Gadget and services
 
 In standard RAM Boot, Windows lists `VID_18D1&PID_D00D` as the Android
@@ -137,9 +171,9 @@ controller's identification and status. The next stage is to use the
 halted controller for an XNU device-mode driver and verify its shutdown
 during the timed return.
 
-1. Bring up the XNU USB Device driver with the EFI interface stopped.
-   Validate enumeration, endpoint transfers, disconnect, reconnect
-   and timed shutdown on the native host.
+1. Add XNU bulk data endpoints after the Windows EP0 milestone.
+   Validate transfers, cable reconnect, timed shutdown and native
+   enumeration on macOS and Linux.
 2. Validate discovery and transport with usbmuxd and libimobiledevice,
    then implement and test trust and lockdown session handling. Export
    actual thyme hardware and OS information where the protocol permits,

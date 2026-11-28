@@ -1,5 +1,40 @@
 ## Chronological Verification Logs & Evidence
 
+## XNU USB 2.0 EP0 on thyme (2026-11-28)
+
+- The control endpoint probe starts only after explicit RAM Boot
+  handoff and a halted DWC3. The first 175 s run used kernel
+  `e9b28d1b0477` and loader `79f1fad4d1c6`. The running controller
+  held `DSTS=0x00920001` and reported zero bus resets, connect events
+  and SETUP packets. Windows recorded no test gadget.
+- The second 175 s run, kernel `d62ac03ac94b`, drove the Qualcomm USB2
+  session-valid signal from charger telemetry. Windows read
+  `USB\VID_1209&PID_0001&REV_0100` and the bus-reported name
+  `HakiOS thyme USB test`. The device reported address 23, one reset,
+  one connect event, 34 events and seven SETUP packets. The Windows
+  device node stopped being present roughly 14 s after enumeration.
+  Later SSH samples showed `DEVCTRLHLT=1` with the software session
+  still valid and configuration 0.
+- The 150 s WinUSB repeat used kernel `904e6c61dc23`, the same loader
+  and boot image `90d71be52b94`. Native Windows bound `winusb.inf`,
+  reported compatible ID `USB\MS_COMP_WINUSB` and problem code 0,
+  then kept the device present for about 160 s until the end of the
+  run. The pinned LAN client read `DCTL=0x80000000`, high-speed DSTS,
+  configuration 1, address 27, 24 SETUP packets and 121 events.
+  The interface remained a control-endpoint probe.
+- Host replay covered 23 standard and Microsoft descriptor requests
+  under AddressSanitizer and UndefinedBehaviorSanitizer, including seven
+  expected stalls. The ten guarded launcher tests passed.
+- All three runs returned to completed Android boots and their whole
+  `logdump` SHA-256 values matched before and after. The WinUSB run
+  completed Android boot 200 s after launch. The kernel and loader
+  images were staged in RAM with the UIM read-only option.
+- Evidence is under `out/thyme-boot/usb-ep0.8OdSopwV/`.
+  `winusb/windows-usb.log` SHA-256
+  `5ece171afd7a62df6900fed8e38b37d5bceb6b7448fdb3a9c61550725a93570c`.
+  `winusb/ssh-evidence.log` SHA-256
+  `bc4ef116f591659581f58bd013a8784a43fd5a0c24e63182ce3b59107ee0713b`.
+
 ## EFI USB controller handoff on thyme (2026-11-28)
 
 - The guarded launcher stages the normal RAM payload and explicitly asks

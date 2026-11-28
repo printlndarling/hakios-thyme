@@ -62,6 +62,7 @@ extern void hakios_camera_quiesce(void);
 extern void hakios_mic_quiesce(void);
 extern void hakios_ufs_quiesce(void);
 extern void hakios_wdt_quiesce(void) __attribute__((weak));
+extern void hakios_thyme_usb_quiesce(void) __attribute__((weak));
 extern void hakios_var_save_on_return(void);   /* drivers/storage/hakios.ufs.c: the data volume into the flash */
 void loader_checkpoint(uint64_t n);
 
@@ -374,6 +375,9 @@ loader_return(void)
 	 */
 	psci_smp_stop_others();
 #endif
+	if (hakios_thyme_usb_quiesce) {
+		hakios_thyme_usb_quiesce();
+	}
 	if (hakios_wdt_quiesce) {
 		hakios_wdt_quiesce();
 	}

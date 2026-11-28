@@ -1,0 +1,5 @@
+# THYME USB peripheral controller.
+driver THYME_USB
+	file    bsd/dev/hakios.thyme_usb.c
+	help    RAM Boot USB 2.0 device-mode probe with a control endpoint
+	help    (usb_gadget=1 and an explicit EFI USB handoff).
