@@ -1,5 +1,41 @@
 ## Chronological Verification Logs & Evidence
 
+## Vectorized Bayer preview and per-session pacing (2026-11-28)
+
+- Preview row caches now hold RGB values with both green sites averaged.
+  The arm64 media library uses four-lane instructions for colour
+  interpolation. Host rear and front fixtures rendered 1504×1128
+  NV12 with at most one code value difference per byte from the scalar
+  implementation. The same bound held for BGRA and eight-slice NV12
+  under ASan/UBSan. The NV12 chroma boundary and all four Bayer order
+  tests passed.
+- Two 122 s guarded RAM tests used kernel `faedd6175a35`, loader
+  `11f4e0271c65` and the same camera switch scene. Both media libraries
+  recorded preview timing. The scene trees differed only in that
+  library. Baseline root `50238a609f53` and vectorized root
+  `32cd183e1803` each delivered three rear and two front sessions.
+- Rear ISP averages went from 73.41–80.77 ms to 52.03–55.25 ms.
+  Average time from kernel-ready to graph submission fell from
+  94.26–100.27 ms to 71.65–79.20 ms. Average gaps in rear graph delivery
+  fell from 85.95–90.07 ms to 61.81–68.98 ms. The longest rear delivery
+  gap increased from 267.40 ms to 350.18 ms. Thermal throttling was
+  active during both runs.
+- Front ISP averages went from 71.39–83.95 ms to 44.58–44.95 ms.
+  Average front graph delivery gaps fell from 75.68–89.87 ms to
+  49.09–49.52 ms. Both runs reported zero preview pool misses. Recorded
+  DMA guard samples showed no faults. The measurements end at graph
+  submission. Motion tracking, occasional flashes, front colour blocks,
+  softness and noise still require manual screen checks.
+- Both runs returned to completed Android boots. `logdump` SHA-256
+  matched before and after. The map-free system images retained
+  `83e304d77605`. Final logs are `logs/soak.BYXWFX7N/kernel.log`
+  (SHA-256 `63f22a78a25a909067f06f54673b95a0410559d7aa19287f83e6666214e80b02`)
+  and `logs/soak.rssty2fQ/kernel.log`
+  (SHA-256 `256c82e732806108551c5e77b6da9c05919deefbd21fb1fc4aa17ec7b536bc25`).
+  The extracted measurements and the wireless/full test scene are in
+  `out/thyme-boot/camera-shading.vBoEsTsZ/`. The latter passed the
+  component and payload-size checks with root `6b1042723b12`.
+
 ## Planned GPT identity for the Android data writer (2026-11-28)
 
 - The host writer validates both GPT copies and derives the APFS
