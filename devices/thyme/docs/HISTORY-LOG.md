@@ -1,5 +1,34 @@
 ## Chronological Verification Logs & Evidence
 
+## Read-only Darwin flash-root boot in QEMU (2026-11-28)
+
+- The host packer validated the raw 16.5 APFS superblocks and assembled
+  the Darwin, OS cryptex and App cryptex containers at 4 KiB blocks 0,
+  1374208 and 2039808. The 8,365,539,328-byte prefix ends at the HFSX
+  boundary. Each output range compared byte for byte with its input.
+  The prefix SHA-256 was
+  `9efb156f417e32b6f92d709af33c0e8e584693c3fbd29eaf139b57eee3735560`
+  before and after the read-only runs. The host regression also covered
+  a bad superblock checksum, truncation, crossing the data boundary and
+  an output hardlinked to an input.
+- The flash-root recipe with the phone audio firmware, GL and Bluetooth
+  produced an 87,561,224-byte payload. The loader rejected it at its
+  63 MiB limit. The reduced QEMU payload was 39,130,120 bytes, with the
+  optional package manager and phone audio firmware omitted. The runs
+  used kernel `faedd6175a35` and QEMU with two CPUs and 5 GiB RAM.
+- QEMU loaded the same payload first from memory and then directly from
+  the ESP's `\EFI\hakios\payload.bin`. Both runs switched the root to
+  the read-only virtio disk, mounted OS and App from its containers 1
+  and 2, and reached SpringBoard and backboardd's shell bootstrap.
+  The host stopped QEMU on the 120 s and 95 s limits, respectively.
+  Logs under `out/thyme-boot/flash-root.eySFnims/` are
+  `qemu-flash-lean.log` (SHA-256
+  `4216843641382c18f4312809beeb941b41767743525e62c41d54d7653658ef70`)
+  and `qemu-flash-esp.log` (SHA-256
+  `4d3a25e6d78a66d0a589631e3effca9cb9734656f5f1f3dc8ef599dbfe4e8422`).
+  Mi 10S was outside this test. UFS provisioning, the physical boot
+  path and the full configuration payload remain open.
+
 ## Per-subscription NAS registration on thyme (2026-11-28)
 
 - The optional NAS probe uses separate QRTR client ports for primary

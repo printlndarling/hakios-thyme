@@ -22,8 +22,8 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 | 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
 | 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest. All 12 GPT ranges also matched a read-only comparison against the connected thyme |
 | 2 | **Carve `darwin`** off the end of Android's userdata | An authorized resize moves F2FS data and changes both GPT copies. An independently recoverable Android user-data backup is required. | Host planner tested. The non-wipe path requires a matching F2FS readback before generating either GPT file. The attached thyme currently has no `darwin`. |
-| 3 | **Provision the root and data regions in `darwin`** | Writes would be limited to the approved `darwin` layout and read back. | Host HFSX image generation from paired GPT snapshots and two QEMU persistence boots passed. Root and cryptex provisioning for the actual thyme partition remains open. The existing Android writer still requires the legacy `sda34` identity. |
-| 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | **not verified**: the arguments the flash recipe needs are not confirmed. Repeat until it is boring; this is the gate before stage 5 |
+| 3 | **Provision the root and data regions in `darwin`** | Writes would be limited to the approved `darwin` layout and read back. | The host packer produced the root and cryptex prefix. HFSX image generation from paired GPT snapshots and two QEMU persistence boots passed. Physical provisioning remains open. The existing Android writer still requires the legacy `sda34` identity. |
+| 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | QEMU mounted the root and both cryptexes from a read-only virtio disk and started SpringBoard. Thyme UFS and the physical boot arguments still need the stage 3 readback and three consecutive boots before stage 5. |
 | 5 | **The boot image into the inactive slot**, `fastboot set_active` to it, once | writes the inactive slot's `boot` (and what its recipe needs); the active slot is not touched | **not done, not tried**; whether Project Silicium's boot manager behaves from a boot slot, and what `vbmeta` says to a modified boot image, are unknown |
 | 6 | **A way back**, tested before it is needed: `fastboot set_active a` (or b) from the bootloader, and Android's own slot switch | writes the slot flag | the standard fastboot command; not tried here |
 
@@ -65,6 +65,51 @@ candidate on `sda36` as well and found no valid blocks beyond the proposed
 segment limit at the time of the snapshot. The planner emitted the resize
 target and no GPT files. A device F2FS shrink and Android recovery remain
 unverified. Partition provisioning requires the owner's explicit authorization.
+
+## Prepare the APFS partition prefix on the host
+
+Use the root and both matching cryptexes from the locally supplied 16.5
+system image. The packer checks the APFS superblock and declared size of
+each input against the file and writes the three complete containers in
+the kernel's mount order. It produces a host file for the system prefix
+of `darwin`.
+
+```sh
+python3 tools/apfs/dmg.py extract sysimage/rootfs.dmg darwin-root.apfs --apfs
+python3 tools/mkflashroot.py darwin-root.apfs sysimage/cryptex-os.dmg \
+    sysimage/cryptex-app.dmg darwin-system.img
+```
+
+The tested inputs start at blocks 0, 1374208 and 2039808, respectively.
+The last container ends immediately before block 2042368, where HFSX
+begins. The prefix file is 8,365,539,328 bytes. A prefix that would cross
+the data boundary is refused.
+
+For a host boot test, build `FLASHBOOT=1 CRYPTEXES=flash SHARE=1` in a
+separate workspace with the matching extracted userland. The QEMU image
+used `REST=1 RAM_ROOT_SLACK=128 RC_JOBS=rc.jobs.unlock` and omitted the
+optional package manager and phone audio firmware. This leaves a 4 MiB
+Boot container with empty cryptex mount points and a companion Redwood
+container with the flash-root init and jobs. A payload with the phone
+audio firmware, graphics and Bluetooth build options occupied
+87,561,224 bytes. The loader's payload limit is 63 MiB, including the
+kernel and both containers.
+
+```sh
+python3 xnuloader/mkpayload.py -o qemu/payload.bin kernel=hakios-kernel \
+    ramdisk=userland/root.apfs resident=userland/flashboot.apfs \
+    --cmdline "debug=0x8 rd=md0 bootcpu=0 cpus=2 root_apfs=rvblk0 virtio_blk=1 epoch=$(date +%s)"
+QEMU_SMP=2 QEMU_MEM=5G qemu/run.sh 120 -global virtio-mmio.force-legacy=false \
+    -drive "file=$PWD/darwin-system.img,format=raw,if=none,id=disk,readonly=on" \
+    -device virtio-blk-device,drive=disk -device ramfb
+```
+
+Check for the read-only Darwin mount, root switch, both mounts from
+`/dev/rvblk0,c=1` and `/dev/rvblk0,c=2`, and the SpringBoard spawn.
+Verify the prefix's SHA-256 before and after the run. Set `QEMU_ESP=1`
+on the same command to serve the payload from the ESP in
+[UEFI test mode](uefi-boot.md).
+The phone's UFS and boot chain still require physical validation.
 
 ## Prepare the HFSX data image on the host
 

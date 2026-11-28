@@ -91,7 +91,7 @@ Status legend:
 | Layer | Status | Scope & Notes |
 |---|---|---|
 | Security & Privacy | 🚧 | TCC permission prompts work; Keychain persistence, passcode/FOD BiometricKit pending |
-| Install & Storage | 🚧 | Cross-platform RAM Boot launchers and local image builds. Current GPT geometry, the F2FS planner and the HFS/var archive overlap guard have separate verification records. A GPT-sized HFSX data image retained data across two QEMU boots. The attached phone has no `darwin`; UFS persistence, standalone boot and OTA remain open. |
+| Install & Storage | 🚧 | Cross-platform RAM Boot launchers and local image builds. Current GPT geometry, the F2FS planner and the HFS/var archive overlap guard have separate verification records. A GPT-sized HFSX data image retained data across two QEMU boots. A read-only flash-root QEMU test mounted the system and both disk cryptexes and started SpringBoard. The attached phone has no `darwin`. Physical provisioning, UFS persistence, standalone boot and OTA remain open. |
 | Background Services | 🚧 | `launchd`, `locationd`, `wifid`, `CommCenter`, `backboardd` live; deep-sleep alarm/notifications pending |
 | Networking | 🚧 | IPv4/IPv6, DNS, HTTPS TLS work; VPN (`utun`), proxy UI, Personal Hotspot pending |
 | System Interaction | 🚧 | zh-Hans UI, PingFang, keyboard configuration, Control Center, Notification Center and switcher available. Input, notifications and functional controls have separate acceptance in section 6. |

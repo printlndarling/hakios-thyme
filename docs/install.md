@@ -52,11 +52,11 @@ Each one is how the project already treats writes (`darwin-write.py`, the loader
 | Needed | State |
 |---|---|
 | A boot image that starts with no host (shim + payload) | exists (`mkxnuimg.py`); the loader started from it by `fastboot boot` on the attached phone |
-| Preparing and provisioning `darwin` | The HFSX data image can be built from paired GPTs and has passed host replay and QEMU tests. The Android data-range writer supports the legacy layout. Root and cryptex provisioning on thyme remain open. |
+| Preparing and provisioning `darwin` | The host packer builds the APFS partition prefix from the root and two cryptex containers. The HFSX data image can be built from paired GPTs and has passed host replay and QEMU tests. The Android data-range writer supports the legacy layout. Physical provisioning on thyme remains open. |
 | A plan for carving `darwin` | Host-only planner and tests. The resize path requires a matching F2FS readback before emitting GPT files. |
 | Read-only preflight | exists (`make doctor`): slots, `darwin`, firmware, root, bootloader as reported |
 | **Writing the boot image to a slot and switching to it** | **not done, not tried** |
-| **Booting the flash recipe's root from `darwin`** | **not verified** (the arguments it needs are not confirmed) |
+| **Booting the flash recipe's root from `darwin`** | Passed on read-only virtio storage in QEMU using the partition prefix. The loader path and root arguments on thyme remain to be verified. |
 | **Project Silicium's Boot Manager behaving the same from a boot slot** | **unknown** |
 | **Verified boot (`vbmeta`) for a modified boot image** | **unknown** |
 | An installer that chains the steps under the rules above | not written |
