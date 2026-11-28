@@ -1,5 +1,45 @@
 ## Chronological Verification Logs & Evidence
 
+## Per-subscription NAS registration on thyme (2026-11-28)
+
+- The optional NAS probe uses separate QRTR client ports for primary
+  and secondary. Each binds locally and reads Get Serving System up to
+  three times while the normal CommCenter bridge runs. Replies must
+  match the peer, client, transaction and message and contain a valid
+  result. Host replay covered two interleaved clients, malformed and
+  misrouted replies, bounded sampling and timeout release. QMI, NAS
+  and soak regressions passed, as did the arm64 build.
+- In the first 175 s test on kernel `3920064c6c06`, Android returned
+  normally and still reported both cards loaded. The final log did
+  not retain the NAS probes. A 160 s repeat with five-second snapshots
+  retained both refusals with result 1 and QMI error 1 alongside the
+  two READY cards. The repeat log was `logs/soak.tWlHOtnL/kernel.log`
+  (SHA-256
+  `0f737b033fe3c71973b65385e99e9a4aca8a273af71787f27820dd4d4e6e83f0`).
+- The locally retained Android `libqmiservices.so`, SHA-256
+  `ccb2f0e5000a1f8d7008db35f225a7aaef16808c8995516e7e43b986722b4211`,
+  defines NAS request `0x0045` with a maximum payload of four bytes.
+  Its required TLV 1 carries a one-byte enum, as decoded with
+  [Qualcomm's published IDL layout](https://github.com/qualcomm/qmi-framework/blob/main/include/qmi_idl_lib_internal.h).
+  The initial probe used four bytes of value; the corrected arm64
+  kernel `d4f20465c601` uses a one-byte value and passed the corrected
+  wire-format fixture.
+- In the 132 s repeat on root `d76a8d248df6`, with slot switching
+  and the diagnostic SMS submit disabled, both NAS client binds
+  succeeded. Each client returned three Get Serving System samples.
+  Both initially reported registration 0 and RAT 0. The next two
+  samples both reported registration 2 (searching), CS 2, PS 2
+  and RAT 12. This run establishes per-client queries on the SDX55M.
+  Concurrent registered service and native Settings line controls
+  remain open.
+- The corrected run returned to Android on its timer. Android reported
+  `LOADED,LOADED` and `NR_SA,LTE` in DSDS mode. The whole
+  `logdump` SHA-256 matched before and after all runs.
+  Final log `logs/soak.U8e00nnH/kernel.log`, SHA-256
+  `76d2c30fba235f8fe845739accf41c24d33573336caa9c8e4df6936773bc65e7`.
+  The retained bind and serving-system excerpt is
+  `out/thyme-boot/nas-dsds.tMOfIzQB/physical-dsds-fixed.log`.
+
 ## Skip redundant camera lens-bus scans at startup (2026-11-28)
 
 - Native rear sessions now talk directly to the previously verified

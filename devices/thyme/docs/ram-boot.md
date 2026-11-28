@@ -121,7 +121,7 @@ SOAK_UIM_READONLY=1 SOAK_DSDS_PROBE=1 SOAK_SECS=160 devices/thyme/soak.sh
 ```
 
 The dedicated NAS clients bind to the two subscriptions and query their
-registration and radio state three times. By default, the launcher keeps
+registration and radio state up to three times. By default, the launcher keeps
 five-second log snapshots alongside the live kernel log in `logs/`.
 The kernel labels the samples `DSDS NAS subscription`. Native line controls
 have a separate acceptance check.
