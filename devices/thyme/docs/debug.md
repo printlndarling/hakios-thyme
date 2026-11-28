@@ -277,7 +277,8 @@ thyme, SM8250-AC and HakiOS. `ProductVersion` and `BuildVersion` report
 the compatibility metadata from the running image's SystemVersion
 plist. The verified image reports 16.5 and 20F66. The explicitly
 approved developer record also supports encrypted queries from
-OpenSSL-based ideviceinfo 1.3.0. System services remain open.
+OpenSSL-based ideviceinfo 1.3.0. The same development profile also
+supports the read-only diagnostics relay below.
 
 Windows enumerated the development interface as 1209:0001 with
 WINUSB while Apple Mobile Device Service was running. The Apple USB
@@ -366,6 +367,28 @@ python3 devices/thyme/tools/usbmux-winusb.py --pair-record "$fixture/pair.plist"
 rmdir "$fixture"
 ```
 
+#### Read-only diagnostics over USB
+
+An authenticated Lockdown session can request
+`com.apple.mobile.diagnostics_relay` with `StartService`. The returned
+port is 62080 in the development profile. The offer is single use,
+expires after 15 seconds, and requires a fresh mutual TLS handshake
+using the same approved pairing identity. The private carrier services
+one connection at a time. The original diagnostics CLI closes Lockdown
+before connecting to the service port.
+[libimobiledevice diagnostics CLI](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/tools/idevicediagnostics.c#L198-L215)
+
+With a live approval and local pair record, use the original client.
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py --pair-record PATH -- idevicediagnostics diagnostics All
+```
+
+The reply contains the HakiOS identity and live DWC3 counters. The
+implemented requests are `All` and `Goodbye`. The integration test above
+also exercises this service when passed `--diagnostics` after
+`--stock-record`.
+
 #### Discover the SSH address over USB
 
 When the development scene contains both HDB and the USB Lockdown
@@ -429,11 +452,10 @@ reset.
    Extend the USB bulk transport to support concurrent system services.
 2. Verify native host discovery and the standard device trust prompt.
    Export other verified thyme hardware and OS information as needed.
-3. Add authenticated service-port connections to StartService and verify
-   AFC, installation proxy, logs and screenshots with the open tools.
-   The libimobiledevice AFC factory closes its Lockdown session before
-   opening the service connection. Use an approved developer app and
-   temporary files in the RAM session. [libimobiledevice service factory](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/service.c#L77-L109)
+3. Extend authenticated service-port connections to AFC, installation
+   proxy, logs and screenshots. The libimobiledevice AFC factory closes
+   its Lockdown session before opening the service connection. Use an
+   approved developer app and temporary files in the RAM session. [libimobiledevice service factory](https://github.com/libimobiledevice/libimobiledevice/blob/1.3.0/src/service.c#L77-L109)
 4. Test host identification and device management separately in
    i4Tools, 3uTools, iMazing, iTunes and Finder wherever available.
    Keep vendor-service and authorization results separate. Flashing

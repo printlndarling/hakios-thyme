@@ -167,6 +167,23 @@ def mux_request(address, request, switch=False):
         return reply
 
 
+def tls_context(record, credential):
+    ctx = ssl.create_default_context(cadata=record.root_certificate.decode())
+    ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    if credential:
+        certificate, key = credential
+        # The temporary credential files stay on WSL tmpfs.
+        with tempfile.TemporaryDirectory(dir="/dev/shm", prefix="thyme-tls-") as directory:
+            bundle = Path(directory) / "client.pem"
+            fd = os.open(bundle, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(certificate)
+                handle.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                               serialization.NoEncryption()))
+            ctx.load_cert_chain(bundle)
+    return ctx
+
+
 def session_test(locator, pins, record, credentials, hdb):
     address = os.environ["USBMUXD_SOCKET_ADDRESS"].removeprefix("UNIX:")
     entries = mux_request(address, {"MessageType": "ListDevices"})["DeviceList"]
@@ -174,22 +191,6 @@ def session_test(locator, pins, record, credentials, hdb):
     start = {"Request": "StartSession", "HostID": pins["HostID"], "SystemBUID": pins["SystemBUID"]}
     connect = {"MessageType": "Connect", "DeviceID": device["DeviceID"], "PortNumber": socket.htons(62078)}
     device_der = x509.load_pem_x509_certificate(record.device_certificate).public_bytes(serialization.Encoding.DER)
-
-    def context(credential):
-        ctx = ssl.create_default_context(cadata=record.root_certificate.decode())
-        ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
-        if credential:
-            certificate, key = credential
-            # The temporary credential files stay on WSL tmpfs.
-            with tempfile.TemporaryDirectory(dir="/dev/shm", prefix="thyme-tls-") as directory:
-                bundle = Path(directory) / "client.pem"
-                fd = os.open(bundle, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(certificate)
-                    handle.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                                   serialization.NoEncryption()))
-                ctx.load_cert_chain(bundle)
-        return ctx
 
     with mux_request(address, connect, switch=True) as (reply, stream):
         check("Lockdown socket connected", reply["Number"], 0)
@@ -209,7 +210,7 @@ def session_test(locator, pins, record, credentials, hdb):
             check("fresh session ID", session_id in session_ids, False)
             session_ids.add(session_id)
             try:
-                tls = context(credential).wrap_socket(stream, server_hostname="thyme.hakios.test")
+                tls = tls_context(record, credential).wrap_socket(stream, server_hostname="thyme.hakios.test")
             except ssl.SSLError as error:
                 if credential is valid or isinstance(error, ssl.SSLCertVerificationError):
                     raise
@@ -235,7 +236,7 @@ def session_test(locator, pins, record, credentials, hdb):
         check("Lockdown socket reconnected", reply["Number"], 0)
         start_reply = plist_request(stream, start)
         check("StartSession after reconnect requests TLS", start_reply.get("EnableSessionSSL"), True)
-        with context(valid).wrap_socket(stream, server_hostname="thyme.hakios.test") as tls:
+        with tls_context(record, valid).wrap_socket(stream, server_hostname="thyme.hakios.test") as tls:
             hdb("shell", "/var/jb/bin/rm", APPROVAL)
             tls.sendall(PLIST_LENGTH.pack(len(body)) + body)
             check("active TLS approval removed", tls.recv(1), b"")
@@ -283,7 +284,87 @@ def check_stock_client(locator, accepts):
           "Stock ideviceinfo did not authenticate with the pairing root", flush=True)
 
 
-def run(state, reattach, stock_record=None):
+def check_diagnostics(locator, pins, record, root_credential):
+    address = os.environ["USBMUXD_SOCKET_ADDRESS"].removeprefix("UNIX:")
+    entries = mux_request(address, {"MessageType": "ListDevices"})["DeviceList"]
+    device = next(item for item in entries if item["Properties"]["SerialNumber"] == locator)
+    connections = {port: {"MessageType": "Connect", "DeviceID": device["DeviceID"],
+                          "PortNumber": socket.htons(port)} for port in (62078, 62080)}
+    diagnostics = {"Request": "StartService", "Service": "com.apple.mobile.diagnostics_relay"}
+    start = {"Request": "StartSession", "HostID": pins["HostID"], "SystemBUID": pins["SystemBUID"]}
+
+    def offer_service():
+        with mux_request(address, connections[62078], switch=True) as (reply, stream):
+            check("Lockdown socket connected", reply["Number"], 0)
+            started = plist_request(stream, start)
+            check("Lockdown upgrade requires TLS", started.get("EnableSessionSSL"), True)
+            with tls_context(record, root_credential).wrap_socket(stream, server_hostname="thyme.hakios.test") as tls:
+                missing = plist_request(tls, {"Request": "StartService", "Service": "com.hakios.nonexistent"})
+                check("unknown Lockdown service refused", missing.get("Error"), "InvalidService")
+                offered = plist_request(tls, diagnostics)
+                check("StartService returned diagnostics port", offered.get("Port"), 62080)
+                check("StartService requires TLS on the service port", offered.get("EnableServiceSSL"), True)
+                check("diagnostics offer survives StopSession", plist_request(
+                    tls, {"Request": "StopSession", "SessionID": started["SessionID"]}), {"Request": "StopSession"})
+
+    check("diagnostics port closed without StartService", mux_request(address, connections[62080])["Number"], 3)
+    with mux_request(address, connections[62078], switch=True) as (reply, stream):
+        check("Lockdown socket connected", reply["Number"], 0)
+        check("plaintext StartService refused", plist_request(stream, diagnostics).get("Error"), "SessionInactive")
+
+    tool = subprocess.run(["idevicediagnostics", "-u", locator, "diagnostics", "All"],
+                          capture_output=True, timeout=22)
+    body = tool.stdout
+    begin = body.find(b"<?xml")
+    end = body.find(b"</plist>", begin)
+    if tool.returncode != 0 or begin < 0 or end < 0:
+        message = (body + tool.stderr).decode(errors="replace")
+        message = message.replace(locator, "thyme-usb-[local]")[:420]
+        raise RuntimeError(f"stock idevicediagnostics failed ({tool.returncode}): {message}")
+    result = plistlib.loads(body[begin:end + len(b"</plist>")])
+    check("stock idevicediagnostics reports HardwareModel", result["HakiOS"]["HardwareModel"], "thyme")
+    check("stock idevicediagnostics reports DWC3 stage", result["USB"]["Stage"], 2)
+    check("stock idevicediagnostics reports USB configuration", result["USB"]["Configuration"], 1)
+    check("successful service offer was consumed", mux_request(address, connections[62080])["Number"], 3)
+
+    offer_service()
+    with mux_request(address, connections[62080], switch=True) as (reply, stream):
+        check("offered diagnostics port opened", reply["Number"], 0)
+        try:
+            tls_context(record, None).wrap_socket(stream, server_hostname="thyme.hakios.test")
+        except ssl.SSLError as error:
+            if isinstance(error, ssl.SSLCertVerificationError):
+                raise
+            print("diagnostics TLS refused a missing client certificate", flush=True)
+        else:
+            raise RuntimeError("diagnostics TLS accepted a missing client certificate")
+    check("failed handshake consumed service offer", mux_request(address, connections[62080])["Number"], 3)
+
+    offer_service()
+    with mux_request(address, connections[62080], switch=True) as (reply, stream):
+        check("fresh diagnostics offer opened", reply["Number"], 0)
+        with tls_context(record, root_credential).wrap_socket(stream, server_hostname="thyme.hakios.test") as tls:
+            check("diagnostics received mutual TLS", tls.version(), "TLSv1.2")
+            check("unsupported diagnostics request refused",
+                  plist_request(tls, {"Request": "Unimplemented"}).get("Status"), "UnknownRequest")
+            result = plist_request(tls, {"Request": "All"})
+            check("new authenticated diagnostics request succeeded", result.get("Status"), "Success")
+            check("diagnostics Goodbye acknowledged", plist_request(tls, {"Request": "Goodbye"}).get("Status"), "Success")
+            check("diagnostics Goodbye closed TLS", tls.recv(1), b"")
+
+    offer_service()
+    time.sleep(16)
+    with mux_request(address, connections[62080], switch=True) as (reply, stream):
+        check("expired offer reached the service admission check", reply["Number"], 0)
+        try:
+            with tls_context(record, root_credential).wrap_socket(stream, server_hostname="thyme.hakios.test"):
+                raise RuntimeError("expired diagnostics offer authenticated")
+        except (ssl.SSLEOFError, ConnectionResetError):
+            print("diagnostics TLS refused the expired offer", flush=True)
+    check("expired offer was discarded", mux_request(address, connections[62080])["Number"], 3)
+
+
+def run(state, reattach, stock_record=None, diagnostics=False):
     ids = subprocess.check_output(["idevice_id", "-l"], text=True, timeout=15).split()
     if len(ids) != 1 or not re.fullmatch(r"thyme-usb-[a-f0-9]{20}", ids[0]):
         raise ValueError("expected one thyme development device")
@@ -362,6 +443,8 @@ def run(state, reattach, stock_record=None):
                     check("Pair under explicit pairing-root policy", lockdown.lib.lockdownd_pair(client, record), 0)
                 check_stock_client(locator, accepts=True)
                 check_stock_client(locator, accepts=True)
+                if diagnostics:
+                    check_diagnostics(locator, pins, record, credentials[2])
                 with lockdown.connection(handshake=True) as client:
                     stage_policy(pins)
                     hdb("shell", "/var/jb/usr/bin/mv", "-f", tmp, APPROVAL)
@@ -382,5 +465,8 @@ if __name__ == "__main__":
     parser.add_argument("--hdb-state", type=Path, required=True)
     parser.add_argument("--reattach", action="store_true", help="also exercise software USB reattachment before validation")
     parser.add_argument("--stock-record", type=Path, help="temporary pair record path passed to the bridge under /dev/shm")
+    parser.add_argument("--diagnostics", action="store_true", help="also exercise the authenticated diagnostics service port")
     args = parser.parse_args()
-    run(args.hdb_state, args.reattach, args.stock_record)
+    if args.diagnostics and not args.stock_record:
+        parser.error("--diagnostics requires --stock-record")
+    run(args.hdb_state, args.reattach, args.stock_record, args.diagnostics)

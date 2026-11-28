@@ -21,6 +21,7 @@ LOCKDOWN_HEADER = bridge["LOCKDOWN_HEADER"]
 class Transport:
     def __init__(self):
         self.present = True
+        self.ports = {62078}
         self.calls = []
 
     def probe(self):
@@ -30,7 +31,7 @@ class Transport:
     @contextmanager
     def connect(self, port, location):
         self.calls.append((port, location))
-        yield (b"connected" if port == 62078 else b"refused") if self.present else b"missing", self
+        yield (b"connected" if port in self.ports else b"refused") if self.present else b"missing", self
 
     def exchange(self, request):
         self.calls.append(request)
@@ -122,6 +123,25 @@ class BridgeTest(unittest.TestCase):
             client.sendall(b"\x17\x03\x03\x48\x01")
             self.assertEqual(stream.read(), b"")
         self.assertEqual(seen, [LOCKDOWN_HEADER.pack(len(request)) + request, "tls", first, second])
+
+    def test_diagnostics_port_relays_tls_from_the_first_record(self):
+        device = self.request(MessageType="ListDevices")["DeviceList"][0]
+        port = bridge["DIAGNOSTICS_PORT"]
+        self.server.transport.ports.add(port)
+        connect = plistlib.dumps(dict(MessageType="Connect", DeviceID=device["DeviceID"], PortNumber=socket.htons(port)))
+        client_record = bytes.fromhex("160301000102")
+        server_record = bytes.fromhex("160303000101")
+
+        def exchange(frame):
+            self.server.transport.calls.append(frame)
+            return server_record
+
+        self.server.transport.exchange = exchange
+        with self.exchange(connect) as (reply, client, stream):
+            self.assertEqual(reply["Number"], 0)
+            client.sendall(client_record)
+            self.assertEqual(stream.read(len(server_record)), server_record)
+        self.assertEqual(self.server.transport.calls, [("list",), (port, LOCATION), client_record])
 
     def test_pairing_metadata_is_available_during_a_lockdown_connection(self):
         entry = self.request(MessageType="ListDevices")["DeviceList"][0]

@@ -25,12 +25,13 @@ _Static_assert(THYME_LOCKDOWN_MESSAGE_MAX <= 65535u, "receive window is sixteen 
 static uint8_t stream[2 * MUX_FRAME_MAX];
 static unsigned used;
 static bool negotiated, online;
-static uint16_t peer_port;
+static uint16_t peer_port, local_port;
 static uint32_t peer_next, device_next, next_transaction;
 static struct thyme_lockdown_message request;
 static unsigned request_length, response_length, response_offset;
 static bool request_complete, request_read, response_ready;
 static bool tls_stream, start_tls;
+static bool diagnostics_offered, new_service, offer_diagnostics, abort_response;
 static uint8_t response[THYME_LOCKDOWN_MESSAGE_MAX];
 
 static uint16_t
@@ -65,17 +66,17 @@ put_be32(uint8_t *bytes, uint32_t value)
 static void
 close_stream(void)
 {
-	peer_port = 0;
+	peer_port = local_port = 0;
 	request_length = response_length = response_offset = 0;
 	request_complete = request_read = response_ready = false;
-	tls_stream = start_tls = false;
+	tls_stream = start_tls = new_service = offer_diagnostics = abort_response = false;
 }
 
 void
 thyme_usbmux_reset(void)
 {
 	used = 0;
-	negotiated = false;
+	negotiated = diagnostics_offered = false;
 	close_stream();
 }
 
@@ -83,6 +84,9 @@ void
 thyme_usbmux_service(bool enabled)
 {
 	online = enabled;
+	if (!online) {
+		diagnostics_offered = false;
+	}
 	if (!online && !request_complete) {
 		close_stream();
 	}
@@ -106,19 +110,30 @@ thyme_usbmux_request(struct thyme_lockdown_message *message, unsigned capacity)
 bool
 thyme_usbmux_submit(const struct thyme_lockdown_message *message, unsigned length)
 {
-	bool upgrade = (message->transaction & THYME_LOCKDOWN_START_TLS) != 0;
+	const uint32_t controls = THYME_LOCKDOWN_START_TLS | THYME_LOCKDOWN_OFFER_DIAGNOSTICS | THYME_LOCKDOWN_ABORT;
+	uint32_t action = message->transaction & controls;
 	if (!request_complete || !request_read || response_ready || length > sizeof(response) ||
-	    (message->transaction & ~THYME_LOCKDOWN_START_TLS) != request.transaction) {
+	    (message->transaction & ~controls) != request.transaction) {
 		return false;
 	}
-	if (tls_stream ? upgrade :
-	    (length <= LOCKDOWN_HEADER || be32(message->data) != length - LOCKDOWN_HEADER)) {
+	if (action == THYME_LOCKDOWN_ABORT) {
+		if (length != 0) return false;
+		abort_response = response_ready = true;
+		return true;
+	}
+	if (tls_stream) {
+		if (action && (action != THYME_LOCKDOWN_OFFER_DIAGNOSTICS || !length || local_port != THYME_LOCKDOWN_PORT)) {
+			return false;
+		}
+	} else if ((action && action != THYME_LOCKDOWN_START_TLS) ||
+	    length <= LOCKDOWN_HEADER || be32(message->data) != length - LOCKDOWN_HEADER) {
 		return false;
 	}
 	memcpy(response, message->data, length);
 	response_length = length;
 	response_ready = true;
-	start_tls = upgrade;
+	start_tls = action == THYME_LOCKDOWN_START_TLS;
+	offer_diagnostics = action == THYME_LOCKDOWN_OFFER_DIAGNOSTICS;
 	return true;
 }
 
@@ -158,12 +173,16 @@ send_response_segment(uint8_t *reply)
 	unsigned remaining = response_length - response_offset;
 	unsigned size = remaining > MUX_SEGMENT_MAX ? MUX_SEGMENT_MAX : remaining;
 	bool last = size == remaining;
-	int length = tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port, device_next,
+	int length = tcp_reply(reply, local_port, peer_port, device_next,
 	    peer_next, last ? TCP_ACK | TCP_PSH : TCP_ACK, response + response_offset, size);
 	device_next += size;
 	response_offset += size;
 	if (last) {
 		response_offset = response_length = 0;
+		if (offer_diagnostics) {
+			diagnostics_offered = true;
+			offer_diagnostics = false;
+		}
 		if (start_tls) {
 			tls_stream = true;
 			start_tls = false;
@@ -178,8 +197,8 @@ thyme_usbmux_complete(uint8_t *reply, bool timeout)
 	if (!request_complete) {
 		return 0;
 	}
-	if (timeout || !online) {
-		int length = tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port,
+	if (timeout || !online || abort_response) {
+		int length = tcp_reply(reply, local_port, peer_port,
 		    device_next, peer_next, TCP_RST | TCP_ACK, NULL, 0);
 		close_stream();
 		return length;
@@ -190,7 +209,7 @@ thyme_usbmux_complete(uint8_t *reply, bool timeout)
 	request_complete = request_read = response_ready = false;
 	request_length = 0;
 	if (!response_length) {
-		return tcp_reply(reply, THYME_LOCKDOWN_PORT, peer_port,
+		return tcp_reply(reply, local_port, peer_port,
 		    device_next, peer_next, TCP_ACK, NULL, 0);
 	}
 	return send_response_segment(reply);
@@ -208,15 +227,21 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 	}
 	unsigned size = length - header;
 	if (flags == TCP_SYN && size == 0) {
-		if (dest != THYME_LOCKDOWN_PORT || !online || peer_port) {
+		bool diagnostics = dest == THYME_DIAGNOSTICS_PORT && diagnostics_offered;
+		if ((!diagnostics && dest != THYME_LOCKDOWN_PORT) || !online || peer_port) {
 			return tcp_reply(reply, dest, source, 0, seq + 1, TCP_RST | TCP_ACK, NULL, 0);
 		}
 		peer_port = source;
+		local_port = dest;
+		if (diagnostics) {
+			diagnostics_offered = false;
+			new_service = tls_stream = true;
+		}
 		peer_next = seq + 1;
 		device_next = 1;
 		return tcp_reply(reply, dest, source, 0, peer_next, TCP_SYN | TCP_ACK, NULL, 0);
 	}
-	if (source != peer_port || dest != THYME_LOCKDOWN_PORT) {
+	if (source != peer_port || dest != local_port) {
 		return -1;
 	}
 	if ((flags & TCP_RST) && seq == peer_next) {
@@ -256,8 +281,11 @@ tcp_input(const uint8_t *tcp, unsigned length, uint8_t *reply)
 			if (request_length < expected + framing) {
 				return tcp_reply(reply, dest, source, device_next, peer_next, TCP_ACK, NULL, 0);
 			}
-			next_transaction = (next_transaction + 1) & (THYME_LOCKDOWN_START_TLS - 1);
-			request.transaction = next_transaction | (tls_stream ? THYME_LOCKDOWN_TLS_RECORD : 0);
+			next_transaction = (next_transaction + 1) & (THYME_LOCKDOWN_ABORT - 1);
+			request.transaction = next_transaction | (tls_stream ? THYME_LOCKDOWN_TLS_RECORD : 0) |
+			    (local_port == THYME_DIAGNOSTICS_PORT ? THYME_LOCKDOWN_DIAGNOSTICS : 0) |
+			    (new_service ? THYME_LOCKDOWN_NEW_SERVICE : 0);
+			new_service = false;
 			request_complete = true;
 			return 0;
 		}

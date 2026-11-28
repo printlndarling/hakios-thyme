@@ -1,5 +1,32 @@
 ## Chronological Verification Logs & Evidence
 
+## Standard USB diagnostics through StartService (2026-11-29)
+
+- The 240 s guarded run used kernel `18a239f6c58f` and companion
+  `3e6afd39faaa`. Two suites passed over the private WinUSB carrier.
+  The first included software USB reattachment. Unmodified
+  idevicediagnostics read `thyme`, controller stage 2 and active
+  USB configuration 1 through a separate authenticated service socket.
+- Plaintext StartService and unknown services were refused. The
+  diagnostics offer survived the authorized Lockdown StopSession and
+  admitted one new socket. Success or a failed TLS handshake consumed
+  the offer. The service rejected a missing certificate and an offer
+  older than 15 seconds. A fresh offer supported TLS 1.2, a read-only
+  query and orderly Goodbye. Unsupported diagnostics requests failed.
+- The original ideviceinfo pairing and TLS suite passed in both runs.
+  Pinned HDB still discovered the Wi-Fi address over USB and read
+  one software reconnect, active configuration 1 and zero invalid
+  mux frames.
+- The guard returned to Android. The full logdump digest matched
+  before and after, and the private WinUSB device list was empty.
+- Evidence is in `out/thyme-boot/usb-diagnostics.qkBGwnc9/`.
+  `diagnostics-service.log` SHA-256
+  `e42dc365b0d644a0e8fcf169f41260abc5c775ee12b7733077aeebf678de266b`.
+  `diagnostics-expiry.log` SHA-256
+  `6b1d5e24dcc9031869f3ea4e92e69db9a4aeb76cbcb2f20b6f6328fc5fea568f`.
+  `hdb-after-service.log` SHA-256
+  `fea9d88e4714e631a39bf2307d9d98257af36be940f5686587b211fde2407d49`.
+
 ## Unmodified ideviceinfo opens an approved TLS session (2026-11-29)
 
 - The 240 s guarded run used kernel `de21a78ef697` and companion
