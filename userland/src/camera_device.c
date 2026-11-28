@@ -399,6 +399,12 @@ format(int sensor_width, int sensor_height, int max_fps, bool binned, double fov
 
 #define HELD    3               /* the moving pictures kept from the pool after they are given (see deliver) */
 
+struct preview_timing {
+	uint64_t frames_with_time, total_age, max_age;
+	uint64_t last_delivery, total_gap, max_gap;
+	uint64_t last_sequence, skipped;
+};
+
 struct output {
 	const char *    name;
 	CFDictionaryRef config;                 /* from VideoOutputConfigurations */
@@ -406,6 +412,7 @@ struct output {
 	void *          handler;                /* a block: ^(CVPixelBufferRef, CMTime) */
 	bool            said_shape;
 	uint64_t        delivered, refused, render_ticks, handler_ticks;
+	struct preview_timing timing;
 	CVPixelBufferRef held[HELD];            /* the pictures given last, kept from the pool (see deliver) */
 	unsigned        held_next;
 	bool            said_pool;
@@ -1012,6 +1019,34 @@ frame_metadata(const struct isp *isp, const struct hakios_camera_frame *f, const
 static void send_picture(int device, CVPixelBufferRef pb);
 
 static void
+note_preview_delivery(struct preview_timing *timing, const struct hakios_camera_frame *f, uint64_t now)
+{
+	/* f->time is stamped when the kernel has put the frame in the ring. */
+	if (f->time != 0 && f->time <= now) {
+		uint64_t age = now - f->time;
+
+		timing->frames_with_time++;
+		timing->total_age += age;
+		if (age > timing->max_age) {
+			timing->max_age = age;
+		}
+	}
+	if (timing->last_delivery != 0) {
+		uint64_t gap = now - timing->last_delivery;
+
+		timing->total_gap += gap;
+		if (gap > timing->max_gap) {
+			timing->max_gap = gap;
+		}
+	}
+	if (timing->last_sequence != 0 && f->sequence > timing->last_sequence) {
+		timing->skipped += f->sequence - timing->last_sequence - 1;
+	}
+	timing->last_sequence = f->sequence;
+	timing->last_delivery = now;
+}
+
+static void
 deliver(struct stream *s, struct output *out, const struct isp *isp, const struct hakios_camera_frame *f, const uint8_t *raw,
     CFDictionaryRef metadata, int host_device)
 {
@@ -1036,7 +1071,8 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	}
 	CVPixelBufferLockBaseAddress(pb, 0);
 
-	struct render_job job = { isp, f, raw, pb, pf, width, height, 8, strcmp(out->name, "StillImage") == 0 && pf != PF_BGRA };
+	bool still_output = strcmp(out->name, "StillImage") == 0;
+	struct render_job job = { isp, f, raw, pb, pf, width, height, 8, still_output && pf != PF_BGRA };
 	uint64_t began = mach_absolute_time();
 
 	dispatch_apply_f(job.pieces, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), &job, render_piece);
@@ -1071,6 +1107,9 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	CMTime pts = CMClockMakeHostTimeFromSystemUnits(f->time);
 
 	began = mach_absolute_time();
+	if (!still_output) {
+		note_preview_delivery(&out->timing, f, began);
+	}
 	((pixel_buffer_handler)out->handler)(pb, pts);
 	out->handler_ticks += mach_absolute_time() - began;
 	/*
@@ -1080,7 +1119,7 @@ deliver(struct stream *s, struct output *out, const struct isp *isp, const struc
 	 * the window server copying it), and the next frame drawn into it showed as bands of two frames,
 	 * torn across. Kept, they make the pool take others. (One kept was not enough.)
 	 */
-	if (strcmp(out->name, "StillImage") != 0) {
+	if (!still_output) {
 		if (out->held[out->held_next] != NULL) {
 			CVPixelBufferRelease(out->held[out->held_next]);
 		}
@@ -1966,6 +2005,7 @@ stream_begin(CMBaseObjectRef o, bool graph)
 
 		out->delivered = out->refused = 0;
 		out->render_ticks = out->handler_ticks = 0;
+		out->timing = (struct preview_timing){ 0 };
 	}
 	s->worker_begin_ticks = mach_absolute_time();
 	s->running = true;
@@ -2016,6 +2056,14 @@ stream_stop(CMBaseObjectRef o)
 			say("%s: %llu pictures, %llu pool misses, average %.2f ms ISP, %.2f ms graph callback",
 			    out->name, (unsigned long long)out->delivered, (unsigned long long)out->refused,
 			    out->render_ticks * scale, out->handler_ticks * scale);
+			const struct preview_timing *t = &out->timing;
+
+			if (t->frames_with_time != 0 && out->delivered > 1) {
+				say("%s %s preview: ready-to-graph %.2f/%.2f ms avg/max, delivery gap %.2f/%.2f ms avg/max, %llu skipped",
+				    s->camera->name, out->name, t->total_age * ms_per_tick / t->frames_with_time, t->max_age * ms_per_tick,
+				    t->total_gap * ms_per_tick / (out->delivered - 1), t->max_gap * ms_per_tick,
+				    (unsigned long long)t->skipped);
+			}
 		}
 	}
 	still_reset();
