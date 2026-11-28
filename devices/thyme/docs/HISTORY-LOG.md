@@ -1,5 +1,24 @@
 ## Chronological Verification Logs & Evidence
 
+## Both bound NAS clients report registration and packet attach (2026-11-28)
+
+- In the 165 s guarded EFI-owned run with `aac8bb9c05de` and the
+  UIM read-only settings, both QRTR clients completed their separate
+  NAS Bind Subscription requests. Each client returned registration
+  states 0, 2, and 1 across the three samples. Sample 3 from both
+  clients reported `CS=2 PS=1 RAT=12`. This decodes to detached CS,
+  attached PS and NR. [libqmi NAS enums](https://github.com/linux-mobile-broadband/libqmi/blob/main/src/libqmi-glib/qmi-enums-nas.h)
+- Both replies carried the same radio and attach values. Independent
+  line service, stable simultaneous registration, native controls,
+  and per-line calls or data are still acceptance checks.
+- The timed return completed Android startup. Android reported
+  `LOADED,LOADED`, `NR_SA,LTE` and `dsds`. The `logdump` digest
+  matched before and after the run. Full kernel log
+  `logs/soak.KIK9dT6i/kernel.log` SHA-256
+  `2496f0bd47e0ed9f58fb270dbfb95357eceea8f6b5901cc0210332b95879ec96`.
+  Numeric extract `out/thyme-boot/hdb-screen.bhDXXl1d/default-dsds.log`
+  SHA-256 `628a217cf648f04065612d08327476291a135d8f939c53c8b978a1448107ae2b`.
+
 ## Live HDB screenshots and i4Tools detection check (2026-11-28)
 
 - In the 210 s guarded USB handoff run with kernel `aac8bb9c05de` and
