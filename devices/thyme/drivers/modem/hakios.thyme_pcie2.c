@@ -14983,14 +14983,27 @@ mhi_bb_release(uint32_t local_port)
  * both the CommCenter allocations and the driver's own single-line poll.
  */
 #define MHI_DSDS_PORT 0x10e0u
-#define NAS_BIND_SUBSCRIPTION 0x0045u
-#define NAS_GET_SERVING_SYSTEM 0x0024u
+
+enum mhi_dsds_phase {
+	DSDS_BIND, DSDS_SERVING, DSDS_SIGNAL, DSDS_PREFERENCE
+};
+
+static const struct {
+	uint16_t id;
+	const char *name;
+} mhi_dsds_query[] = {
+	[DSDS_BIND] = { 0x0045, "bind" },
+	[DSDS_SERVING] = { 0x0024, "serving-system query" },
+	[DSDS_SIGNAL] = { 0x004f, "signal query" },
+	[DSDS_PREFERENCE] = { 0x0034, "selection preference query" },
+};
 
 struct mhi_dsds_line {
 	uint64_t next;
 	uint16_t txn;
 	uint8_t samples;
-	bool bound, waiting;
+	enum mhi_dsds_phase phase;
+	bool waiting;
 };
 
 static struct {
@@ -14998,6 +15011,22 @@ static struct {
 	bool enabled;
 	struct mhi_dsds_line line[2];
 } mhi_dsds;
+
+static void
+mhi_dsds_stop(unsigned local_port, struct mhi_dsds_line *line)
+{
+	line->waiting = false;
+	line->next = 0;
+	mhi_bb_release(local_port);
+}
+
+static void
+mhi_dsds_signal_done(struct mhi_dsds_line *line, uint64_t now)
+{
+	line->waiting = false;
+	line->phase = line->samples < 3 ? DSDS_SERVING : DSDS_PREFERENCE;
+	line->next = line->phase == DSDS_SERVING ? now + 20000000ull : now;
+}
 
 static void
 mhi_dsds_poll(struct mhi_channel *out, uint64_t now)
@@ -15010,10 +15039,11 @@ mhi_dsds_poll(struct mhi_channel *out, uint64_t now)
 		if (!line->next || now < line->next) continue;
 		if (line->waiting) {
 			hakios_tl("pcie2: DSDS NAS subscription %u %s timed out\n",
-			    i + 1, line->bound ? "serving-system query" : "bind");
-			line->waiting = false;
-			mhi_bb_release(local_port);
-			line->next = 0;
+			    i + 1, mhi_dsds_query[line->phase].name);
+			if (line->phase == DSDS_SIGNAL)
+				mhi_dsds_signal_done(line, now);
+			else
+				mhi_dsds_stop(local_port, line);
 			continue;
 		}
 		if (!mhi_dsds.port && !mhi_qrtr_service(0x03, &mhi_dsds.node, &mhi_dsds.port)) {
@@ -15023,9 +15053,8 @@ mhi_dsds_poll(struct mhi_channel *out, uint64_t now)
 		}
 
 		uint8_t request[11], frame[32];
-		unsigned message = line->bound ? NAS_GET_SERVING_SYSTEM : NAS_BIND_SUBSCRIPTION;
-		size_t at = mhi_qmi_open(request, ++line->txn, message);
-		if (!line->bound) {
+		size_t at = mhi_qmi_open(request, ++line->txn, mhi_dsds_query[line->phase].id);
+		if (line->phase == DSDS_BIND) {
 			/* NAS Bind uses a one-byte enum for the zero-based subscription ID. */
 			uint8_t subscription = (uint8_t)i;
 			at = mhi_qmi_put(request, at, 1, &subscription, sizeof(subscription));
@@ -15038,14 +15067,13 @@ mhi_dsds_poll(struct mhi_channel *out, uint64_t now)
 			line->next = now + 5000000ull;
 		} else {
 			hakios_tl("pcie2: DSDS NAS subscription %u TX failed\n", i + 1);
-			mhi_bb_release(local_port);
-			line->next = 0;
+			mhi_dsds_stop(local_port, line);
 		}
 	}
 }
 
-/* Consume only matched responses from the NAS peer. Require a complete,
- * successful result before reporting a subscription's registration.
+/* Consume only matched responses from the NAS peer. Publish numeric state
+ * and signal values only. Keep absent or out-of-range RSRP as unavailable.
  */
 static bool
 mhi_dsds_reply(unsigned dst, unsigned node, unsigned port, const uint8_t *body, size_t n)
@@ -15053,24 +15081,39 @@ mhi_dsds_reply(unsigned dst, unsigned node, unsigned port, const uint8_t *body, 
 	if (!mhi_dsds.enabled || dst < MHI_DSDS_PORT || dst >= MHI_DSDS_PORT + 2) return false;
 	unsigned i = dst - MHI_DSDS_PORT;
 	struct mhi_dsds_line *line = &mhi_dsds.line[i];
-	unsigned message = line->bound ? NAS_GET_SERVING_SYSTEM : NAS_BIND_SUBSCRIPTION;
+	enum mhi_dsds_phase phase = line->phase;
 	if (!line->waiting || node != mhi_dsds.node || port != mhi_dsds.port ||
 	    n < 7 || body[0] != 2 || (unsigned)(body[1] | body[2] << 8) != line->txn ||
-	    (unsigned)(body[3] | body[4] << 8) != message ||
+	    (unsigned)(body[3] | body[4] << 8) != mhi_dsds_query[phase].id ||
 	    (size_t)(body[5] | body[6] << 8) != n - 7) return true;
 
 	const uint8_t *result = NULL, *serving = NULL;
+	unsigned mode = 0xffffu;
+	uint32_t domain = UINT32_MAX;
+	int lte = 0, nr = 0;
 	for (size_t at = 7; at < n;) {
 		if (n - at < 3) return true;
 		unsigned type = body[at], len = body[at + 1] | body[at + 2] << 8;
 		at += 3;
 		if (len > n - at) return true;
+		const uint8_t *v = body + at;
+
 		if (type == 2) {
 			if (result || len != 4) return true;
-			result = body + at;
-		} else if (line->bound && type == 1) {
-			if (serving || len < 5 || len != 5u + body[at + 4]) return true;
-			serving = body + at;
+			result = v;
+		} else if (phase == DSDS_SERVING && type == 1) {
+			if (serving || len < 5 || len != 5u + v[4]) return true;
+			serving = v;
+		} else if (phase == DSDS_SIGNAL) {
+			if (type == 0x14 && len >= 6)
+				lte = (int16_t)(v[2] | v[3] << 8);
+			if (type == 0x17 && len >= 4)
+				nr = (int16_t)(v[0] | v[1] << 8);
+		} else if (phase == DSDS_PREFERENCE) {
+			if (type == 0x11 && len == 2)
+				mode = v[0] | v[1] << 8;
+			if (type == 0x18 && len == 4)
+				domain = mhi_qrtr_word(v, 0);
 		}
 		at += len;
 	}
@@ -15081,25 +15124,33 @@ mhi_dsds_reply(unsigned dst, unsigned node, unsigned port, const uint8_t *body, 
 	unsigned error = result[2] | result[3] << 8;
 	if (status || error) {
 		hakios_tl("pcie2: DSDS NAS subscription %u %s refused (result=%u error=%u)\n",
-		    i + 1, line->bound ? "serving-system query" : "bind", status, error);
-	} else if (!line->bound) {
+		    i + 1, mhi_dsds_query[phase].name, status, error);
+	} else if (phase == DSDS_BIND) {
 		hakios_tl("pcie2: DSDS NAS subscription %u bound on its own client\n", i + 1);
-		line->bound = true;
+		line->phase = DSDS_SERVING;
 		line->next = mhi_now_us();
 		return true;
-	} else if (serving) {
+	} else if (phase == DSDS_SERVING && serving) {
 		hakios_tl("pcie2: DSDS NAS subscription %u sample %u registration=%u CS=%u PS=%u RAT=%u\n",
 		    i + 1, ++line->samples, serving[0], serving[1], serving[2],
 		    serving[4] ? serving[5] : 0);
-		if (line->samples < 3) {
-			line->next = mhi_now_us() + 20000000ull;
-			return true;
-		}
-	} else {
+		line->phase = DSDS_SIGNAL;
+		line->next = mhi_now_us();
+		return true;
+	} else if (phase == DSDS_SERVING) {
 		hakios_tl("pcie2: DSDS NAS subscription %u serving-system TLV missing\n", i + 1);
+	} else if (phase == DSDS_SIGNAL) {
+		hakios_tl("pcie2: DSDS NAS subscription %u sample %u RSRP LTE=%d NR=%d dBm (0 unavailable)\n",
+		    i + 1, line->samples, lte >= -150 && lte <= -30 ? lte : 0,
+		    nr >= -150 && nr <= -30 ? nr : 0);
+	} else {
+		hakios_tl("pcie2: DSDS NAS subscription %u selection mode=%#x domain=%#x (all ones unavailable)\n",
+		    i + 1, mode, domain);
 	}
-	line->next = 0;
-	mhi_bb_release(dst);
+	if (phase == DSDS_SIGNAL)
+		mhi_dsds_signal_done(line, mhi_now_us());
+	else
+		mhi_dsds_stop(dst, line);
 	return true;
 }
 
@@ -15219,7 +15270,7 @@ mhi_bb_bridge_run(struct mhi_channel *out, struct mhi_channel *in, unsigned mode
 		mhi_dsd_settings_client(out, in, dsd_answer, sizeof(dsd_answer));
 		mhi_dsd_arm(out, in, dsd_answer, sizeof(dsd_answer));
 	}
-	/* pcie2_dsds_probe=1: Query both NAS registrations on separate clients. */
+	/* pcie2_dsds_probe=1: Read both subscriptions on separate NAS clients. */
 	uint32_t dsds_probe = 0;
 	memset(&mhi_dsds, 0, sizeof(mhi_dsds));
 	if (PE_parse_boot_argn("pcie2_dsds_probe", &dsds_probe, sizeof(dsds_probe)) && dsds_probe == 1) {
