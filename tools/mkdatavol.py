@@ -38,9 +38,8 @@ def chunk(kind, blocks, data_size):
     return struct.pack('<HHII', kind, 0, blocks, 12 + data_size)
 
 
-def darwin_blocks_from_gpt(head_path, tail_path):
-    head, tail, disk = read_pair(head_path, tail_path)
-    ok, header, _, entries = check('data volume GPT', head, tail, disk)
+def darwin_entry(head, tail, disk):
+    ok, header, _, entries = check('darwin GPT', head, tail, disk)
     if not ok:
         raise ValueError('the two GPT copies must validate and agree')
     darwin = [(i, e) for i, e in enumerate(entries, 1) if e['type'].int and e['name'] == 'darwin']
@@ -54,6 +53,12 @@ def darwin_blocks_from_gpt(head_path, tail_path):
     blocks = entry['last'] - entry['first'] + 1
     if not MIN_DARWIN_BLOCKS <= blocks <= 0xffffffff:
         raise ValueError(f'darwin has {blocks} blocks outside the supported range')
+    return number, entry
+
+
+def darwin_blocks_from_gpt(head_path, tail_path):
+    number, entry = darwin_entry(*read_pair(head_path, tail_path))
+    blocks = entry['last'] - entry['first'] + 1
     print(f'darwin: GPT entry {number}, LBA {entry["first"]}..{entry["last"]}, {blocks} blocks')
     return blocks
 

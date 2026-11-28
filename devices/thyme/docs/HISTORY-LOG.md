@@ -1,5 +1,24 @@
 ## Chronological Verification Logs & Evidence
 
+## Planned GPT identity for the Android data writer (2026-11-28)
+
+- The host writer validates both GPT copies and derives the APFS
+  partition index and bounds from the supplied pair. Its Android guard
+  checks LUN 0, both live GPT digests and the partition's node, name and
+  geometry before any planned data-region write or readback.
+  The paired mode protects blocks 0 through 2042367.
+- Six host tests covered an accepted synthetic `sda36`, changed live
+  identity and GPT snapshots, invalid approved GPT CRC, data bounds,
+  the consent gate and a mocked write with a readback mismatch. The
+  GPT carve and flash-root packer regressions also passed.
+- The local 20 GiB plan validated as entry 36 with 5,243,387 blocks.
+  A read-only check on the attached phone refused because Android has
+  no `/dev/block/by-name/darwin` block node. Android reported boot
+  complete. No partition provisioning or physical write was attempted.
+  Logs `planned-geometry.log` and `attached-check.log` are retained in
+  `out/thyme-boot/darwin-writer.gHQzdWmB/`. The device check SHA-256 is
+  `093c0d748f8c11ac24c482a610eb62e966afdda7ebe024b5a874abbf11939a47`.
+
 ## Flash-root boot with audio, graphics and Bluetooth build options (2026-11-28)
 
 - With `FLASHBOOT=1 CRYPTEXES=flash GL=1 BLUETOOTH=1 ADSP=1`, the DSP

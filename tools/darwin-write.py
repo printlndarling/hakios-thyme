@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Write an image into the phone's darwin partition, and nowhere else, from Android (adb, root).
 
-usage:
+usage: darwin-write.py [--gpt HEAD TAIL] COMMAND
+
+Commands:
   darwin-write.py check                 darwin's identity, read from the phone now                (writes nothing)
   darwin-write.py sum   BLOCK COUNT     sha256 of COUNT blocks of darwin from BLOCK                (writes nothing)
   darwin-write.py plan  IMAGE BLOCK     every check `write` makes, and the command it would run    (writes nothing)
@@ -9,30 +11,34 @@ usage:
   darwin-write.py zero  BLOCK COUNT     with DARWIN_WRITE=yes: zeros over COUNT blocks, read back and compared
   darwin-write.py selftest              the refusals, against this tool's own checks and a GPT read now (writes nothing)
 
-Blocks are darwin's own, 4096 bytes, counted from the partition's start. What it takes to write:
+Blocks are counted from darwin's start, in units of 4096 bytes.
+With --gpt, use an approved pair of GPT snapshots of UFS logical unit 0.
+Both copies must validate and match the current phone byte for byte. The
+partition node, number, name, start and size must also agree. This mode
+allows writes only from the data boundary at block 2042368.
+Without --gpt the tool retains the legacy sda34 identity and its original
+write range, including the cryptexes from block 1374208 onward.
 
-  - darwin is what it was when the port was set up, read at the time of the write and compared with the
-    constants below, all of them: the GPT of logical unit 0 (header and table CRCs right; entry 34 named
-    darwin, its type and unique GUIDs, LBA 25374720..30617594; no other entry over any of it), sda being
-    logical unit 0 of the UFS controller, /dev/block/by-name/darwin being /dev/block/sda34, whose number,
-    name, start and size in sysfs and whose size by blockdev say the same. Anything else: no write.
-  - the blocks lie inside darwin and after the Darwin volume at its start (rootfs.apfs, blocks 0..1374207,
-    which is never written): BLOCK >= 1374208 and BLOCK + COUNT <= 5242875. Anything else: no write.
-  - the write goes to /dev/block/by-name/darwin only, by dd with seek and count in blocks of 4096, from a
-    copy of the image on the phone whose sha256 has been checked; in the same shell, right before dd,
-    the name is checked again to be sda34 of darwin's size. Never /dev/block/sda or anything else.
-  - afterwards the blocks are read back and their sha256 has to be the image's.
+The writer stages and hashes the input, checks the partition immediately
+before writing, and checks the written blocks against the expected digest.
+Only /dev/block/by-name/darwin is used as an output.
 
 Every attempt, refused or done, goes into logs/darwin-write.log.
 """
+import argparse
 import binascii
+from dataclasses import dataclass
 import hashlib
 import os
+import shlex
 import struct
 import subprocess
 import sys
 import time
 import uuid
+
+from gpt import BS, read_pair
+from mkdatavol import DATA_FIRST, darwin_entry
 
 NAME = 'darwin'
 TYPE = '7C3457EF-0000-11AA-AA11-00306543ECAC'          # Apple APFS
@@ -41,12 +47,10 @@ LUN = 0
 PARTN = 34
 FIRST = 25374720
 LAST = 30617594
-BS = 4096
 BLOCKS = LAST - FIRST + 1                               # 5242875
 PROTECTED = 1374208                                     # rootfs.apfs: 5628755968 bytes, never written
 DEV = '/dev/block/by-name/darwin'
 NODE = '/dev/block/sda34'
-TMP = '/data/local/tmp/darwin-write.img'
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = os.path.join(ROOT, 'logs', 'darwin-write.log')
@@ -54,6 +58,63 @@ LOG = os.path.join(ROOT, 'logs', 'darwin-write.log')
 
 class Refused(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class PlannedDarwin:
+    number: int
+    first: int
+    last: int
+    guid: uuid.UUID
+    disk_blocks: int
+    head_sha256: str
+    tail_sha256: str
+
+    @property
+    def node(self):
+        return f'/dev/block/sda{self.number}'
+
+    @property
+    def blocks(self):
+        return self.last - self.first + 1
+
+
+def planned_darwin(head_path, tail_path):
+    head, tail, disk = read_pair(head_path, tail_path)
+    number, entry = darwin_entry(head, tail, disk)
+    return PlannedDarwin(number, entry['first'], entry['last'], entry['guid'], disk,
+                         hashlib.sha256(head).hexdigest(), hashlib.sha256(tail).hexdigest())
+
+
+def planned_guard(target):
+    # This same check runs in the shell that opens the device. dd only
+    # reads from the disk node here and the supplied hashes are hex.
+    return f'''set -e
+set -o pipefail
+expect() {{
+    if [ "$2" != "$3" ]; then
+        echo "REFUSED: $1 is '$2', expected '$3'" >&2
+        exit 3
+    fi
+}}
+expect node "$(readlink -f {DEV} || true)" {target.node}
+case "$(readlink -f /sys/class/block/sda/device)" in
+    *ufshc*:0) ;;
+    *) echo "REFUSED: sda is not UFS logical unit 0" >&2; exit 3 ;;
+esac
+test -b {DEV}
+expect disk-block-size "$(blockdev --getss /dev/block/sda)" {BS}
+expect disk-bytes "$(blockdev --getsize64 /dev/block/sda)" {target.disk_blocks * BS}
+expect partition-number "$(cat /sys/class/block/sda{target.number}/partition)" {target.number}
+expect partition-name "$(sed -n 's/^PARTNAME=//p' /sys/class/block/sda{target.number}/uevent)" {NAME}
+expect partition-start "$(cat /sys/class/block/sda{target.number}/start)" {target.first * BS // 512}
+expect partition-size "$(cat /sys/class/block/sda{target.number}/size)" {target.blocks * BS // 512}
+expect partition-bytes "$(blockdev --getsize64 {DEV})" {target.blocks * BS}
+head_sum=$(dd if=/dev/block/sda bs={BS} count=8 2>/dev/null | sha256sum)
+tail_sum=$(dd if=/dev/block/sda bs={BS} skip={target.disk_blocks - 8} count=8 2>/dev/null | sha256sum)
+expect GPT-head "${{head_sum%% *}}" {target.head_sha256}
+expect GPT-tail "${{tail_sum%% *}}" {target.tail_sha256}
+'''
 
 
 def log(line):
@@ -122,8 +183,12 @@ def check_gpt(raw):
     return bad
 
 
-def identity():
-    """darwin's identity, read now. Raises Refused on anything that is not as it was."""
+def identity(target=None):
+    """Read darwin's identity now and compare it with the expected layout."""
+    if target is not None:
+        phone(planned_guard(target))
+        return (f'darwin is {target.node}, entry {target.number} of logical unit {LUN}, '
+                f'LBA {target.first}..{target.last} ({target.blocks} blocks of {BS}), {TYPE}, {target.guid}')
     out = phone('''
 echo "node=$(readlink -f %(dev)s)"
 echo "lun=$(readlink -f /sys/class/block/sda/device)"
@@ -156,16 +221,18 @@ echo "ss=$(blockdev --getss /dev/block/sda)"
         NODE, PARTN, LUN, FIRST, LAST, BLOCKS, BS, TYPE, UNIQUE)
 
 
-def blocks_ok(block, count):
+def blocks_ok(block, count, target=None):
     """The range rule; raises Refused."""
     if not (isinstance(block, int) and isinstance(count, int)):
         raise Refused('blocks must be whole numbers')
     if count <= 0:
         raise Refused('nothing to write (%d blocks)' % count)
-    if block < PROTECTED:
-        raise Refused('block %d is inside the Darwin volume (blocks 0..%d), which is never written' % (block, PROTECTED - 1))
-    if block + count > BLOCKS:
-        raise Refused('blocks %d..%d go past darwin\'s end (%d blocks)' % (block, block + count - 1, BLOCKS))
+    if target is not None:
+        if block < DATA_FIRST:
+            raise Refused(f'data write starts at block {DATA_FIRST} or later')
+    elif block < PROTECTED:
+        raise Refused("block %d is inside the Darwin volume (blocks 0..%d), which is never written" % (block, PROTECTED - 1))
+    blocks_ok_read(block, count, target)
 
 
 def number(s):
@@ -193,38 +260,45 @@ def sha256_zeros(n):
     return h.hexdigest()
 
 
-def phone_sum(block, count):
-    blocks_ok_read(block, count)
-    out = phone('dd if=%s bs=%d skip=%d count=%d 2>/dev/null | sha256sum\n' % (DEV, BS, block, count))
-    return out.split()[0]
+def phone_sum(block, count, target=None):
+    blocks_ok_read(block, count, target)
+    command = f'set -o pipefail\ndd if={DEV} bs={BS} skip={block} count={count} 2>/dev/null | sha256sum\n'
+    out = phone(planned_guard(target) + command if target is not None else command).split()
+    if not out or len(out[0]) != 64:
+        raise Refused('readback did not return a SHA-256 digest')
+    return out[0]
 
 
-def blocks_ok_read(block, count):
-    if count <= 0 or block < 0 or block + count > BLOCKS:
-        raise Refused('blocks %d..%d are not inside darwin' % (block, block + count - 1))
+def blocks_ok_read(block, count, target=None):
+    blocks = target.blocks if target is not None else BLOCKS
+    if count <= 0 or block < 0 or block + count > blocks:
+        raise Refused('blocks %d..%d are not inside darwin (%d blocks)' % (block, block + count - 1, blocks))
 
 
-def guarded(command):
-    """command, run only if the name still leads to darwin, checked in the same shell right before it."""
+def guarded(command, target=None):
+    """Check the name and identity in the same shell immediately before the write."""
+    if target is not None:
+        return planned_guard(target) + command + '\n'
     return ('t=$(readlink -f %(dev)s); s=$(blockdev --getsize64 %(dev)s)\n'
             'if [ "$t" = %(node)s ] && [ "$s" = %(bytes)d ]; then %(cmd)s 2>&1; else echo "REFUSED: $t $s"; exit 3; fi\n'
             % {'dev': DEV, 'node': NODE, 'bytes': BLOCKS * BS, 'cmd': command})
 
 
-def prepare(image, block):
+def prepare(image, block, target=None):
     size = os.path.getsize(image)
     if size % BS:
         raise Refused('%s is %d bytes, not whole blocks of %d' % (image, size, BS))
     count = size // BS
-    blocks_ok(block, count)
+    blocks_ok(block, count, target)
     return count
 
 
-def cmd_plan(image, block, write=False):
-    count = prepare(image, block)
-    who = identity()
+def cmd_plan(image, block, target=None, write=False):
+    count = prepare(image, block, target)
+    who = identity(target)
     digest = sha256_file(image)
-    dd = 'dd if=%s of=%s bs=%d seek=%d count=%d conv=notrunc,fsync' % (TMP, DEV, BS, block, count)
+    temporary = '/data/local/tmp/darwin-write-' + uuid.uuid4().hex + '.img'
+    dd = 'dd if=%s of=%s bs=%d seek=%d count=%d conv=notrunc,fsync' % (temporary, DEV, BS, block, count)
     log('%s: %s (%d blocks, sha256 %s) at darwin blocks %d..%d (bytes %d..%d); %s; would run: %s' % (
         'write' if write else 'plan', image, count, digest, block, block + count - 1, block * BS,
         (block + count) * BS - 1, who, dd))
@@ -232,35 +306,35 @@ def cmd_plan(image, block, write=False):
         return
     if os.environ.get('DARWIN_WRITE') != 'yes':
         raise Refused('DARWIN_WRITE=yes is not set: nothing written')
-    r = subprocess.run(['adb', 'push', image, TMP], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise Refused('adb push: ' + r.stderr.strip())
     try:
-        there = phone('sha256sum %s\n' % TMP).split()[0]
-        if there != digest:
-            raise Refused('the copy on the phone has sha256 %s, not %s' % (there, digest))
-        identity()                                   # once more, right before the write
-        out = phone(guarded(dd))
+        r = subprocess.run(['adb', 'push', image, temporary], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Refused('adb push: ' + r.stderr.strip())
+        there = phone('sha256sum %s\n' % shlex.quote(temporary)).split()
+        if not there or there[0] != digest:
+            raise Refused('the staged image digest differs from the approved input')
+        identity(target)
+        out = phone(guarded(dd, target))
         log('dd: ' + ' '.join(out.split()))
-        back = phone_sum(block, count)
+        back = phone_sum(block, count, target)
         log('read back blocks %d..%d: sha256 %s -- %s' % (block, block + count - 1, back,
                                                           'the same' if back == digest else 'DIFFERENT'))
         if back != digest:
             raise Refused('what was read back is not what was written')
     finally:
-        phone('rm -f %s\n' % TMP)
+        phone('rm -f %s\n' % shlex.quote(temporary))
 
 
-def cmd_zero(block, count):
-    blocks_ok(block, count)
-    who = identity()
+def cmd_zero(block, count, target=None):
+    blocks_ok(block, count, target)
+    who = identity(target)
     dd = 'dd if=/dev/zero of=%s bs=%d seek=%d count=%d conv=notrunc,fsync' % (DEV, BS, block, count)
     log('zero: darwin blocks %d..%d; %s; runs: %s' % (block, block + count - 1, who, dd))
     if os.environ.get('DARWIN_WRITE') != 'yes':
         raise Refused('DARWIN_WRITE=yes is not set: nothing written')
-    out = phone(guarded(dd))
+    out = phone(guarded(dd, target))
     log('dd: ' + ' '.join(out.split()))
-    back, want = phone_sum(block, count), sha256_zeros(count * BS)
+    back, want = phone_sum(block, count, target), sha256_zeros(count * BS)
     log('read back blocks %d..%d: %s' % (block, block + count - 1, 'zeros' if back == want else 'NOT ZEROS ' + back))
     if back != want:
         raise Refused('what was read back is not zeros')
@@ -319,26 +393,32 @@ def cmd_selftest():
 
 
 def main():
-    a = sys.argv[1:]
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--gpt', nargs=2, metavar=('HEAD', 'TAIL'), help='approved paired GPT snapshots of UFS LUN 0')
+    parser.add_argument('command', choices=('check', 'sum', 'plan', 'write', 'zero', 'selftest'))
+    parser.add_argument('args', nargs='*')
+    args = parser.parse_args()
+    command, a = args.command, args.args
     try:
-        if a == ['check']:
-            log('check: ' + identity())
-        elif len(a) == 3 and a[0] == 'sum':
-            block, count = number(a[1]), number(a[2])
-            identity()
+        target = planned_darwin(*args.gpt) if args.gpt else None
+        if command == 'check' and not a:
+            log('check: ' + identity(target))
+        elif command == 'sum' and len(a) == 2:
+            block, count = number(a[0]), number(a[1])
+            identity(target)
             log('sum: darwin blocks %d..%d: sha256 %s (zeros would be %s)' % (block, block + count - 1,
-                                                                            phone_sum(block, count),
+                                                                            phone_sum(block, count, target),
                                                                             sha256_zeros(count * BS)))
-        elif len(a) == 3 and a[0] in ('plan', 'write'):
-            cmd_plan(a[1], number(a[2]), write=(a[0] == 'write'))
-        elif len(a) == 3 and a[0] == 'zero':
-            cmd_zero(number(a[1]), number(a[2]))
-        elif a == ['selftest']:
+        elif command in ('plan', 'write') and len(a) == 2:
+            cmd_plan(a[0], number(a[1]), target, write=(command == 'write'))
+        elif command == 'zero' and len(a) == 2:
+            cmd_zero(number(a[0]), number(a[1]), target)
+        elif command == 'selftest' and not a and target is None:
             sys.exit(0 if cmd_selftest() else 1)
         else:
-            sys.exit(__doc__)
-    except Refused as e:
-        log('REFUSED %s: %s' % (' '.join(a), e))
+            parser.error('incorrect arguments for ' + command)
+    except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
+        log('REFUSED %s: %s' % (' '.join([command] + a), error))
         sys.exit(2)
 
 

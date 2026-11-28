@@ -22,7 +22,7 @@ A phone is bricked by writing the wrong thing to the chain it starts from, or by
 | 0 | **Preflight.** Two slots? Which one is Android on? Is the bootloader really unlocked? Battery over 60% and the cable good? `darwin` already there? | nothing; reads | `make doctor` does most of it. The charge itself is still a person's check; a run that nobody watches ends at `battery_stop` (verified on hardware 2026-11-11, `logs/134145-run.log`; see "The phone that went quiet") |
 | 1 | **Backup.** The boot-related partitions of both slots, `vbmeta*`, `persist`, `modemst1/2`, `fsg`, the partition tables, and with `--with-bootchain` the chain. Each copy is proven by three SHA-256s (the phone's before, the host's, the phone's after) | nothing; reads, as root | **written and tested** against a stand-in adb: `tools/backup-partitions.py` (`tools/backup-partitions-test.py`). A local thyme backup dated 2026-11-03 was rechecked offline on 2026-11-27: 40 partition files and 12 GPT records for six UFS logical units matched the manifest. All 12 GPT ranges also matched a read-only comparison against the connected thyme |
 | 2 | **Carve `darwin`** off the end of Android's userdata | An authorized resize moves F2FS data and changes both GPT copies. An independently recoverable Android user-data backup is required. | Host planner tested. The non-wipe path requires a matching F2FS readback before generating either GPT file. The attached thyme currently has no `darwin`. |
-| 3 | **Provision the root and data regions in `darwin`** | Writes would be limited to the approved `darwin` layout and read back. | The host packer produced the root and cryptex prefix. HFSX image generation from paired GPT snapshots and two QEMU persistence boots passed. Physical provisioning remains open. The existing Android writer still requires the legacy `sda34` identity. |
+| 3 | **Provision the root and data regions in `darwin`** | Writes would be limited to the approved `darwin` layout and read back. | The host packer produced the root and cryptex prefix. HFSX image generation from paired GPT snapshots and two QEMU persistence boots passed. Physical provisioning remains open. The Android data writer accepts an explicitly supplied pair of GPT snapshots and checks the live partition against them. |
 | 4 | **Boot from the phone's storage, still from RAM.** `fastboot boot` the loader, and the kernel mounts its root from `darwin` (`root_apfs=`) instead of from an image uploaded to RAM | `fastboot boot` writes nothing; `ufs_write` stays 0 | QEMU mounted the root and both cryptexes from a read-only virtio disk and started SpringBoard. Thyme UFS and the physical boot arguments still need the stage 3 readback and three consecutive boots before stage 5. |
 | 5 | **The boot image into the inactive slot**, `fastboot set_active` to it, once | writes the inactive slot's `boot` (and what its recipe needs); the active slot is not touched | **not done, not tried**; whether Project Silicium's boot manager behaves from a boot slot, and what `vbmeta` says to a modified boot image, are unknown |
 | 6 | **A way back**, tested before it is needed: `fastboot set_active a` (or b) from the bootloader, and Android's own slot switch | writes the slot flag | the standard fastboot command; not tried here |
@@ -129,6 +129,26 @@ QEMU boots on the replayed volume. The hypothetical clear-data GPT has
 5,242,875. Generate the image for the exact GPT selected for provisioning.
 An actual deployment still needs the stage 2 readback and the stage 3
 provisioning gate.
+
+## Check the planned data range in Android
+
+After an authorized GPT change and a successful return to Android, use
+the planned GPT files to verify the current device. The command reads
+LUN 0 and checks the partition name, node, start and size. It checks the
+SHA-256 of both eight-block GPT snapshots against the plan.
+
+```sh
+python3 tools/darwin-write.py --gpt PLAN/gpt-head.new PLAN/gpt-tail.new check
+```
+
+The current 20 GiB host plan resolves to `sda36` with 5,243,387
+4 KiB blocks. Android currently lacks that partition, so the live
+check refuses the planned target. In paired GPT mode, `plan`, `write`
+and `zero` accept ranges from block 2042368 through the partition's
+last block. The Darwin root and both cryptexes are protected. The
+data writer takes raw blocks. The Android sparse HFSX image above
+is a whole-partition layout and cannot be passed directly as raw data
+to this writer.
 
 ## The gates
 

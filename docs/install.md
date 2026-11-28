@@ -25,8 +25,9 @@ on the phone:
 2. **The system.** The partition `darwin`, cut off the end of Android's userdata once
    (`tools/userdata-carve.py` validates both GPT copies and checks the F2FS resize readback).
    Provisioning the root image from the flash recipe (`FLASHBOOT=1 userland/build.sh`)
-   still needs a guarded path for the actual thyme layout. `tools/darwin-write.py` is
-   limited to the data range of the legacy geometry.
+   still needs a guarded system-region provisioning path. For the planned
+   layout, `tools/darwin-write.py --gpt HEAD TAIL` checks both GPT copies
+   and accepts data-region writes from block 2042368.
 
 `make doctor` already looks at what this stands on, read only: whether the phone reports two slots, which one Android
 runs from, and whether `darwin` exists.
@@ -52,7 +53,7 @@ Each one is how the project already treats writes (`darwin-write.py`, the loader
 | Needed | State |
 |---|---|
 | A boot image that starts with no host (shim + payload) | exists (`mkxnuimg.py`); the loader started from it by `fastboot boot` on the attached phone |
-| Preparing and provisioning `darwin` | The host packer builds the APFS partition prefix from the root and two cryptex containers. The HFSX data image can be built from paired GPTs and has passed host replay and QEMU tests. The Android data-range writer supports the legacy layout. Physical provisioning on thyme remains open. |
+| Preparing and provisioning `darwin` | The host packer builds the APFS partition prefix from the root and two cryptex containers. The HFSX data image can be built from paired GPTs and has passed host replay and QEMU tests. The Android data-range writer supports approved paired GPT snapshots and retains the legacy mode. Physical provisioning on thyme remains open. |
 | A plan for carving `darwin` | Host-only planner and tests. The resize path requires a matching F2FS readback before emitting GPT files. |
 | Read-only preflight | exists (`make doctor`): slots, `darwin`, firmware, root, bootloader as reported |
 | **Writing the boot image to a slot and switching to it** | **not done, not tried** |
