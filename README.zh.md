@@ -23,7 +23,7 @@
 | GPS 与日常定位 | **PASS** | 用户在真机确认定位和地图图层刷新。开阔天空下的纯卫星 3D 定位单独验收。 |
 | Wi-Fi（QCA6390） | **PASS** | 2.4/5 GHz WPA2、DHCP/TLS、国家码（`CN`）、65 s 锁屏唤醒、AP 踢下线与断电自动重连 |
 | 蓝牙（QCA6390） | **PASS** | 3 Mbaud H4、已实测正常连接蓝牙耳机（A2DP 音频播放）与其它手机配对、BlueTool 休眠 |
-| 真机调试与 USB | **PARTIAL** | WSL2 和 Windows 原生 OpenSSH 已验证。WinUSB 开发接口可经 WSL2 桥接运行原版 `ideviceinfo`，读取真实型号与 SoC。爱思助手原生识别、配对和其他管理服务待验收。见[真机调试说明](devices/thyme/docs/debug.md)。 |
+| 真机调试与 USB | **PARTIAL** | WSL2 和 Windows 原生 OpenSSH 已验证。WinUSB 开发接口可经 WSL2 读取真实型号与 SoC。`hdb --usb` 可读取当次 Wi-Fi 地址并校验 SSH 主机密钥，软件重连后也已验证。爱思助手原生识别、配对和其他管理服务待验收。见[真机调试说明](devices/thyme/docs/debug.md)。 |
 | 电池与温控 | **PASS** | 电量读取、`bq25970` 与 `fsa4480` 10 s 遥测、USB 充电、温控限频与低电量保护正常 |
 | 传感器（SLPI） | **PASS** | LSM6DSO、50 Hz `mag_cal` 指南针、前 `TCS3701` + 后 `TSL2540` 光感、气压计、计步与朝向 |
 | CDSP / 红外 / RTC / WDT | **PASS** | `CDSP` TZ 鉴权启动、SMP2P 就绪、GLINK 协商、FastRPC 能力查询、guest 会话挂接与释放、原厂独立计算进程创建、进程内 ASID 查询、反向监听器注册与进程释放、`/dev/hakios-ir`（38 kHz NEC）、SPMI RTC 校时、TRNG、APSS 硬件看门狗 |

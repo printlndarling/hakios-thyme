@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "hakios.thyme_usbmux.h"
+#include "hdb_network.h"
 
 static CFDictionaryRef
 identity(void)
@@ -19,6 +20,21 @@ identity(void)
 	};
 	return CFDictionaryCreate(kCFAllocatorDefault, keys, values, sizeof(keys) / sizeof(keys[0]),
 	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+}
+
+/* The address is a discovery hint. Authorization belongs to OpenSSH. */
+static CFStringRef
+debug_address(void)
+{
+	struct in_addr peer;
+	char peer_text[INET_ADDRSTRLEN + 2], local[INET_ADDRSTRLEN];
+	if (!hdb_read_peer(&peer, peer_text, sizeof(peer_text)) ||
+	    access(HDB_DIR "/authorized_keys", R_OK) != 0 ||
+	    access(HDB_DIR "/host_key", R_OK) != 0 ||
+	    !hdb_wifi_address(peer, local, sizeof(local))) {
+		return NULL;
+	}
+	return CFStringCreateWithCString(kCFAllocatorDefault, local, kCFStringEncodingASCII);
 }
 
 static void
@@ -36,6 +52,7 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 		CFTypeRef key = CFDictionaryGetValue(request, CFSTR("Key"));
 		CFTypeRef domain = CFDictionaryGetValue(request, CFSTR("Domain"));
 		CFTypeRef value = NULL;
+		CFStringRef address = NULL;
 		CFDictionarySetValue(reply, CFSTR("Request"), CFSTR("GetValue"));
 		if (!domain) {
 			if (!key) {
@@ -43,11 +60,18 @@ dispatch(CFDictionaryRef request, CFMutableDictionaryRef reply, CFDictionaryRef 
 			} else if (CFGetTypeID(key) == CFStringGetTypeID()) {
 				value = CFDictionaryGetValue(info, key);
 			}
+		} else if (key && CFEqual(domain, CFSTR("com.hakios.debug")) &&
+		    CFEqual(key, CFSTR("SSHAddress"))) {
+			address = debug_address();
+			value = address;
 		}
 		if (value) {
 			CFDictionarySetValue(reply, CFSTR("Value"), value);
 		} else {
 			CFDictionarySetValue(reply, CFSTR("Error"), CFSTR("MissingValue"));
+		}
+		if (address) {
+			CFRelease(address);
 		}
 	} else if (CFEqual(name, CFSTR("Goodbye"))) {
 		CFDictionarySetValue(reply, CFSTR("Request"), CFSTR("Goodbye"));

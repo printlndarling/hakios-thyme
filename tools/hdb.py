@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 
 PORT = 2222
+USB_ADDRESS = ['ideviceinfo', '-s', '-q', 'com.hakios.debug', '-k', 'SSHAddress']
 ALIAS = 'hakios-thyme-hdb'
 ROOT = Path(__file__).resolve().parent.parent
 LAN = tuple(ipaddress.IPv4Network(cidr) for cidr in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
@@ -25,6 +26,19 @@ def lan_ip(value):
     if not any(host in net for net in LAN):
         raise argparse.ArgumentTypeError('the address must be a private LAN IPv4 address')
     return str(host)
+
+
+def usb_host():
+    try:
+        info = subprocess.run(USB_ADDRESS, capture_output=True, text=True, check=True, timeout=20)
+    except FileNotFoundError as error:
+        raise ValueError('USB discovery requires ideviceinfo on PATH') from error
+    except subprocess.SubprocessError as error:
+        raise ValueError('USB discovery could not query the thyme development device') from error
+    try:
+        return lan_ip(info.stdout.strip())
+    except argparse.ArgumentTypeError as error:
+        raise ValueError('USB discovery did not return a private Wi-Fi address for the development scene') from error
 
 
 def write_private(path, text):
@@ -98,7 +112,9 @@ def remote_path(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state', type=Path, default=ROOT / 'ssh/hdb')
-    parser.add_argument('--host', type=lan_ip, help='the Wi-Fi address reported by the development scene')
+    connection = parser.add_mutually_exclusive_group()
+    connection.add_argument('--host', type=lan_ip, help='the Wi-Fi address reported by the development scene')
+    connection.add_argument('--usb', action='store_true', help='query the Wi-Fi address over the development USB profile')
     commands = parser.add_subparsers(dest='action', required=True)
     init = commands.add_parser('prepare', help='create the development keys and configure the allowed host')
     init.add_argument('peer', metavar='HOST_LAN_IP', type=lan_ip)
@@ -118,18 +134,19 @@ def main():
         if args.action == 'prepare':
             prepare(args.state, args.peer, args.authorize)
             return 0
-        if not args.host:
-            parser.error('--host is required for shell, push and pull')
-        device = 'root@' + args.host
+        if not (args.host or args.usb):
+            parser.error('--host or --usb is required for shell, push and pull')
+        flags = client_flags(args.state, '-p' if args.action == 'shell' else '-P')
+        device = 'root@' + (usb_host() if args.usb else args.host)
         if args.action == 'shell':
             command = args.command[1:] if args.command[:1] == ['--'] else args.command
             target = [device, shlex.join(command)] if command else [device]
-            return subprocess.call(['ssh', *client_flags(args.state, '-p'), *target])
+            return subprocess.call(['ssh', *flags, *target])
         if args.action == 'push':
             files = [str(args.source.resolve()), f'{device}:{args.destination}']
         else:
             files = [f'{device}:{args.source}', str(args.destination.resolve())]
-        return subprocess.call(['scp', *client_flags(args.state, '-P'), *files])
+        return subprocess.call(['scp', *flags, *files])
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         parser.exit(1, f'hdb: {error}\n')
 

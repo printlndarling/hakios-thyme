@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify that native OpenSSH enrollment only consumes public key material."""
+"""Check HDB key enrollment and USB address discovery."""
 import base64
 from contextlib import redirect_stdout
 import io
 from pathlib import Path
 import struct
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,37 @@ class Enrollment(unittest.TestCase):
                     hdb.prepare(self.state, '192.168.1.2', [self.public])
                 make_key.assert_not_called()
                 self.assertEqual(authorized.read_bytes(), b'current fixture')
+
+
+class USBDiscovery(unittest.TestCase):
+    def test_reads_current_private_address_from_ideviceinfo(self):
+        info = subprocess.CompletedProcess([], 0, stdout='192.168.10.6\r\n', stderr='')
+        with patch.object(hdb.subprocess, 'run', return_value=info) as run:
+            self.assertEqual(hdb.usb_host(), '192.168.10.6')
+        run.assert_called_once_with(hdb.USB_ADDRESS, capture_output=True, text=True, check=True, timeout=20)
+
+    def test_rejects_absent_public_and_ambiguous_addresses(self):
+        for stdout in ('', '203.0.113.5', '169.254.0.2', '192.168.10.6\n192.168.10.7', '-oProxyCommand=x'):
+            with self.subTest(stdout=stdout):
+                info = subprocess.CompletedProcess([], 0, stdout=stdout, stderr='')
+                with patch.object(hdb.subprocess, 'run', return_value=info):
+                    with self.assertRaisesRegex(ValueError, 'private Wi-Fi address'):
+                        hdb.usb_host()
+
+    def test_usb_selection_keeps_pinned_ssh_options(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / 'client_key').touch()
+            (state / 'known_hosts').touch()
+            argv = ['hdb.py', '--state', directory, '--usb', 'shell', '/usr/bin/id', '-u']
+            with patch('sys.argv', argv), patch.object(hdb, 'usb_host', return_value='192.168.10.6'), \
+                    patch.object(hdb.subprocess, 'call', return_value=0) as call:
+                self.assertEqual(hdb.main(), 0)
+            command = call.call_args.args[0]
+            self.assertEqual(command[0], 'ssh')
+            self.assertIn('StrictHostKeyChecking=yes', command)
+            self.assertIn(f'HostKeyAlias={hdb.ALIAS}', command)
+            self.assertEqual(command[-2:], ['root@192.168.10.6', '/usr/bin/id -u'])
 
 
 if __name__ == '__main__':

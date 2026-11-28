@@ -1,5 +1,35 @@
 ## Chronological Verification Logs & Evidence
 
+## Discover the HDB Wi-Fi address over the development USB link (2026-11-28)
+
+- A 155 s RAM Boot retained EFI log access. Wi-Fi joined the configured
+  AP, DHCP assigned a different address from the earlier trials and
+  OpenSSH logged its listener. Native Windows connected to TCP 2222.
+  Banner exchange timed out in that diagnostic session.
+- A 230 s USB handoff session used kernel `bebe93e0cabe` and
+  development companion `f02b045dcc30`. The original Ubuntu
+  `ideviceinfo` retrieved the current en0 address from the HakiOS
+  Lockdown development domain. WSL2 `hdb --usb` and native Windows
+  OpenSSH authenticated using their enrolled keys. HDB read UID 0,
+  Darwin 22.5.0, DWC3 ID `0x33313130`, and 131,071 kernel-log bytes.
+- The USB interface detached and reattached via the authenticated HDB
+  command. Another `hdb --usb` query and SSH command reported one
+  reattachment and an active USB configuration. SFTP transferred a
+  test file both directions with identical bytes, and the existing
+  arm64 fixture ran from RAM. The wrong host pin and an unenrolled
+  client key both failed.
+- The live aggregate modem counters read 0 for readiness and
+  registration in this boot. The dedicated per-subscription probe was
+  disabled so this run does not establish either line's state.
+- Both timers returned the phone to Android and both pre/post
+  `logdump` hashes matched. After the combined run, `hdb --usb`
+  could no longer discover a development endpoint.
+- Evidence is in `out/thyme-boot/hdb-recovery.yln6Rrek/`.
+  `hdb-kernel.log` SHA-256
+  `38765652a17bc53b3b83275e9745b9ea98d17e7a741927124c15ffbe553e475e`.
+  `combined-reattached.log` SHA-256
+  `4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865`.
+
 ## Read-only Lockdown over thyme WinUSB (2026-11-28)
 
 - Windows Plug and Play enumerated the private HakiOS development USB

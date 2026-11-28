@@ -228,8 +228,9 @@ RAM data volume in a dedicated terminal.
 
 ```sh
 . ./xnu-env.sh
+mkdir -p out/thyme-boot
 xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" \
-  -O2 -Wall -Wextra -I drivers/core -framework CoreFoundation \
+  -O2 -Wall -Wextra -I drivers/core -I userland/src -framework CoreFoundation \
   -o out/thyme-boot/lockdown-usb devices/thyme/tools/lockdown-usb.c
 python3 tools/hdb.py --host PHONE_LAN_IP push out/thyme-boot/lockdown-usb /private/var/tmp/lockdown-usb
 python3 tools/hdb.py --host PHONE_LAN_IP shell chmod 700 /private/var/tmp/lockdown-usb
@@ -266,6 +267,27 @@ physical thyme, unmodified `ideviceinfo -s` returned Xiaomi Mi 10S,
 thyme, SM8250-AC and HakiOS. Pairing, trusted sessions and system
 services still need implementation. The native Windows i4Tools test
 with the private WinUSB identity did not detect the device.
+
+#### Discover the SSH address over USB
+
+When the development scene contains both HDB and the USB Lockdown
+probe, HDB can read the current DHCP address from the phone before each
+connection. Keep the original `ideviceinfo` on PATH.
+
+```sh
+python3 devices/thyme/tools/usbmux-winusb.py -- \
+  python3 tools/hdb.py --usb shell /var/jb/usr/bin/uname -r
+```
+
+The probe reads `SSHAddress` in the `com.hakios.debug` domain. It
+reports the private IPv4 address of `en0` only when the development
+credentials are present and the configured LAN peer shares its subnet.
+The address can change whenever DHCP assigns a new lease. HDB uses the
+address for the TCP connection and verifies the enrolled SSH host key.
+On thyme, WSL2 opened a pinned shell before and after software USB
+reattachment and transferred files after reattachment. Native Windows
+OpenSSH accepted the discovered address with its own enrolled key.
+Use `--usb` for shell, push and pull. Use `--host` for a LAN-only session.
 
 ### USB Gadget and services
 
